@@ -3,6 +3,7 @@
  */
 
 import { formatDuration } from '@/src/services';
+import { usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import React, { useCallback } from 'react';
 import { StyleSheet, View } from 'react-native';
@@ -11,12 +12,12 @@ import { Text } from 'react-native-paper';
 import Animated, {
     runOnJS,
     useAnimatedStyle,
+    useDerivedValue,
     useSharedValue,
     withSpring,
 } from 'react-native-reanimated';
 
 interface ProgressSliderProps {
-    position: number; // ms
     duration: number; // ms
     onSeek: (position: number) => void;
     showTime?: boolean;
@@ -26,7 +27,6 @@ interface ProgressSliderProps {
 }
 
 export function ProgressSlider({
-    position,
     duration,
     onSeek,
     showTime = true,
@@ -35,6 +35,8 @@ export function ProgressSlider({
     textColor,
 }: ProgressSliderProps) {
     const { theme } = useTheme();
+    const positionSecond = usePlayerStore(s => Math.floor(s.position / 1000));
+    const positionShared = usePlayerStore(s => s.positionShared);
 
     // Use provided colors or fall back to theme
     const colors = {
@@ -48,7 +50,10 @@ export function ProgressSlider({
     const sliderWidth = useSharedValue(0);
     const thumbScale = useSharedValue(1);
 
-    const progress = duration > 0 ? position / duration : 0;
+    const progress = useDerivedValue(() => {
+        if (duration <= 0) return 0;
+        return positionShared.value / duration;
+    }, [duration, positionShared]);
 
     const handleSeek = useCallback((progressValue: number) => {
         const newPosition = Math.max(0, Math.min(1, progressValue)) * duration;
@@ -85,16 +90,16 @@ export function ProgressSlider({
     const composedGesture = Gesture.Race(panGesture, tapGesture);
 
     const progressStyle = useAnimatedStyle(() => {
-        const displayProgress = isDragging.value ? dragProgress.value : progress;
+        const displayProgress = isDragging.value ? dragProgress.value : progress.value;
         return {
-            width: `${displayProgress * 100}%`,
+            width: sliderWidth.value * displayProgress,
         };
     });
 
     const thumbStyle = useAnimatedStyle(() => {
-        const displayProgress = isDragging.value ? dragProgress.value : progress;
+        const displayProgress = isDragging.value ? dragProgress.value : progress.value;
         return {
-            left: `${displayProgress * 100}%`,
+            left: sliderWidth.value * displayProgress,
             transform: [
                 { translateX: -8 },
                 { scale: thumbScale.value },
@@ -141,7 +146,7 @@ export function ProgressSlider({
                         variant="labelSmall"
                         style={{ color: colors.text }}
                     >
-                        {formatDuration(position)}
+                        {formatDuration(positionSecond * 1000)}
                     </Text>
                     <Text
                         variant="labelSmall"

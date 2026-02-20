@@ -22,15 +22,23 @@ export function parseFilename(filename: string): { title: string; artist: string
     if (nameWithoutExt.includes(' - ')) {
         const parts = nameWithoutExt.split(' - ');
         if (parts.length >= 2) {
+            // Check if first part is just a number (track number)
+            const firstPart = parts[0].trim();
+            if (/^\d+$/.test(firstPart) && parts.length >= 3) {
+                return {
+                    artist: parts[1].trim(),
+                    title: parts.slice(2).join(' - ').trim(),
+                };
+            }
             return {
-                artist: parts[0].trim(),
+                artist: firstPart,
                 title: parts.slice(1).join(' - ').trim(),
             };
         }
     }
 
-    // Try to remove track number prefix
-    const withoutTrackNum = nameWithoutExt.replace(/^\d+[\s._-]*/, '');
+    // Try to remove track number prefix and look for title
+    const withoutTrackNum = nameWithoutExt.replace(/^\d+[\s._-]*/, '').trim();
 
     return {
         title: withoutTrackNum || nameWithoutExt,
@@ -70,7 +78,9 @@ export function formatDurationLong(ms: number): string {
  * Generate unique ID for album based on name and artist
  */
 export function generateAlbumId(albumName: string, artistName: string): string {
-    const combined = `${albumName.toLowerCase()}_${artistName.toLowerCase()}`;
+    const album = (albumName || 'Unknown Album').toLowerCase();
+    const artist = (artistName || 'Unknown Artist').toLowerCase();
+    const combined = `${album}_${artist}`;
     let hash = 0;
     for (let i = 0; i < combined.length; i++) {
         hash = ((hash << 5) - hash) + combined.charCodeAt(i);
@@ -83,7 +93,7 @@ export function generateAlbumId(albumName: string, artistName: string): string {
  * Generate unique ID for artist
  */
 export function generateArtistId(artistName: string): string {
-    const name = artistName.toLowerCase();
+    const name = (artistName || 'Unknown Artist').toLowerCase();
     let hash = 0;
     for (let i = 0; i < name.length; i++) {
         hash = ((hash << 5) - hash) + name.charCodeAt(i);
@@ -105,6 +115,11 @@ export function organizeIntoAlbums(tracks: Track[]): Map<string, Album> {
             const album = albums.get(albumId)!;
             album.tracks.push(track.id);
             album.trackCount++;
+
+            // If album doesn't have artwork yet, try to take it from this track
+            if (!album.artwork && track.artwork) {
+                album.artwork = track.artwork;
+            }
         } else {
             albums.set(albumId, {
                 id: albumId,
@@ -119,6 +134,10 @@ export function organizeIntoAlbums(tracks: Track[]): Map<string, Album> {
         }
     }
 
+    // Debug: count albums with artwork
+    const albumsWithArtwork = Array.from(albums.values()).filter(a => a.artwork).length;
+    console.log(`[MetadataService] Organized ${albums.size} albums, ${albumsWithArtwork} have artwork`);
+
     return albums;
 }
 
@@ -130,22 +149,28 @@ export function organizeIntoArtists(tracks: Track[], albums: Map<string, Album>)
 
     for (const track of tracks) {
         const artistId = generateArtistId(track.artist);
+        const albumId = generateAlbumId(track.album, track.artist);
+        const albumArtwork = albums.get(albumId)?.artwork;
+        const artworkCandidate = track.artwork || albumArtwork;
 
         if (artists.has(artistId)) {
             const artist = artists.get(artistId)!;
             artist.trackCount++;
 
+            if (!artist.artwork && artworkCandidate) {
+                artist.artwork = artworkCandidate;
+            }
+
             // Add album if not already included
-            const albumId = generateAlbumId(track.album, track.artist);
             if (!artist.albums.includes(albumId)) {
                 artist.albums.push(albumId);
                 artist.albumCount++;
             }
         } else {
-            const albumId = generateAlbumId(track.album, track.artist);
             artists.set(artistId, {
                 id: artistId,
                 name: track.artist,
+                artwork: artworkCandidate,
                 albumCount: 1,
                 trackCount: 1,
                 albums: [albumId],
@@ -157,14 +182,43 @@ export function organizeIntoArtists(tracks: Track[], albums: Map<string, Album>)
 }
 
 /**
- * Update track metadata from parsed filename
+ * Update track metadata from parsed filename and folder structure
  */
-export function enrichTrackFromFilename(track: Track, filename: string): Track {
+export function enrichTrackFromUri(track: Track, uri: string): Track {
+    const filename = uri.split('/').pop() || '';
+    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
     const parsed = parseFilename(filename);
+
+    // Get parent directory name as potential album name
+    const pathParts = uri.split('/');
+    // For file:///storage/emulated/0/Music/Album/Song.mp3, parent is "Album"
+    const parentFolder = pathParts.length > 2 ? pathParts[pathParts.length - 2] : null;
+
+    const genericParentFolders = new Set([
+        '0',
+        'download',
+        'downloads',
+        'music',
+        'musica',
+        'música',
+        'audio',
+        'documents',
+        'documentos',
+    ]);
 
     return {
         ...track,
-        title: track.title === filename.replace(/\.[^/.]+$/, '') ? parsed.title : track.title,
-        artist: track.artist === 'Unknown Artist' ? parsed.artist : track.artist,
+        title: (track.title === nameWithoutExt || track.title === 'Unknown') ? parsed.title : track.title,
+        artist: (track.artist === 'Unknown Artist' || track.artist === 'Unknown') ? parsed.artist : track.artist,
+        album: (track.album === 'Unknown Album' || track.album === 'Unknown')
+            ? (parentFolder && !genericParentFolders.has(parentFolder.toLowerCase()) ? decodeURIComponent(parentFolder) : 'Unknown Album')
+            : track.album,
     };
+}
+
+/**
+ * Update track metadata from parsed filename (Deprecated in favor of enrichTrackFromUri)
+ */
+export function enrichTrackFromFilename(track: Track, filename: string): Track {
+    return enrichTrackFromUri(track, `file:///${filename}`);
 }

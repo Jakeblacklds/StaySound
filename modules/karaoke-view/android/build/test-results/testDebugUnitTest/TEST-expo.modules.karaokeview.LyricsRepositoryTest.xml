@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="expo.modules.karaokeview.LyricsRepositoryTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-02-16T23:03:41.674Z" hostname="JAKE" time="0.128">
+  <properties/>
+  <testcase name="normalization matches accents spaces and punctuation" classname="expo.modules.karaokeview.LyricsRepositoryTest" time="0.114"/>
+  <testcase name="cache hit does not call network" classname="expo.modules.karaokeview.LyricsRepositoryTest" time="0.007"/>
+  <testcase name="force refresh keeps previous local when remote misses" classname="expo.modules.karaokeview.LyricsRepositoryTest" time="0.001"/>
+  <testcase name="offline still serves local after first download" classname="expo.modules.karaokeview.LyricsRepositoryTest" time="0.001"/>
+  <testcase name="cache miss downloads and stores locally" classname="expo.modules.karaokeview.LyricsRepositoryTest" time="0.002"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

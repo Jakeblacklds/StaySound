@@ -1,0 +1,15 @@
+diff --git a/node_modules/expo-music-info-2/MusicInfo.js b/node_modules/expo-music-info-2/MusicInfo.js
+index 8755c7a..0f036ea 100644
+--- a/node_modules/expo-music-info-2/MusicInfo.js
++++ b/node_modules/expo-music-info-2/MusicInfo.js
+@@ -1,8 +1,8 @@
+-import * as FileSystem from 'expo-file-system';
+ import { decode, encode } from 'base-64';
++import * as FileSystem from 'expo-file-system/legacy';
+ 
+-import MusicInfoResponse from './MusicInfo';
+ import Buffer from './Buffer';
++import MusicInfoResponse from './MusicInfo';
+ 
+ const BUFFER_SIZE = 256 * 1024;
+ 

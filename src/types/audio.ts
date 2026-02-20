@@ -13,6 +13,11 @@ export interface Track {
     trackNumber?: number;
     year?: number;
     genre?: string;
+    format?: string;
+    codec?: string;
+    sampleRate?: number; // Hz
+    bitDepth?: number;
+    quality?: string;
     dateAdded: number;
 }
 
@@ -59,6 +64,7 @@ export interface PlayerState {
     repeatMode: RepeatMode;
     shuffleEnabled: boolean;
     volume: number; // 0-1
+    playerVariant: 'aurora' | 'cyber' | 'brutal' | 'immersive';
 }
 
 export interface ScanProgress {
@@ -67,12 +73,78 @@ export interface ScanProgress {
     currentPath: string;
 }
 
+export type TidalQuality = 'HI_RES_LOSSLESS' | 'LOSSLESS';
+
+export interface TidalTrack {
+    id: number;
+    title: string;
+    artist: string;
+    artistId?: number;
+    album: string;
+    albumId?: number;
+    durationMs: number;
+    quality: string;
+    isHiRes: boolean;
+    coverUuid?: string | null;
+    artworkUrl?: string;
+    trackNumber?: number;
+    year?: number;
+    explicit?: boolean;
+    popularity?: number;
+    sampleRate?: number;
+    bitDepth?: number;
+    codec?: string;
+}
+
+export type TidalSearchResult = TidalTrack;
+
+export interface TidalArtist {
+    id: number;
+    name: string;
+    picture?: string;
+    artworkUrl?: string;
+    popularity?: number;
+}
+
+export interface TidalAlbum {
+    id: number;
+    title: string;
+    artistId?: number;
+    artistName: string;
+    coverUuid?: string | null;
+    artworkUrl?: string;
+    releaseDate?: string;
+    year?: number;
+    numberOfTracks?: number;
+    explicit?: boolean;
+}
+
+export interface TidalArtistDetail {
+    artist: TidalArtist;
+    topTracks: TidalTrack[];
+    albums: TidalAlbum[];
+}
+
+export interface TidalAlbumDetail {
+    album: TidalAlbum;
+    tracks: TidalTrack[];
+}
+
+export interface DownloadState {
+    status: 'idle' | 'downloading' | 'done' | 'error';
+    progress: number;
+    error?: string;
+    updatedAt: number;
+}
+
 export interface LibraryState {
     tracks: Map<string, Track>;
     albums: Map<string, Album>;
     artists: Map<string, Artist>;
     playlists: Map<string, Playlist>;
+    recentSearches: string[];
     isScanning: boolean;
     scanProgress: ScanProgress | null;
     lastScanDate: number | null;
+    _hasHydrated: boolean;
 }

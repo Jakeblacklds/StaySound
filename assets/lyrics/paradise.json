@@ -1,0 +1,73 @@
+{
+  "language": "en",
+  "processing_time_sec": 24.48,
+  "word_count": 263,
+  "words": [
+    {
+      "word": "Thank",
+      "start": 0.031,
+      "end": 1.552,
+      "score": 0.157
+    },
+    {
+      "word": "you.",
+      "start": 1.572,
+      "end": 1.655,
+      "score": 0.195
+    },
+    {
+      "word": "She",
+      "start": 54.993,
+      "end": 55.354,
+      "score": 0.898
+    },
+    {
+      "word": "calls",
+      "start": 55.434,
+      "end": 55.794,
+      "score": 0.95
+    },
+    {
+      "word": "out",
+      "start": 56.055,
+      "end": 56.215,
+      "score": 0.998
+    },
+    {
+      "word": "to",
+      "start": 56.335,
+      "end": 56.595,
+      "score": 0.988
+    },
+    {
+      "word": "the",
+      "start": 56.676,
+      "end": 56.876,
+      "score": 0.986
+    },
+    {
+      "word": "man",
+      "start": 56.976,
+      "end": 56.976,
+      "score": 0.827
+    },
+    {
+      "word": "on",
+      "start": 57.737,
+      "end": 57.817,
+      "score": 0.925
+    },
+    {
+      "word": "the",
+      "start": 57.857,
+      "end": 58.018,
+      "score": 0.854
+    },
+    {
+      "word": "street.",
+      "start": 58.078,
+      "end": 58.518,
+      "score": 0.904
+    }
+  ]
+}

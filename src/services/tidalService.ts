@@ -1,0 +1,787 @@
+import { decode as decodeBase64 } from 'base-64';
+import * as FileSystem from 'expo-file-system/legacy';
+import { Platform } from 'react-native';
+import { FileSystemStorage } from './storage';
+import {
+    TidalAlbum,
+    TidalAlbumDetail,
+    TidalArtist,
+    TidalArtistDetail,
+    TidalQuality,
+    TidalSearchResult,
+    TidalTrack,
+    Track,
+} from '../types/audio';
+
+const TIDAL_API_BASE = 'https://arran.monochrome.tf';
+const TIDAL_ARTWORK_BASE = 'https://resources.tidal.com/images';
+const TIDAL_TEMP_DOWNLOADS_DIR = `${FileSystem.cacheDirectory}StaySound/Downloads/`;
+const TIDAL_PUBLIC_FOLDER = 'StaySound';
+const TIDAL_PUBLIC_DOWNLOADS_PERMISSION_KEY = 'tidal-public-downloads-permission';
+const REQUEST_TIMEOUT_MS = 12000;
+
+interface TidalTrackApiResponse {
+    id: number;
+    title: string;
+    duration: number;
+    trackNumber?: number;
+    explicit?: boolean;
+    audioQuality?: string;
+    mediaMetadata?: { tags?: string[] };
+    album?: { id?: number; title?: string; cover?: string | null; releaseDate?: string; numberOfTracks?: number };
+    artist?: { id?: number; name?: string; picture?: string | null };
+    artists?: Array<{ id?: number; name?: string; picture?: string | null }>;
+    popularity?: number;
+}
+
+interface TidalSearchApiResponse {
+    data?: {
+        items?: TidalTrackApiResponse[];
+    };
+}
+
+interface TidalArtistApiResponse {
+    id: number;
+    name: string;
+    picture?: string | null;
+    popularity?: number;
+}
+
+interface TidalArtistSearchApiResponse {
+    data?: {
+        artists?: {
+            items?: TidalArtistApiResponse[];
+        };
+        items?: TidalArtistApiResponse[];
+    };
+}
+
+interface TidalArtistDetailApiResponse {
+    artist?: TidalArtistApiResponse;
+    cover?: {
+        ['750']?: string;
+    };
+}
+
+interface TidalAlbumApiResponse {
+    id: number;
+    title: string;
+    releaseDate?: string;
+    explicit?: boolean;
+    numberOfTracks?: number;
+    cover?: string | null;
+    artist?: {
+        id?: number;
+        name?: string;
+    };
+    artists?: Array<{
+        id?: number;
+        name?: string;
+    }>;
+}
+
+interface TidalAlbumDetailApiResponse {
+    data?: TidalAlbumApiResponse & {
+        items?: Array<{
+            item?: TidalTrackApiResponse;
+        }>;
+    };
+}
+
+interface TidalManifestApiResponse {
+    data?: {
+        manifest?: string;
+        manifestMimeType?: string;
+        audioQuality?: string;
+        bitDepth?: number;
+        sampleRate?: number;
+    };
+}
+
+interface ParsedManifest {
+    urls: string[];
+    quality: string;
+    mimeType?: string;
+    codecs?: string;
+    isSegmented: boolean;
+    sampleRate?: number;
+    bitDepth?: number;
+}
+
+interface DownloadOptions {
+    onProgress?: (progress: number) => void;
+    onTask?: (task: FileSystem.DownloadResumable | null) => void;
+}
+
+type PersistedPublicDownloadsPermission = {
+    directoryUri: string;
+};
+
+function sanitizeFilename(input: string): string {
+    return input
+        .replace(/[<>:"/\\|?*]/g, '_')
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 160);
+}
+
+function getTrackBaseFilename(track: Pick<TidalTrack, 'id' | 'title' | 'artist'>): string {
+    const sanitized = sanitizeFilename(`${track.artist} - ${track.title}`);
+    if (sanitized.length > 0) return sanitized;
+    return `tidal_${track.id}`;
+}
+
+function getSafEntityName(uri: string): string {
+    const decoded = decodeURIComponent(uri);
+    const lastSlash = decoded.lastIndexOf('/');
+    const lastSegment = lastSlash >= 0 ? decoded.slice(lastSlash + 1) : decoded;
+    const colonIndex = lastSegment.lastIndexOf(':');
+    const withoutProvider = colonIndex >= 0 ? lastSegment.slice(colonIndex + 1) : lastSegment;
+    const pathParts = withoutProvider.split('/').filter(Boolean);
+    return pathParts[pathParts.length - 1] ?? withoutProvider;
+}
+
+async function getPersistedPublicDownloadsDirectoryUri(): Promise<string | null> {
+    try {
+        const raw = await FileSystemStorage.getItem(TIDAL_PUBLIC_DOWNLOADS_PERMISSION_KEY);
+        if (!raw) return null;
+
+        const parsed = JSON.parse(raw) as Partial<PersistedPublicDownloadsPermission>;
+        return typeof parsed.directoryUri === 'string' ? parsed.directoryUri : null;
+    } catch {
+        return null;
+    }
+}
+
+async function setPersistedPublicDownloadsDirectoryUri(directoryUri: string): Promise<void> {
+    await FileSystemStorage.setItem(
+        TIDAL_PUBLIC_DOWNLOADS_PERMISSION_KEY,
+        JSON.stringify({ directoryUri } satisfies PersistedPublicDownloadsPermission),
+    );
+}
+
+async function findSafChildByName(parentUri: string, targetName: string): Promise<string | null> {
+    const entries = await FileSystem.StorageAccessFramework.readDirectoryAsync(parentUri);
+    const normalizedTarget = targetName.toLowerCase();
+
+    for (const entry of entries) {
+        if (getSafEntityName(entry).toLowerCase() === normalizedTarget) {
+            return entry;
+        }
+    }
+
+    return null;
+}
+
+async function ensureStaySoundPublicDirectory(baseDirectoryUri: string): Promise<string> {
+    const baseName = getSafEntityName(baseDirectoryUri).toLowerCase();
+    if (baseName === TIDAL_PUBLIC_FOLDER.toLowerCase()) {
+        return baseDirectoryUri;
+    }
+
+    const existing = await findSafChildByName(baseDirectoryUri, TIDAL_PUBLIC_FOLDER);
+    if (existing) return existing;
+
+    return await FileSystem.StorageAccessFramework.makeDirectoryAsync(baseDirectoryUri, TIDAL_PUBLIC_FOLDER);
+}
+
+async function requestPublicDownloadsDirectoryUri(): Promise<string> {
+    const initialDirectory = FileSystem.StorageAccessFramework.getUriForDirectoryInRoot('Download');
+    const permissions = await FileSystem.StorageAccessFramework.requestDirectoryPermissionsAsync(initialDirectory);
+
+    if (!permissions.granted) {
+        throw new Error('Necesitamos permiso a Download para guardar en Download/StaySound');
+    }
+
+    return await ensureStaySoundPublicDirectory(permissions.directoryUri);
+}
+
+async function getPublicDownloadsDirectoryUri(): Promise<string> {
+    if (Platform.OS !== 'android') {
+        throw new Error('Public download directory is only available on Android');
+    }
+
+    const persisted = await getPersistedPublicDownloadsDirectoryUri();
+    if (persisted) {
+        try {
+            await FileSystem.StorageAccessFramework.readDirectoryAsync(persisted);
+            return persisted;
+        } catch {
+            // Persisted permission is no longer valid.
+        }
+    }
+
+    const selectedDirectory = await requestPublicDownloadsDirectoryUri();
+    await setPersistedPublicDownloadsDirectoryUri(selectedDirectory);
+    return selectedDirectory;
+}
+
+async function findExistingPublicTrackUri(filename: string): Promise<string | null> {
+    const directoryUri = await getPublicDownloadsDirectoryUri();
+    return await findSafChildByName(directoryUri, filename);
+}
+
+async function persistInPublicDownloads(tempUri: string, baseFilename: string): Promise<string> {
+    const filename = `${baseFilename}.flac`;
+    const existing = await findExistingPublicTrackUri(filename);
+    if (existing) return existing;
+
+    const directoryUri = await getPublicDownloadsDirectoryUri();
+    const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+        directoryUri,
+        baseFilename,
+        'audio/flac',
+    );
+
+    const payload = await FileSystem.readAsStringAsync(tempUri, {
+        encoding: FileSystem.EncodingType.Base64,
+    });
+
+    await FileSystem.StorageAccessFramework.writeAsStringAsync(destinationUri, payload, {
+        encoding: FileSystem.EncodingType.Base64,
+    });
+
+    return destinationUri;
+}
+
+function withTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
+    return {
+        signal: controller.signal,
+        cleanup: () => clearTimeout(timeout),
+    };
+}
+
+async function fetchJson<T>(url: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<T> {
+    const { signal, cleanup } = withTimeoutSignal(timeoutMs);
+
+    try {
+        const response = await fetch(url, { signal });
+        if (!response.ok) {
+            throw new Error(`Tidal request failed (${response.status})`);
+        }
+        return await response.json() as T;
+    } finally {
+        cleanup();
+    }
+}
+
+function resolveUrl(baseUrl: string, maybeRelative: string): string {
+    if (!maybeRelative) return baseUrl;
+    if (/^https?:\/\//i.test(maybeRelative)) return maybeRelative;
+    if (!baseUrl) return maybeRelative;
+
+    const normalizedBase = baseUrl.endsWith('/') ? baseUrl : `${baseUrl}/`;
+    return `${normalizedBase}${maybeRelative.replace(/^\/+/, '')}`;
+}
+
+function extractSegmentCountFromTimeline(xml: string): number {
+    const segmentNodes = Array.from(xml.matchAll(/<S\b([^>]*)\/?\s*>/gi));
+    if (segmentNodes.length === 0) return 0;
+
+    let count = 0;
+    for (const node of segmentNodes) {
+        const attrs = node[1] ?? '';
+        const repeatMatch = attrs.match(/\br="(-?\d+)"/i);
+        const repeat = repeatMatch ? Number.parseInt(repeatMatch[1], 10) : 0;
+        count += repeat >= 0 ? repeat + 1 : 1;
+    }
+
+    return count;
+}
+
+function buildSegmentTemplateMedia(mediaTemplate: string, number: number): string {
+    return mediaTemplate.replace(/\$Number(%0(\d+)d)?\$/g, (_full, _format, width) => {
+        if (!width) return String(number);
+        return String(number).padStart(Number.parseInt(width, 10), '0');
+    });
+}
+
+function parseDashManifest(manifestXml: string): string[] {
+    const baseUrlMatch = manifestXml.match(/<BaseURL>([^<]+)<\/BaseURL>/i);
+    const baseUrl = baseUrlMatch?.[1]?.trim() ?? '';
+
+    const segmentListInit = manifestXml.match(/<SegmentList[^>]*\binitialization="([^"]+)"/i)?.[1];
+    const segmentListUrls = Array.from(manifestXml.matchAll(/<SegmentURL[^>]*\bmedia="([^"]+)"/gi));
+    if (segmentListUrls.length > 0) {
+        const urls = segmentListUrls.map(match => resolveUrl(baseUrl, match[1]));
+        if (segmentListInit) {
+            return [resolveUrl(baseUrl, segmentListInit), ...urls];
+        }
+        return urls;
+    }
+
+    const segmentTemplateMatch = manifestXml.match(/<SegmentTemplate[^>]*>/i)?.[0] ?? '';
+    const initialization = segmentTemplateMatch.match(/\binitialization="([^"]+)"/i)?.[1];
+    const media = segmentTemplateMatch.match(/\bmedia="([^"]+)"/i)?.[1];
+    const startNumber = Number.parseInt(segmentTemplateMatch.match(/\bstartNumber="(\d+)"/i)?.[1] ?? '1', 10);
+    const segmentCount = extractSegmentCountFromTimeline(manifestXml);
+
+    if (media && segmentCount > 0) {
+        const urls: string[] = [];
+        if (initialization) {
+            urls.push(resolveUrl(baseUrl, initialization));
+        }
+
+        for (let segmentNumber = startNumber; segmentNumber < startNumber + segmentCount; segmentNumber++) {
+            urls.push(resolveUrl(baseUrl, buildSegmentTemplateMedia(media, segmentNumber)));
+        }
+
+        return urls;
+    }
+
+    const absoluteUrls = Array.from(manifestXml.matchAll(/https?:\/\/[^"'\s<]+/gi)).map(match => match[0]);
+    return absoluteUrls;
+}
+
+function parseManifestPayload(
+    manifestBase64: string,
+    quality: string,
+    extra?: { sampleRate?: number; bitDepth?: number },
+): ParsedManifest {
+    const decoded = decodeBase64(manifestBase64);
+    const trimmed = decoded.trim();
+
+    if (!trimmed) {
+        throw new Error('Empty Tidal manifest payload');
+    }
+
+    if (trimmed.startsWith('{')) {
+        const parsed = JSON.parse(trimmed) as { urls?: string[]; mimeType?: string; codecs?: string };
+        const urls = Array.isArray(parsed.urls) ? parsed.urls.filter(Boolean) : [];
+        if (urls.length === 0) {
+            throw new Error('Tidal manifest JSON does not contain URLs');
+        }
+        return {
+            urls,
+            quality,
+            mimeType: parsed.mimeType,
+            codecs: parsed.codecs,
+            isSegmented: urls.length > 1,
+            sampleRate: extra?.sampleRate,
+            bitDepth: extra?.bitDepth,
+        };
+    }
+
+    if (trimmed.startsWith('<')) {
+        const urls = parseDashManifest(trimmed).filter(Boolean);
+        if (urls.length === 0) {
+            throw new Error('Tidal DASH manifest did not produce segment URLs');
+        }
+        const mimeType = trimmed.match(/\bmimeType="([^"]+)"/i)?.[1];
+        const codecs = trimmed.match(/\bcodecs="([^"]+)"/i)?.[1];
+        return {
+            urls,
+            quality,
+            mimeType,
+            codecs,
+            isSegmented: urls.length > 1,
+            sampleRate: extra?.sampleRate,
+            bitDepth: extra?.bitDepth,
+        };
+    }
+
+    throw new Error('Unsupported Tidal manifest format');
+}
+
+function normalizeSearchItem(item: TidalTrackApiResponse): TidalSearchResult {
+    const quality = item.audioQuality ?? 'LOSSLESS';
+    const tags = item.mediaMetadata?.tags ?? [];
+    const isHiRes = tags.includes('HIRES_LOSSLESS') || quality === 'HI_RES_LOSSLESS';
+    const primaryArtist = item.artist?.name ?? item.artists?.[0]?.name ?? 'Unknown Artist';
+    const albumTitle = item.album?.title ?? 'Unknown Album';
+    const coverUuid = item.album?.cover ?? null;
+
+    return {
+        id: item.id,
+        title: item.title,
+        artist: primaryArtist,
+        album: albumTitle,
+        durationMs: Math.max(0, Math.round((item.duration ?? 0) * 1000)),
+        quality,
+        isHiRes,
+        coverUuid,
+        artworkUrl: getArtworkUrl(coverUuid),
+        trackNumber: item.trackNumber,
+        explicit: item.explicit,
+        popularity: item.popularity,
+        artistId: item.artist?.id,
+        albumId: item.album?.id,
+    };
+}
+
+function parseYearFromReleaseDate(releaseDate?: string): number | undefined {
+    if (!releaseDate) return undefined;
+    const year = Number.parseInt(releaseDate.slice(0, 4), 10);
+    return Number.isFinite(year) ? year : undefined;
+}
+
+function normalizeArtistItem(item: TidalArtistApiResponse): TidalArtist {
+    return {
+        id: item.id,
+        name: item.name,
+        picture: item.picture ?? undefined,
+        artworkUrl: getArtworkUrl(item.picture ?? undefined),
+        popularity: item.popularity,
+    };
+}
+
+function normalizeAlbumItem(item: TidalAlbumApiResponse): TidalAlbum {
+    const artist = item.artist ?? item.artists?.[0];
+    return {
+        id: item.id,
+        title: item.title,
+        artistId: artist?.id,
+        artistName: artist?.name ?? 'Unknown Artist',
+        coverUuid: item.cover,
+        artworkUrl: getArtworkUrl(item.cover),
+        releaseDate: item.releaseDate,
+        year: parseYearFromReleaseDate(item.releaseDate),
+        numberOfTracks: item.numberOfTracks,
+        explicit: item.explicit,
+    };
+}
+
+function normalizeArtistTrack(track: TidalTrackApiResponse, fallbackArtist?: TidalArtist): TidalTrack {
+    const normalized = normalizeSearchItem(track);
+    return {
+        ...normalized,
+        artistId: normalized.artistId ?? fallbackArtist?.id,
+        artist: normalized.artist || fallbackArtist?.name || 'Unknown Artist',
+    };
+}
+
+async function ensureDirectoryExists(dirUri: string): Promise<void> {
+    const info = await FileSystem.getInfoAsync(dirUri);
+    if (!info.exists) {
+        await FileSystem.makeDirectoryAsync(dirUri, { intermediates: true });
+    }
+}
+
+function getOutputUri(baseFilename: string): string {
+    return `${TIDAL_TEMP_DOWNLOADS_DIR}${baseFilename}.flac`;
+}
+
+function isFlacSource(url: string, manifest: ParsedManifest): boolean {
+    if (/\.flac(\?|$)/i.test(url)) return true;
+    if ((manifest.mimeType ?? '').toLowerCase().includes('flac')) return true;
+    if ((manifest.codecs ?? '').toLowerCase().includes('flac')) return true;
+    return false;
+}
+
+function getDirectFlacUrl(manifest: ParsedManifest): string | null {
+    const directUrls = manifest.urls.filter(url => /^https?:\/\//i.test(url));
+    if (manifest.isSegmented || directUrls.length !== 1) {
+        return null;
+    }
+
+    const sourceUrl = directUrls[0];
+    if (!isFlacSource(sourceUrl, manifest)) {
+        return null;
+    }
+
+    return sourceUrl;
+}
+
+async function downloadSegment(
+    url: string,
+    outputUri: string,
+    onTask?: (task: FileSystem.DownloadResumable | null) => void,
+    onProgress?: (progress: number) => void,
+): Promise<void> {
+    const task = FileSystem.createDownloadResumable(url, outputUri, {}, progress => {
+        const expected = progress.totalBytesExpectedToWrite;
+        if (!onProgress) return;
+        if (expected > 0) {
+            onProgress(progress.totalBytesWritten / expected);
+            return;
+        }
+        onProgress(0);
+    });
+
+    onTask?.(task);
+    await task.downloadAsync();
+    onTask?.(null);
+}
+
+function toLibraryTrack(tidalTrack: TidalTrack, uri: string): Track {
+    return {
+        id: `tidal_${tidalTrack.id}`,
+        uri,
+        title: tidalTrack.title,
+        artist: tidalTrack.artist,
+        album: tidalTrack.album,
+        duration: tidalTrack.durationMs,
+        artwork: tidalTrack.artworkUrl,
+        trackNumber: tidalTrack.trackNumber,
+        year: tidalTrack.year,
+        format: 'FLAC',
+        codec: tidalTrack.codec ?? 'flac',
+        sampleRate: tidalTrack.sampleRate,
+        bitDepth: tidalTrack.bitDepth,
+        quality: tidalTrack.quality,
+        dateAdded: Date.now(),
+    };
+}
+
+export function getArtworkUrl(coverUuid?: string | null): string | undefined {
+    if (!coverUuid) return undefined;
+    const normalized = coverUuid.replace(/-/g, '/');
+    return `${TIDAL_ARTWORK_BASE}/${normalized}/640x640.jpg`;
+}
+
+export async function searchTidal(query: string): Promise<TidalSearchResult[]> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+
+    const response = await fetchJson<TidalSearchApiResponse>(
+        `${TIDAL_API_BASE}/search/?s=${encodeURIComponent(trimmed)}`,
+    );
+
+    return (response.data?.items ?? [])
+        .filter(item => typeof item.id === 'number' && typeof item.title === 'string')
+        .map(normalizeSearchItem);
+}
+
+export async function searchTidalArtists(query: string): Promise<TidalArtist[]> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+
+    const response = await fetchJson<TidalArtistSearchApiResponse>(
+        `${TIDAL_API_BASE}/search/?a=${encodeURIComponent(trimmed)}`,
+    );
+
+    const artistItems = response.data?.artists?.items ?? response.data?.items ?? [];
+    return artistItems
+        .filter(item => typeof item.id === 'number' && typeof item.name === 'string')
+        .map(normalizeArtistItem);
+}
+
+export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
+    const albumsMap = new Map<number, TidalAlbum>();
+
+    tracks.forEach(track => {
+        if (!track.albumId) return;
+        if (albumsMap.has(track.albumId)) return;
+
+        albumsMap.set(track.albumId, {
+            id: track.albumId,
+            title: track.album,
+            artistId: track.artistId,
+            artistName: track.artist,
+            coverUuid: track.coverUuid,
+            artworkUrl: track.artworkUrl,
+        });
+    });
+
+    return Array.from(albumsMap.values());
+}
+
+export async function getTidalAlbumDetail(albumId: number): Promise<TidalAlbumDetail> {
+    const response = await fetchJson<TidalAlbumDetailApiResponse>(
+        `${TIDAL_API_BASE}/album/?id=${albumId}`,
+    );
+
+    const albumData = response.data;
+    if (!albumData) {
+        throw new Error('No se pudo cargar el album de Tidal');
+    }
+
+    const album = normalizeAlbumItem(albumData);
+    const tracks = (albumData.items ?? [])
+        .map(entry => entry.item)
+        .filter((item): item is TidalTrackApiResponse => !!item && typeof item.id === 'number' && typeof item.title === 'string')
+        .map(item => normalizeArtistTrack(item, album.artistId ? { id: album.artistId, name: album.artistName } : undefined));
+
+    return {
+        album,
+        tracks,
+    };
+}
+
+export async function getTidalArtistDetail(artistId: number, artistNameHint?: string): Promise<TidalArtistDetail> {
+    const artistResponse = await fetchJson<TidalArtistDetailApiResponse>(
+        `${TIDAL_API_BASE}/artist/?id=${artistId}`,
+    );
+
+    const apiArtist = artistResponse.artist;
+    if (!apiArtist) {
+        throw new Error('No se pudo cargar el artista de Tidal');
+    }
+
+    const artist: TidalArtist = {
+        ...normalizeArtistItem(apiArtist),
+        artworkUrl: artistResponse.cover?.['750'] ?? getArtworkUrl(apiArtist.picture ?? undefined),
+    };
+
+    const queryTerm = artistNameHint?.trim() || artist.name;
+    const tracksByName = await searchTidal(queryTerm);
+
+    const mergedTracksMap = new Map<number, TidalTrack>();
+
+    tracksByName
+        .filter(track => track.artistId === artistId || track.artist.toLowerCase() === artist.name.toLowerCase())
+        .forEach(track => mergedTracksMap.set(track.id, track));
+
+    const mergedTracks = Array.from(mergedTracksMap.values());
+    mergedTracks.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
+
+    const albums = extractAlbumsFromTracks(mergedTracks);
+    const topTracks = mergedTracks.slice(0, 25);
+
+    return {
+        artist,
+        topTracks,
+        albums,
+    };
+}
+
+export async function getTidalTrackManifest(
+    tidalId: number,
+    quality: TidalQuality = 'HI_RES_LOSSLESS',
+): Promise<ParsedManifest> {
+    const response = await fetchJson<TidalManifestApiResponse>(
+        `${TIDAL_API_BASE}/track/?id=${tidalId}&quality=${quality}`,
+    );
+
+    const manifestBase64 = response.data?.manifest;
+    if (!manifestBase64) {
+        throw new Error('Missing Tidal manifest payload');
+    }
+
+    return parseManifestPayload(manifestBase64, response.data?.audioQuality ?? quality, {
+        sampleRate: response.data?.sampleRate,
+        bitDepth: response.data?.bitDepth,
+    });
+}
+
+export async function downloadTidalTrack(
+    tidalTrack: TidalTrack,
+    options: DownloadOptions = {},
+): Promise<Track> {
+    const baseFilename = getTrackBaseFilename(tidalTrack);
+    const filename = `${baseFilename}.flac`;
+
+    if (Platform.OS === 'android') {
+        const existingPublicUri = await findExistingPublicTrackUri(filename);
+        if (existingPublicUri) {
+            options.onProgress?.(1);
+            return toLibraryTrack(tidalTrack, existingPublicUri);
+        }
+    }
+
+    await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
+
+    const outputUri = getOutputUri(baseFilename);
+    const outputExists = await FileSystem.getInfoAsync(outputUri);
+    if (outputExists.exists) {
+        if (Platform.OS === 'android') {
+            await FileSystem.deleteAsync(outputUri, { idempotent: true });
+        } else {
+            options.onProgress?.(1);
+            return toLibraryTrack(tidalTrack, outputUri);
+        }
+    }
+
+    let manifest: ParsedManifest;
+    try {
+        manifest = await getTidalTrackManifest(tidalTrack.id, 'HI_RES_LOSSLESS');
+    } catch (error) {
+        console.warn('[TidalService] HI_RES_LOSSLESS failed, retrying LOSSLESS', error);
+        manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+    }
+
+    let sourceUrl = getDirectFlacUrl(manifest);
+    if (!sourceUrl) {
+        const fallbackManifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+        sourceUrl = getDirectFlacUrl(fallbackManifest);
+        manifest = fallbackManifest;
+    }
+
+    if (!sourceUrl) {
+        throw new Error('Este track no ofrece FLAC directo descargable');
+    }
+
+    const enrichedTrack: TidalTrack = {
+        ...tidalTrack,
+        quality: manifest.quality ?? tidalTrack.quality,
+        codec: manifest.codecs ?? tidalTrack.codec,
+        sampleRate: manifest.sampleRate ?? tidalTrack.sampleRate,
+        bitDepth: manifest.bitDepth ?? tidalTrack.bitDepth,
+    };
+
+    await downloadSegment(sourceUrl, outputUri, options.onTask, options.onProgress);
+    let persistentUri = outputUri;
+
+    if (Platform.OS === 'android') {
+        persistentUri = await persistInPublicDownloads(outputUri, baseFilename);
+        await FileSystem.deleteAsync(outputUri, { idempotent: true });
+    }
+
+    options.onProgress?.(1);
+    return toLibraryTrack(enrichedTrack, persistentUri);
+}
+
+export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Track> {
+    let manifest: ParsedManifest;
+    try {
+        manifest = await getTidalTrackManifest(tidalTrack.id, 'HI_RES_LOSSLESS');
+    } catch (error) {
+        console.warn('[TidalService] Stream HI_RES_LOSSLESS failed, retrying LOSSLESS', error);
+        manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+    }
+
+    let streamUrl = getDirectFlacUrl(manifest);
+    if (!streamUrl) {
+        const fallbackManifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+        streamUrl = getDirectFlacUrl(fallbackManifest);
+        manifest = fallbackManifest;
+    }
+
+    if (!streamUrl) {
+        throw new Error('No direct FLAC stream URL available for this track');
+    }
+
+    const enrichedTrack: TidalTrack = {
+        ...tidalTrack,
+        quality: manifest.quality ?? tidalTrack.quality,
+        codec: manifest.codecs ?? tidalTrack.codec,
+        sampleRate: manifest.sampleRate ?? tidalTrack.sampleRate,
+        bitDepth: manifest.bitDepth ?? tidalTrack.bitDepth,
+    };
+
+    return {
+        id: `tidal_stream_${tidalTrack.id}`,
+        uri: streamUrl,
+        title: enrichedTrack.title,
+        artist: enrichedTrack.artist,
+        album: enrichedTrack.album,
+        duration: enrichedTrack.durationMs,
+        artwork: enrichedTrack.artworkUrl,
+        trackNumber: enrichedTrack.trackNumber,
+        year: enrichedTrack.year,
+        format: 'FLAC',
+        codec: enrichedTrack.codec ?? 'flac',
+        sampleRate: enrichedTrack.sampleRate,
+        bitDepth: enrichedTrack.bitDepth,
+        quality: enrichedTrack.quality,
+        dateAdded: Date.now(),
+    };
+}
+
+export async function isValidFlacFile(uri: string): Promise<boolean> {
+    try {
+        const base64Prefix = await FileSystem.readAsStringAsync(uri, {
+            encoding: FileSystem.EncodingType.Base64,
+            position: 0,
+            length: 12,
+        } as never);
+
+        const decodedPrefix = decodeBase64(base64Prefix);
+        return decodedPrefix.startsWith('fLaC');
+    } catch {
+        return false;
+    }
+}

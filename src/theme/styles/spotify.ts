@@ -10,6 +10,7 @@ const spotifyComponents: ComponentStyles = {
         showDivider: false,
         dividerInset: 0,
         activeScale: 0.98,
+        variant: 'standard',
     },
     card: {
         aspectRatio: 1,
@@ -17,6 +18,7 @@ const spotifyComponents: ComponentStyles = {
         showShadow: false,
         titleSize: 14,
         subtitleSize: 11,
+        variant: 'flat',
     },
     player: {
         artworkRadius: 4,
@@ -24,10 +26,31 @@ const spotifyComponents: ComponentStyles = {
         progressStyle: 'bar',
         showBlur: false,
         blurIntensity: 0,
+        variant: 'compact',
+        icons: {
+            play: 'play',
+            pause: 'pause',
+            next: 'skip-next',
+            previous: 'skip-previous',
+            shuffle: 'shuffle',
+            repeat: 'repeat',
+            repeatOne: 'repeat-once',
+            heart: 'heart',
+            heartOutline: 'heart-outline',
+        }
     },
     navigation: {
         tabStyle: 'icons',
         headerStyle: 'compact',
+    },
+    global: {
+        screenPadding: 16,
+        itemSpacing: 10,
+        borderWidth: 0,
+        borderColor: 'transparent',
+        shadowStyle: 'none',
+        buttonRadius: 20,
+        buttonPadding: 12,
     },
 };
 

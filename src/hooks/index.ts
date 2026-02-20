@@ -1,5 +1,4 @@
-/**
- * Hooks module - Custom React hooks
- */
+export * from './useArtistInfo';
+export * from './useDynamicColors';
+export * from './useTidalDownload';
 
-export { useDynamicColors } from './useDynamicColors';

@@ -1,135 +1,362 @@
 /**
- * TrackPlayerService - Android Auto / Media Notifications bridge
+ * TrackPlayerService - Audio Playback with Background Support
  * 
- * Uses react-native-track-player to expose media controls to:
- * - Android Auto
- * - Lock screen
- * - Bluetooth devices
- * - Notification controls
- * 
- * Note: This is a stub that will be enabled once track-player is properly configured.
- * For now, we're using expo-audio as the primary audio engine.
+ * Uses react-native-track-player as the primary audio engine for:
+ * - Background playback (music plays when app is in background)
+ * - Lock screen controls
+ * - Notification controls (with artwork)
+ * - Samsung Dynamic Island / Now Bar integration
+ * - Bluetooth/headphone controls
+ * - Android Auto support
  */
 
+import TrackPlayer, {
+    AppKilledPlaybackBehavior,
+    Capability,
+    Event,
+    RepeatMode,
+    State,
+} from 'react-native-track-player';
 import { Track } from '../types/audio';
 
-// Flag to track if TrackPlayer is available
-let trackPlayerAvailable = false;
 let isInitialized = false;
+let initializationPromise: Promise<boolean> | null = null;
 
 /**
- * Initialize Track Player for media session
+ * Initialize Track Player with full configuration
  */
-export async function initializeTrackPlayer(): Promise<void> {
-    if (isInitialized) return;
+export async function initializeTrackPlayer(): Promise<boolean> {
+    if (isInitialized) return true;
+    if (initializationPromise) return initializationPromise;
 
-    try {
-        // Dynamically import to avoid build issues
-        const TrackPlayer = await import('react-native-track-player').catch(() => null);
+    initializationPromise = (async () => {
+        try {
+            // Setup the player — optimized for local file playback
+            await TrackPlayer.setupPlayer({
+                // Buffer settings tuned for LOCAL files (not streaming)
+                // Local files read from disk instantly, so minimal buffering needed
+                minBuffer: 5,
+                maxBuffer: 15,
+                // CRITICAL: Start playing almost immediately
+                playBuffer: 0.1,
+                maxCacheSize: 1024 * 100,
+                autoHandleInterruptions: true,
+            });
 
-        if (!TrackPlayer) {
-            console.log('[TrackPlayer] Not available - using expo-audio only');
-            return;
+            // Configure capabilities (what buttons to show)
+            await TrackPlayer.updateOptions({
+                capabilities: [
+                    Capability.Play,
+                    Capability.Pause,
+                    Capability.SkipToNext,
+                    Capability.SkipToPrevious,
+                    Capability.SeekTo,
+                    Capability.Stop,
+                ],
+                notificationCapabilities: [
+                    Capability.Play,
+                    Capability.Pause,
+                    Capability.SkipToNext,
+                    Capability.SkipToPrevious,
+                    Capability.SeekTo,
+                ],
+                // Progress bar update interval in seconds
+                progressUpdateEventInterval: 1,
+                // Android specific options
+                android: {
+                    // Show notification immediately when track is added
+                    appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
+                },
+            });
+
+            isInitialized = true;
+            console.log('[TrackPlayer] Initialized successfully');
+            return true;
+        } catch (error) {
+            console.error('[TrackPlayer] Setup failed:', error);
+            return false;
+        } finally {
+            initializationPromise = null;
         }
+    })();
 
-        await TrackPlayer.default.setupPlayer({
-            autoHandleInterruptions: true,
-        });
-
-        await TrackPlayer.default.updateOptions({
-            capabilities: [
-                TrackPlayer.Capability.Play,
-                TrackPlayer.Capability.Pause,
-                TrackPlayer.Capability.SkipToNext,
-                TrackPlayer.Capability.SkipToPrevious,
-                TrackPlayer.Capability.SeekTo,
-                TrackPlayer.Capability.Stop,
-            ],
-            compactCapabilities: [
-                TrackPlayer.Capability.Play,
-                TrackPlayer.Capability.Pause,
-                TrackPlayer.Capability.SkipToNext,
-            ],
-            progressUpdateEventInterval: 1,
-        });
-
-        trackPlayerAvailable = true;
-        isInitialized = true;
-        console.log('[TrackPlayer] Initialized successfully');
-    } catch (error) {
-        console.log('[TrackPlayer] Setup failed, using expo-audio only:', error);
-        trackPlayerAvailable = false;
-    }
+    return initializationPromise;
 }
 
 /**
- * Sync current track metadata to Track Player (for notifications/Android Auto)
+ * Check if Track Player is ready
  */
-export async function syncNowPlaying(track: Track): Promise<void> {
-    if (!trackPlayerAvailable) return;
+export function isTrackPlayerReady(): boolean {
+    return isInitialized;
+}
+
+/**
+ * Play a single track — optimized for near-instant start.
+ * BUG FIX: Uses reset()+add() instead of load() for absolute queue reliability.
+ */
+export async function playTrack(track: Track): Promise<void> {
+    if (!isInitialized) {
+        const initialized = await initializeTrackPlayer();
+        if (!initialized) {
+            throw new Error('Track Player initialization failed');
+        }
+    }
 
     try {
-        const TrackPlayer = await import('react-native-track-player');
-        await TrackPlayer.default.reset();
-        await TrackPlayer.default.add({
+        // CRITICAL BUG FIX: reset() ensures the native queue is completely empty.
+        // load() can sometimes preserve metadata from previous sessions on buggy Android versions.
+        await TrackPlayer.reset();
+
+        const trackData = {
             id: track.id,
             url: track.uri,
-            title: track.title,
-            artist: track.artist,
-            album: track.album,
-            artwork: track.artwork,
-            duration: track.duration / 1000,
-        });
-        console.log('[TrackPlayer] Synced now playing:', track.title);
+            title: track.title || 'Unknown Title',
+            artist: track.artist || 'Unknown Artist',
+            album: track.album || 'Unknown Album',
+            artwork: track.artwork || undefined,
+            duration: track.duration ? track.duration / 1000 : undefined,
+        };
+
+        await TrackPlayer.add([trackData]);
+        await TrackPlayer.play();
     } catch (error) {
-        console.log('[TrackPlayer] Sync failed:', error);
+        console.error('[TrackPlayer] Play error:', error);
+        throw error;
     }
 }
 
 /**
- * Sync playback state
+ * Play a queue of tracks starting at a specific index
  */
-export async function syncPlaybackState(isPlaying: boolean): Promise<void> {
-    if (!trackPlayerAvailable) return;
-
-    try {
-        const TrackPlayer = await import('react-native-track-player');
-        if (isPlaying) {
-            await TrackPlayer.default.play();
-        } else {
-            await TrackPlayer.default.pause();
+export async function playQueue(tracks: Track[], startIndex: number = 0): Promise<void> {
+    if (!isInitialized) {
+        const initialized = await initializeTrackPlayer();
+        if (!initialized) {
+            throw new Error('Track Player initialization failed');
         }
-    } catch (error) {
-        console.log('[TrackPlayer] State sync failed:', error);
     }
-}
-
-/**
- * Sync position
- */
-export async function syncPosition(positionMs: number): Promise<void> {
-    if (!trackPlayerAvailable) return;
 
     try {
-        const TrackPlayer = await import('react-native-track-player');
-        await TrackPlayer.default.seekTo(positionMs / 1000);
+        if (tracks.length === 0) return;
+
+        await TrackPlayer.reset();
+
+        const trackPlayerTracks = tracks.map(track => ({
+            id: track.id,
+            url: track.uri,
+            title: track.title || 'Unknown Title',
+            artist: track.artist || 'Unknown Artist',
+            album: track.album || 'Unknown Album',
+            artwork: track.artwork || undefined,
+            duration: track.duration ? track.duration / 1000 : undefined,
+        }));
+
+        const safeIndex = Math.max(0, Math.min(startIndex, trackPlayerTracks.length - 1));
+
+        await TrackPlayer.add(trackPlayerTracks);
+        if (safeIndex > 0) {
+            await TrackPlayer.skip(safeIndex);
+        }
+        await TrackPlayer.play();
+
+        console.log('[TrackPlayer] Playing queue, starting at:', tracks[safeIndex]?.title);
     } catch (error) {
-        console.log('[TrackPlayer] Position sync failed:', error);
+        console.error('[TrackPlayer] Play queue error:', error);
+        throw error;
     }
 }
 
 /**
- * Cleanup
+ * Pause playback
+ */
+export async function pause(): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.pause();
+    console.log('[TrackPlayer] Paused');
+}
+
+/**
+ * Resume playback
+ */
+export async function resume(): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.play();
+    console.log('[TrackPlayer] Resumed');
+}
+
+/**
+ * Toggle play/pause
+ */
+export async function togglePlayPause(): Promise<void> {
+    if (!isInitialized) return;
+
+    const state = await TrackPlayer.getPlaybackState();
+    if (state.state === State.Playing) {
+        await pause();
+    } else {
+        await resume();
+    }
+}
+
+/**
+ * Stop playback
+ */
+export async function stop(): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.stop();
+    console.log('[TrackPlayer] Stopped');
+}
+
+/**
+ * Seek to position in seconds
+ */
+export async function seekTo(positionSeconds: number): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.seekTo(positionSeconds);
+    console.log('[TrackPlayer] Seeked to:', positionSeconds);
+}
+
+/**
+ * Skip to next track
+ */
+export async function skipToNext(): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.skipToNext();
+    console.log('[TrackPlayer] Skipped to next');
+}
+
+/**
+ * Skip to previous track (or restart if more than 3 seconds in)
+ */
+export async function skipToPrevious(): Promise<void> {
+    if (!isInitialized) return;
+
+    const progress = await TrackPlayer.getProgress();
+    if (progress.position > 3) {
+        await TrackPlayer.seekTo(0);
+    } else {
+        await TrackPlayer.skipToPrevious();
+    }
+    console.log('[TrackPlayer] Skipped to previous');
+}
+
+/**
+ * Skip to specific track in queue
+ */
+export async function skipToTrack(index: number): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.skip(index);
+    console.log('[TrackPlayer] Skipped to track:', index);
+}
+
+/**
+ * Set volume (0-1)
+ */
+export async function setVolume(volume: number): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.setVolume(Math.max(0, Math.min(1, volume)));
+    console.log('[TrackPlayer] Volume set to:', volume);
+}
+
+/**
+ * Set repeat mode
+ */
+export async function setRepeatMode(mode: 'off' | 'all' | 'one'): Promise<void> {
+    if (!isInitialized) return;
+
+    const repeatModes = {
+        'off': RepeatMode.Off,
+        'all': RepeatMode.Queue,
+        'one': RepeatMode.Track,
+    };
+
+    await TrackPlayer.setRepeatMode(repeatModes[mode]);
+    console.log('[TrackPlayer] Repeat mode:', mode);
+}
+
+/**
+ * Get current playback state
+ */
+export async function getPlaybackState(): Promise<State | null> {
+    if (!isInitialized) return null;
+    const state = await TrackPlayer.getPlaybackState();
+    return state.state;
+}
+
+/**
+ * Get current progress (position, duration, buffered)
+ */
+export async function getProgress(): Promise<{ position: number; duration: number; buffered: number }> {
+    if (!isInitialized) return { position: 0, duration: 0, buffered: 0 };
+    return TrackPlayer.getProgress();
+}
+
+/**
+ * Get current track
+ * BUG FIX: Use getActiveTrack() exclusively for better metadata reliability.
+ */
+export async function getCurrentTrack(): Promise<Track | null> {
+    if (!isInitialized) return null;
+
+    try {
+        const track = await TrackPlayer.getActiveTrack();
+        if (!track) return null;
+
+        return {
+            id: track.id?.toString() || '',
+            uri: track.url,
+            title: track.title || 'Unknown',
+            artist: track.artist || 'Unknown',
+            album: track.album || 'Unknown',
+            artwork: track.artwork as string | undefined,
+            duration: (track.duration || 0) * 1000,
+            dateAdded: Date.now(),
+        };
+    } catch (error) {
+        console.error('[TrackPlayer] Error getting current track:', error);
+        return null;
+    }
+}
+
+/**
+ * Get current active track index
+ */
+export async function getActiveTrackIndex(): Promise<number> {
+    if (!isInitialized) return -1;
+    const index = await TrackPlayer.getActiveTrackIndex();
+    return index ?? -1;
+}
+
+/**
+ * Check if currently playing
+ */
+export async function isPlaying(): Promise<boolean> {
+    if (!isInitialized) return false;
+    const state = await TrackPlayer.getPlaybackState();
+    return state.state === State.Playing;
+}
+
+/**
+ * Add event listener for playback events
+ */
+export function addEventListener(event: Event, callback: (data: any) => void) {
+    return TrackPlayer.addEventListener(event, callback);
+}
+
+/**
+ * Destroy Track Player
  */
 export async function destroyTrackPlayer(): Promise<void> {
-    if (!trackPlayerAvailable) return;
+    if (!isInitialized) return;
 
     try {
-        const TrackPlayer = await import('react-native-track-player');
-        await TrackPlayer.default.reset();
+        await TrackPlayer.reset();
         isInitialized = false;
         console.log('[TrackPlayer] Destroyed');
     } catch (error) {
-        console.log('[TrackPlayer] Destroy failed:', error);
+        console.error('[TrackPlayer] Destroy failed:', error);
     }
 }
+
+// Re-export types and enums for convenience
+export { Event, RepeatMode, State };

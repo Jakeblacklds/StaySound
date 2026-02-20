@@ -8,6 +8,7 @@ import { ActivityIndicator, Divider, List, Switch, Text } from 'react-native-pap
 export default function SettingsScreen() {
     const { theme, config, setThemeStyle, setThemeMode, toggleDynamicColors, isDark } = useTheme();
     const { isScanning, scanLibrary, getAllTracks, lastScanDate } = useLibraryStore();
+    const isMaterial3 = config.style === 'material3';
 
     const trackCount = getAllTracks().length;
     const lastScan = lastScanDate
@@ -24,9 +25,10 @@ export default function SettingsScreen() {
     };
 
     const themeStyles: { label: string; value: ThemeStyle }[] = [
-        { label: '🍎 Minimal (Apple-like)', value: 'minimal' },
-        { label: '🎨 Material 3 Expressive', value: 'material3' },
-        { label: '💚 Spotify', value: 'spotify' },
+        { label: '🎨 Material 3 Expressive (2026)', value: 'material3' },
+        { label: '✨ Aurora Glass (Frosted)', value: 'aurora' },
+        { label: '👾 Cyber Neon (Technical)', value: 'cyber' },
+        { label: '💥 Neo Brutalist (Bold)', value: 'brutal' },
     ];
 
     return (
@@ -42,7 +44,7 @@ export default function SettingsScreen() {
                 APPEARANCE
             </Text>
 
-            <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}> 
                 <List.Item
                     title="Dark Mode"
                     description={config.mode === 'system' ? 'Following system' : isDark ? 'On' : 'Off'}
@@ -80,7 +82,7 @@ export default function SettingsScreen() {
                 THEME STYLE
             </Text>
 
-            <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}> 
                 {themeStyles.map((item, index) => (
                     <React.Fragment key={item.value}>
                         <List.Item
@@ -108,7 +110,7 @@ export default function SettingsScreen() {
                 PLAYBACK
             </Text>
 
-            <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}> 
                 <List.Item
                     title="Equalizer"
                     description="Adjust audio frequencies"
@@ -136,7 +138,7 @@ export default function SettingsScreen() {
                 LIBRARY
             </Text>
 
-            <View style={[styles.section, { backgroundColor: theme.colors.surface }]}>
+            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}> 
                 <List.Item
                     title="Scan for Music"
                     description={isScanning ? 'Scanning...' : `${trackCount} tracks • Last scan: ${lastScan}`}

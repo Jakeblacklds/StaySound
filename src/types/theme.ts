@@ -91,14 +91,19 @@ export interface ComponentStyles {
         showDivider: boolean;
         dividerInset: number;
         activeScale: number;
+        variant: 'standard' | 'minimal' | 'glass' | 'brutal' | 'cyber' | 'aurora';
+        layout?: 'horizontal' | 'vertical' | 'asymmetric';
+        borderWidth?: number;
     };
     // Card styling (albums, artists)
     card: {
-        aspectRatio: number; // 1 for square, 0.75 for portrait
+        aspectRatio: number;
         imageRadius: number;
         showShadow: boolean;
         titleSize: number;
         subtitleSize: number;
+        variant: 'standard' | 'flat' | 'elevated' | 'glass' | 'brutal' | 'aurora';
+        textAlign?: 'left' | 'center';
     };
     // Player styling
     player: {
@@ -107,11 +112,36 @@ export interface ComponentStyles {
         progressStyle: 'bar' | 'circular' | 'wave';
         showBlur: boolean;
         blurIntensity: number;
+        variant: 'immersive' | 'classic' | 'compact' | 'glass' | 'brutal' | 'cyber' | 'aurora';
+        layoutTemplate?: 'centered' | 'top-heavy' | 'bottom-controls' | 'split';
+        titleWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900';
+        icons: {
+            play: string;
+            pause: string;
+            next: string;
+            previous: string;
+            shuffle: string;
+            repeat: string;
+            repeatOne: string;
+            heart: string;
+            heartOutline: string;
+        };
     };
     // Navigation/tabs
     navigation: {
-        tabStyle: 'icons' | 'pills' | 'underline';
+        tabStyle: 'icons' | 'pills' | 'underline' | 'brutal';
         headerStyle: 'large' | 'compact' | 'hidden';
+        activeIndicatorColor?: string;
+    };
+    // Global UI modifiers
+    global: {
+        screenPadding: number;
+        itemSpacing: number;
+        borderWidth: number;
+        borderColor: string;
+        shadowStyle?: 'soft' | 'hard' | 'none';
+        buttonRadius: number;
+        buttonPadding?: number;
     };
 }
 
@@ -127,7 +157,7 @@ export interface Theme {
     components: ComponentStyles;
 }
 
-export type ThemeStyle = 'minimal' | 'material3' | 'spotify' | 'custom';
+export type ThemeStyle = 'material3' | 'aurora' | 'cyber' | 'brutal';
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface ThemeConfig {

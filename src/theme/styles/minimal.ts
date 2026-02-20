@@ -10,6 +10,7 @@ const minimalComponents: ComponentStyles = {
         showDivider: true,
         dividerInset: 64,
         activeScale: 0.99,
+        variant: 'minimal',
     },
     card: {
         aspectRatio: 1,
@@ -17,6 +18,7 @@ const minimalComponents: ComponentStyles = {
         showShadow: true,
         titleSize: 15,
         subtitleSize: 13,
+        variant: 'flat',
     },
     player: {
         artworkRadius: 8,
@@ -24,10 +26,31 @@ const minimalComponents: ComponentStyles = {
         progressStyle: 'bar',
         showBlur: true,
         blurIntensity: 100,
+        variant: 'classic',
+        icons: {
+            play: 'play',
+            pause: 'pause',
+            next: 'skip-next',
+            previous: 'skip-previous',
+            shuffle: 'shuffle',
+            repeat: 'repeat',
+            repeatOne: 'repeat-once',
+            heart: 'heart',
+            heartOutline: 'heart-outline',
+        }
     },
     navigation: {
         tabStyle: 'underline',
         headerStyle: 'large',
+    },
+    global: {
+        screenPadding: 16,
+        itemSpacing: 12,
+        borderWidth: 0,
+        borderColor: 'transparent',
+        shadowStyle: 'none',
+        buttonRadius: 12,
+        buttonPadding: 12,
     },
 };
 

@@ -1,71 +1,330 @@
 /**
  * AudioEngine - Unified audio controller for StaySound
- * 
- * Uses expo-audio for actual playback and syncs state to 
- * react-native-track-player for Android Auto/media notifications.
+ *
+ * Uses react-native-track-player as the primary playback engine for:
+ * - Background audio playback
+ * - Lock screen and notification controls
+ * - Samsung Dynamic Island / Now Bar
+ * - Bluetooth/car system integration
+ * - Android Auto support
  */
 
-import { AudioPlayer, useAudioPlayer, useAudioPlayerStatus } from 'expo-audio';
-import { useEffect } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { Event, State } from 'react-native-track-player';
 import { Track } from '../types/audio';
-
-// Singleton audio player reference
-let audioPlayerInstance: AudioPlayer | null = null;
+import * as TrackPlayerService from './trackPlayerService';
 
 export interface AudioEngineState {
     isPlaying: boolean;
     isLoading: boolean;
-    position: number;
-    duration: number;
+    position: number; // in milliseconds
+    duration: number; // in milliseconds
     currentTrack: Track | null;
+    queueIndex: number;
+    buffered: number;
 }
 
 export interface AudioEngineCallbacks {
     onStateChange?: (state: AudioEngineState) => void;
     onTrackEnd?: () => void;
+    onTrackChange?: (track: Track | null) => void;
     onError?: (error: Error) => void;
 }
 
 class AudioEngineClass {
-    private currentTrack: Track | null = null;
     private callbacks: AudioEngineCallbacks = {};
-    private updateInterval: ReturnType<typeof setInterval> | null = null;
+    private isInitialized = false;
+    private positionInterval: ReturnType<typeof setInterval> | null = null;
+    private subscriptions: { remove: () => void }[] = [];
+    private currentState: AudioEngineState = {
+        isPlaying: false,
+        isLoading: false,
+        position: 0,
+        duration: 0,
+        currentTrack: null,
+        queueIndex: -1,
+        buffered: 0,
+    };
 
     /**
      * Initialize audio engine with callbacks
      */
-    initialize(callbacks: AudioEngineCallbacks) {
+    async initialize(callbacks: AudioEngineCallbacks = {}): Promise<void> {
+        if (this.isInitialized) {
+            this.callbacks = callbacks;
+            return;
+        }
+        this.isInitialized = true;
         this.callbacks = callbacks;
-        console.log('[AudioEngine] Initialized');
-    }
 
-    /**
-     * Set the audio player instance (called from hook)
-     */
-    setPlayer(player: AudioPlayer) {
-        audioPlayerInstance = player;
-    }
-
-    /**
-     * Load and play a track
-     */
-    async play(track: Track): Promise<void> {
-        if (!audioPlayerInstance) {
-            throw new Error('Audio player not initialized');
+        // Initialize Track Player
+        const success = await TrackPlayerService.initializeTrackPlayer();
+        if (!success) {
+            console.error('[AudioEngine] Failed to initialize Track Player');
+            this.isInitialized = false;
+            return;
         }
 
+        // Setup event listeners
+        this.setupEventListeners();
+
+        // Start position update interval
+        this.startPositionUpdates();
+
+        // Sync state from native player in case playback already exists
+        await this.syncInitialState();
+
+        console.log('[AudioEngine] Initialized with Track Player');
+    }
+
+    private async syncInitialState(): Promise<void> {
+        const syncSnapshot = {
+            trackId: this.currentState.currentTrack?.id ?? null,
+            queueIndex: this.currentState.queueIndex,
+            isPlaying: this.currentState.isPlaying,
+            isLoading: this.currentState.isLoading,
+            position: this.currentState.position,
+            duration: this.currentState.duration,
+        };
+
         try {
-            this.currentTrack = track;
+            const [playbackState, progress, activeTrack, activeIndex] = await Promise.all([
+                TrackPlayerService.getPlaybackState(),
+                TrackPlayerService.getProgress(),
+                TrackPlayerService.getCurrentTrack(),
+                TrackPlayerService.getActiveTrackIndex(),
+            ]);
 
-            // Replace current source with new track
-            await audioPlayerInstance.replace({ uri: track.uri });
+            const stateChangedDuringSync =
+                (this.currentState.currentTrack?.id ?? null) !== syncSnapshot.trackId ||
+                this.currentState.queueIndex !== syncSnapshot.queueIndex ||
+                this.currentState.isPlaying !== syncSnapshot.isPlaying ||
+                this.currentState.isLoading !== syncSnapshot.isLoading ||
+                this.currentState.position !== syncSnapshot.position ||
+                this.currentState.duration !== syncSnapshot.duration;
 
-            // Start playback
-            audioPlayerInstance.play();
+            if (stateChangedDuringSync) {
+                return;
+            }
 
-            console.log('[AudioEngine] Playing:', track.title);
+            this.currentState.isPlaying = playbackState === State.Playing;
+            this.currentState.isLoading = playbackState === State.Loading || playbackState === State.Buffering;
+            this.currentState.position = progress.position * 1000;
+            this.currentState.duration = progress.duration * 1000;
+            this.currentState.buffered = progress.buffered * 1000;
+            this.currentState.currentTrack = activeTrack;
+            this.currentState.queueIndex = activeIndex;
+
+            this.callbacks.onStateChange?.(this.currentState);
+            this.callbacks.onTrackChange?.(activeTrack);
         } catch (error) {
-            console.error('[AudioEngine] Play error:', error);
+            console.warn('[AudioEngine] Failed to sync initial native state:', error);
+        }
+    }
+
+    /**
+     * Setup Track Player event listeners
+     */
+    private setupEventListeners(): void {
+        // Clear any existing subscriptions to avoid duplicate event calls
+        this.subscriptions.forEach(s => s.remove());
+        this.subscriptions = [];
+
+        // Listen for playback state changes
+        const stateSub = TrackPlayerService.addEventListener(Event.PlaybackState, async (event) => {
+            const nextState = event.state;
+
+            if (nextState === State.Playing) {
+                this.currentState.isPlaying = true;
+                this.currentState.isLoading = false;
+            } else if (nextState === State.Loading || nextState === State.Buffering) {
+                this.currentState.isLoading = true;
+            } else {
+                this.currentState.isPlaying = false;
+                this.currentState.isLoading = false;
+            }
+
+            this.callbacks.onStateChange?.(this.currentState);
+        });
+        this.subscriptions.push(stateSub);
+
+        // Listen for track changes
+        const trackSub = TrackPlayerService.addEventListener(Event.PlaybackActiveTrackChanged, async (event) => {
+            try {
+                // Use TP v5 payload
+                const track = event?.track;
+                const index = event?.index;
+
+                if (track) {
+                    const normalized: Track = {
+                        id: track.id?.toString() || '',
+                        uri: track.url,
+                        title: track.title || 'Unknown',
+                        artist: track.artist || 'Unknown',
+                        album: track.album || 'Unknown',
+                        artwork: track.artwork as string | undefined,
+                        duration: (track.duration || 0) * 1000,
+                        dateAdded: Date.now(),
+                    };
+                    this.currentState.currentTrack = normalized;
+                    this.currentState.queueIndex = index ?? -1;
+                    this.currentState.duration = normalized.duration;
+                    this.currentState.position = 0;
+                } else {
+                    const [activeTrack, activeIndex] = await Promise.all([
+                        TrackPlayerService.getCurrentTrack(),
+                        TrackPlayerService.getActiveTrackIndex(),
+                    ]);
+                    this.currentState.currentTrack = activeTrack;
+                    this.currentState.queueIndex = activeIndex;
+                    this.currentState.duration = activeTrack?.duration || 0;
+                }
+
+                this.callbacks.onTrackChange?.(this.currentState.currentTrack);
+                this.callbacks.onStateChange?.(this.currentState);
+            } catch (error) {
+                console.error('[AudioEngine] Failed to sync active track:', error);
+            }
+        });
+        this.subscriptions.push(trackSub);
+
+        // Listen for queue ending
+        const endSub = TrackPlayerService.addEventListener(Event.PlaybackQueueEnded, () => {
+            console.log('[AudioEngine] Queue ended');
+            this.callbacks.onTrackEnd?.();
+        });
+        this.subscriptions.push(endSub);
+
+        // Listen for errors
+        const errorSub = TrackPlayerService.addEventListener(Event.PlaybackError, (event) => {
+            console.error('[AudioEngine] Playback error:', event);
+            this.callbacks.onError?.(new Error(event.message || 'Playback error'));
+        });
+        this.subscriptions.push(errorSub);
+    }
+
+    private lastReactUpdate = 0;
+    private lastPositionZustandUpdate = 0;
+    private progressRequestInFlight = false;
+    private lastProgressPull = 0;
+
+    /**
+     * Start interval to update position
+     *
+     * PERFORMANCE DESIGN:
+     * - positionShared (SharedValue): updated every tick → progress bar moves on UI thread, ZERO JS re-renders
+     * - Zustand `position`: updated 1x/sec → only used by time-label text, which uses Math.floor(pos/1000)
+     * - Zustand full state (isPlaying/duration/etc): updated every 2s for general sync, NO `position` included
+     */
+    private startPositionUpdates(): void {
+        if (this.positionInterval) return;
+
+        const { usePlayerStore } = require('../stores/playerStore');
+
+        this.positionInterval = setInterval(async () => {
+            if (!TrackPlayerService.isTrackPlayerReady()) return;
+            if (this.progressRequestInFlight) return;
+
+            const storeState = usePlayerStore.getState();
+            const isPlayerExpanded = !!storeState.playerVisible;
+            const isActivelyPlaying = this.currentState.isPlaying || this.currentState.isLoading;
+            if (!isActivelyPlaying && !isPlayerExpanded) return;
+
+            const now = Date.now();
+            const targetIntervalMs = isPlayerExpanded ? 64 : 240;
+            if ((now - this.lastProgressPull) < targetIntervalMs) return;
+
+            this.progressRequestInFlight = true;
+
+            try {
+                const progress = await TrackPlayerService.getProgress();
+                this.lastProgressPull = Date.now();
+                this.currentState.position = progress.position * 1000;
+                this.currentState.duration = progress.duration * 1000;
+                this.currentState.buffered = progress.buffered * 1000;
+
+                // ─── PATH 1: UI THREAD (every tick, zero React re-renders) ───
+                // positionShared drives the animated progress bar directly on the UI thread.
+                const positionShared = usePlayerStore.getState().positionShared;
+                if (positionShared) {
+                    positionShared.value = this.currentState.position;
+                }
+
+                // ─── PATH 2: ZUSTAND position only (1x/sec, for time-label text) ───
+                // The time label selector uses Math.floor(s.position / 1000) so it only
+                // triggers a component re-render when the second changes — max 1x/sec.
+                if (this.lastProgressPull - this.lastPositionZustandUpdate > 1000) {
+                    this.lastPositionZustandUpdate = this.lastProgressPull;
+                    usePlayerStore.getState().setPosition(this.currentState.position);
+                }
+
+                // ─── PATH 3: FULL ZUSTAND SYNC (every 2s, for isPlaying/duration/etc.) ───
+                // Does NOT include `position` to avoid double-triggering subscribers.
+                if (this.lastProgressPull - this.lastReactUpdate > 2000) {
+                    this.lastReactUpdate = this.lastProgressPull;
+                    this.callbacks.onStateChange?.({
+                        ...this.currentState,
+                        position: undefined as any,
+                    });
+                }
+            } catch (error) {
+                // Ignore position update errors
+            } finally {
+                this.progressRequestInFlight = false;
+            }
+        }, 32);
+    }
+
+    /**
+     * Load and play a track — optimized for instant start
+     */
+    async play(track: Track): Promise<void> {
+        // PRE-EMPTIVE update to avoid sync race conditions
+        const backupState = { ...this.currentState };
+        this.currentState.currentTrack = track;
+        this.currentState.duration = track.duration;
+        this.currentState.isLoading = true;
+        this.currentState.isPlaying = true;
+        this.currentState.position = 0;
+        this.currentState.queueIndex = 0;
+        this.callbacks.onStateChange?.(this.currentState);
+
+        try {
+            await TrackPlayerService.playTrack(track);
+            this.currentState.isLoading = false;
+            this.callbacks.onStateChange?.(this.currentState);
+        } catch (error) {
+            this.currentState = backupState;
+            this.callbacks.onStateChange?.(this.currentState);
+            this.callbacks.onError?.(error as Error);
+            throw error;
+        }
+    }
+
+    /**
+     * Play a queue of tracks
+     */
+    async playQueue(tracks: Track[], startIndex: number = 0): Promise<void> {
+        if (!tracks[startIndex]) return;
+
+        // PRE-EMPTIVE update to avoid sync race conditions
+        const backupState = { ...this.currentState };
+        this.currentState.currentTrack = tracks[startIndex];
+        this.currentState.duration = tracks[startIndex].duration;
+        this.currentState.isLoading = true;
+        this.currentState.isPlaying = true;
+        this.currentState.position = 0;
+        this.currentState.queueIndex = startIndex;
+        this.callbacks.onStateChange?.(this.currentState);
+
+        try {
+            await TrackPlayerService.playQueue(tracks, startIndex);
+            this.currentState.isLoading = false;
+            this.callbacks.onStateChange?.(this.currentState);
+            console.log('[AudioEngine] Playing queue, starting at:', tracks[startIndex]?.title);
+        } catch (error) {
+            this.currentState = backupState;
+            this.callbacks.onStateChange?.(this.currentState);
             this.callbacks.onError?.(error as Error);
             throw error;
         }
@@ -74,112 +333,153 @@ class AudioEngineClass {
     /**
      * Pause playback
      */
-    pause(): void {
-        if (audioPlayerInstance) {
-            audioPlayerInstance.pause();
-            console.log('[AudioEngine] Paused');
-        }
+    async pause(): Promise<void> {
+        await TrackPlayerService.pause();
+        this.currentState.isPlaying = false;
+        this.callbacks.onStateChange?.(this.currentState);
+        console.log('[AudioEngine] Paused');
     }
 
     /**
      * Resume playback
      */
-    resume(): void {
-        if (audioPlayerInstance) {
-            audioPlayerInstance.play();
-            console.log('[AudioEngine] Resumed');
-        }
+    async resume(): Promise<void> {
+        await TrackPlayerService.resume();
+        this.currentState.isPlaying = true;
+        this.callbacks.onStateChange?.(this.currentState);
+        console.log('[AudioEngine] Resumed');
     }
 
     /**
      * Toggle play/pause
      */
-    togglePlayPause(): void {
-        if (!audioPlayerInstance) return;
-
-        if (audioPlayerInstance.playing) {
-            this.pause();
+    async togglePlayPause(): Promise<void> {
+        if (this.currentState.isPlaying) {
+            await this.pause();
         } else {
-            this.resume();
+            await this.resume();
         }
     }
 
     /**
      * Seek to position in milliseconds
+     *
+     * This is the ONLY place Zustand `position` gets updated from the engine.
+     * It also updates positionShared immediately for instant visual feedback.
      */
     async seek(positionMs: number): Promise<void> {
-        if (audioPlayerInstance) {
-            await audioPlayerInstance.seekTo(positionMs / 1000); // expo-audio uses seconds
-            console.log('[AudioEngine] Seeked to:', positionMs);
+        await TrackPlayerService.seekTo(positionMs / 1000);
+        this.currentState.position = positionMs;
+
+        // Update positionShared immediately (visual feedback without waiting for next tick)
+        const { usePlayerStore } = require('../stores/playerStore');
+        const positionShared = usePlayerStore.getState().positionShared;
+        if (positionShared) {
+            positionShared.value = positionMs;
         }
+
+        // On seek, update Zustand position so the text label is correct after seek
+        this.callbacks.onStateChange?.(this.currentState);
+        console.log('[AudioEngine] Seeked to:', positionMs);
     }
 
     /**
-     * Stop playback and unload
+     * Skip to next track
      */
-    stop(): void {
-        if (audioPlayerInstance) {
-            audioPlayerInstance.pause();
-            this.currentTrack = null;
-            console.log('[AudioEngine] Stopped');
-        }
+    async next(): Promise<void> {
+        await TrackPlayerService.skipToNext();
+        console.log('[AudioEngine] Skipped to next');
+    }
+
+    /**
+     * Skip to previous track
+     */
+    async previous(): Promise<void> {
+        await TrackPlayerService.skipToPrevious();
+        console.log('[AudioEngine] Skipped to previous');
+    }
+
+    /**
+     * Skip to specific track in queue
+     */
+    async skipTo(index: number): Promise<void> {
+        await TrackPlayerService.skipToTrack(index);
+        console.log('[AudioEngine] Skipped to track:', index);
+    }
+
+    /**
+     * Stop playback
+     */
+    async stop(): Promise<void> {
+        await TrackPlayerService.stop();
+        this.currentState.isPlaying = false;
+        this.currentState.position = 0;
+        this.currentState.currentTrack = null;
+        this.currentState.queueIndex = -1;
+        this.callbacks.onStateChange?.(this.currentState);
+        console.log('[AudioEngine] Stopped');
     }
 
     /**
      * Set volume (0-1)
      */
-    setVolume(volume: number): void {
-        if (audioPlayerInstance) {
-            audioPlayerInstance.volume = Math.max(0, Math.min(1, volume));
-            console.log('[AudioEngine] Volume set to:', volume);
-        }
+    async setVolume(volume: number): Promise<void> {
+        await TrackPlayerService.setVolume(volume);
+        console.log('[AudioEngine] Volume set to:', volume);
+    }
+
+    /**
+     * Set repeat mode
+     */
+    async setRepeatMode(mode: 'off' | 'all' | 'one'): Promise<void> {
+        await TrackPlayerService.setRepeatMode(mode);
+        console.log('[AudioEngine] Repeat mode:', mode);
+    }
+
+    /**
+     * Get current state
+     */
+    getState(): AudioEngineState {
+        return { ...this.currentState };
     }
 
     /**
      * Get current track
      */
     getCurrentTrack(): Track | null {
-        return this.currentTrack;
+        return this.currentState.currentTrack;
     }
 
     /**
      * Check if currently playing
      */
     isPlaying(): boolean {
-        return audioPlayerInstance?.playing ?? false;
+        return this.currentState.isPlaying;
     }
 
     /**
      * Get current position in milliseconds
      */
     getPosition(): number {
-        return (audioPlayerInstance?.currentTime ?? 0) * 1000;
+        return this.currentState.position;
     }
 
     /**
      * Get duration in milliseconds
      */
     getDuration(): number {
-        return (audioPlayerInstance?.duration ?? 0) * 1000;
-    }
-
-    /**
-     * Handle track end event
-     */
-    handleTrackEnd(): void {
-        console.log('[AudioEngine] Track ended');
-        this.callbacks.onTrackEnd?.();
+        return this.currentState.duration;
     }
 
     /**
      * Cleanup
      */
-    destroy(): void {
-        if (this.updateInterval) {
-            clearInterval(this.updateInterval);
+    async destroy(): Promise<void> {
+        if (this.positionInterval) {
+            clearInterval(this.positionInterval);
+            this.positionInterval = null;
         }
-        this.stop();
-        audioPlayerInstance = null;
+        await TrackPlayerService.destroyTrackPlayer();
         console.log('[AudioEngine] Destroyed');
     }
 }
@@ -188,44 +488,68 @@ class AudioEngineClass {
 export const AudioEngine = new AudioEngineClass();
 
 /**
- * Hook to use audio player with expo-audio
- * Must be called in a component to initialize the player
+ * Hook to use audio engine with automatic state updates
  */
 export function useAudioEngine() {
-    const player = useAudioPlayer();
-    const status = useAudioPlayerStatus(player);
+    const [state, setState] = useState<AudioEngineState>({
+        isPlaying: false,
+        isLoading: false,
+        position: 0,
+        duration: 0,
+        currentTrack: null,
+        queueIndex: -1,
+        buffered: 0,
+    });
 
-    // Set player reference on mount
     useEffect(() => {
-        AudioEngine.setPlayer(player);
-    }, [player]);
-
-    // Listen for playback completion
-    useEffect(() => {
-        const sub = player.addListener('playbackStatusUpdate', (status) => {
-            if (status.didJustFinish) {
-                AudioEngine.handleTrackEnd();
-            }
+        // Initialize audio engine
+        AudioEngine.initialize({
+            onStateChange: (newState) => {
+                setState({ ...newState });
+            },
+            onTrackEnd: () => {
+                console.log('[useAudioEngine] Track ended');
+            },
+            onError: (error) => {
+                console.error('[useAudioEngine] Error:', error);
+            },
         });
-        return () => sub.remove();
-    }, [player]);
+
+        // Cleanup on unmount
+        return () => {
+            // Don't destroy on unmount - we want background playback
+        };
+    }, []);
+
+    // Memoized actions
+    const play = useCallback((track: Track) => AudioEngine.play(track), []);
+    const playQueue = useCallback((tracks: Track[], startIndex?: number) =>
+        AudioEngine.playQueue(tracks, startIndex), []);
+    const pause = useCallback(() => AudioEngine.pause(), []);
+    const resume = useCallback(() => AudioEngine.resume(), []);
+    const togglePlayPause = useCallback(() => AudioEngine.togglePlayPause(), []);
+    const seek = useCallback((ms: number) => AudioEngine.seek(ms), []);
+    const next = useCallback(() => AudioEngine.next(), []);
+    const previous = useCallback(() => AudioEngine.previous(), []);
+    const skipTo = useCallback((index: number) => AudioEngine.skipTo(index), []);
+    const stop = useCallback(() => AudioEngine.stop(), []);
+    const setVolume = useCallback((v: number) => AudioEngine.setVolume(v), []);
+    const setRepeatMode = useCallback((mode: 'off' | 'all' | 'one') =>
+        AudioEngine.setRepeatMode(mode), []);
 
     return {
-        player,
-        status,
-        isPlaying: status.playing,
-        isLoading: status.isLoaded === false,
-        position: (status.currentTime ?? 0) * 1000,
-        duration: (status.duration ?? 0) * 1000,
-        currentTrack: AudioEngine.getCurrentTrack(),
-
-        // Actions
-        play: (track: Track) => AudioEngine.play(track),
-        pause: () => AudioEngine.pause(),
-        resume: () => AudioEngine.resume(),
-        togglePlayPause: () => AudioEngine.togglePlayPause(),
-        seek: (ms: number) => AudioEngine.seek(ms),
-        stop: () => AudioEngine.stop(),
-        setVolume: (v: number) => AudioEngine.setVolume(v),
+        ...state,
+        play,
+        playQueue,
+        pause,
+        resume,
+        togglePlayPause,
+        seek,
+        next,
+        previous,
+        skipTo,
+        stop,
+        setVolume,
+        setRepeatMode,
     };
 }

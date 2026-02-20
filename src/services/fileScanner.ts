@@ -1,13 +1,22 @@
 /**
  * FileScanner - Local music file discovery service
- * 
- * Scans device storage for audio files and extracts metadata.
- * Uses expo-music-info-2 for ID3 tag extraction including artwork.
+ *
+ * FAST MODE: Uses Android MediaStore for instant scanning
+ * - Gets files from MediaStore database (pre-indexed by Android)
+ * - Defers metadata extraction to when tracks are played/viewed
+ * - Supports folder selection for targeted scanning
+ *
+ * Performance utilities:
+ * - runConcurrent: concurrency-limited async pool
+ * - withTimeout: per-item timeout guard
  */
 
+import { readDirectoryAsync } from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { MusicInfo } from 'expo-music-info-2';
 import { ScanProgress, Track } from '../types/audio';
+import { extractFlacMetadata, isFlacFile } from './flacParser';
+import { canUseNativeLibraryIndexer, scanMusicNative } from './nativeLibraryIndexer';
 
 // Supported audio formats
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'opus', 'aac', 'wma'];
@@ -18,7 +27,22 @@ export interface ScanResult {
     duration: number; // ms
 }
 
+export interface ScanOptions {
+    /** Folder path pattern to filter (e.g., /Download/, /Music/) */
+    folderPattern?: string;
+    /** If true, extracts full metadata (slow). If false, uses filename parsing (fast) */
+    extractMetadata?: boolean;
+}
+
 export type ScanProgressCallback = (progress: ScanProgress) => void;
+export type TrackFoundCallback = (tracks: Track[]) => void;
+
+// Common folder patterns for music
+export const MUSIC_FOLDERS = {
+    download: '/storage/emulated/0/Download/',
+    music: '/storage/emulated/0/Music/',
+    all: '', // No filter
+};
 
 /**
  * Request media library permissions
@@ -57,9 +81,81 @@ function generateTrackId(uri: string): string {
 }
 
 /**
- * Extract ID3 metadata from audio file using expo-music-info-2
+ * Parse filename to extract artist and title
+ * Handles formats like: "Artist - Title.mp3", "01 Title.mp3"
  */
-async function extractMetadata(uri: string): Promise<{
+function parseFilename(filename: string): { title: string; artist: string; album: string } {
+    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
+
+    // Try "Artist - Title" format
+    if (nameWithoutExt.includes(' - ')) {
+        const parts = nameWithoutExt.split(' - ');
+        if (parts.length >= 2) {
+            const firstPart = parts[0].trim();
+            // Check if first part is just a track number
+            if (/^\d+$/.test(firstPart) && parts.length >= 3) {
+                return {
+                    artist: parts[1].trim(),
+                    title: parts.slice(2).join(' - ').trim(),
+                    album: 'Unknown Album',
+                };
+            }
+            return {
+                artist: firstPart,
+                title: parts.slice(1).join(' - ').trim(),
+                album: 'Unknown Album',
+            };
+        }
+    }
+
+    // Remove track number prefix
+    const withoutTrackNum = nameWithoutExt.replace(/^\d+[\s._-]*/, '').trim();
+
+    return {
+        title: withoutTrackNum || nameWithoutExt,
+        artist: 'Unknown Artist',
+        album: 'Unknown Album',
+    };
+}
+
+function getFormatFromUri(uri: string): string | undefined {
+    const match = uri.toLowerCase().match(/\.([a-z0-9]+)(\?|$)/);
+    if (!match) return undefined;
+    return match[1].toUpperCase();
+}
+
+/**
+ * FAST: Convert MediaLibrary asset to Track without metadata extraction
+ * Uses filename parsing instead of reading file metadata
+ */
+function assetToTrackFast(asset: MediaLibrary.Asset, folderName: string): Track {
+    const filename = asset.filename || 'Unknown';
+    const parsed = parseFilename(filename);
+
+    // Use parent folder as album name if not generic
+    const genericFolders = ['download', 'music', 'audio', '0', 'documents'];
+    const albumFromFolder = genericFolders.includes(folderName.toLowerCase())
+        ? 'Unknown Album'
+        : decodeURIComponent(folderName);
+
+    return {
+        id: generateTrackId(asset.uri),
+        uri: asset.uri,
+        title: parsed.title,
+        artist: parsed.artist,
+        album: albumFromFolder,
+        artwork: undefined, // Will be loaded on-demand
+        duration: (asset.duration || 0) * 1000,
+        format: getFormatFromUri(asset.uri),
+        dateAdded: new Date(asset.creationTime).getTime(),
+    };
+}
+
+/**
+ * Extract metadata from audio file (expensive operation)
+ * Uses FLAC parser for FLAC files, expo-music-info-2 for others
+ */
+export async function extractMetadata(uri: string): Promise<{
     title?: string;
     artist?: string;
     album?: string;
@@ -67,77 +163,140 @@ async function extractMetadata(uri: string): Promise<{
     year?: number;
     trackNumber?: number;
     genre?: string;
+    format?: string;
+    sampleRate?: number;
+    bitDepth?: number;
 }> {
-    try {
-        // expo-music-info-2 expects a file:// URI
-        const fileUri = uri.startsWith('file://') ? uri : `file://${uri}`;
+    const fileUri = (uri.startsWith('file://') || uri.startsWith('content://')) ? uri : `file://${uri}`;
 
+    // Use FLAC parser for FLAC files
+    if (isFlacFile(uri)) {
+        try {
+            const flacMetadata = await extractFlacMetadata(fileUri);
+            if (flacMetadata) {
+                return {
+                    title: flacMetadata.title,
+                    artist: flacMetadata.artist,
+                    album: flacMetadata.album,
+                    artwork: flacMetadata.picture?.pictureData,
+                    genre: flacMetadata.genre,
+                    year: flacMetadata.year ? parseInt(flacMetadata.year, 10) : undefined,
+                    trackNumber: flacMetadata.trackNumber ? parseInt(flacMetadata.trackNumber, 10) : undefined,
+                    format: flacMetadata.format ?? 'FLAC',
+                    sampleRate: flacMetadata.sampleRate,
+                    bitDepth: flacMetadata.bitDepth,
+                };
+            }
+        } catch (error) {
+            console.debug(`[FileScanner] FLAC parsing failed for ${uri}: ${error}`);
+        }
+        return {};
+    }
+
+    // Use expo-music-info-2 for other formats (MP3, M4A, etc.)
+    try {
         const metadata = await MusicInfo.getMusicInfoAsync(fileUri, {
             title: true,
             artist: true,
             album: true,
             genre: true,
-            picture: true, // This gets the artwork
+            picture: true,
         });
 
         if (!metadata) {
             return {};
         }
 
-        // Artwork comes as base64, we need to save it or use it directly
-        let artworkUri: string | undefined;
-        if (metadata.picture?.pictureData) {
-            // Create a data URI from the base64 picture
-            artworkUri = `data:image/jpeg;base64,${metadata.picture.pictureData}`;
-        }
-
         return {
             title: metadata.title || undefined,
             artist: metadata.artist || undefined,
             album: metadata.album || undefined,
-            artwork: artworkUri,
+            artwork: metadata.picture?.pictureData,
             genre: metadata.genre || undefined,
+            format: getFormatFromUri(uri),
         };
     } catch (error) {
-        console.warn(`[FileScanner] Metadata extraction failed for ${uri}:`, error);
+        console.debug(`[FileScanner] ID3 extraction failed for ${uri}: ${error}`);
         return {};
     }
 }
 
 /**
- * Convert MediaLibrary asset to our Track type with metadata extraction
+ * Wrap a promise with a timeout. Resolves to null if the timeout fires first.
  */
-async function assetToTrack(asset: MediaLibrary.Asset): Promise<Track> {
-    const filename = asset.filename || 'Unknown';
-    const titleFromFilename = filename.replace(/\.[^/.]+$/, '');
-
-    // Try to extract metadata from the file
-    const metadata = await extractMetadata(asset.uri);
-
-    return {
-        id: generateTrackId(asset.uri),
-        uri: asset.uri,
-        title: metadata.title || titleFromFilename,
-        artist: metadata.artist || 'Unknown Artist',
-        album: metadata.album || 'Unknown Album',
-        artwork: metadata.artwork,
-        duration: (asset.duration || 0) * 1000,
-        dateAdded: new Date(asset.creationTime).getTime(),
-        year: metadata.year,
-        trackNumber: metadata.trackNumber,
-        genre: metadata.genre,
-    };
+export function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T | null> {
+    return Promise.race([
+        promise,
+        new Promise<null>(resolve => setTimeout(() => resolve(null), ms)),
+    ]);
 }
 
 /**
- * Scan device for audio files using MediaLibrary
+ * Run async tasks with a concurrency limit.
+ * @param items  Array of items to process
+ * @param limit  Max number of tasks running at the same time
+ * @param task   Async function receiving each item
  */
-export async function scanMusicLibrary(
-    onProgress?: ScanProgressCallback
+export async function runConcurrent<T>(
+    items: T[],
+    limit: number,
+    task: (item: T, index: number) => Promise<void>
+): Promise<void> {
+    let index = 0;
+
+    async function worker() {
+        while (index < items.length) {
+            const currentIndex = index++;
+            await task(items[currentIndex], currentIndex);
+        }
+    }
+
+    const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+}
+
+/**
+ * Enrich a track with full metadata (call on-demand, not during scan)
+ */
+export async function enrichTrackWithMetadata(track: Track): Promise<Track> {
+    try {
+        // Get local URI for file access
+        const assetInfo = await MediaLibrary.getAssetInfoAsync(track.id.replace('track_', ''));
+        const uri = assetInfo?.localUri || track.uri;
+
+        const metadata = await extractMetadata(uri);
+
+        return {
+            ...track,
+            title: metadata.title || track.title,
+            artist: metadata.artist || track.artist,
+            album: metadata.album || track.album,
+            artwork: metadata.artwork || track.artwork,
+            year: metadata.year,
+            trackNumber: metadata.trackNumber,
+            genre: metadata.genre,
+            format: metadata.format || track.format,
+            sampleRate: metadata.sampleRate || track.sampleRate,
+            bitDepth: metadata.bitDepth || track.bitDepth,
+        };
+    } catch (error) {
+        console.debug(`[FileScanner] enrichTrackWithMetadata failed: ${error}`);
+        return track;
+    }
+}
+
+/**
+ * FAST SCAN: Get audio files from MediaStore instantly
+ * Does NOT read metadata from files - just indexes what Android already knows
+ */
+export async function scanMusicLibraryFast(
+    options: ScanOptions = {},
+    onProgress?: ScanProgressCallback,
+    onTrackFound?: TrackFoundCallback
 ): Promise<ScanResult> {
     const startTime = Date.now();
     const tracks: Track[] = [];
     const errors: string[] = [];
+    const folderPattern = options.folderPattern || MUSIC_FOLDERS.all;
 
     const hasPerms = await hasPermissions();
     if (!hasPerms) {
@@ -148,7 +307,31 @@ export async function scanMusicLibrary(
     }
 
     try {
-        console.log('[FileScanner] Starting scan with metadata extraction...');
+        console.log(`[FileScanner] FAST SCAN starting - folder filter: "${folderPattern || 'ALL'}"`);
+
+        if (canUseNativeLibraryIndexer()) {
+            const nativeTracks = await scanMusicNative(folderPattern);
+            tracks.push(...nativeTracks);
+
+            if (onTrackFound && nativeTracks.length > 0) {
+                const CHUNK_SIZE = 120;
+                for (let i = 0; i < nativeTracks.length; i += CHUNK_SIZE) {
+                    onTrackFound(nativeTracks.slice(i, i + CHUNK_SIZE));
+                }
+            }
+
+            if (onProgress) {
+                onProgress({
+                    total: nativeTracks.length,
+                    scanned: nativeTracks.length,
+                    currentPath: `${nativeTracks.length} tracks found`,
+                });
+            }
+
+            const duration = Date.now() - startTime;
+            console.log(`[FileScanner] FAST SCAN (native) complete: ${tracks.length} tracks in ${duration}ms`);
+            return { tracks, errors, duration };
+        }
 
         let hasNextPage = true;
         let endCursor: string | undefined;
@@ -158,54 +341,58 @@ export async function scanMusicLibrary(
         while (hasNextPage) {
             const result = await MediaLibrary.getAssetsAsync({
                 mediaType: MediaLibrary.MediaType.audio,
-                first: 50, // Smaller batch for metadata extraction
+                first: 100, // Larger batches since we're not extracting metadata
                 after: endCursor,
                 sortBy: [[MediaLibrary.SortBy.creationTime, false]],
             });
 
             pageCount++;
+            totalScanned += result.assets.length;
 
-            // Process assets in parallel with a limit
-            const batchPromises = result.assets
-                .filter(asset => {
-                    const ext = asset.filename?.split('.').pop()?.toLowerCase();
-                    return ext && AUDIO_EXTENSIONS.includes(ext);
-                })
-                .map(async (asset) => {
-                    try {
-                        const track = await assetToTrack(asset);
-                        return track;
-                    } catch (error) {
-                        errors.push(`Error processing ${asset.filename}: ${error}`);
-                        return null;
-                    }
+            // Filter by folder pattern and audio extension
+            const matchingAssets = result.assets.filter(asset => {
+                const ext = asset.filename?.split('.').pop()?.toLowerCase();
+                if (!ext || !AUDIO_EXTENSIONS.includes(ext)) return false;
+
+                // Apply folder filter if specified
+                if (folderPattern) {
+                    const uri = decodeURIComponent(asset.uri || '');
+                    return uri.includes(folderPattern);
+                }
+                return true;
+            });
+
+            if (matchingAssets.length > 0) {
+                // Convert to tracks instantly (no file I/O)
+                const batchTracks = matchingAssets.map(asset => {
+                    // Extract folder name from URI
+                    const uriParts = decodeURIComponent(asset.uri).split('/');
+                    const folderName = uriParts[uriParts.length - 2] || '';
+                    return assetToTrackFast(asset, folderName);
                 });
 
-            const batchTracks = await Promise.all(batchPromises);
+                tracks.push(...batchTracks);
 
-            for (const track of batchTracks) {
-                if (track) {
-                    tracks.push(track);
+                // Stream tracks to UI immediately
+                if (onTrackFound) {
+                    onTrackFound(batchTracks);
                 }
-                totalScanned++;
 
-                if (onProgress && totalScanned % 5 === 0) {
+                if (onProgress) {
                     onProgress({
                         total: result.totalCount,
                         scanned: totalScanned,
-                        currentPath: track?.title || '',
+                        currentPath: `${batchTracks.length} tracks found`,
                     });
                 }
             }
 
             hasNextPage = result.hasNextPage;
             endCursor = result.endCursor;
-
-            console.log(`[FileScanner] Page ${pageCount}: ${result.assets.length} assets, tracks with metadata: ${tracks.length}`);
         }
 
         const duration = Date.now() - startTime;
-        console.log(`[FileScanner] Complete. Found ${tracks.length} tracks with metadata in ${duration}ms`);
+        console.log(`[FileScanner] FAST SCAN complete: ${tracks.length} tracks in ${duration}ms`);
 
         return { tracks, errors, duration };
 
@@ -220,19 +407,87 @@ export async function scanMusicLibrary(
 }
 
 /**
- * Get total audio file count without full scan
+ * SLOW SCAN: Full metadata extraction (original behavior)
+ * Use this for detailed library indexing
  */
-export async function getAudioFileCount(): Promise<number> {
-    const hasPerms = await hasPermissions();
-    if (!hasPerms) return 0;
+export async function scanMusicLibrary(
+    onProgress?: ScanProgressCallback,
+    onTrackFound?: TrackFoundCallback
+): Promise<ScanResult> {
+    // Delegate to fast scan without metadata extraction
+    return scanMusicLibraryFast(
+        { folderPattern: MUSIC_FOLDERS.download, extractMetadata: false },
+        onProgress,
+        onTrackFound
+    );
+}
 
+/**
+ * Find artwork image in the same folder as the audio file
+ */
+export async function findArtworkInFolder(audioUri: string): Promise<string | undefined> {
     try {
-        const result = await MediaLibrary.getAssetsAsync({
-            mediaType: MediaLibrary.MediaType.audio,
-            first: 1,
+        const folderUri = audioUri.substring(0, audioUri.lastIndexOf('/') + 1);
+        const decodedUri = decodeURIComponent(audioUri);
+        const folderPath = decodedUri.substring(0, decodedUri.lastIndexOf('/') + 1);
+        const folderName = folderPath.split('/').filter(Boolean).pop() || '';
+
+        let files: string[] = [];
+        try {
+            files = await readDirectoryAsync(folderUri);
+        } catch (dirError) {
+            files = await readDirectoryAsync(folderPath);
+        }
+
+        if (!files || files.length === 0) {
+            return undefined;
+        }
+
+        const imageExtensions = ['.jpg', '.jpeg', '.png'];
+        const priorityNames = ['cover', 'folder', 'album', 'front'];
+
+        // Find valid images
+        const imageFiles = files.filter(file => {
+            const lower = file.toLowerCase();
+            const isImage = imageExtensions.some(ext => lower.endsWith(ext));
+            const isSystemFile = lower.startsWith('.') ||
+                lower.startsWith('thumb') ||
+                lower.startsWith('resize') ||
+                lower.startsWith('temp') ||
+                lower.includes('cache');
+            return isImage && !isSystemFile;
         });
-        return result.totalCount;
-    } catch {
-        return 0;
+
+        if (imageFiles.length === 0) {
+            return undefined;
+        }
+
+        // Priority match
+        for (const name of priorityNames) {
+            for (const ext of imageExtensions) {
+                const target = `${name}${ext}`;
+                const match = imageFiles.find(f => f.toLowerCase() === target);
+                if (match) {
+                    return `${folderUri}${match}`;
+                }
+            }
+        }
+
+        // Fallback: only for album folders
+        const genericFolders = ['0', 'download', 'music', 'audio', 'dcim', 'documents', 'pictures'];
+        if (genericFolders.includes(folderName.toLowerCase())) {
+            return undefined;
+        }
+
+        // Pick best candidate
+        const likelyCover = imageFiles.find(f => {
+            const l = f.toLowerCase();
+            return priorityNames.some(p => l.includes(p));
+        });
+
+        return `${folderUri}${likelyCover || imageFiles[0]}`;
+    } catch (error) {
+        console.debug(`[FileScanner] findArtworkInFolder error: ${error}`);
+        return undefined;
     }
 }

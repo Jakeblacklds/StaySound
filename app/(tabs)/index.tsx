@@ -1,28 +1,397 @@
 import { AlbumCard, EmptyState } from '@/src/components/ui';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
-import { Album } from '@/src/types';
+import { Album, Artist, Track } from '@/src/types';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { FlashList } from '@shopify/flash-list';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React, { useCallback } from 'react';
-import { ScrollView, StyleSheet, View } from 'react-native';
-import { Button, IconButton, Text } from 'react-native-paper';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import React, { useCallback, useMemo, useRef } from 'react';
+import {
+  Pressable,
+  ScrollView,
+  StyleSheet,
+  View
+} from 'react-native';
+import { Text } from 'react-native-paper';
+import Animated, {
+  FadeInDown,
+} from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+const TRACK_CARD_WIDTH = 140;
+const ARTIST_CARD_SIZE = 80;
+
+// ─── Greeting based on time of day ──────────────────────────
+function getGreeting(): string {
+  const hour = new Date().getHours();
+  if (hour < 6) return 'Good night';
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+// ─── Horizontal Track Card (Optimized) ────────────────────
+const TrackCard = React.memo(({
+  track,
+  onPress,
+}: {
+  track: Track;
+  onPress: (track: Track) => void;
+}) => {
+  const { theme } = useTheme();
+
+  // Memoize theme-dependent styles to avoid recalculating on re-render
+  const cardBgStyle = useMemo(() => ({
+    backgroundColor: theme.colors.surfaceVariant + '30'
+  }), [theme.colors.surfaceVariant]);
+
+  const artBgStyle = useMemo(() => ({
+    backgroundColor: theme.colors.surfaceVariant
+  }), [theme.colors.surfaceVariant]);
+
+  const titleStyle = useMemo(() => ({
+    color: theme.colors.onSurface
+  }), [theme.colors.onSurface]);
+
+  const subtitleStyle = useMemo(() => ({
+    color: theme.colors.onSurfaceVariant
+  }), [theme.colors.onSurfaceVariant]);
+
+  return (
+    <Pressable
+      onPress={() => onPress(track)}
+      style={({ pressed }) => [
+        styles.trackCard,
+        cardBgStyle,
+        pressed && styles.pressedCard,
+      ]}
+    >
+      <View style={[styles.trackCardArt, artBgStyle]}>
+        {track.artwork ? (
+          <Image
+            source={{ uri: track.artwork }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            recyclingKey={track.id}
+            cachePolicy="memory-disk"
+            transition={0}
+          />
+        ) : (
+          <MaterialCommunityIcons
+            name="music-note"
+            size={32}
+            color={theme.colors.onSurfaceVariant + '60'}
+          />
+        )}
+      </View>
+      <Text
+        variant="bodySmall"
+        numberOfLines={1}
+        style={[styles.trackCardTitle, titleStyle]}
+      >
+        {track.title}
+      </Text>
+      <Text
+        variant="labelSmall"
+        numberOfLines={1}
+        style={[styles.trackCardSubtitle, subtitleStyle]}
+      >
+        {track.artist}
+      </Text>
+    </Pressable>
+  );
+});
+
+// ─── Artist Bubble (Optimized) ────────────────────────────
+const ArtistBubble = React.memo(({
+  artist,
+  onPress,
+}: {
+  artist: Artist;
+  onPress: (id: string) => void;
+}) => {
+  const { theme } = useTheme();
+
+  const avatarBgStyle = useMemo(() => ({
+    backgroundColor: theme.colors.surfaceVariant
+  }), [theme.colors.surfaceVariant]);
+
+  const nameStyle = useMemo(() => ({
+    color: theme.colors.onSurfaceVariant
+  }), [theme.colors.onSurfaceVariant]);
+
+  return (
+    <Pressable
+      onPress={() => onPress(artist.id)}
+      style={({ pressed }) => [
+        styles.artistBubble,
+        pressed && styles.pressedCard,
+      ]}
+    >
+      <View style={[styles.artistAvatar, avatarBgStyle]}>
+        {artist.artwork ? (
+          <Image
+            source={{ uri: artist.artwork }}
+            style={StyleSheet.absoluteFill}
+            contentFit="cover"
+            recyclingKey={artist.id}
+            cachePolicy="memory-disk"
+            transition={0}
+          />
+        ) : (
+          <MaterialCommunityIcons
+            name="account-music"
+            size={30}
+            color={theme.colors.onSurfaceVariant + '80'}
+          />
+        )}
+      </View>
+      <Text
+        variant="labelSmall"
+        numberOfLines={1}
+        style={[styles.artistName, nameStyle]}
+      >
+        {artist.name}
+      </Text>
+    </Pressable>
+  );
+});
+
+// ─── Quick Play Chip (Optimized) ───────────────────────────────
+const QuickChip = React.memo(({
+  icon,
+  label,
+  onPress,
+  color,
+  bgColor,
+}: {
+  icon: string;
+  label: string;
+  onPress: () => void;
+  color: string;
+  bgColor: string;
+}) => {
+  return (
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [
+        styles.quickChip,
+        { backgroundColor: bgColor },
+        pressed && styles.pressedChip
+      ]}
+    >
+      <MaterialCommunityIcons name={icon as any} size={20} color={color} />
+      <Text style={[styles.quickChipText, { color }]}>{label}</Text>
+    </Pressable>
+  );
+});
+
+// ─── Section Header ─────────────────────────────────────────
+const SectionHeader = React.memo(({
+  title,
+  icon,
+  onSeeAll,
+}: {
+  title: string;
+  icon: string;
+  onSeeAll?: () => void;
+}) => {
+  const { theme } = useTheme();
+  const titleStyle = useMemo(() => ({ color: theme.colors.onBackground }), [theme.colors.onBackground]);
+  const seeAllStyle = useMemo(() => ({ color: theme.colors.primary }), [theme.colors.primary]);
+
+  return (
+    <View style={styles.sectionHeader}>
+      <View style={styles.sectionTitleRow}>
+        <MaterialCommunityIcons
+          name={icon as any}
+          size={22}
+          color={theme.colors.primary}
+          style={styles.sectionIcon}
+        />
+        <Text variant="titleMedium" style={[styles.sectionTitle, titleStyle]}>
+          {title}
+        </Text>
+      </View>
+      {onSeeAll != null && (
+        <Pressable onPress={onSeeAll} hitSlop={12}>
+          <Text variant="labelMedium" style={seeAllStyle}>
+            See all
+          </Text>
+        </Pressable>
+      )}
+    </View>
+  );
+});
+
+// ─── Stats Chip ───────────────────────────
+const StatChip = React.memo(({
+  icon,
+  value,
+  label,
+}: {
+  icon: string;
+  value: number;
+  label: string;
+}) => {
+  const { theme } = useTheme();
+  const chipStyle = useMemo(() => ({
+    backgroundColor: theme.colors.surfaceVariant + '30'
+  }), [theme.colors.surfaceVariant]);
+  const valueStyle = useMemo(() => ({
+    color: theme.colors.onSurface
+  }), [theme.colors.onSurface]);
+
+  return (
+    <View style={[styles.statChip, chipStyle]}>
+      <MaterialCommunityIcons
+        name={icon as any}
+        size={18}
+        color={theme.colors.primary}
+      />
+      <Text variant="titleMedium" style={[styles.statValue, valueStyle]}>
+        {value}
+      </Text>
+      <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
+        {label}
+      </Text>
+    </View>
+  );
+});
+
+// ─── Now Playing Card ───────────────────────────────────────
+const NowPlayingCard = React.memo(({
+  track,
+}: {
+  track: Track;
+}) => {
+  const { theme } = useTheme();
+  const containerStyle = useMemo(() => ({
+    backgroundColor: theme.colors.primaryContainer + '30',
+    borderColor: theme.colors.primary + '30',
+  }), [theme.colors.primaryContainer, theme.colors.primary]);
+
+  const artBgStyle = useMemo(() => ({
+    backgroundColor: theme.colors.surfaceVariant
+  }), [theme.colors.surfaceVariant]);
+
+  return (
+    <Pressable
+      onPress={() => router.push('/player')}
+      style={({ pressed }) => [
+        styles.nowPlayingCard,
+        containerStyle,
+        pressed && styles.pressedNowPlaying,
+      ]}
+    >
+      <View style={styles.nowPlayingContent}>
+        <View style={[styles.nowPlayingArt, artBgStyle]}>
+          {track.artwork ? (
+            <Image
+              source={{ uri: track.artwork }}
+              style={StyleSheet.absoluteFill}
+              contentFit="cover"
+              cachePolicy="memory-disk"
+              transition={0}
+            />
+          ) : (
+            <MaterialCommunityIcons
+              name="music-note"
+              size={24}
+              color={theme.colors.onSurfaceVariant}
+            />
+          )}
+        </View>
+        <View style={styles.nowPlayingInfo}>
+          <Text
+            variant="labelSmall"
+            style={[styles.nowPlayingLabel, { color: theme.colors.primary }]}
+          >
+            NOW PLAYING
+          </Text>
+          <Text
+            variant="bodyLarge"
+            numberOfLines={1}
+            style={[styles.nowPlayingTitle, { color: theme.colors.onSurface }]}
+          >
+            {track.title}
+          </Text>
+          <Text
+            variant="bodySmall"
+            numberOfLines={1}
+            style={{ color: theme.colors.onSurfaceVariant }}
+          >
+            {track.artist}
+          </Text>
+        </View>
+        <MaterialCommunityIcons
+          name="chevron-right"
+          size={24}
+          color={theme.colors.primary}
+        />
+      </View>
+    </Pressable>
+  );
+});
+
+// ═══════════════════════════════════════════════════════════
 export default function HomeScreen() {
-  const { theme, config } = useTheme();
-  const { getAllTracks, getAllAlbums, scanLibrary, isScanning } = useLibraryStore();
-  const { setQueue, play, toggleShuffle, shuffleEnabled } = usePlayerStore();
+  const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
 
-  const tracks = getAllTracks();
-  const albums = getAllAlbums();
+  // Focused selectors
+  const tracksMap = useLibraryStore(s => s.tracks);
+  const albumsMap = useLibraryStore(s => s.albums);
+  const artistsMap = useLibraryStore(s => s.artists);
+  const isScanning = useLibraryStore(s => s.isScanning);
+  const scanLibrary = useLibraryStore(s => s.scanLibrary);
 
-  // Show only first 6 albums or recently added
-  const recentAlbums = albums.slice(0, 6);
+  const play = usePlayerStore(s => s.play);
+  const toggleShuffle = usePlayerStore(s => s.toggleShuffle);
+  const shuffleEnabled = usePlayerStore(s => s.shuffleEnabled);
+  const recentlyPlayed = usePlayerStore(s => s.recentlyPlayed);
+  const currentTrack = usePlayerStore(s => s.currentTrack);
 
+  // Derived arrays
+  const tracks = useMemo(() => Array.from(tracksMap.values()), [tracksMap]);
+  const albums = useMemo(() => Array.from(albumsMap.values()), [albumsMap]);
+  const artists = useMemo(() => Array.from(artistsMap.values()), [artistsMap]);
+
+  // Data derivations
+  const recentlyAddedAlbums = useMemo(
+    () => [...albums].sort((a, b) => (b.year ?? 0) - (a.year ?? 0)).slice(0, 6),
+    [albums]
+  );
+
+  const recentlyAddedTracks = useMemo(
+    () => [...tracks].sort((a, b) => (b.dateAdded ?? 0) - (a.dateAdded ?? 0)).slice(0, 15),
+    [tracks]
+  );
+
+  const quickPicksSeedRef = useRef(Date.now());
+  const prevTrackCountRef = useRef(tracks.length);
+
+  if (tracks.length !== prevTrackCountRef.current) {
+    prevTrackCountRef.current = tracks.length;
+    quickPicksSeedRef.current = Date.now();
+  }
+
+  const quickPicks = useMemo(() => {
+    if (tracks.length === 0) return [];
+    const seed = quickPicksSeedRef.current;
+    return [...tracks]
+      .sort((a, b) => hashSimple(a.id + seed) - hashSimple(b.id + seed))
+      .slice(0, 10);
+  }, [tracks]);
+
+  const topArtists = useMemo(() => artists.slice(0, 10), [artists]);
+  const recentlyPlayedSlice = useMemo(() => recentlyPlayed.slice(0, 10), [recentlyPlayed]);
+  const hasMusic = tracks.length > 0;
+
+  // Handlers
   const handlePlayAll = useCallback(() => {
-    if (tracks.length > 0) {
-      play(tracks[0], tracks);
-    }
+    if (tracks.length > 0) play(tracks[0], tracks);
   }, [tracks, play]);
 
   const handleShuffle = useCallback(() => {
@@ -33,180 +402,249 @@ export default function HomeScreen() {
     }
   }, [tracks, play, toggleShuffle, shuffleEnabled]);
 
+  const handleTrackPress = useCallback((track: Track) => {
+    play(track, tracks);
+  }, [tracks, play]);
+
   const handleAlbumPress = useCallback((album: Album) => {
     router.push({ pathname: '/album/[id]', params: { id: album.id } });
   }, []);
 
+  const handleArtistPress = useCallback((artistId: string) => {
+    router.push({ pathname: '/artist/[id]', params: { id: artistId } });
+  }, []);
+
+  const goToLibrary = useCallback(() => router.push('/library'), []);
+  const goToSettings = useCallback(() => router.push('/settings'), []);
+
+  // Render helpers
+  const renderTrackCard = useCallback(({ item }: { item: Track }) => (
+    <TrackCard track={item} onPress={handleTrackPress} />
+  ), [handleTrackPress]);
+
+  const renderArtistBubble = useCallback(({ item }: { item: Artist }) => (
+    <ArtistBubble artist={item} onPress={handleArtistPress} />
+  ), [handleArtistPress]);
+
+  const trackKeyExtractor = useCallback((item: Track) => item.id, []);
+  const artistKeyExtractor = useCallback((item: Artist) => item.id, []);
+  const renderHorizontalSeparator = useCallback(() => <View style={styles.listSeparator} />, []);
+
+  const getTrackItemLayout = useCallback((_data: any, index: number) => ({
+    length: TRACK_CARD_WIDTH + 12,
+    offset: (TRACK_CARD_WIDTH + 12) * index + 20,
+    index,
+  }), []);
+
+  const containerStyle = useMemo(() => ({
+    backgroundColor: theme.colors.background
+  }), [theme.colors.background]);
+
+  const heroCardStyle = useMemo(() => ({
+    backgroundColor: theme.colors.surface + '80',
+    borderColor: theme.colors.outline + '35',
+  }), [theme.colors.surface, theme.colors.outline]);
+
+  const sectionSurfaceStyle = useMemo(() => ({
+    backgroundColor: theme.colors.surface + '70',
+    borderColor: theme.colors.outline + '2F',
+  }), [theme.colors.surface, theme.colors.outline]);
+
   return (
     <ScrollView
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
-      contentContainerStyle={styles.content}
+      style={[styles.container, containerStyle]}
+      contentContainerStyle={[styles.content, { paddingTop: insets.top + 6 }]}
+      showsVerticalScrollIndicator={false}
+      removeClippedSubviews
+      decelerationRate="fast"
     >
-      {/* Header */}
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <View>
-            <Text
-              variant="headlineMedium"
-              style={[styles.greeting, { color: theme.colors.onBackground }]}
+      <Animated.View entering={FadeInDown.duration(400)} style={[styles.heroCard, heroCardStyle]}>
+        <View style={styles.header}>
+          <View style={styles.headerTop}>
+            <View style={styles.headerTextContainer}>
+              <Text
+                variant="bodyMedium"
+                style={[styles.greetingText, { color: theme.colors.onSurfaceVariant }]}
+              >
+                {getGreeting()}
+              </Text>
+              <Text
+                variant="headlineMedium"
+                style={[styles.appTitle, { color: theme.colors.onBackground }]}
+              >
+                StaySound
+              </Text>
+            </View>
+            <Pressable
+              onPress={goToSettings}
+              style={[styles.settingsBtn, { backgroundColor: theme.colors.surfaceVariant + '66' }]}
             >
-              StaySound
-            </Text>
-            <Text
-              variant="bodyMedium"
-              style={{ color: theme.colors.onSurfaceVariant }}
-            >
-              Enjoy your local music
-            </Text>
+              <MaterialCommunityIcons name="cog-outline" size={22} color={theme.colors.onSurfaceVariant} />
+            </Pressable>
           </View>
-          <IconButton
-            icon="cog-outline"
-            size={24}
-            iconColor={theme.colors.onSurfaceVariant}
-            onPress={() => router.push('/settings')}
+        </View>
+
+        {hasMusic && (
+          <>
+            <View style={styles.quickChipRow}>
+              <QuickChip icon="play-circle" label="Play All" onPress={handlePlayAll} color={theme.colors.onPrimary} bgColor={theme.colors.primary} />
+              <QuickChip icon="shuffle-variant" label="Shuffle" onPress={handleShuffle} color={theme.colors.primary} bgColor={theme.colors.primaryContainer + '90'} />
+              <QuickChip icon="playlist-music" label="Library" onPress={goToLibrary} color={theme.colors.onSurfaceVariant} bgColor={theme.colors.surfaceVariant + '75'} />
+            </View>
+
+            <View style={styles.statsRow}>
+              <StatChip icon="music-note" value={tracks.length} label="songs" />
+              <StatChip icon="album" value={albums.length} label="albums" />
+              <StatChip icon="account-music" value={artists.length} label="artists" />
+            </View>
+          </>
+        )}
+      </Animated.View>
+
+      {recentlyPlayedSlice.length > 0 && (
+        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+          <SectionHeader title="Recently Played" icon="history" />
+          <FlashList
+            data={recentlyPlayedSlice}
+            renderItem={renderTrackCard}
+            keyExtractor={trackKeyExtractor}
+            ItemSeparatorComponent={renderHorizontalSeparator}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalList}
+            drawDistance={TRACK_CARD_WIDTH * 2}
           />
         </View>
-      </View>
+      )}
 
-      {/* Quick Actions */}
-      <View style={styles.buttonRow}>
-        <Button
-          mode="contained"
-          style={styles.button}
-          contentStyle={styles.buttonContent}
-          icon="play"
-          onPress={handlePlayAll}
-          disabled={tracks.length === 0}
-        >
-          Play All
-        </Button>
-        <Button
-          mode="contained-tonal"
-          style={styles.button}
-          contentStyle={styles.buttonContent}
-          icon="shuffle"
-          onPress={handleShuffle}
-          disabled={tracks.length === 0}
-        >
-          Shuffle
-        </Button>
-      </View>
+      {recentlyAddedTracks.length > 0 && (
+        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+          <SectionHeader title="Recently Added" icon="clock-plus-outline" onSeeAll={goToLibrary} />
+          <FlashList
+            data={recentlyAddedTracks}
+            renderItem={renderTrackCard}
+            keyExtractor={trackKeyExtractor}
+            ItemSeparatorComponent={renderHorizontalSeparator}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalList}
+            drawDistance={TRACK_CARD_WIDTH * 2}
+          />
+        </View>
+      )}
 
-      {albums.length > 0 ? (
-        <Animated.View entering={FadeInDown.duration(400)}>
-          <Text
-            variant="titleLarge"
-            style={[styles.sectionTitle, { color: theme.colors.onBackground }]}
-          >
-            Recently Added
-          </Text>
-
-          <View style={styles.grid}>
-            {recentAlbums.map((album) => (
+      {recentlyAddedAlbums.length > 0 && (
+        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+          <SectionHeader title="Albums" icon="album" onSeeAll={goToLibrary} />
+          <View style={styles.albumGrid}>
+            {recentlyAddedAlbums.map((album) => (
               <View key={album.id} style={styles.albumWrapper}>
-                <AlbumCard
-                  album={album}
-                  size="medium"
-                  onPress={handleAlbumPress}
-                />
+                <AlbumCard album={album} size="medium" onPress={handleAlbumPress} />
               </View>
             ))}
           </View>
+        </View>
+      )}
 
-          <Button
-            mode="text"
-            onPress={() => router.push('/library')}
-            style={styles.viewMore}
-          >
-            View Full Library
-          </Button>
-        </Animated.View>
-      ) : (
+      {topArtists.length > 0 && (
+        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+          <SectionHeader title="Your Artists" icon="account-group" onSeeAll={goToLibrary} />
+          <FlashList
+            data={topArtists}
+            renderItem={renderArtistBubble}
+            keyExtractor={artistKeyExtractor}
+            ItemSeparatorComponent={renderHorizontalSeparator}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalList}
+            drawDistance={ARTIST_CARD_SIZE * 2}
+          />
+        </View>
+      )}
+
+      {quickPicks.length > 0 && (
+        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+          <SectionHeader title="Quick Picks" icon="dice-multiple" />
+          <FlashList
+            data={quickPicks}
+            renderItem={renderTrackCard}
+            keyExtractor={trackKeyExtractor}
+            ItemSeparatorComponent={renderHorizontalSeparator}
+            horizontal
+            showsHorizontalScrollIndicator={false}
+            contentContainerStyle={styles.horizontalList}
+            drawDistance={TRACK_CARD_WIDTH * 2}
+          />
+        </View>
+      )}
+
+      {currentTrack != null && <NowPlayingCard track={currentTrack} />}
+
+      {!hasMusic && (
         <View style={styles.emptyContainer}>
           <EmptyState
             icon="📁"
             title="Scan your Library"
             description="We didn't find any music files on your device. Let's scan your storage to find them."
-            actionLabel={isScanning ? "Scanning..." : "Scan for Music"}
+            actionLabel={isScanning ? 'Scanning...' : 'Scan for Music'}
             onAction={scanLibrary}
           />
         </View>
       )}
 
-      {/* Feature Highlight */}
-      <View style={[styles.featureCard, { backgroundColor: theme.colors.surfaceVariant + '40' }]}>
-        <Text variant="titleMedium" style={{ color: theme.colors.primary, fontWeight: 'bold' }}>
-          ✨ Dynamic Theming
-        </Text>
-        <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-          StaySound automatically adjusts its colors to match the album art of the music you play.
-        </Text>
-      </View>
+      <View style={styles.bottomSpacer} />
     </ScrollView>
   );
 }
 
+function hashSimple(str: string | number): number {
+  const s = String(str);
+  let h = 0;
+  for (let i = 0; i < s.length; i++) h = ((h << 5) - h + s.charCodeAt(i)) | 0;
+  return h;
+}
+
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-  },
-  content: {
-    padding: 20,
-    paddingBottom: 140,
-  },
-  header: {
-    marginBottom: 24,
-    marginTop: 10,
-  },
-  headerTop: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-  },
-  greeting: {
-    fontWeight: 'bold',
-    letterSpacing: -0.5,
-  },
-  sectionTitle: {
-    fontWeight: '700',
-    marginBottom: 16,
-    letterSpacing: -0.5,
-  },
-  buttonRow: {
-    flexDirection: 'row',
-    gap: 12,
-    marginBottom: 32,
-  },
-  button: {
-    flex: 1,
-    borderRadius: 16,
-  },
-  buttonContent: {
-    paddingVertical: 8,
-  },
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    marginHorizontal: -8,
-  },
-  albumWrapper: {
-    width: '50%',
-    padding: 8,
-    marginBottom: 8,
-  },
-  viewMore: {
-    marginTop: 8,
-    alignSelf: 'flex-end',
-  },
-  emptyContainer: {
-    marginTop: 20,
-    height: 300,
-  },
-  featureCard: {
-    marginTop: 40,
-    padding: 20,
-    borderRadius: 20,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.05)',
-  },
+  container: { flex: 1 },
+  content: { paddingBottom: 140 },
+  heroCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 20, borderWidth: 1, borderRadius: 24, overflow: 'hidden' },
+  header: { paddingHorizontal: 18, paddingTop: 16, marginBottom: 14 },
+  headerTop: { flexDirection: 'row', alignItems: 'center' },
+  headerTextContainer: { flex: 1 },
+  greetingText: { marginBottom: 2 },
+  appTitle: { fontWeight: '800', letterSpacing: -0.8, fontSize: 28 },
+  settingsBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
+  quickChipRow: { flexDirection: 'row', paddingHorizontal: 18, gap: 10, marginBottom: 14 },
+  quickChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 14, gap: 6 },
+  quickChipText: { fontSize: 13, fontWeight: '600' },
+  pressedChip: { opacity: 0.7, transform: [{ scale: 0.97 }] },
+  statsRow: { flexDirection: 'row', paddingHorizontal: 18, gap: 10, marginBottom: 18 },
+  statChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 12, gap: 2 },
+  statValue: { fontWeight: 'bold', marginHorizontal: 4 },
+  sectionBlock: { marginHorizontal: 16, marginBottom: 14, borderWidth: 1, borderRadius: 20, paddingTop: 12, paddingBottom: 8 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, marginBottom: 12 },
+  sectionTitleRow: { flexDirection: 'row', alignItems: 'center' },
+  sectionIcon: { marginRight: 8 },
+  sectionTitle: { fontWeight: '700', letterSpacing: -0.3 },
+  horizontalList: { paddingLeft: 14, paddingRight: 14, marginBottom: 2 },
+  listSeparator: { width: 12 },
+  trackCard: { width: TRACK_CARD_WIDTH, borderRadius: 14, overflow: 'hidden', paddingBottom: 10 },
+  pressedCard: { opacity: 0.8, transform: [{ scale: 0.96 }] },
+  trackCardArt: { width: TRACK_CARD_WIDTH, height: TRACK_CARD_WIDTH, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },
+  trackCardTitle: { fontWeight: '600', paddingHorizontal: 4 },
+  trackCardSubtitle: { paddingHorizontal: 4 },
+  albumGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 6, marginBottom: 4 },
+  albumWrapper: { width: '50%', padding: 8, marginBottom: 10 },
+  artistBubble: { alignItems: 'center', width: ARTIST_CARD_SIZE + 10 },
+  artistAvatar: { width: ARTIST_CARD_SIZE, height: ARTIST_CARD_SIZE, borderRadius: ARTIST_CARD_SIZE / 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 6 },
+  artistName: { textAlign: 'center', fontSize: 11 },
+  nowPlayingCard: { marginHorizontal: 16, borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginTop: 6 },
+  pressedNowPlaying: { opacity: 0.9, transform: [{ scale: 0.99 }] },
+  nowPlayingContent: { flexDirection: 'row', alignItems: 'center', padding: 14 },
+  nowPlayingArt: { width: 52, height: 52, borderRadius: 12, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+  nowPlayingInfo: { flex: 1, marginLeft: 14 },
+  nowPlayingLabel: { fontWeight: '700', letterSpacing: 0.5 },
+  nowPlayingTitle: { fontWeight: '600', marginTop: 2 },
+  emptyContainer: { marginTop: 20, height: 300, paddingHorizontal: 20 },
+  bottomSpacer: { height: 40 },
 });

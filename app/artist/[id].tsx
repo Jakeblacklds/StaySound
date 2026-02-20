@@ -2,8 +2,9 @@
  * Artist Detail Screen - Shows artist info with albums and top songs
  */
 
-import { AlbumCard, MemoizedTrackListItem } from '@/src/components/ui';
-import { useDynamicColors } from '@/src/hooks';
+import { AlbumCard, ArtistAbout, MemoizedTrackListItem } from '@/src/components/ui';
+import { useArtistInfo, useDynamicColors } from '@/src/hooks';
+import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Album, Track } from '@/src/types';
@@ -17,8 +18,11 @@ import Animated, { FadeIn, FadeInDown, FadeInRight, interpolate, useAnimatedScro
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const HEADER_HEIGHT = 280;
-const AVATAR_SIZE = 160;
+const HEADER_HEIGHT = 300;
+const AVATAR_SIZE = 188;
+const HERO_TOP_OFFSET = 56;
+const BACK_BUTTON_TOP_OFFSET = 10;
+const CONTENT_TOP_GAP = 24;
 
 const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
 
@@ -28,15 +32,29 @@ export default function ArtistDetailScreen() {
     const insets = useSafeAreaInsets();
     const scrollY = useSharedValue(0);
 
-    const { getArtistById, getTracksByArtist, getAlbumsByArtist } = useLibraryStore();
-    const { play, currentTrack } = usePlayerStore();
+    const getArtistById = useLibraryStore(state => state.getArtistById);
+    const getTracksByArtist = useLibraryStore(state => state.getTracksByArtist);
+    const getAlbumsByArtist = useLibraryStore(state => state.getAlbumsByArtist);
+    const getAllPlaylists = useLibraryStore(state => state.getAllPlaylists);
+    const createPlaylist = useLibraryStore(state => state.createPlaylist);
+    const addToPlaylist = useLibraryStore(state => state.addToPlaylist);
+
+    const play = usePlayerStore(state => state.play);
+    const addToQueue = usePlayerStore(state => state.addToQueue);
+    const toggleShuffle = usePlayerStore(state => state.toggleShuffle);
+    const shuffleEnabled = usePlayerStore(state => state.shuffleEnabled);
+    const currentTrackId = usePlayerStore(state => state.currentTrack?.id);
 
     const artist = getArtistById(id);
     const tracks = useMemo(() => getTracksByArtist(id), [id, getTracksByArtist]);
     const albums = useMemo(() => getAlbumsByArtist(id), [id, getAlbumsByArtist]);
 
+    // Fetch dynamic info (artwork/bio)
+    const { info: artistInfo } = useArtistInfo(artist?.name || undefined);
+    const artworkUri = artist?.artwork || artistInfo?.photo_url || undefined;
+
     // Extract dynamic colors from artist artwork
-    const { colors: artistColors } = useDynamicColors(artist?.artwork);
+    const { colors: artistColors } = useDynamicColors(artworkUri);
 
     // Show top 5 songs
     const topTracks = tracks.slice(0, 5);
@@ -69,6 +87,16 @@ export default function ArtistDetailScreen() {
         router.push({ pathname: '/album/[id]', params: { id: album.id } });
     }, []);
 
+    const handleAddToQueue = useCallback((track: Track) => {
+        openTrackActionsMenu({
+            track,
+            playlists: getAllPlaylists(),
+            addToQueue,
+            addToPlaylist,
+            createPlaylist,
+        });
+    }, [addToPlaylist, addToQueue, createPlaylist, getAllPlaylists]);
+
     const handlePlayAll = useCallback(() => {
         if (tracks.length > 0) {
             play(tracks[0], tracks);
@@ -77,10 +105,11 @@ export default function ArtistDetailScreen() {
 
     const handleShuffle = useCallback(() => {
         if (tracks.length > 0) {
+            if (!shuffleEnabled) toggleShuffle();
             const randomIndex = Math.floor(Math.random() * tracks.length);
             play(tracks[randomIndex], tracks);
         }
-    }, [tracks, play]);
+    }, [tracks, play, toggleShuffle, shuffleEnabled]);
 
     if (!artist) {
         return (
@@ -103,10 +132,10 @@ export default function ArtistDetailScreen() {
             </Animated.View>
 
             {/* Artist Avatar */}
-            <Animated.View style={[styles.avatarContainer, { paddingTop: insets.top + 60 }, avatarStyle]}>
+            <Animated.View style={[styles.avatarContainer, { paddingTop: insets.top + HERO_TOP_OFFSET }, avatarStyle]}>
                 <View style={[styles.avatar, { backgroundColor: theme.colors.surfaceVariant }]}>
-                    {artist.artwork ? (
-                        <Image source={{ uri: artist.artwork }} style={styles.avatarImage} />
+                    {artworkUri ? (
+                        <Image source={{ uri: artworkUri }} style={styles.avatarImage} />
                     ) : (
                         <Text style={{ fontSize: 64 }}>🎤</Text>
                     )}
@@ -114,7 +143,7 @@ export default function ArtistDetailScreen() {
             </Animated.View>
 
             {/* Back Button */}
-            <View style={[styles.backButton, { top: insets.top + 8 }]}>
+            <View style={[styles.backButton, { top: insets.top + BACK_BUTTON_TOP_OFFSET }]}>
                 <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={styles.blurButton}>
                     <IconButton
                         icon="arrow-left"
@@ -131,7 +160,7 @@ export default function ArtistDetailScreen() {
                 scrollEventThrottle={16}
                 contentContainerStyle={[
                     styles.content,
-                    { paddingTop: HEADER_HEIGHT + 20 }
+                    { paddingTop: HEADER_HEIGHT + CONTENT_TOP_GAP }
                 ]}
                 showsVerticalScrollIndicator={false}
             >
@@ -203,8 +232,9 @@ export default function ArtistDetailScreen() {
                                     track={track}
                                     index={index}
                                     showIndex={true}
-                                    isPlaying={currentTrack?.id === track.id}
+                                    isPlaying={currentTrackId === track.id}
                                     onPress={handleTrackPress}
+                                    onOptionsPress={handleAddToQueue}
                                 />
                             </Animated.View>
                         ))}
@@ -245,18 +275,8 @@ export default function ArtistDetailScreen() {
                     </Animated.View>
                 )}
 
-                {/* About Section (placeholder for future artist bio) */}
-                <Animated.View
-                    entering={FadeInDown.delay(800)}
-                    style={[styles.aboutCard, { backgroundColor: artistColors.primary + '15' }]}
-                >
-                    <Text variant="titleSmall" style={{ color: artistColors.primary, marginBottom: 8 }}>
-                        ℹ️ About
-                    </Text>
-                    <Text variant="bodyMedium" style={{ color: artistColors.isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)' }}>
-                        Artist information will be loaded from online sources when available.
-                    </Text>
-                </Animated.View>
+                {/* About Section */}
+                <ArtistAbout artistName={artist.name} accentColor={artistColors.primary} />
 
             </AnimatedScrollView>
         </View>

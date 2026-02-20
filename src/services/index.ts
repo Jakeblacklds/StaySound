@@ -1,3 +1,4 @@
+export { ArtistInfo, getArtistInfo } from './artistApi';
 export { AudioEngine, useAudioEngine } from './audioEngine';
 export {
     AlbumColors,
@@ -6,22 +7,51 @@ export {
     extractColorsFromImage,
     getImageColors
 } from './colorExtractor';
+export { clearDatabase, getDatabase } from './database';
 export {
-    getAudioFileCount, hasPermissions, requestPermissions, scanMusicLibrary
+    hasPermissions, requestPermissions, scanMusicLibrary
 } from './fileScanner';
 export {
-    getActiveLyricIndex, LyricsData, parseLRC, SAMPLE_LRC
-} from './lyricsService';
+    extractAlbumsFromTracks,
+    createTidalStreamTrack,
+    downloadTidalTrack,
+    getTidalAlbumDetail,
+    getTidalArtistDetail,
+    getArtworkUrl as getTidalArtworkUrl,
+    getTidalTrackManifest,
+    searchTidal,
+    searchTidalArtists,
+} from './tidalService';
+export {
+    findActiveLineIndex,
+    getWordProgress,
+    parseKaraokeLyrics
+} from './karaokeParser';
+export { LyricsRepository } from './lyricsRepository';
+export { getActiveLyricIndex, LyricsData, parseLRC, SAMPLE_LRC } from './lyricsService';
 export {
     formatDuration,
     formatDurationLong,
     organizeIntoAlbums,
     organizeIntoArtists, parseFilename
 } from './metadataService';
+export { PlaybackService } from './playbackService';
 export {
-    destroyTrackPlayer, initializeTrackPlayer,
-    syncNowPlaying,
-    syncPlaybackState,
-    syncPosition
+    destroyTrackPlayer, getCurrentTrack,
+    getPlaybackState,
+    getProgress,
+    initializeTrackPlayer,
+    isPlaying,
+    isTrackPlayerReady,
+    pause,
+    playQueue,
+    playTrack, RepeatMode, resume,
+    seekTo,
+    setRepeatMode,
+    setVolume,
+    skipToNext,
+    skipToPrevious,
+    skipToTrack, stop,
+    togglePlayPause, Event as TrackPlayerEvent, State as TrackPlayerState
 } from './trackPlayerService';
 

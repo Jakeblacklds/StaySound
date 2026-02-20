@@ -1,0 +1,109 @@
+package expo.modules.karaokeview
+
+import expo.modules.kotlin.modules.Module
+import expo.modules.kotlin.modules.ModuleDefinition
+
+/**
+ * Expo Module definition for KaraokeView
+ * Bridges JS <-> Kotlin with props and events
+ */
+class KaraokeViewModule : Module() {
+    private val remoteDataSource = SupabaseLyricsDataSource()
+    private var lyricsRepository: LyricsRepository? = null
+    private val lrcLibDataSource = LrcLibDataSource()
+
+    init {
+        remoteDataSource.configure(
+            BuildConfig.SUPABASE_URL,
+            BuildConfig.SUPABASE_SECRET_KEY,
+        )
+    }
+
+    private fun repository(): LyricsRepository? {
+        val existing = lyricsRepository
+        if (existing != null) return existing
+
+        val context = appContext.reactContext?.applicationContext ?: return null
+        val repo = LyricsRepository(
+            localStore = FileLyricsStore(context),
+            remoteDataSource = remoteDataSource,
+        )
+        lyricsRepository = repo
+        return repo
+    }
+
+    private fun toResultMap(record: LyricsPayload): Map<String, Any?> {
+        return mapOf(
+            "canonicalKey" to record.canonicalKey,
+            "payloadJson" to record.payloadJson,
+            "updatedAt" to record.updatedAt,
+        )
+    }
+
+    override fun definition() = ModuleDefinition {
+        Name("KaraokeView")
+
+        Function("configureSupabase") { url: String?, secretKey: String? ->
+            remoteDataSource.configure(url, secretKey)
+        }
+
+        Function("normalizeKeyPart") { value: String ->
+            LyricsRepository.normalizeKeyPart(value)
+        }
+
+        Function("canonicalKey") { songTitle: String, artist: String ->
+            LyricsRepository.canonicalKey(songTitle, artist)
+        }
+
+        AsyncFunction("getLyrics") { songTitle: String, artist: String ->
+            repository()?.getLyrics(songTitle, artist)?.let { toResultMap(it) }
+        }
+
+        AsyncFunction("forceRefreshLyrics") { songTitle: String, artist: String ->
+            repository()?.forceRefreshLyrics(songTitle, artist)?.let { toResultMap(it) }
+        }
+
+        AsyncFunction("getLrcLibLyrics") { songTitle: String, artist: String, durationSec: Double? ->
+            lrcLibDataSource.fetchLyrics(songTitle, artist, durationSec)
+        }
+
+        View(KaraokeView::class) {
+            // Lyrics data - sent once when lyrics change
+            Prop("lyrics") { view: KaraokeView, lyrics: List<Map<String, Any>>? ->
+                lyrics?.let { view.setLyrics(it) }
+            }
+
+            // Current time in ms - updated frequently from JS
+            Prop("currentTimeMs") { view: KaraokeView, timeMs: Double? ->
+                timeMs?.let { view.updateTime(it.toLong()) }
+            }
+
+            Prop("isPlaying") { view: KaraokeView, value: Boolean? ->
+                view.setIsPlaying(value ?: false)
+            }
+
+            Prop("fontSize") { view: KaraokeView, size: Double? ->
+                size?.let { view.setFontSize(it.toFloat()) }
+            }
+
+            Prop("activeColor") { view: KaraokeView, color: Int? ->
+                color?.let { view.setActiveColor(it) }
+            }
+
+            Prop("inactiveColor") { view: KaraokeView, color: Int? ->
+                color?.let { view.setInactiveColor(it) }
+            }
+
+            Prop("glowColor") { view: KaraokeView, color: Int? ->
+                color?.let { view.setGlowColor(it) }
+            }
+
+            Prop("isLineByLine") { view: KaraokeView, value: Boolean? ->
+                view.setIsLineByLine(value ?: false)
+            }
+
+            // Events emitted to JS
+            Events("onLineChange", "onWordChange", "onSeek")
+        }
+    }
+}

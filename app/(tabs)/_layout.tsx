@@ -1,14 +1,19 @@
 import { useTheme } from '@/src/theme';
+import { MaterialLiquidTabBar } from '@/src/components/navigation/MaterialLiquidTabBar';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Tabs } from 'expo-router';
 import React from 'react';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 export default function TabLayout() {
-  const { theme, isDark } = useTheme();
+  const { theme, config } = useTheme();
+  const isMaterial3 = config.style === 'material3';
 
   return (
     <Tabs
+      tabBar={isMaterial3 ? (props: BottomTabBarProps) => <MaterialLiquidTabBar {...props} /> : undefined}
       screenOptions={{
+        headerShown: false,
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.onSurfaceVariant,
         tabBarStyle: {
@@ -22,11 +27,6 @@ export default function TabLayout() {
           fontSize: 11,
           fontWeight: '500',
         },
-        headerStyle: {
-          backgroundColor: theme.colors.surface,
-        },
-        headerTintColor: theme.colors.onSurface,
-        headerShadowVisible: false,
       }}>
       <Tabs.Screen
         name="index"
@@ -55,12 +55,25 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
-        name="search"
+        name="playlists"
         options={{
-          title: 'Search',
-          tabBarIcon: ({ color }) => (
+          title: 'Playlists',
+          tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons
-              name="magnify"
+              name={focused ? "playlist-music" : "playlist-music-outline"}
+              size={26}
+              color={color}
+            />
+          ),
+        }}
+      />
+      <Tabs.Screen
+        name="tidal"
+        options={{
+          title: 'TIDAL',
+          tabBarIcon: ({ color, focused }) => (
+            <MaterialCommunityIcons
+              name={focused ? 'music-circle' : 'music-circle-outline'}
               size={26}
               color={color}
             />
