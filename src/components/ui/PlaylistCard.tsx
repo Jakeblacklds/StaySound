@@ -4,8 +4,9 @@
 
 import { useTheme } from '@/src/theme';
 import { Playlist } from '@/src/types';
+import { Image as ExpoImage } from 'expo-image';
 import React from 'react';
-import { Image, Pressable, StyleSheet, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { IconButton, Text } from 'react-native-paper';
 import Animated, {
     useAnimatedStyle,
@@ -61,13 +62,19 @@ export function PlaylistCard({
             {/* Playlist artwork - mosaic of 4 covers or single image */}
             <View style={[styles.artwork, { backgroundColor: theme.colors.surfaceVariant }]}>
                 {artwork || playlist.artwork ? (
-                    <Image
+                    <ExpoImage
                         source={{ uri: artwork || playlist.artwork }}
                         style={styles.artworkImage}
+                        contentFit="cover"
+                        recyclingKey={playlist.id}
+                        cachePolicy="memory-disk"
+                        transition={0}
                     />
                 ) : (
                     <View style={styles.placeholderArtwork}>
-                        <Text style={{ fontSize: 32 }}>🎵</Text>
+                        <Text style={{ fontSize: 32 }}>
+                            {playlist.id === 'playlist_liked' ? '❤️' : '🎵'}
+                        </Text>
                     </View>
                 )}
             </View>

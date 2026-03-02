@@ -1,27 +1,41 @@
 /**
- * useDynamicColors - Hook to extract and use colors from album artwork
+ * useDynamicColors
+ *
+ * Extracts colors from album artwork and:
+ *   1. Returns them for local use (FullPlayer backgrounds, etc.)
+ *   2. Pushes the full extracted palette to ThemeProvider so the ENTIRE
+ *      app theme adapts to the artwork — but only when dynamicColors is ON.
+ *
+ * Performance notes:
+ *   - react-native-image-colors has its own disk cache (key = URI).
+ *   - We maintain an in-memory JS cache in colorExtractor.ts (50 entries).
+ *   - setDynamicPalette is stable (useCallback) so it never triggers
+ *     extra re-renders of this hook.
+ *   - The theme useMemo in ThemeProvider only re-runs when the palette changes.
  */
 
 import { useEffect, useMemo, useState } from 'react';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors, getImageColors } from '../services/colorExtractor';
+import { useTheme } from '../theme/ThemeProvider';
 
 const DEFAULT_COLORS: AlbumColors = {
-    primary: '#1DB954',
-    secondary: '#191414',
-    background: '#121212',
+    primary: '#6750A4',
+    secondary: '#625B71',
+    background: '#080B12',
     text: '#FFFFFF',
     onPrimary: '#FFFFFF',
     onSurface: '#FFFFFF',
-    accent: '#1DB954',
+    accent: '#6750A4',
     isDark: true,
 };
 
 export function useDynamicColors(imageUri: string | undefined) {
+    const { config, setDynamicPalette } = useTheme();
     const [rawColors, setRawColors] = useState<AlbumColors>(DEFAULT_COLORS);
     const [isLoading, setIsLoading] = useState(false);
 
-    // Shared values for smooth transitions
+    // Shared values for smooth per-frame color transitions in the UI
     const primary = useSharedValue(DEFAULT_COLORS.primary);
     const secondary = useSharedValue(DEFAULT_COLORS.secondary);
     const background = useSharedValue(DEFAULT_COLORS.background);
@@ -43,6 +57,10 @@ export function useDynamicColors(imageUri: string | undefined) {
     useEffect(() => {
         if (!imageUri) {
             setRawColors(DEFAULT_COLORS);
+            // Reset theme to default colors when no artwork
+            if (config.dynamicColors) {
+                setDynamicPalette(DEFAULT_COLORS);
+            }
             return;
         }
 
@@ -51,35 +69,40 @@ export function useDynamicColors(imageUri: string | undefined) {
 
         getImageColors(imageUri)
             .then((extracted) => {
-                if (!cancelled) {
-                    setRawColors(extracted);
-                    setIsLoading(false);
+                if (cancelled) return;
 
-                    // Animate shared values
-                    const config = { duration: 600 };
-                    primary.value = withTiming(extracted.primary, config);
-                    secondary.value = withTiming(extracted.secondary, config);
-                    background.value = withTiming(extracted.background, config);
-                    accent.value = withTiming(extracted.accent, config);
-                    text.value = withTiming(extracted.text, config);
-                    onPrimary.value = withTiming(extracted.onPrimary, config);
-                    onSurface.value = withTiming(extracted.onSurface, config);
+                setRawColors(extracted);
+                setIsLoading(false);
+
+                // Animate local shared values (for FullPlayer background, etc.)
+                const cfg = { duration: 600 };
+                primary.value = withTiming(extracted.primary, cfg);
+                secondary.value = withTiming(extracted.secondary, cfg);
+                background.value = withTiming(extracted.background, cfg);
+                accent.value = withTiming(extracted.accent, cfg);
+                text.value = withTiming(extracted.text, cfg);
+                onPrimary.value = withTiming(extracted.onPrimary, cfg);
+                onSurface.value = withTiming(extracted.onSurface, cfg);
+
+                // Push the full palette to ThemeProvider → allows using REAL background/primary.
+                if (config.dynamicColors && config.style === 'material3') {
+                    setDynamicPalette(extracted);
                 }
             })
             .catch(() => {
-                if (!cancelled) {
-                    setRawColors(DEFAULT_COLORS);
-                    setIsLoading(false);
-                }
+                if (cancelled) return;
+                setRawColors(DEFAULT_COLORS);
+                setIsLoading(false);
             });
 
         return () => {
             cancelled = true;
         };
-    }, [imageUri]);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [imageUri, setDynamicPalette]);
 
     return {
-        colors: rawColors, // Keep backward compatibility
+        colors: rawColors,
         isLoading,
         animated,
     };

@@ -10,8 +10,9 @@ import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper';
 import 'react-native-reanimated';
 
 import { FullPlayer, MiniPlayer } from '@/src/components/player';
+import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
 import { useAudioEngine } from '@/src/services';
-import { useLibraryStore, usePlayerStore } from '@/src/stores';
+import { useLibraryStore, usePlayerStore, useSettingsStore } from '@/src/stores';
 import { ThemeProvider, useTheme } from '@/src/theme';
 
 function isTrackPlayerNotificationUrl(url: string | null | undefined): boolean {
@@ -44,13 +45,14 @@ export default function RootLayout() {
     if (error) throw error;
   }, [error]);
 
-  const _hasHydrated = useLibraryStore(state => state._hasHydrated);
+  const _hasLibraryHydrated = useLibraryStore(state => state._hasHydrated);
+  const _hasSettingsHydrated = useSettingsStore(state => state._hasHydrated);
 
   useEffect(() => {
-    if (loaded && _hasHydrated) {
+    if (loaded && _hasLibraryHydrated && _hasSettingsHydrated) {
       SplashScreen.hideAsync();
     }
-  }, [loaded, _hasHydrated]);
+  }, [loaded, _hasLibraryHydrated, _hasSettingsHydrated]);
 
   // Emergency timeout to hide splash screen after 5 seconds
   useEffect(() => {
@@ -60,7 +62,7 @@ export default function RootLayout() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (!loaded || !_hasHydrated) {
+  if (!loaded || !_hasLibraryHydrated || !_hasSettingsHydrated) {
     return null;
   }
 
@@ -76,7 +78,10 @@ export default function RootLayout() {
 
 
 function AudioSync() {
-  const { next, setLoading, setPosition, updateFromEngine } = usePlayerStore();
+  const next = usePlayerStore(state => state.next);
+  const setLoading = usePlayerStore(state => state.setLoading);
+  const setPosition = usePlayerStore(state => state.setPosition);
+  const updateFromEngine = usePlayerStore(state => state.updateFromEngine);
 
   // Initialize the audio engine hook - this sets up Track Player
   const audioState = useAudioEngine();
@@ -106,10 +111,10 @@ function AudioSync() {
     const hasMeaningfulChange =
       audioState.isPlaying !== lastState.current.isPlaying ||
       audioState.isLoading !== lastState.current.isLoading ||
-      audioState.duration !== lastState.current.duration ||
       audioState.queueIndex !== lastState.current.queueIndex ||
       audioState.currentTrack?.id !== lastState.current.trackId ||
-      Math.abs(audioState.position - lastState.current.position) > 1000;
+      Math.abs((audioState.duration ?? 0) - lastState.current.duration) > 1000 ||
+      Math.abs((audioState.position ?? 0) - lastState.current.position) > 1000;
 
     if (hasMeaningfulChange) {
       updateFromEngine({
@@ -226,6 +231,7 @@ function RootLayoutNav() {
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
               <Stack.Screen name="artist" options={{ headerShown: false }} />
               <Stack.Screen name="album" options={{ headerShown: false }} />
+              <Stack.Screen name="playlist" options={{ headerShown: false }} />
               <Stack.Screen name="tidal-artist" options={{ headerShown: false }} />
               <Stack.Screen name="tidal-album" options={{ headerShown: false }} />
               <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
@@ -238,6 +244,9 @@ function RootLayoutNav() {
                 }}
               />
             </Stack>
+            <ActionSheet />
+            <ConfirmationModal />
+            <GlobalNotification />
             <MiniPlayer />
             <FullPlayer />
           </View>

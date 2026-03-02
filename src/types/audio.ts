@@ -8,6 +8,7 @@ export interface Track {
     album: string;
     duration: number; // milliseconds
     artwork?: string; // URI to artwork image
+    artworkThumb?: string; // Small thumbnail URI for list rendering
     albumId?: string;
     artistId?: string;
     trackNumber?: number;
@@ -19,6 +20,7 @@ export interface Track {
     bitDepth?: number;
     quality?: string;
     dateAdded: number;
+    favorite?: boolean;
 }
 
 export interface Album {
@@ -27,6 +29,7 @@ export interface Album {
     artist: string;
     artistId?: string;
     artwork?: string;
+    artworkThumb?: string;
     year?: number;
     trackCount: number;
     tracks: string[]; // Track IDs
@@ -73,7 +76,7 @@ export interface ScanProgress {
     currentPath: string;
 }
 
-export type TidalQuality = 'HI_RES_LOSSLESS' | 'LOSSLESS';
+export type TidalQuality = 'HI_RES_LOSSLESS' | 'LOSSLESS' | 'HIGH' | 'LOW';
 
 export interface TidalTrack {
     id: number;

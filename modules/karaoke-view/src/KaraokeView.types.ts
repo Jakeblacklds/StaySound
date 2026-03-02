@@ -50,6 +50,9 @@ export interface KaraokeViewProps extends ViewProps {
     /** Whether to highlight the entire line instantly (LRCLIB mode) */
     isLineByLine?: boolean;
 
+    /** Enables tap-to-seek behavior when touching lyrics */
+    enableSeekOnTap?: boolean;
+
     /** Called when active line changes */
     onLineChange?: (event: { nativeEvent: { lineIndex: number } }) => void;
 

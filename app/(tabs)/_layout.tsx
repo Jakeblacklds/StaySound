@@ -1,9 +1,9 @@
-import { useTheme } from '@/src/theme';
 import { MaterialLiquidTabBar } from '@/src/components/navigation/MaterialLiquidTabBar';
+import { useTheme } from '@/src/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Tabs } from 'expo-router';
 import React from 'react';
-import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 
 export default function TabLayout() {
   const { theme, config } = useTheme();
@@ -31,7 +31,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: 'Inicio',
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons
               name={focused ? "home" : "home-outline"}
@@ -44,7 +44,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="library"
         options={{
-          title: 'Library',
+          title: 'Biblioteca',
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons
               name={focused ? "music-box-multiple" : "music-box-multiple-outline"}
@@ -70,7 +70,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="tidal"
         options={{
-          title: 'TIDAL',
+          title: 'Descargar',
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons
               name={focused ? 'music-circle' : 'music-circle-outline'}
@@ -83,7 +83,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
-          title: 'Settings',
+          title: 'Ajustes',
           tabBarIcon: ({ color, focused }) => (
             <MaterialCommunityIcons
               name={focused ? "cog" : "cog-outline"}

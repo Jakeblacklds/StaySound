@@ -11,7 +11,7 @@
 
 import { useDynamicColors } from '@/src/hooks';
 import { LyricsRepository } from '@/src/services';
-import { usePlayerStore } from '@/src/stores';
+import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 
@@ -21,14 +21,16 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { usePathname } from 'expo-router';
 import { KaraokeView } from 'karaoke-view';
-import React, { useCallback, useMemo, useState } from 'react';
-import { Dimensions, Pressable, StyleProp, StyleSheet, View, ViewStyle, processColor } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { BackHandler, Dimensions, Pressable, StyleProp, StyleSheet, View, ViewStyle, processColor } from 'react-native';
 import DraggableFlatList, { type RenderItemParams } from 'react-native-draggable-flatlist';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { ActivityIndicator, Button, IconButton, Text } from 'react-native-paper';
+import { Button, IconButton, Text } from 'react-native-paper';
 import Animated, {
     Easing,
     Extrapolation,
+    FadeIn,
+    FadeOut,
     cancelAnimation,
     interpolate,
     runOnJS,
@@ -36,13 +38,17 @@ import Animated, {
     useAnimatedStyle,
     useSharedValue,
     withRepeat,
+    withSequence,
     withSpring,
-    withTiming
+    withTiming,
+    type SharedValue
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { LyricsSkeleton } from '../ui';
 import { ProgressSlider } from './ProgressSlider';
 import { ThemeBackground } from './backgrounds/ThemeBackground';
+
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -135,9 +141,7 @@ function getQualityBadge(track?: { quality?: string; format?: string; uri?: stri
 }
 
 type PlayerButtonKind = 'primary' | 'nav' | 'secondary';
-type PlayerVariant = 'aurora' | 'cyber' | 'brutal' | 'immersive';
-
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+type PlayerVariant = 'aurora' | 'cyber' | 'brutal' | 'immersive'; const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 function AnimatedPlayerButton({
     variant,
@@ -225,7 +229,6 @@ function AnimatedPlayerButton({
     );
 }
 
-// ─── Custom Queue Item Decorator ────────────────────────────────────
 // Combines scale + shadow + tinted background for a premium drag feel
 function QueueItemDecorator({
     children,
@@ -277,6 +280,101 @@ function QueueItemDecorator({
 
 }
 
+function Particle({ index, count, progress, color }: { index: number; count: number; progress: SharedValue<number>; color: string }) {
+    const angle = (index * (360 / count)) * (Math.PI / 180);
+    const distance = 35;
+
+    const animatedStyle = useAnimatedStyle(() => {
+        const opacity = interpolate(progress.value, [0, 0.2, 0.8, 1], [0, 1, 1, 0]);
+        const scale = interpolate(progress.value, [0, 0.2, 1], [0, 1.2, 0]);
+        const translateX = Math.cos(angle) * distance * progress.value;
+        const translateY = Math.sin(angle) * distance * progress.value;
+
+        return {
+            position: 'absolute',
+            width: 6,
+            height: 6,
+            borderRadius: 3,
+            backgroundColor: color,
+            opacity,
+            transform: [
+                { translateX },
+                { translateY },
+                { scale }
+            ],
+        };
+    });
+
+    return <Animated.View style={animatedStyle} />;
+}
+
+function AnimatedFavoriteButton({
+    isFavorite,
+    onPress,
+    activeColor,
+    inactiveColor,
+    size = 28,
+    style,
+}: {
+    isFavorite: boolean;
+    onPress: () => void;
+    activeColor: string;
+    inactiveColor: string;
+    size?: number;
+    style?: any;
+}) {
+    const scale = useSharedValue(1);
+    const particleProgress = useSharedValue(0);
+
+    const animatedStyle = useAnimatedStyle(() => ({
+        transform: [{ scale: scale.value }],
+    }));
+
+    const handlePress = () => {
+        const becomingFavorite = !isFavorite;
+        onPress();
+
+        if (becomingFavorite) {
+            // A bit more readable punch, but still stops dead.
+            scale.value = withSequence(
+                withTiming(1.8, { duration: 200 }),
+                withSpring(1.1, { damping: 30, stiffness: 600, mass: 0.8 })
+            );
+
+            particleProgress.value = 0;
+            particleProgress.value = withTiming(1, { duration: 400 });
+        } else {
+            // Instant snap off
+            scale.value = withTiming(1, { duration: 100 });
+        }
+    };
+
+    const particles = Array.from({ length: 8 });
+
+    return (
+        <View style={[style, { alignItems: 'center', justifyContent: 'center' }]}>
+            {particles.map((_, i) => (
+                <Particle
+                    key={i}
+                    index={i}
+                    count={particles.length}
+                    progress={particleProgress}
+                    color={activeColor}
+                />
+            ))}
+            <Animated.View style={animatedStyle}>
+                <IconButton
+                    icon={isFavorite ? 'heart' : 'heart-outline'}
+                    size={size}
+                    iconColor={isFavorite ? activeColor : inactiveColor}
+                    onPress={handlePress}
+                    style={{ margin: 0 }}
+                />
+            </Animated.View>
+        </View>
+    );
+}
+
 export function FullPlayer() {
     const { theme, config } = useTheme();
     const pathname = usePathname();
@@ -302,6 +400,11 @@ export function FullPlayer() {
     const cycleRepeatMode = usePlayerStore(state => state.cycleRepeatMode);
     const skipTo = usePlayerStore(state => state.skipTo);
     const removeFromQueue = usePlayerStore(state => state.removeFromQueue);
+
+    const toggleFavorite = useLibraryStore(state => state.toggleFavorite);
+    const isFavorite = useLibraryStore(state =>
+        currentTrack ? !!state.tracks.get(currentTrack.id)?.favorite : false
+    );
 
     const activeVariant = (theme.components?.player?.variant as any) || playerVariant;
     const { colors: albumColors, animated: animColors } = useDynamicColors(currentTrack?.artwork);
@@ -334,7 +437,12 @@ export function FullPlayer() {
     const [queueVisible, setQueueVisible] = useState(false);
     const [queueDraft, setQueueDraft] = useState(queue);
     const queueAnimation = useSharedValue(0);
-    const isDetailRoute = pathname.startsWith('/album/') || pathname.startsWith('/artist/');
+    const isDetailRoute =
+        pathname.startsWith('/album/') ||
+        pathname.startsWith('/artist/') ||
+        pathname.startsWith('/playlist/') ||
+        pathname.startsWith('/tidal-album/') ||
+        pathname.startsWith('/tidal-artist/');
     const tabReservedSpace = config.style === 'material3'
         ? TAB_BAR_HEIGHT + TAB_BAR_FLOAT_OFFSET
         : 85;
@@ -408,7 +516,7 @@ export function FullPlayer() {
             }
         } catch (error: any) {
             console.error('[FullPlayer] Error downloading LRC:', error);
-            setLrcError('Error de conexión al descargar de LRCLib.');
+            setLrcError('Error al descargar las letras.');
         } finally {
             setIsDownloadingLrc(false);
         }
@@ -833,6 +941,34 @@ export function FullPlayer() {
     // M3 CONTAINER TRANSFORM: EXPANSION ANIMATION
     // ═══════════════════════════════════════════════════
 
+    // Hardware Back Button interceptor
+    React.useEffect(() => {
+        if (!isVisible) return;
+
+        const onBackPress = () => {
+            if (isLyricsExpanded) {
+                setShowLyrics(false);
+                toggleLyricsFull(false);
+                return true;
+            }
+            if (queueVisible) {
+                handleCloseQueue();
+                return true;
+            }
+
+            // Standard collapse
+            expansion.value = withTiming(0, {
+                duration: COLLAPSE_DURATION,
+                easing: M3_EMPHASIZED,
+            });
+            runOnJS(setPlayerVisible)(false);
+            return true;
+        };
+
+        const subscription = BackHandler.addEventListener('hardwareBackPress', onBackPress);
+        return () => subscription.remove();
+    }, [isVisible, isLyricsExpanded, queueVisible, expansion, handleCloseQueue, setPlayerVisible]);
+
     React.useEffect(() => {
         if (isVisible) {
             // Fast timing-based expand — no spring overshoot settling delay
@@ -881,6 +1017,14 @@ export function FullPlayer() {
                             </View>
                             <Animated.Text style={[styles.techMetaAurora, textStyle]} numberOfLines={1}>{trackTechLabel}</Animated.Text>
                         </View>
+                        <AnimatedFavoriteButton
+                            isFavorite={isFavorite}
+                            onPress={() => toggleFavorite(track.id)}
+                            activeColor={accentColor}
+                            inactiveColor={textColor}
+                            size={24}
+                            style={styles.auroraHeartBtn}
+                        />
                     </BlurView>
                 </Animated.View>
             </View>
@@ -936,6 +1080,14 @@ export function FullPlayer() {
                         </View>
                         <Animated.Text style={[styles.techMetaCyber, textStyle]} numberOfLines={1}>{trackTechLabel}</Animated.Text>
                     </View>
+                    <AnimatedFavoriteButton
+                        isFavorite={isFavorite}
+                        onPress={() => toggleFavorite(track.id)}
+                        activeColor={accentColor}
+                        inactiveColor={textColor}
+                        size={24}
+                        style={{ margin: 0, marginTop: 8 }}
+                    />
                 </View>
             </View>
 
@@ -973,6 +1125,14 @@ export function FullPlayer() {
                         </View>
                         <Animated.Text style={[styles.techMetaBrutal, { color: textColor }]} numberOfLines={1}>{trackTechLabel}</Animated.Text>
                     </View>
+                    <AnimatedFavoriteButton
+                        isFavorite={isFavorite}
+                        onPress={() => toggleFavorite(track.id)}
+                        activeColor={accentColor}
+                        inactiveColor={textColor}
+                        size={24}
+                        style={[styles.brutalFavoriteBtn, { borderColor: brutalBorder, backgroundColor: brutalButtonBg }]}
+                    />
                 </View>
                 <IconButton
                     icon="close"
@@ -1075,11 +1235,12 @@ export function FullPlayer() {
                                 iconColor={showLyrics ? accentColor : textColor}
                                 style={{ margin: 0 }}
                             />
-                            <IconButton
-                                icon="heart-outline"
+                            <AnimatedFavoriteButton
+                                isFavorite={isFavorite}
+                                onPress={() => toggleFavorite(track.id)}
+                                activeColor={accentColor}
+                                inactiveColor={textColor}
                                 size={28}
-                                iconColor={textColor}
-                                style={{ margin: 0 }}
                             />
                         </View>
                     </View>
@@ -1226,17 +1387,19 @@ export function FullPlayer() {
                         </Animated.View>
                     </Animated.View>
 
-                    {/* ThemeBackground always rendered — controlled by opacity via expansion */}
-                    <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}>
-                        <ThemeBackground
-                            variant={activeVariant}
-                            colors={albumColors}
-                            animColors={animColors}
-                            artwork={track.artwork}
-                            isVisible={animationsActive}
-                            expansion={expansion}
-                        />
-                    </Animated.View>
+                    {/* ThemeBackground - strictly unmounted completely to save CPU/GPU overhead when collapsed */}
+                    {isVisible && (
+                        <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}>
+                            <ThemeBackground
+                                variant={activeVariant}
+                                colors={albumColors}
+                                animColors={animColors}
+                                artwork={track.artwork}
+                                isVisible={animationsActive}
+                                expansion={expansion}
+                            />
+                        </Animated.View>
+                    )}
 
                     {/* Highly subtle dark overlay for lyrics readability */}
                     <Animated.View
@@ -1332,7 +1495,7 @@ export function FullPlayer() {
                                             onPress={() => setLyricsMode('synced')}
                                             style={[styles.modeTab, lyricsMode === 'synced' && styles.modeTabActive]}
                                         >
-                                            <Text style={[styles.modeTabText, lyricsMode === 'synced' && { color: accentColor }]}>SYNCED</Text>
+                                            <Text style={[styles.modeTabText, lyricsMode === 'synced' && { color: accentColor }]}>SINCRONIZADAS</Text>
                                         </Pressable>
                                         <Pressable
                                             onPress={() => setLyricsMode('lrc')}
@@ -1346,53 +1509,82 @@ export function FullPlayer() {
                         </View>
 
                         {isDownloadingLrc && (
-                            <View style={styles.downloadOverlay}>
-                                <ActivityIndicator size="large" color={accentColor} />
-                                <Text style={styles.downloadText}>Sincronizando estrofas...</Text>
-                            </View>
+                            <Animated.View
+                                entering={FadeIn.duration(400)}
+                                exiting={FadeOut.duration(400)}
+                                style={styles.downloadOverlay}
+                            >
+                                <LyricsSkeleton isDownloading={true} />
+                            </Animated.View>
                         )}
 
                         {(lyricsMode === 'synced' ? trackLyrics : lrcLyrics) ? (
-                            <KaraokeView
+                            <Animated.View
+                                key="lyrics-content"
+                                entering={FadeIn.duration(600)}
                                 style={{ flex: 1 }}
-                                lyrics={(lyricsMode === 'synced' ? trackLyrics : lrcLyrics)!.lyrics}
-                                currentTimeMs={nativePositionMs}
-                                isPlaying={isPlaying}
-                                fontSize={26}
-                                isLineByLine={lyricsMode === 'lrc'}
-                                activeColor={processColor(accentColor || '#FFFFFF')}
-                                inactiveColor={processColor((textColor || '#FFFFFF') + '33')}
-                                glowColor={processColor(accentColor || '#FFFFFF')}
-                                onLineChange={({ nativeEvent }) => {
-                                    // console.log('[NativeKaraoke] Line:', nativeEvent.lineIndex);
-                                }}
-                                onSeek={({ nativeEvent }) => {
-                                    seek(nativeEvent.timeMs / 1000);
-                                }}
-                            />
+                            >
+                                <KaraokeView
+                                    style={{ flex: 1 }}
+                                    lyrics={(lyricsMode === 'synced' ? trackLyrics : lrcLyrics)!.lyrics}
+                                    currentTimeMs={nativePositionMs}
+                                    isPlaying={isPlaying}
+                                    fontSize={26}
+                                    isLineByLine={lyricsMode === 'lrc'}
+                                    activeColor={processColor(accentColor || '#FFFFFF')}
+                                    inactiveColor={processColor((textColor || '#FFFFFF') + '33')}
+                                    glowColor={processColor(accentColor || '#FFFFFF')}
+                                    onLineChange={({ nativeEvent }) => {
+                                        // console.log('[NativeKaraoke] Line:', nativeEvent.lineIndex);
+                                    }}
+                                    onSeek={({ nativeEvent }) => {
+                                        seek(nativeEvent.timeMs / 1000);
+                                    }}
+                                />
+                            </Animated.View>
                         ) : (
-                            <View style={styles.lyricsFallbackState}>
-                                <Text style={styles.lyricsFallbackTitle}>
-                                    {isLyricsLoading ? 'Cargando lyrics...' : 'No lyrics found for this track'}
-                                </Text>
-                                {!isLyricsLoading && !lrcLyrics && !isDownloadingLrc && (
-                                    <View style={styles.lyricsActionContainer}>
-                                        <Text style={styles.lyricsFallbackSubtitle}>
-                                            {lrcError ?? 'No hay letras sincronizadas disponibles en Supabase.'}
+                            <Animated.View
+                                key="lyrics-fallback"
+                                entering={FadeIn.duration(400)}
+                                style={[styles.lyricsFallbackState, isLyricsLoading && { justifyContent: 'flex-start' }]}
+                            >
+                                {(isLyricsLoading || isDownloadingLrc) ? (
+                                    <Animated.View
+                                        key="lyrics-loading"
+                                        entering={FadeIn.duration(400)}
+                                        exiting={FadeOut.duration(400)}
+                                    >
+                                        <LyricsSkeleton isDownloading={isDownloadingLrc} />
+                                    </Animated.View>
+                                ) : (
+                                    <Animated.View
+                                        key="lyrics-empty"
+                                        entering={FadeIn.duration(400)}
+                                        style={{ alignItems: 'center', width: '100%', paddingHorizontal: 40 }}
+                                    >
+                                        <Text style={styles.lyricsFallbackTitle}>
+                                            No se encontraron letras
                                         </Text>
-                                        <Button
-                                            mode="contained"
-                                            onPress={handleDownloadLrc}
-                                            icon="cloud-download"
-                                            style={[styles.downloadBtn, { backgroundColor: lrcError ? '#CC4444' : accentColor }]}
-                                            contentStyle={{ height: 50, paddingHorizontal: 16 }}
-                                            labelStyle={{ color: onPrimaryColor, fontWeight: '900' }}
-                                        >
-                                            {lrcError ? 'Reintentar' : 'Descargar de LRCLib'}
-                                        </Button>
-                                    </View>
+                                        {!lrcLyrics && (
+                                            <View style={styles.lyricsActionContainer}>
+                                                <Text style={styles.lyricsFallbackSubtitle}>
+                                                    {lrcError ?? 'No hay letras disponibles localmente.'}
+                                                </Text>
+                                                <Button
+                                                    mode="contained"
+                                                    onPress={handleDownloadLrc}
+                                                    icon="cloud-download"
+                                                    style={[styles.downloadBtn, { backgroundColor: lrcError ? '#CC4444' : accentColor }]}
+                                                    contentStyle={{ height: 50, paddingHorizontal: 16 }}
+                                                    labelStyle={{ color: onPrimaryColor, fontWeight: '900' }}
+                                                >
+                                                    {lrcError ? 'Reintentar' : 'Descargar Letras'}
+                                                </Button>
+                                            </View>
+                                        )}
+                                    </Animated.View>
                                 )}
-                            </View>
+                            </Animated.View>
                         )}
                     </View>
                 </Animated.View>
@@ -1969,6 +2161,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         paddingHorizontal: 32,
+        backgroundColor: 'transparent',
     },
     lyricsFallbackTitle: {
         color: '#FFFFFF',
@@ -2171,16 +2364,30 @@ const styles = StyleSheet.create({
     },
     downloadOverlay: {
         ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.6)',
+        backgroundColor: 'transparent',
         zIndex: 200,
-        justifyContent: 'center',
+        justifyContent: 'flex-start',
+    },
+    downloadTextContainer: {
+        position: 'absolute',
+        bottom: 80,
+        left: 20,
+        right: 20,
         alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        paddingVertical: 16,
+        paddingHorizontal: 24,
+        borderRadius: 20,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
     },
     downloadText: {
         color: '#FFFFFF',
-        fontSize: 14,
-        fontWeight: '600',
-        marginTop: 16,
+        fontSize: 15,
+        fontWeight: '700',
+        letterSpacing: 0.8,
+        textTransform: 'uppercase',
     },
     lyricsActionContainer: {
         alignItems: 'center',
@@ -2190,5 +2397,17 @@ const styles = StyleSheet.create({
         marginTop: 24,
         borderRadius: 28,
         paddingHorizontal: 12,
+    },
+    auroraHeartBtn: {
+        marginTop: 10,
+        alignSelf: 'center',
+    },
+    brutalFavoriteBtn: {
+        borderWidth: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 4, height: 4 },
+        shadowOpacity: 1,
+        shadowRadius: 0,
+        elevation: 8,
     },
 });

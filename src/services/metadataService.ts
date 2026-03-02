@@ -120,6 +120,9 @@ export function organizeIntoAlbums(tracks: Track[]): Map<string, Album> {
             if (!album.artwork && track.artwork) {
                 album.artwork = track.artwork;
             }
+            if (!album.artworkThumb && track.artworkThumb) {
+                album.artworkThumb = track.artworkThumb;
+            }
         } else {
             albums.set(albumId, {
                 id: albumId,
@@ -127,6 +130,7 @@ export function organizeIntoAlbums(tracks: Track[]): Map<string, Album> {
                 artist: track.artist,
                 artistId: generateArtistId(track.artist),
                 artwork: track.artwork,
+                artworkThumb: track.artworkThumb,
                 year: track.year,
                 trackCount: 1,
                 tracks: [track.id],

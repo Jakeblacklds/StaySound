@@ -1,7 +1,8 @@
 import { decode as decodeBase64 } from 'base-64';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Platform } from 'react-native';
-import { FileSystemStorage } from './storage';
+import { useNotificationStore } from '../stores/notificationStore';
+import { useSettingsStore } from '../stores/settingsStore';
 import {
     TidalAlbum,
     TidalAlbumDetail,
@@ -12,8 +13,28 @@ import {
     TidalTrack,
     Track,
 } from '../types/audio';
+import { FileSystemStorage } from './storage';
 
-const TIDAL_API_BASE = 'https://arran.monochrome.tf';
+export const TIDAL_API_BASES = [
+    'https://triton.squid.wtf',
+    'https://dabmusic.xyz/api',
+    'https://dab.monochrome.tf',
+    'https://hifi.monochrome.tf',
+    'https://arran.monochrome.tf',
+    'https://music.binimum.org',
+];
+
+export const TIDAL_MIRROR_NAMES: Record<string, string> = {
+    'https://triton.squid.wtf': 'Fuente Principal (Alta Velocidad)',
+    'https://dabmusic.xyz/api': 'Fuente Alternativa (Estable)',
+    'https://dab.monochrome.tf': 'Servidor Espejo A',
+    'https://hifi.monochrome.tf': 'Servidor Espejo B',
+    'https://arran.monochrome.tf': 'Servidor Espejo C',
+    'https://music.binimum.org': 'Fuente de Respaldo',
+    'auto': 'Selección Automática (Recomendado)',
+};
+
+let currentBaseIndex = 0;
 const TIDAL_ARTWORK_BASE = 'https://resources.tidal.com/images';
 const TIDAL_TEMP_DOWNLOADS_DIR = `${FileSystem.cacheDirectory}StaySound/Downloads/`;
 const TIDAL_PUBLIC_FOLDER = 'StaySound';
@@ -131,6 +152,15 @@ function getTrackBaseFilename(track: Pick<TidalTrack, 'id' | 'title' | 'artist'>
     return `tidal_${track.id}`;
 }
 
+function getExtensionFromMime(mimeType?: string, codecs?: string): string {
+    const m = (mimeType ?? '').toLowerCase();
+    const c = (codecs ?? '').toLowerCase();
+    if (m.includes('flac') || c.includes('flac')) return 'flac';
+    if (m.includes('mp4') || m.includes('aac') || c.includes('mp4') || c.includes('aac')) return 'm4a';
+    if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
+    return 'flac'; // fallback
+}
+
 function getSafEntityName(uri: string): string {
     const decoded = decodeURIComponent(uri);
     const lastSlash = decoded.lastIndexOf('/');
@@ -221,16 +251,22 @@ async function findExistingPublicTrackUri(filename: string): Promise<string | nu
     return await findSafChildByName(directoryUri, filename);
 }
 
-async function persistInPublicDownloads(tempUri: string, baseFilename: string): Promise<string> {
-    const filename = `${baseFilename}.flac`;
+async function persistInPublicDownloads(tempUri: string, baseFilename: string, extension: string): Promise<string> {
+    const filename = `${baseFilename}.${extension}`;
     const existing = await findExistingPublicTrackUri(filename);
     if (existing) return existing;
 
     const directoryUri = await getPublicDownloadsDirectoryUri();
+    const mimeMap: Record<string, string> = {
+        flac: 'audio/flac',
+        m4a: 'audio/mp4',
+        mp3: 'audio/mpeg',
+    };
+
     const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
         directoryUri,
         baseFilename,
-        'audio/flac',
+        mimeMap[extension] || 'audio/flac',
     );
 
     const payload = await FileSystem.readAsStringAsync(tempUri, {
@@ -254,18 +290,76 @@ function withTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cleanup: (
     };
 }
 
-async function fetchJson<T>(url: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<T> {
-    const { signal, cleanup } = withTimeoutSignal(timeoutMs);
+async function fetchJson<T>(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<T> {
+    const { tidalMirror } = useSettingsStore.getState();
+    const showNotification = useNotificationStore.getState().showNotification;
+    let lastError: Error | null = null;
+    const startBaseIndex = currentBaseIndex;
 
-    try {
-        const response = await fetch(url, { signal });
-        if (!response.ok) {
-            throw new Error(`Tidal request failed (${response.status})`);
+    // If user selected a specific mirror, try it first
+    if (tidalMirror && tidalMirror !== 'auto') {
+        const url = `${tidalMirror}${path}`;
+        const { signal, cleanup } = withTimeoutSignal(timeoutMs);
+        try {
+            console.log(`[TidalService] Requesting (Manual Mirror): ${url}`);
+            const response = await fetch(url, { signal });
+            if (response.ok) {
+                cleanup();
+                return await response.json() as T;
+            }
+            throw new Error(`Manual mirror issue: ${response.status}`);
+        } catch (error: any) {
+            cleanup();
+            console.warn(`[TidalService] Manual mirror ${tidalMirror} failed: ${error.message}. Falling back to auto...`);
+            showNotification('Conexión inestable con el servidor elegido. Buscando alternativa...', 'warning');
+            lastError = error;
         }
-        return await response.json() as T;
-    } finally {
-        cleanup();
     }
+
+    for (let i = 0; i < TIDAL_API_BASES.length; i++) {
+        const base = TIDAL_API_BASES[currentBaseIndex];
+        const url = `${base}${path}`;
+        const { signal, cleanup } = withTimeoutSignal(timeoutMs);
+
+        try {
+            console.log(`[TidalService] Requesting: ${url}`);
+            const response = await fetch(url, { signal });
+
+            if (response.ok) {
+                cleanup();
+                return await response.json() as T;
+            }
+
+            // If it's a server error (5xx) or a possible proxy misconfiguration (404 on common paths)
+            if (response.status >= 500 || (response.status === 404 && base.includes('music.binimum.org'))) {
+                throw new Error(`Mirror issue: ${response.status}`);
+            }
+
+            // If we are at dabmusic.xyz, it might need /api/search instead of /search
+            // but our fetchJson prepends /search, so we adjust current path if needed or just skip
+            if (response.status === 404 && base.includes('dabmusic.xyz')) {
+                throw new Error(`Endpoint not found on this mirror: ${response.status}`);
+            }
+
+            const errorBody = await response.text().catch(() => 'No body');
+            throw new Error(`Tidal request failed (${response.status}): ${errorBody}`);
+        } catch (error: any) {
+            cleanup();
+            lastError = error;
+            console.warn(`[TidalService] Base ${base} failed: ${error.message}. Trying next...`);
+
+            // Cycle to next base
+            currentBaseIndex = (currentBaseIndex + 1) % TIDAL_API_BASES.length;
+
+            const nextBase = TIDAL_API_BASES[currentBaseIndex];
+            showNotification(`Cambiando a ${TIDAL_MIRROR_NAMES[nextBase] || 'otro servidor'} para mejor conexión`, 'info');
+
+            // If we've circled back to the start, stop and throw
+            if (currentBaseIndex === startBaseIndex) break;
+        }
+    }
+
+    throw lastError || new Error('All Tidal mirrors failed');
 }
 
 function resolveUrl(baseUrl: string, maybeRelative: string): string {
@@ -460,8 +554,8 @@ async function ensureDirectoryExists(dirUri: string): Promise<void> {
     }
 }
 
-function getOutputUri(baseFilename: string): string {
-    return `${TIDAL_TEMP_DOWNLOADS_DIR}${baseFilename}.flac`;
+function getOutputUri(baseFilename: string, extension: string): string {
+    return `${TIDAL_TEMP_DOWNLOADS_DIR}${baseFilename}.${extension}`;
 }
 
 function isFlacSource(url: string, manifest: ParsedManifest): boolean {
@@ -471,18 +565,12 @@ function isFlacSource(url: string, manifest: ParsedManifest): boolean {
     return false;
 }
 
-function getDirectFlacUrl(manifest: ParsedManifest): string | null {
+function getDirectUrl(manifest: ParsedManifest): string | null {
     const directUrls = manifest.urls.filter(url => /^https?:\/\//i.test(url));
     if (manifest.isSegmented || directUrls.length !== 1) {
         return null;
     }
-
-    const sourceUrl = directUrls[0];
-    if (!isFlacSource(sourceUrl, manifest)) {
-        return null;
-    }
-
-    return sourceUrl;
+    return directUrls[0];
 }
 
 async function downloadSegment(
@@ -490,7 +578,7 @@ async function downloadSegment(
     outputUri: string,
     onTask?: (task: FileSystem.DownloadResumable | null) => void,
     onProgress?: (progress: number) => void,
-): Promise<void> {
+): Promise<FileSystem.FileSystemDownloadResult> {
     const task = FileSystem.createDownloadResumable(url, outputUri, {}, progress => {
         const expected = progress.totalBytesExpectedToWrite;
         if (!onProgress) return;
@@ -498,15 +586,25 @@ async function downloadSegment(
             onProgress(progress.totalBytesWritten / expected);
             return;
         }
-        onProgress(0);
+        // If server doesn't provide content-length, we can't show real progress
+        onProgress(0.01);
     });
 
     onTask?.(task);
-    await task.downloadAsync();
+    const result = await task.downloadAsync();
     onTask?.(null);
+    if (!result) throw new Error('Download failed: No result from task');
+    return result;
 }
 
 function toLibraryTrack(tidalTrack: TidalTrack, uri: string): Track {
+    const extension = uri.split('.').pop()?.toLowerCase() || 'flac';
+    const formatMap: Record<string, string> = {
+        flac: 'FLAC',
+        m4a: 'AAC',
+        mp3: 'MP3',
+    };
+
     return {
         id: `tidal_${tidalTrack.id}`,
         uri,
@@ -517,8 +615,8 @@ function toLibraryTrack(tidalTrack: TidalTrack, uri: string): Track {
         artwork: tidalTrack.artworkUrl,
         trackNumber: tidalTrack.trackNumber,
         year: tidalTrack.year,
-        format: 'FLAC',
-        codec: tidalTrack.codec ?? 'flac',
+        format: formatMap[extension] || 'FLAC',
+        codec: tidalTrack.codec ?? extension,
         sampleRate: tidalTrack.sampleRate,
         bitDepth: tidalTrack.bitDepth,
         quality: tidalTrack.quality,
@@ -537,12 +635,10 @@ export async function searchTidal(query: string): Promise<TidalSearchResult[]> {
     if (!trimmed) return [];
 
     const response = await fetchJson<TidalSearchApiResponse>(
-        `${TIDAL_API_BASE}/search/?s=${encodeURIComponent(trimmed)}`,
+        `/search/?s=${encodeURIComponent(trimmed)}`,
     );
 
-    return (response.data?.items ?? [])
-        .filter(item => typeof item.id === 'number' && typeof item.title === 'string')
-        .map(normalizeSearchItem);
+    return (response.data?.items ?? []).map(normalizeSearchItem);
 }
 
 export async function searchTidalArtists(query: string): Promise<TidalArtist[]> {
@@ -550,13 +646,11 @@ export async function searchTidalArtists(query: string): Promise<TidalArtist[]> 
     if (!trimmed) return [];
 
     const response = await fetchJson<TidalArtistSearchApiResponse>(
-        `${TIDAL_API_BASE}/search/?a=${encodeURIComponent(trimmed)}`,
+        `/search/?a=${encodeURIComponent(trimmed)}`,
     );
 
     const artistItems = response.data?.artists?.items ?? response.data?.items ?? [];
-    return artistItems
-        .filter(item => typeof item.id === 'number' && typeof item.name === 'string')
-        .map(normalizeArtistItem);
+    return artistItems.map(normalizeArtistItem);
 }
 
 export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
@@ -581,7 +675,7 @@ export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
 
 export async function getTidalAlbumDetail(albumId: number): Promise<TidalAlbumDetail> {
     const response = await fetchJson<TidalAlbumDetailApiResponse>(
-        `${TIDAL_API_BASE}/album/?id=${albumId}`,
+        `/album/?id=${albumId}`,
     );
 
     const albumData = response.data;
@@ -592,18 +686,15 @@ export async function getTidalAlbumDetail(albumId: number): Promise<TidalAlbumDe
     const album = normalizeAlbumItem(albumData);
     const tracks = (albumData.items ?? [])
         .map(entry => entry.item)
-        .filter((item): item is TidalTrackApiResponse => !!item && typeof item.id === 'number' && typeof item.title === 'string')
+        .filter((item): item is TidalTrackApiResponse => !!item)
         .map(item => normalizeArtistTrack(item, album.artistId ? { id: album.artistId, name: album.artistName } : undefined));
 
-    return {
-        album,
-        tracks,
-    };
+    return { album, tracks };
 }
 
 export async function getTidalArtistDetail(artistId: number, artistNameHint?: string): Promise<TidalArtistDetail> {
     const artistResponse = await fetchJson<TidalArtistDetailApiResponse>(
-        `${TIDAL_API_BASE}/artist/?id=${artistId}`,
+        `/artist/?id=${artistId}`,
     );
 
     const apiArtist = artistResponse.artist;
@@ -620,7 +711,6 @@ export async function getTidalArtistDetail(artistId: number, artistNameHint?: st
     const tracksByName = await searchTidal(queryTerm);
 
     const mergedTracksMap = new Map<number, TidalTrack>();
-
     tracksByName
         .filter(track => track.artistId === artistId || track.artist.toLowerCase() === artist.name.toLowerCase())
         .forEach(track => mergedTracksMap.set(track.id, track));
@@ -631,11 +721,7 @@ export async function getTidalArtistDetail(artistId: number, artistNameHint?: st
     const albums = extractAlbumsFromTracks(mergedTracks);
     const topTracks = mergedTracks.slice(0, 25);
 
-    return {
-        artist,
-        topTracks,
-        albums,
-    };
+    return { artist, topTracks, albums };
 }
 
 export async function getTidalTrackManifest(
@@ -643,7 +729,7 @@ export async function getTidalTrackManifest(
     quality: TidalQuality = 'HI_RES_LOSSLESS',
 ): Promise<ParsedManifest> {
     const response = await fetchJson<TidalManifestApiResponse>(
-        `${TIDAL_API_BASE}/track/?id=${tidalId}&quality=${quality}`,
+        `/track/?id=${tidalId}&quality=${quality}`,
     );
 
     const manifestBase64 = response.data?.manifest;
@@ -659,10 +745,26 @@ export async function getTidalTrackManifest(
 
 export async function downloadTidalTrack(
     tidalTrack: TidalTrack,
+    targetQuality: TidalQuality = 'LOSSLESS',
     options: DownloadOptions = {},
 ): Promise<Track> {
     const baseFilename = getTrackBaseFilename(tidalTrack);
-    const filename = `${baseFilename}.flac`;
+
+    // 1. Get manifest for target quality
+    let manifest: ParsedManifest;
+    try {
+        manifest = await getTidalTrackManifest(tidalTrack.id, targetQuality);
+    } catch (error) {
+        console.warn(`[TidalService] Quality ${targetQuality} failed, falling back to LOSSLESS/HIGH`, error);
+        try {
+            manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+        } catch {
+            manifest = await getTidalTrackManifest(tidalTrack.id, 'HIGH');
+        }
+    }
+
+    const extension = getExtensionFromMime(manifest.mimeType, manifest.codecs);
+    const filename = `${baseFilename}.${extension}`;
 
     if (Platform.OS === 'android') {
         const existingPublicUri = await findExistingPublicTrackUri(filename);
@@ -674,34 +776,29 @@ export async function downloadTidalTrack(
 
     await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
 
-    const outputUri = getOutputUri(baseFilename);
+    const outputUri = getOutputUri(baseFilename, extension);
     const outputExists = await FileSystem.getInfoAsync(outputUri);
     if (outputExists.exists) {
-        if (Platform.OS === 'android') {
-            await FileSystem.deleteAsync(outputUri, { idempotent: true });
-        } else {
-            options.onProgress?.(1);
-            return toLibraryTrack(tidalTrack, outputUri);
+        // Redownloading/repairing if called (or if platform doesn't support easy re-use)
+        await FileSystem.deleteAsync(outputUri, { idempotent: true });
+    }
+
+    let sourceUrl = getDirectUrl(manifest);
+    if (!sourceUrl && manifest.quality !== 'HIGH' && manifest.quality !== 'LOW') {
+        try {
+            const fallbackManifest = await getTidalTrackManifest(tidalTrack.id, 'HIGH');
+            sourceUrl = getDirectUrl(fallbackManifest);
+            if (sourceUrl) manifest = fallbackManifest;
+        } catch {
+            // ignore
         }
     }
 
-    let manifest: ParsedManifest;
-    try {
-        manifest = await getTidalTrackManifest(tidalTrack.id, 'HI_RES_LOSSLESS');
-    } catch (error) {
-        console.warn('[TidalService] HI_RES_LOSSLESS failed, retrying LOSSLESS', error);
-        manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
-    }
-
-    let sourceUrl = getDirectFlacUrl(manifest);
     if (!sourceUrl) {
-        const fallbackManifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
-        sourceUrl = getDirectFlacUrl(fallbackManifest);
-        manifest = fallbackManifest;
-    }
-
-    if (!sourceUrl) {
-        throw new Error('Este track no ofrece FLAC directo descargable');
+        if (manifest.isSegmented) {
+            throw new Error(`Este track utiliza segmentos (DASH) y no se puede descargar directamente como un solo archivo ${extension.toUpperCase()}.`);
+        }
+        throw new Error('No se encontró una URL de descarga directa para este track.');
     }
 
     const enrichedTrack: TidalTrack = {
@@ -713,11 +810,27 @@ export async function downloadTidalTrack(
     };
 
     await downloadSegment(sourceUrl, outputUri, options.onTask, options.onProgress);
+
+    // Validate download result
+    const fileInfo = await FileSystem.getInfoAsync(outputUri);
+    if (!fileInfo.exists || fileInfo.size === 0) {
+        throw new Error('Download failed: File is empty or does not exist');
+    }
+
+    if (!(await isValidAudioFile(outputUri, extension))) {
+        throw new Error(`Download failed: The file received is not a valid ${extension.toUpperCase()}`);
+    }
+
     let persistentUri = outputUri;
 
     if (Platform.OS === 'android') {
-        persistentUri = await persistInPublicDownloads(outputUri, baseFilename);
-        await FileSystem.deleteAsync(outputUri, { idempotent: true });
+        try {
+            persistentUri = await persistInPublicDownloads(outputUri, baseFilename, extension);
+            await FileSystem.deleteAsync(outputUri, { idempotent: true });
+        } catch (persistError) {
+            console.error('[TidalService] Failed to persist in public folder:', persistError);
+            throw new Error(`Failed to save track to public folder: ${persistError instanceof Error ? persistError.message : 'Unknown error'}`);
+        }
     }
 
     options.onProgress?.(1);
@@ -733,15 +846,15 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
         manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
     }
 
-    let streamUrl = getDirectFlacUrl(manifest);
+    let streamUrl = getDirectUrl(manifest);
     if (!streamUrl) {
         const fallbackManifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
-        streamUrl = getDirectFlacUrl(fallbackManifest);
+        streamUrl = getDirectUrl(fallbackManifest);
         manifest = fallbackManifest;
     }
 
     if (!streamUrl) {
-        throw new Error('No direct FLAC stream URL available for this track');
+        throw new Error('No direct stream URL available for this track');
     }
 
     const enrichedTrack: TidalTrack = {
@@ -750,6 +863,13 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
         codec: manifest.codecs ?? tidalTrack.codec,
         sampleRate: manifest.sampleRate ?? tidalTrack.sampleRate,
         bitDepth: manifest.bitDepth ?? tidalTrack.bitDepth,
+    };
+
+    const extension = getExtensionFromMime(manifest.mimeType, manifest.codecs);
+    const formatMap: Record<string, string> = {
+        flac: 'FLAC',
+        m4a: 'AAC',
+        mp3: 'MP3',
     };
 
     return {
@@ -762,8 +882,8 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
         artwork: enrichedTrack.artworkUrl,
         trackNumber: enrichedTrack.trackNumber,
         year: enrichedTrack.year,
-        format: 'FLAC',
-        codec: enrichedTrack.codec ?? 'flac',
+        format: formatMap[extension] || 'FLAC',
+        codec: enrichedTrack.codec ?? extension,
         sampleRate: enrichedTrack.sampleRate,
         bitDepth: enrichedTrack.bitDepth,
         quality: enrichedTrack.quality,
@@ -771,7 +891,7 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
     };
 }
 
-export async function isValidFlacFile(uri: string): Promise<boolean> {
+export async function isValidAudioFile(uri: string, extension: string): Promise<boolean> {
     try {
         const base64Prefix = await FileSystem.readAsStringAsync(uri, {
             encoding: FileSystem.EncodingType.Base64,
@@ -780,7 +900,12 @@ export async function isValidFlacFile(uri: string): Promise<boolean> {
         } as never);
 
         const decodedPrefix = decodeBase64(base64Prefix);
-        return decodedPrefix.startsWith('fLaC');
+
+        if (extension === 'flac') return decodedPrefix.startsWith('fLaC');
+        if (extension === 'm4a') return decodedPrefix.includes('ftyp');
+        if (extension === 'mp3') return decodedPrefix.startsWith('ID3') || decodedPrefix.includes('\xff\xfb') || decodedPrefix.includes('\xff\xf3');
+
+        return true; // fallback
     } catch {
         return false;
     }

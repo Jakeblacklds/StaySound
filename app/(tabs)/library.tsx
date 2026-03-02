@@ -12,14 +12,15 @@
 import { AlbumCard, ArtistCard, EmptyState, ScanButton, TrackListItem } from '@/src/components/ui';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
-import { useTheme } from '@/src/theme';
+import { useAnimatedColors, useTheme } from '@/src/theme';
 import { Album, Artist, Track } from '@/src/types';
 import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { InteractionManager, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Searchbar, Text } from 'react-native-paper';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const LIBRARY_TABS = [
     { value: 'songs', label: 'Songs' },
@@ -28,6 +29,13 @@ const LIBRARY_TABS = [
 ] as const;
 
 type LibraryTab = (typeof LIBRARY_TABS)[number]['value'];
+
+// Performance constants (stable for FlashList)
+const ESTIMATED_ALBUM_SIZE = 212;
+const ESTIMATED_ARTIST_SIZE = 138;
+const DEFAULT_TRACK_SIZE = 76;
+const TRACK_DRAW_DISTANCE = 160;
+
 
 export default function LibraryScreen() {
     const { theme } = useTheme();
@@ -38,9 +46,11 @@ export default function LibraryScreen() {
     const isScanning = useLibraryStore(s => s.isScanning);
     const scanLibrary = useLibraryStore(s => s.scanLibrary);
     const refreshArtistPhotos = useLibraryStore(s => s.refreshArtistPhotos);
+    const ensureArtworkThumbsForTracks = useLibraryStore(s => s.ensureArtworkThumbsForTracks);
     const getAllPlaylists = useLibraryStore(s => s.getAllPlaylists);
     const createPlaylist = useLibraryStore(s => s.createPlaylist);
     const addToPlaylist = useLibraryStore(s => s.addToPlaylist);
+    const deleteTrack = useLibraryStore(s => s.deleteTrack);
 
     // Select the Maps (stable references — only change when library is scanned)
     const tracksMap = useLibraryStore(s => s.tracks);
@@ -86,6 +96,16 @@ export default function LibraryScreen() {
         refreshArtistPhotos();
     }, [artists.length, isScanning, refreshArtistPhotos, tab]);
 
+    useEffect(() => {
+        if (tab !== 'songs') return;
+        if (isScanning) return;
+        if (tracks.length === 0) return;
+        const task = InteractionManager.runAfterInteractions(() => {
+            void ensureArtworkThumbsForTracks(tracks.slice(0, 180).map(track => track.id));
+        });
+        return () => task.cancel();
+    }, [ensureArtworkThumbsForTracks, isScanning, tab, tracks]);
+
     // Focused player selector
     const play = usePlayerStore(s => s.play);
     const addToQueue = usePlayerStore(s => s.addToQueue);
@@ -103,8 +123,9 @@ export default function LibraryScreen() {
             addToQueue,
             addToPlaylist,
             createPlaylist,
+            deleteTrack,
         });
-    }, [addToPlaylist, addToQueue, createPlaylist, getAllPlaylists]);
+    }, [addToPlaylist, addToQueue, createPlaylist, deleteTrack, getAllPlaylists]);
 
     const handleAlbumPress = useCallback((album: Album) => {
         router.push({ pathname: '/album/[id]', params: { id: album.id } });
@@ -141,151 +162,185 @@ export default function LibraryScreen() {
     const trackKeyExtractor = useCallback((item: Track) => item.id, []);
     const albumKeyExtractor = useCallback((item: Album) => item.id, []);
     const artistKeyExtractor = useCallback((item: Artist) => item.id, []);
+    const getTrackItemType = useCallback(() => 'track', []);
+    const getAlbumItemType = useCallback(() => 'album', []);
+    const getArtistItemType = useCallback(() => 'artist', []);
+
+    const overrideAlbumItemLayout = useCallback((layout: { size?: number }) => {
+        layout.size = ESTIMATED_ALBUM_SIZE;
+    }, []);
+    const overrideArtistItemLayout = useCallback((layout: { size?: number }) => {
+        layout.size = ESTIMATED_ARTIST_SIZE;
+    }, []);
     // ─── Content padding ─────────────────────────────────
+    const insets = useSafeAreaInsets();
     const screenPadding = theme.components.global?.screenPadding || 16;
     const listContentStyle = useMemo(
-        () => ({ paddingBottom: 120, paddingHorizontal: screenPadding }),
-        [screenPadding],
+        () => ({ paddingBottom: 120 + insets.bottom, paddingHorizontal: screenPadding }),
+        [screenPadding, insets.bottom],
     );
     const gridContentStyle = useMemo(
-        () => ({ paddingBottom: 120, padding: screenPadding }),
-        [screenPadding],
+        () => ({ paddingBottom: 120 + insets.bottom, padding: screenPadding }),
+        [screenPadding, insets.bottom],
     );
 
+    // Dynamic but stable track size based on theme (including vertical margins)
+    const isMaterial3 = theme.id.startsWith('material3');
+    const trackVerticalMargin = theme.components.trackItem.variant === 'brutal' ? 16 : (isMaterial3 ? 8 : 0);
+    const trackSize = (theme.components.trackItem.height || DEFAULT_TRACK_SIZE) + trackVerticalMargin;
+    const overrideTrackItemLayout = useCallback((layout: { size?: number }) => {
+        layout.size = trackSize;
+    }, [trackSize]);
+
+
+    const aC = useAnimatedColors();
+    const animBg = useAnimatedStyle(() => ({
+        backgroundColor: aC.background.value,
+    }));
+
     return (
-        <SafeAreaView
-            style={[styles.container, { backgroundColor: theme.colors.background }]}
-            edges={['top']}
-        >
-            {/* Header */}
-            <View style={[styles.header, { paddingHorizontal: screenPadding }]}> 
-                <Text
-                    variant="headlineMedium"
-                    style={[
-                        styles.title,
-                        {
-                            color: theme.colors.onBackground,
-                            fontFamily: theme.typography.fontFamily.bold
-                        }
-                    ]}
-                >
-                    Library
-                </Text>
-                <Searchbar
-                    placeholder="Search your library"
-                    value={searchQuery}
-                    onChangeText={setSearchQuery}
-                    style={[styles.searchbar, { backgroundColor: theme.colors.surfaceVariant }]}
-                    iconColor={theme.colors.primary}
-                />
-            </View>
+        <Animated.View style={[styles.container, animBg]}>
+            <SafeAreaView style={styles.container} edges={['top']}>
+                {/* Header */}
+                <View style={[styles.header, { paddingHorizontal: screenPadding }]}>
+                    <Text
+                        variant="headlineMedium"
+                        style={[
+                            styles.title,
+                            {
+                                color: theme.colors.onBackground,
+                                fontFamily: theme.typography.fontFamily.bold
+                            }
+                        ]}
+                    >
+                        Library
+                    </Text>
+                    <Searchbar
+                        placeholder="Search your library"
+                        value={searchQuery}
+                        onChangeText={setSearchQuery}
+                        style={[styles.searchbar, { backgroundColor: theme.colors.surfaceVariant }]}
+                        iconColor={theme.colors.primary}
+                    />
+                </View>
 
-            {/* Segment Control */}
-            <View style={styles.segmentContainer}>
-                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-                    {LIBRARY_TABS.map(item => {
-                        const selected = tab === item.value;
+                {/* Segment Control */}
+                <View style={styles.segmentContainer}>
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
+                        {LIBRARY_TABS.map(item => {
+                            const selected = tab === item.value;
 
-                        return (
-                            <Pressable key={item.value} style={styles.tabButton} onPress={() => setTab(item.value)}>
-                                <Text
-                                    style={{
-                                        color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant,
-                                        fontWeight: selected ? '700' : '500',
-                                    }}
-                                >
-                                    {item.label}
-                                </Text>
-                                <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant, opacity: 0.8 }}>
-                                    {tabCounts[item.value]}
-                                </Text>
-                                {selected ? <View style={[styles.tabIndicator, { backgroundColor: theme.colors.primary }]} /> : null}
-                            </Pressable>
-                        );
-                    })}
-                </ScrollView>
-            </View>
+                            return (
+                                <Pressable key={item.value} style={styles.tabButton} onPress={() => setTab(item.value)}>
+                                    <Text
+                                        style={{
+                                            color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                                            fontWeight: selected ? '700' : '500',
+                                        }}
+                                    >
+                                        {item.label}
+                                    </Text>
+                                    <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant, opacity: 0.8 }}>
+                                        {tabCounts[item.value]}
+                                    </Text>
+                                    {selected ? <View style={[styles.tabIndicator, { backgroundColor: theme.colors.primary }]} /> : null}
+                                </Pressable>
+                            );
+                        })}
+                    </ScrollView>
+                </View>
 
-            {/* Content */}
-            <View style={styles.content}>
-                {tab === 'songs' ? (
-                    filteredTracks.length === 0 ? (
-                        <View style={styles.emptyContainer}>
-                            <EmptyState
-                                icon="🎵"
-                                title={tracks.length === 0 ? 'No songs yet' : 'No songs match your search'}
-                                description={tracks.length === 0 ? 'Scan your device to find music files' : 'Try another title, artist, or album'}
-                            />
-                            {tracks.length === 0 ? (
-                                <ScanButton
-                                    isScanning={isScanning}
-                                    onScan={scanLibrary}
+                {/* Content */}
+                <View style={styles.content}>
+                    {tab === 'songs' ? (
+                        filteredTracks.length === 0 ? (
+                            <View style={styles.emptyContainer}>
+                                <EmptyState
+                                    icon="🎵"
+                                    title={tracks.length === 0 ? 'No songs yet' : 'No songs match your search'}
+                                    description={tracks.length === 0 ? 'Scan your device to find music files' : 'Try another title, artist, or album'}
                                 />
-                            ) : null}
-                        </View>
-                    ) : (
-                        <FlashList<Track>
-                            data={filteredTracks}
-                            keyExtractor={trackKeyExtractor}
-                            renderItem={renderTrackItem}
-                            contentContainerStyle={listContentStyle}
-                            getItemType={() => 'track'}
-                            removeClippedSubviews={false}
-                            drawDistance={180}
-                            showsVerticalScrollIndicator={false}
-                        />
-                    )
-                ) : null}
+                                {tracks.length === 0 ? (
+                                    <ScanButton
+                                        isScanning={isScanning}
+                                        onScan={scanLibrary}
+                                    />
+                                ) : null}
+                            </View>
+                        ) : (
+                            <FlashList
+                                data={filteredTracks}
+                                keyExtractor={trackKeyExtractor}
+                                renderItem={renderTrackItem}
+                                contentContainerStyle={listContentStyle}
+                                // @ts-ignore - estimatedItemSize is required for FlashList performance
+                                estimatedItemSize={trackSize}
+                                getItemType={getTrackItemType}
+                                // @ts-ignore - FlashList accepts overrideItemLayout for fixed-height rows
+                                overrideItemLayout={overrideTrackItemLayout}
+                                removeClippedSubviews
+                                drawDistance={TRACK_DRAW_DISTANCE}
+                                showsVerticalScrollIndicator={false}
+                            />
+                        )
+                    ) : null}
 
-                {tab === 'albums' ? (
-                    filteredAlbums.length === 0 ? (
-                        <EmptyState
-                            icon="💿"
-                            title={albums.length === 0 ? 'No albums yet' : 'No albums match your search'}
-                            description={albums.length === 0 ? 'Albums will appear after scanning your music' : 'Try searching another album or artist'}
-                            actionLabel={albums.length === 0 ? 'Scan Library' : undefined}
-                            onAction={albums.length === 0 ? scanLibrary : undefined}
-                        />
-                    ) : (
-                        <FlashList<Album>
-                            data={filteredAlbums}
-                            keyExtractor={albumKeyExtractor}
-                            numColumns={2}
-                            renderItem={renderAlbumItem}
-                            contentContainerStyle={gridContentStyle}
-                            getItemType={() => 'album'}
-                            removeClippedSubviews={true}
-                            drawDistance={280}
-                            showsVerticalScrollIndicator={false}
-                        />
-                    )
-                ) : null}
+                    {tab === 'albums' ? (
+                        filteredAlbums.length === 0 ? (
+                            <EmptyState
+                                icon="💿"
+                                title={albums.length === 0 ? 'No albums yet' : 'No albums match your search'}
+                                description={albums.length === 0 ? 'Albums will appear after scanning your music' : 'Try searching another album or artist'}
+                                actionLabel={albums.length === 0 ? 'Scan Library' : undefined}
+                                onAction={albums.length === 0 ? scanLibrary : undefined}
+                            />
+                        ) : (
+                            <FlashList
+                                data={filteredAlbums}
+                                keyExtractor={albumKeyExtractor}
+                                numColumns={2}
+                                renderItem={renderAlbumItem}
+                                contentContainerStyle={gridContentStyle}
+                                // @ts-ignore
+                                estimatedItemSize={ESTIMATED_ALBUM_SIZE}
+                                getItemType={getAlbumItemType}
+                                // @ts-ignore
+                                overrideItemLayout={overrideAlbumItemLayout}
+                                removeClippedSubviews
+                                showsVerticalScrollIndicator={false}
+                            />
+                        )
+                    ) : null}
 
-                {tab === 'artists' ? (
-                    filteredArtists.length === 0 ? (
-                        <EmptyState
-                            icon="🎤"
-                            title={artists.length === 0 ? 'No artists yet' : 'No artists match your search'}
-                            description={artists.length === 0 ? 'Artists will appear after scanning your music' : 'Try searching another artist name'}
-                            actionLabel={artists.length === 0 ? 'Scan Library' : undefined}
-                            onAction={artists.length === 0 ? scanLibrary : undefined}
-                        />
-                    ) : (
-                        <FlashList<Artist>
-                            data={filteredArtists}
-                            keyExtractor={artistKeyExtractor}
-                            numColumns={3}
-                            renderItem={renderArtistItem}
-                            contentContainerStyle={gridContentStyle}
-                            getItemType={() => 'artist'}
-                            removeClippedSubviews={true}
-                            drawDistance={260}
-                            showsVerticalScrollIndicator={false}
-                        />
-                    )
-                ) : null}
-            </View>
-        </SafeAreaView>
+                    {tab === 'artists' ? (
+                        filteredArtists.length === 0 ? (
+                            <EmptyState
+                                icon="🎤"
+                                title={artists.length === 0 ? 'No artists yet' : 'No artists match your search'}
+                                description={artists.length === 0 ? 'Artists will appear after scanning your music' : 'Try searching another artist name'}
+                                actionLabel={artists.length === 0 ? 'Scan Library' : undefined}
+                                onAction={artists.length === 0 ? scanLibrary : undefined}
+                            />
+                        ) : (
+                            <FlashList
+                                data={filteredArtists}
+                                keyExtractor={artistKeyExtractor}
+                                numColumns={3}
+                                renderItem={renderArtistItem}
+                                contentContainerStyle={gridContentStyle}
+                                // @ts-ignore
+                                estimatedItemSize={ESTIMATED_ARTIST_SIZE}
+                                getItemType={getArtistItemType}
+                                // @ts-ignore
+                                overrideItemLayout={overrideArtistItemLayout}
+                                removeClippedSubviews
+                                showsVerticalScrollIndicator={false}
+                            />
+                        )
+                    ) : null}
+                </View>
+            </SafeAreaView>
+        </Animated.View>
     );
 }
 

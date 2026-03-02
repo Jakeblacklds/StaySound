@@ -1,8 +1,7 @@
-import { useTheme } from '@/src/theme';
+import { useAnimatedColors, useTheme } from '@/src/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
+
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -14,6 +13,7 @@ import Animated, {
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TAB_HEIGHT = 88;
 const TAB_BOTTOM = 10;
@@ -23,21 +23,24 @@ const TAB_ITEM_RADIUS = 16;
 const DROP_WIDTH = 56;
 const DROP_HEIGHT = 36;
 
-function getRouteAccent(routeName: string, fallback: string) {
-  switch (routeName) {
-    case 'index':
-      return '#7DB6FF';
-    case 'library':
-      return '#69D6B7';
-    case 'playlists':
-      return '#B8A6FF';
-    case 'tidal':
-      return '#68C8FF';
-    case 'settings':
-      return '#9AB1D9';
-    default:
-      return fallback;
-  }
+import { ColorTokens } from '@/src/types/theme';
+
+/**
+ * Get the color role for the active tab's bubble/drop
+ */
+function getRouteTabColors(
+  routeName: string,
+  colors: ColorTokens
+) {
+  // Use primary roles for ALL active tabs to ensure absolute consistency.
+  // This allows Dynamic Colors (album colors) to be the sole accent in the navbar.
+  const isSettings = routeName === 'settings';
+
+  return {
+    pill: isSettings ? colors.surfaceVariant : colors.primaryContainer,
+    icon: isSettings ? colors.onSurfaceVariant : (colors.onPrimaryContainer || colors.onPrimary),
+    accent: colors.primary
+  };
 }
 
 function withAlpha(color: string, alphaHex: string) {
@@ -98,7 +101,7 @@ const LiquidTabItem = memo(function LiquidTabItem({
       <Animated.View style={iconStyle}>
         <MaterialCommunityIcons name={icon as any} size={25} color={color} />
       </Animated.View>
-      <Animated.Text style={[styles.itemLabel, { color }, labelStyle]} numberOfLines={1}>
+      <Animated.Text style={[styles.itemLabel, { color: inactiveColor }, labelStyle]} numberOfLines={1}>
         {label}
       </Animated.Text>
     </Pressable>
@@ -107,6 +110,8 @@ const LiquidTabItem = memo(function LiquidTabItem({
 
 export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
+  const aC = useAnimatedColors(); // singleton animated shared values from ThemeProvider
   const [barWidth, setBarWidth] = useState(0);
 
   const visibleRoutes = useMemo(
@@ -125,13 +130,27 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
   const dropDirection = useSharedValue(0);
   const dropEnergy = useSharedValue(0);
 
-  const activeAccent = useMemo(() => {
-    const currentRoute = visibleRoutes[activeVisibleIndex];
-    return getRouteAccent(currentRoute?.name ?? '', theme.colors.primary);
-  }, [activeVisibleIndex, theme.colors.primary, visibleRoutes]);
-
+  // Animated versions of the accent color (derived from animated primary)
+  const activeAccent = theme.colors.primary; // for non-animated uses
   const activeAccent85 = `${activeAccent}85`;
   const activeAccentC4 = `${activeAccent}C4`;
+
+  // Animated style for the navbar background
+  const animNavBg = useAnimatedStyle(() => ({
+    backgroundColor: aC.surface.value,
+  }));
+
+  // Animated style for the drop fill and border
+  const animDropStyle = useAnimatedStyle(() => ({
+    backgroundColor: aC.primaryContainer.value,
+    borderColor: `${aC.primary.value}70`,
+  }));
+
+  // Shimmer inside the drop pill — must be top-level (Rules of Hooks)
+  const animDropShimmer = useAnimatedStyle(() => ({
+    backgroundColor: `${aC.primary.value}20`,
+    borderRadius: DROP_HEIGHT / 2,
+  }));
 
   useEffect(() => {
     if (slotWidth <= 0) return;
@@ -144,9 +163,9 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
 
     dropStretch.value = pulse;
     dropX.value = withSpring(targetX, {
-      damping: 16,
-      stiffness: 180,
-      mass: 0.88,
+      damping: 18,
+      stiffness: 150,
+      mass: 0.6,
     });
     dropStretch.value = withTiming(0, {
       duration: 520,
@@ -161,9 +180,6 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
   const dropStyle = useAnimatedStyle(() => ({
     transform: [
       { translateX: dropX.value },
-      { scaleX: interpolate(dropStretch.value, [0, 1], [1, 1.24]) },
-      { scaleY: interpolate(dropStretch.value, [0, 1], [1, 0.86]) },
-      { rotate: `${interpolate(dropStretch.value, [0, 1], [0, 7])}deg` },
     ],
   }));
 
@@ -231,7 +247,7 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
   }));
 
   return (
-    <View pointerEvents="box-none" style={styles.outer}>
+    <View pointerEvents="box-none" style={[styles.outer, { bottom: insets.bottom + TAB_BOTTOM }]}>
       <View
         style={[
           styles.wrapper,
@@ -241,15 +257,10 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
           },
         ]}
       >
-        <LinearGradient
-          colors={[
-            withAlpha(theme.colors.surface, 'F4'),
-            withAlpha(theme.colors.surfaceVariant, 'EE'),
-            withAlpha(theme.colors.primaryContainer, 'E2'),
-          ]}
-          start={{ x: 0, y: 0 }}
-          end={{ x: 1, y: 0.9 }}
-          style={StyleSheet.absoluteFill}
+        {/* Animated background gradient — responds to dynamic album colors */}
+        <Animated.View
+          pointerEvents="none"
+          style={[StyleSheet.absoluteFill, animNavBg, { borderRadius: TAB_RADIUS }]}
         />
 
         <View
@@ -261,74 +272,16 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
               pointerEvents="none"
               style={[
                 styles.drop,
-                {
-                  width: DROP_WIDTH,
-                  height: DROP_HEIGHT,
-                  borderColor: withAlpha(activeAccent, '70'),
-                  backgroundColor: withAlpha(theme.colors.primaryContainer, 'D0'),
-                },
-                accentColorStyle,
+                { width: DROP_WIDTH, height: DROP_HEIGHT },
+                animDropStyle,
                 dropStyle,
               ]}
             >
-              <LinearGradient
-                colors={[
-                  withAlpha(theme.colors.primary, '2E'),
-                  withAlpha(theme.colors.primaryContainer, '66'),
-                  withAlpha(theme.colors.primary, '1F'),
-                ]}
-                start={{ x: 0.1, y: 0 }}
-                end={{ x: 1, y: 1 }}
-                style={StyleSheet.absoluteFill}
+              {/* Inner shimmer overlay on top of the animated bg */}
+              <Animated.View
+                pointerEvents="none"
+                style={[StyleSheet.absoluteFill, animDropShimmer]}
               />
-              <Animated.View style={[styles.prismaticLeft, prismaticLeftStyle]}>
-                <LinearGradient
-                  colors={[withAlpha(activeAccent, 'B3'), 'rgba(255,255,255,0)']}
-                  start={{ x: 0, y: 0.2 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                />
-              </Animated.View>
-              <Animated.View style={[styles.prismaticRight, prismaticRightStyle]}>
-                <LinearGradient
-                  colors={['rgba(125,233,255,0.62)', 'rgba(255,255,255,0)']}
-                  start={{ x: 1, y: 0.2 }}
-                  end={{ x: 0, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                />
-              </Animated.View>
-              <Animated.View style={[StyleSheet.absoluteFill, lensDistortStyle]}>
-                <BlurView
-                  intensity={24}
-                  tint="light"
-                  style={StyleSheet.absoluteFill}
-                  experimentalBlurMethod="dimezisBlurView"
-                />
-              </Animated.View>
-              <Animated.View style={[styles.bottomRim, bottomRimStyle]}>
-                <LinearGradient
-                  colors={[withAlpha(activeAccent, '80'), withAlpha(activeAccent, '0A')]}
-                  start={{ x: 0.5, y: 1 }}
-                  end={{ x: 0.5, y: 0 }}
-                  style={StyleSheet.absoluteFill}
-                />
-              </Animated.View>
-              <Animated.View style={[styles.caustic, causticStyle]}>
-                <LinearGradient
-                  colors={['rgba(255,255,255,0.42)', 'rgba(255,255,255,0.06)', 'rgba(255,255,255,0)']}
-                  start={{ x: 0, y: 0.2 }}
-                  end={{ x: 1, y: 1 }}
-                  style={StyleSheet.absoluteFill}
-                />
-              </Animated.View>
-              <Animated.View style={[styles.reflection, reflectionStyle]}>
-                <LinearGradient
-                  colors={['rgba(255,255,255,0.65)', 'rgba(255,255,255,0.05)']}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 0.9 }}
-                  style={StyleSheet.absoluteFill}
-                />
-              </Animated.View>
             </Animated.View>
           ) : null}
 
@@ -379,7 +332,7 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
                   label={label}
                   icon={iconName}
                   focused={focused}
-                  activeColor={getRouteAccent(route.name, theme.colors.primary)}
+                  activeColor={theme.colors.onPrimaryContainer || theme.colors.onPrimary}
                   inactiveColor={theme.colors.onSurfaceVariant}
                   onPress={onPress}
                   onLongPress={onLongPress}
@@ -389,7 +342,7 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, 
           })}
         </View>
       </View>
-    </View>
+    </View >
   );
 });
 

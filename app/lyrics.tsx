@@ -4,6 +4,7 @@
 
 import { KaraokeLyrics } from '@/src/components/lyrics';
 import { LyricsView } from '@/src/components/player/LyricsView';
+import { LyricsSkeleton } from '@/src/components/ui';
 import { LyricsRepository } from '@/src/services';
 import { usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
@@ -114,10 +115,14 @@ export default function LyricsScreen() {
                 lyricsPayload ? (
                     <KaraokeLyrics lyricsJson={lyricsPayload} />
                 ) : (
-                    <View style={styles.emptyLyricsContainer}>
-                        <Text style={styles.emptyLyricsText}>
-                            {isLoadingLyrics ? 'Buscando lyrics sincronizadas...' : 'No hay lyrics para esta cancion'}
-                        </Text>
+                    <View style={[styles.emptyLyricsContainer, isLoadingLyrics && { justifyContent: 'flex-start', paddingTop: 60 }]}>
+                        {isLoadingLyrics ? (
+                            <LyricsSkeleton isDownloading={isLoadingLyrics} />
+                        ) : (
+                            <Text style={styles.emptyLyricsText}>
+                                No hay lyrics para esta cancion
+                            </Text>
+                        )}
                     </View>
                 )
             ) : (

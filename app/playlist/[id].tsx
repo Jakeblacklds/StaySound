@@ -9,8 +9,8 @@ import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Track } from '@/src/types';
 import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
 import * as FileSystem from 'expo-file-system/legacy';
+import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
@@ -30,7 +30,7 @@ export default function PlaylistDetailScreen() {
     const insets = useSafeAreaInsets();
     const scrollY = useSharedValue(0);
 
-    const { getPlaylist, getPlaylistTracks, getAllPlaylists, addToPlaylist, createPlaylist, updatePlaylist } = useLibraryStore();
+    const { getPlaylist, getPlaylistTracks, getAllPlaylists, addToPlaylist, createPlaylist, updatePlaylist, deleteTrack } = useLibraryStore();
     const play = usePlayerStore(state => state.play);
     const addToQueue = usePlayerStore(state => state.addToQueue);
     const toggleShuffle = usePlayerStore(state => state.toggleShuffle);
@@ -162,8 +162,9 @@ export default function PlaylistDetailScreen() {
             addToQueue,
             addToPlaylist,
             createPlaylist,
+            deleteTrack,
         });
-    }, [addToPlaylist, addToQueue, createPlaylist, getAllPlaylists]);
+    }, [addToPlaylist, addToQueue, createPlaylist, deleteTrack, getAllPlaylists]);
 
     const handleShuffle = useCallback(() => {
         if (tracks.length > 0) {
@@ -190,74 +191,76 @@ export default function PlaylistDetailScreen() {
         if (!playlist) return null;
 
         return (
-        <View style={styles.headerContent}>
-            <View style={styles.playlistInfo}>
-                <View style={[styles.playlistIcon, { backgroundColor: theme.colors.primaryContainer }]}>
-                    {playlist.artwork ? (
-                        <Image
-                            source={{ uri: playlist.artwork }}
-                            style={styles.playlistIconImage}
-                            contentFit="cover"
-                            transition={120}
-                        />
-                    ) : (
-                        <Text style={{ fontSize: 48 }}>🎶</Text>
-                    )}
-                </View>
-                <Text
-                    variant="headlineSmall"
-                    style={[styles.playlistTitle, { color: theme.colors.onBackground }]}
-                    numberOfLines={2}
-                >
-                    {playlist.name}
-                </Text>
-                {playlist.description ? (
+            <View style={styles.headerContent}>
+                <View style={styles.playlistInfo}>
+                    <View style={[styles.playlistIcon, { backgroundColor: theme.colors.primaryContainer }]}>
+                        {playlist.artwork ? (
+                            <Image
+                                source={{ uri: playlist.artwork }}
+                                style={styles.playlistIconImage}
+                                contentFit="cover"
+                                transition={120}
+                            />
+                        ) : (
+                            <Text style={{ fontSize: 48 }}>
+                                {playlist.id === 'playlist_liked' ? '❤️' : '🎶'}
+                            </Text>
+                        )}
+                    </View>
                     <Text
-                        variant="bodyMedium"
-                        style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', marginBottom: 8 }}
+                        variant="headlineSmall"
+                        style={[styles.playlistTitle, { color: theme.colors.onBackground }]}
                         numberOfLines={2}
                     >
-                        {playlist.description}
+                        {playlist.name}
                     </Text>
-                ) : null}
-                <Text
-                    variant="bodySmall"
-                    style={{ color: theme.colors.onSurfaceVariant }}
-                >
-                    {tracks.length} songs • {formatDuration(totalDuration)}
-                </Text>
-            </View>
+                    {playlist.description ? (
+                        <Text
+                            variant="bodyMedium"
+                            style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', marginBottom: 8 }}
+                            numberOfLines={2}
+                        >
+                            {playlist.description}
+                        </Text>
+                    ) : null}
+                    <Text
+                        variant="bodySmall"
+                        style={{ color: theme.colors.onSurfaceVariant }}
+                    >
+                        {tracks.length} songs • {formatDuration(totalDuration)}
+                    </Text>
+                </View>
 
-            <View style={styles.actions}>
-                <IconButton
-                    icon="play-circle"
-                    mode="contained"
-                    size={56}
-                    iconColor={theme.colors.onPrimary}
-                    containerColor={theme.colors.primary}
-                    onPress={handlePlayAll}
-                />
-                <IconButton
-                    icon="shuffle"
-                    mode="contained-tonal"
-                    size={32}
-                    iconColor={theme.colors.primary}
-                    onPress={handleShuffle}
-                />
-                <IconButton
-                    icon="pencil"
-                    mode="contained-tonal"
-                    size={32}
-                    iconColor={theme.colors.onSurfaceVariant}
-                    onPress={() => {
-                        setEditName(playlist.name);
-                        setEditDescription(playlist.description ?? '');
-                        setEditArtwork(playlist.artwork ?? '');
-                        setEditDialogVisible(true);
-                    }}
-                />
+                <View style={styles.actions}>
+                    <IconButton
+                        icon="play-circle"
+                        mode="contained"
+                        size={56}
+                        iconColor={theme.colors.onPrimary}
+                        containerColor={theme.colors.primary}
+                        onPress={handlePlayAll}
+                    />
+                    <IconButton
+                        icon="shuffle"
+                        mode="contained-tonal"
+                        size={32}
+                        iconColor={theme.colors.primary}
+                        onPress={handleShuffle}
+                    />
+                    <IconButton
+                        icon="pencil"
+                        mode="contained-tonal"
+                        size={32}
+                        iconColor={theme.colors.onSurfaceVariant}
+                        onPress={() => {
+                            setEditName(playlist.name);
+                            setEditDescription(playlist.description ?? '');
+                            setEditArtwork(playlist.artwork ?? '');
+                            setEditDialogVisible(true);
+                        }}
+                    />
+                </View>
             </View>
-        </View>
         );
     }, [
         handlePlayAll,
@@ -340,7 +343,7 @@ export default function PlaylistDetailScreen() {
                             style={styles.dialogInput}
                         />
                         <View style={styles.coverEditor}>
-                            <View style={[styles.coverPreview, { backgroundColor: theme.colors.surfaceVariant }]}> 
+                            <View style={[styles.coverPreview, { backgroundColor: theme.colors.surfaceVariant }]}>
                                 {editArtwork ? (
                                     <Image source={{ uri: editArtwork }} style={styles.coverPreviewImage} contentFit="cover" />
                                 ) : (

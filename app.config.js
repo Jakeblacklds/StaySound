@@ -2,7 +2,7 @@ const IS_DEV = process.env.APP_VARIANT === 'development';
 
 module.exports = {
     expo: {
-        name: IS_DEV ? "StaySound (Dev)" : "StaySound",
+        name: IS_DEV ? "StaySound dev" : "StaySound",
         slug: "StaySound",
         version: "1.0.0",
         orientation: "portrait",
@@ -17,7 +17,7 @@ module.exports = {
         },
         ios: {
             supportsTablet: true,
-            bundleIdentifier: IS_DEV ? "com.staysound.app.dev" : "com.staysound.app",
+            bundleIdentifier: IS_DEV ? "com.staysound.app.dev" : "com.staysound.app.pro",
             infoPlist: {
                 UIBackgroundModes: ["audio"],
                 NSAppleMusicUsageDescription: "StaySound needs access to your music library",
@@ -30,7 +30,7 @@ module.exports = {
                 backgroundColor: "#0a0a0a"
             },
             edgeToEdgeEnabled: true,
-            package: IS_DEV ? "com.staysound.app.dev" : "com.staysound.app",
+            package: IS_DEV ? "com.staysound.app.dev" : "com.staysound.app.pro",
             versionCode: 1,
             compileSdkVersion: 35,
             targetSdkVersion: 35,

@@ -14,7 +14,9 @@ import Animated, {
     useAnimatedStyle,
     useDerivedValue,
     useSharedValue,
+    withDelay,
     withSpring,
+    withTiming,
 } from 'react-native-reanimated';
 
 interface ProgressSliderProps {
@@ -35,7 +37,6 @@ export function ProgressSlider({
     textColor,
 }: ProgressSliderProps) {
     const { theme } = useTheme();
-    const positionSecond = usePlayerStore(s => Math.floor(s.position / 1000));
     const positionShared = usePlayerStore(s => s.positionShared);
 
     // Use provided colors or fall back to theme
@@ -45,7 +46,7 @@ export function ProgressSlider({
         text: textColor || theme.colors.onSurfaceVariant,
     };
 
-    const isDragging = useSharedValue(false);
+    const isDragging = useSharedValue(0); // 0 = false, 1 = true
     const dragProgress = useSharedValue(0);
     const sliderWidth = useSharedValue(0);
     const thumbScale = useSharedValue(1);
@@ -62,7 +63,7 @@ export function ProgressSlider({
 
     const panGesture = Gesture.Pan()
         .onBegin((e) => {
-            isDragging.value = true;
+            isDragging.value = 1;
             thumbScale.value = withSpring(1.5);
             if (sliderWidth.value > 0) {
                 dragProgress.value = e.x / sliderWidth.value;
@@ -74,9 +75,13 @@ export function ProgressSlider({
             }
         })
         .onEnd(() => {
-            isDragging.value = false;
             thumbScale.value = withSpring(1);
             runOnJS(handleSeek)(dragProgress.value);
+            // We delay setting isDragging back to 0 by a small amount (150ms)
+            // to allow the JS thread to process handleSeek and update positionShared
+            // before the UI thread switches back to displaying the native position.
+            // This prevents the "jumping" effect caused by bridge latency.
+            isDragging.value = withDelay(150, withTiming(0, { duration: 0 }));
         });
 
     const tapGesture = Gesture.Tap()
@@ -90,14 +95,14 @@ export function ProgressSlider({
     const composedGesture = Gesture.Race(panGesture, tapGesture);
 
     const progressStyle = useAnimatedStyle(() => {
-        const displayProgress = isDragging.value ? dragProgress.value : progress.value;
+        const displayProgress = isDragging.value > 0 ? dragProgress.value : progress.value;
         return {
             width: sliderWidth.value * displayProgress,
         };
     });
 
     const thumbStyle = useAnimatedStyle(() => {
-        const displayProgress = isDragging.value ? dragProgress.value : progress.value;
+        const displayProgress = isDragging.value > 0 ? dragProgress.value : progress.value;
         return {
             left: sliderWidth.value * displayProgress,
             transform: [
@@ -141,24 +146,31 @@ export function ProgressSlider({
 
             {/* Time labels */}
             {showTime && (
-                <View style={styles.timeContainer}>
-                    <Text
-                        variant="labelSmall"
-                        style={{ color: colors.text }}
-                    >
-                        {formatDuration(positionSecond * 1000)}
-                    </Text>
-                    <Text
-                        variant="labelSmall"
-                        style={{ color: colors.text }}
-                    >
-                        {formatDuration(duration)}
-                    </Text>
-                </View>
+                <TimeLabels duration={duration} color={colors.text} />
             )}
         </View>
     );
 }
+
+const TimeLabels = React.memo(({ duration, color }: { duration: number, color: string }) => {
+    const positionSecond = usePlayerStore(s => Math.floor(s.position / 1000));
+    return (
+        <View style={styles.timeContainer}>
+            <Text
+                variant="labelSmall"
+                style={{ color }}
+            >
+                {formatDuration(positionSecond * 1000)}
+            </Text>
+            <Text
+                variant="labelSmall"
+                style={{ color }}
+            >
+                {formatDuration(duration)}
+            </Text>
+        </View>
+    );
+});
 
 const styles = StyleSheet.create({
     container: {

@@ -102,6 +102,10 @@ class KaraokeViewModule : Module() {
                 view.setIsLineByLine(value ?: false)
             }
 
+            Prop("enableSeekOnTap") { view: KaraokeView, value: Boolean? ->
+                view.setSeekOnTapEnabled(value ?: false)
+            }
+
             // Events emitted to JS
             Events("onLineChange", "onWordChange", "onSeek")
         }

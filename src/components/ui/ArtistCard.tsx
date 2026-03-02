@@ -7,12 +7,12 @@
  * For the grid listing, we show local data only (initials or cached artwork).
  */
 
-import { useTheme } from '@/src/theme';
+import { useAnimatedColors, useTheme } from '@/src/theme';
 import { Artist } from '@/src/types';
 import { Image as ExpoImage } from 'expo-image';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Text } from 'react-native-paper';
+import Animated, { useAnimatedStyle } from 'react-native-reanimated';
 
 interface ArtistCardProps {
     artist: Artist;
@@ -28,6 +28,7 @@ const SIZES = {
 
 function ArtistCardInner({ artist, size = 'medium', onPress }: ArtistCardProps) {
     const { theme } = useTheme();
+    const aC = useAnimatedColors();
     const isMaterial3 = theme.id.startsWith('material3');
     const cardSize = SIZES[size];
     const [imageFailed, setImageFailed] = useState(false);
@@ -60,7 +61,7 @@ function ArtistCardInner({ artist, size = 'medium', onPress }: ArtistCardProps) 
         const base: any[] = [
             styles.imageContainer,
             {
-                backgroundColor: theme.colors.primaryContainer,
+                // backgroundColor excluded — driven by animatedCircleStyle
                 width: cardSize,
                 height: cardSize,
                 borderRadius,
@@ -87,7 +88,24 @@ function ArtistCardInner({ artist, size = 'medium', onPress }: ArtistCardProps) 
         }
 
         return base;
-    }, [theme.colors.primaryContainer, cardSize, borderRadius, cardStyles.variant, globalStyles.borderWidth, globalStyles.borderColor, isMaterial3, theme.colors.outline, theme.colors.shadow]);
+    }, [cardSize, borderRadius, cardStyles.variant, globalStyles.borderWidth, globalStyles.borderColor, isMaterial3, theme.colors.outline, theme.colors.shadow]);
+
+    // Animated circle background + initials color — UI-thread worklets, zero JS
+    // overhead during scroll. Only executes during the 700ms color transition.
+    const animatedCircleStyle = useAnimatedStyle(() => ({
+        backgroundColor: aC.primaryContainer.value,
+    }));
+    const animatedInitialsStyle = useAnimatedStyle(() => ({
+        color: aC.onPrimaryContainer.value,
+    }));
+
+    // Artist name / subtitle text colors — cross-fade with the background
+    const animatedNameStyle = useAnimatedStyle(() => ({
+        color: aC.onSurface.value,
+    }));
+    const animatedCountStyle = useAnimatedStyle(() => ({
+        color: aC.onSurfaceVariant.value,
+    }));
 
     const containerWidth = useMemo(() => ({ width: cardSize }), [cardSize]);
 
@@ -100,7 +118,7 @@ function ArtistCardInner({ artist, size = 'medium', onPress }: ArtistCardProps) 
                 pressed && styles.pressed,
             ]}
         >
-            <View style={imageContainerStyle}>
+            <Animated.View style={[imageContainerStyle, animatedCircleStyle]}>
                 {artworkUri && !imageFailed ? (
                     <ExpoImage
                         source={{ uri: artworkUri }}
@@ -112,46 +130,44 @@ function ArtistCardInner({ artist, size = 'medium', onPress }: ArtistCardProps) 
                         onError={() => setImageFailed(true)}
                     />
                 ) : (
-                    <Text
+                    <Animated.Text
                         style={[
                             styles.initials,
                             {
-                                color: theme.colors.onPrimaryContainer,
                                 fontSize: cardSize * 0.3,
-                                fontFamily: theme.typography.fontFamily.bold
-                            }
+                                fontFamily: theme.typography.fontFamily.bold,
+                            },
+                            animatedInitialsStyle,
                         ]}
                     >
                         {initials}
-                    </Text>
+                    </Animated.Text>
                 )}
-            </View>
+            </Animated.View>
 
             <View style={styles.info}>
-                <Text
-                    variant="bodyMedium"
+                <Animated.Text
                     numberOfLines={1}
                     style={[
                         styles.name,
                         {
-                            color: theme.colors.onSurface,
                             fontFamily: theme.typography.fontFamily.bold,
-                            textTransform: cardStyles.variant === 'brutal' ? 'uppercase' : 'none'
-                        }
+                            textTransform: cardStyles.variant === 'brutal' ? 'uppercase' : 'none',
+                        },
+                        animatedNameStyle,
                     ]}
                 >
                     {artist.name}
-                </Text>
-                <Text
-                    variant="bodySmall"
-                    style={{
-                        color: theme.colors.onSurfaceVariant,
-                        textAlign: 'center',
-                        fontFamily: theme.typography.fontFamily.regular
-                    }}
+                </Animated.Text>
+                <Animated.Text
+                    style={[
+                        styles.albumCount,
+                        { fontFamily: theme.typography.fontFamily.regular },
+                        animatedCountStyle,
+                    ]}
                 >
                     {artist.albumCount} album{artist.albumCount !== 1 ? 's' : ''}
-                </Text>
+                </Animated.Text>
             </View>
         </Pressable>
     );
@@ -192,6 +208,12 @@ const styles = StyleSheet.create({
     },
     name: {
         marginTop: 8,
+        textAlign: 'center',
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    albumCount: {
+        fontSize: 11,
         textAlign: 'center',
     },
     info: {

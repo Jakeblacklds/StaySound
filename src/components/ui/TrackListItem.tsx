@@ -1,19 +1,28 @@
 /**
  * TrackListItem - Single track row for lists
  * 
- * Performance: NO Reanimated here. Each shared value + worklet per item
- * adds up fast in lists with 200+ items, killing scroll performance.
- * Uses plain Pressable with native ripple for zero-cost press feedback.
- * Playing state is passed from parent to avoid hundreds of store subscribers.
+ * Performance notes:
+ * - NO per-item Reanimated animations tied to scroll (position, opacity, etc.) —
+ *   those would run a worklet every frame per cell, killing 120fps scroll.
+ * - Two useAnimatedStyle hooks read singleton shared values from ThemeProvider
+ *   (surface + surfaceVariant colors). Their worklets only execute during the
+ *   700ms dynamic-color transition when the song changes — never during scroll.
+ *   FlashList recycles ~15-20 cells max, so overhead is negligible.
+ * - Uses plain Pressable with native ripple for zero-cost press feedback.
+ * - Playing state is passed from parent to avoid hundreds of store subscribers.
  */
 
 import { formatDuration } from '@/src/services';
-import { useTheme } from '@/src/theme';
+import { useAnimatedColors, useTheme } from '@/src/theme';
 import { Track } from '@/src/types';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { IconButton, Text } from 'react-native-paper';
+import { Text } from 'react-native-paper';
+import Animated, { useAnimatedProps, useAnimatedStyle } from 'react-native-reanimated';
+
+const AnimatedIcon = Animated.createAnimatedComponent(MaterialCommunityIcons);
 
 interface TrackListItemProps {
     track: Track;
@@ -39,6 +48,7 @@ function TrackListItemInner({
     optionsIconColor,
 }: TrackListItemProps) {
     const { theme } = useTheme();
+    const aC = useAnimatedColors();
     const isMaterial3 = theme.id.startsWith('material3');
 
     const isPlaying = !!isPlayingProp;
@@ -48,11 +58,12 @@ function TrackListItemInner({
     const globalStyles = theme.components.global;
 
     // Static parts of Styles (Pre-calculated)
-    const containerStyle = useMemo(() => [
+    // Note: backgroundColor is handled via animatedContainerStyle to react to dynamic color changes
+    // without requiring a React re-render (which React.memo's custom comparator would block).
+    const containerBaseStyle = useMemo(() => [
         styles.container,
         {
             height: trackStyles.height,
-            backgroundColor: isMaterial3 ? `${theme.colors.surface}CC` : 'transparent',
             borderRadius: trackStyles.variant === 'glass' ? 16 : globalStyles.buttonRadius,
             borderWidth: trackStyles.variant === 'brutal' ? globalStyles.borderWidth : (isMaterial3 ? 1 : 0),
             borderColor: trackStyles.variant === 'brutal' ? globalStyles.borderColor : (isMaterial3 ? `${theme.colors.outline}4D` : globalStyles.borderColor),
@@ -65,109 +76,165 @@ function TrackListItemInner({
             shadowRadius: 0,
             elevation: 0,
         }
-    ], [trackStyles.height, trackStyles.variant, globalStyles.buttonRadius, globalStyles.borderWidth, globalStyles.borderColor, globalStyles.screenPadding, isMaterial3, theme.colors.surface, theme.colors.outline]);
+    ], [trackStyles.height, trackStyles.variant, globalStyles.buttonRadius, globalStyles.borderWidth, globalStyles.borderColor, globalStyles.screenPadding, isMaterial3, theme.colors.outline]);
 
-    const artworkContainerStyle = useMemo(() => [
+    // Animated background — runs on the UI thread, bypasses React.memo block
+    const animatedContainerStyle = useAnimatedStyle(() => ({
+        backgroundColor: isMaterial3 ? aC.surface.value : 'transparent',
+    }));
+
+    const animatedArtworkStyle = useAnimatedStyle(() => ({
+        backgroundColor: aC.surfaceVariant.value,
+    }));
+
+    // Playing highlight — animated so it cross-fades smoothly on song change
+    const suffix = isMaterial3 ? '66' : '40';
+    const animatedPlayingStyle = useAnimatedStyle(() => ({
+        backgroundColor: aC.primaryContainer.value + suffix,
+    }));
+
+    const artworkContainerBaseStyle = useMemo(() => [
         styles.artwork,
         {
-            backgroundColor: theme.colors.surfaceVariant,
             width: trackStyles.artworkSize,
             height: trackStyles.artworkSize,
             borderRadius: trackStyles.artworkRadius,
         }
-    ], [theme.colors.surfaceVariant, trackStyles.artworkSize, trackStyles.artworkRadius]);
+    ], [trackStyles.artworkSize, trackStyles.artworkRadius]);
 
-    const titleColor = isPlaying ? theme.colors.primary : theme.colors.onSurface;
     const subtitle = track.album && track.album !== 'Unknown Album'
         ? `${track.artist} - ${track.album}`
         : track.artist;
 
+    // Animated text colors — UI-thread worklets, only active during the 700ms transition
+    const animatedTitleStyle = useAnimatedStyle(() => ({
+        color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurface.value,
+    }));
+    const animatedSubtleStyle = useAnimatedStyle(() => ({
+        color: aC.onSurfaceVariant.value,
+    }));
+    const animatedIndexStyle = useAnimatedStyle(() => ({
+        color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurfaceVariant.value,
+    }));
+
+    const animatedIconProps = useAnimatedProps(() => ({
+        color: optionsIconColor ?? aC.onSurfaceVariant.value,
+    }));
+
+    const animatedHeartProps = useAnimatedProps(() => ({
+        color: aC.primary.value,
+    }));
+
     return (
-        <Pressable
-            onPress={() => onPress(track)}
-            android_ripple={{ color: theme.colors.primary + '15' }}
-            style={({ pressed }) => [
-                containerStyle,
-                pressed && styles.pressed,
-            ]}
-        >
+        <Animated.View style={[containerBaseStyle, animatedContainerStyle]}>
+            {/* Playing highlight — at Animated.View level so it fills the full container */}
             {isPlaying ? (
-                <View
+                <Animated.View
                     pointerEvents="none"
                     style={[
                         StyleSheet.absoluteFillObject,
                         {
-                            backgroundColor: theme.colors.primaryContainer + (isMaterial3 ? '66' : '40'),
                             borderRadius: trackStyles.variant === 'glass' ? 16 : globalStyles.buttonRadius,
                         },
+                        animatedPlayingStyle,
                     ]}
                 />
             ) : null}
+            <Pressable
+                onPress={() => onPress(track)}
+                android_ripple={{ color: theme.colors.primary + '15' }}
+                style={({ pressed }) => [
+                    styles.pressableInner,
+                    pressed && styles.pressed,
+                ]}
+            >
 
-            {/* Index or Artwork */}
-            {showIndex && index !== undefined ? (
-                <View style={[styles.indexContainer, { width: trackStyles.artworkSize || 40 }]}>
-                    <Text
-                        variant="bodyMedium"
-                        style={[styles.indexText, { color: isPlaying ? theme.colors.primary : theme.colors.onSurfaceVariant }]}
-                    >
-                        {isPlaying ? '♪' : (index + 1).toString().padStart(2, '0')}
-                    </Text>
-                </View>
-            ) : showArtwork ? (
-                <View style={artworkContainerStyle}>
-                    {track.artwork ? (
-                        <Image
-                            source={{ uri: track.artwork }}
-                            style={styles.artworkImage}
-                            contentFit="cover"
-                            recyclingKey={track.id}
-                            cachePolicy="memory-disk"
-                            transition={0}
-                        />
-                    ) : (
-                        <Text style={{ fontSize: trackStyles.artworkSize * 0.4 }}>🎵</Text>
-                    )}
-                </View>
-            ) : null}
-
-            {/* Track Info */}
-            <View style={styles.info}>
-                <Text
-                    variant="bodyLarge"
-                    numberOfLines={1}
-                    style={[styles.title, { color: titleColor, fontFamily: theme.typography.fontFamily.bold, textTransform: trackStyles.variant === 'cyber' ? 'uppercase' as const : 'none' as const, }]}
-                >
-                    {track.title}
-                </Text>
-                <Text
-                    variant="bodySmall"
-                    numberOfLines={1}
-                    style={{ color: theme.colors.onSurfaceVariant, fontFamily: theme.typography.fontFamily.regular, letterSpacing: trackStyles.variant === 'cyber' ? 1 : 0, }}
-                >
-                    {subtitle}
-                </Text>
-            </View>
-
-            {/* Duration */}
-            <View style={styles.rightContainer}>
-                <Text
-                    variant="bodySmall"
-                    style={{ color: theme.colors.onSurfaceVariant, fontFamily: theme.typography.fontFamily.medium, }}
-                >
-                    {formatDuration(track.duration)}
-                </Text>
-                {onOptionsPress ? (
-                    <IconButton
-                        icon={optionsIcon ?? 'playlist-plus'}
-                        size={18}
-                        iconColor={optionsIconColor ?? theme.colors.onSurfaceVariant}
-                        style={styles.queueBtn}
-                        onPress={() => onOptionsPress(track)}
-                    />
+                {/* Index or Artwork */}
+                {showIndex && index !== undefined ? (
+                    <View style={[styles.indexContainer, { width: trackStyles.artworkSize || 40 }]}>
+                        <Animated.Text style={[styles.indexText, animatedIndexStyle]}>
+                            {isPlaying ? '♪' : (index + 1).toString().padStart(2, '0')}
+                        </Animated.Text>
+                    </View>
+                ) : showArtwork ? (
+                    <Animated.View style={[artworkContainerBaseStyle, animatedArtworkStyle]}>
+                        {track.artwork || track.artworkThumb ? (
+                            <Image
+                                source={{ uri: track.artworkThumb || track.artwork }}
+                                style={styles.artworkImage}
+                                contentFit="cover"
+                                recyclingKey={track.id}
+                                cachePolicy="memory-disk"
+                                transition={0}
+                            />
+                        ) : (
+                            <Text style={{ fontSize: trackStyles.artworkSize * 0.4 }}>🎵</Text>
+                        )}
+                    </Animated.View>
                 ) : null}
-            </View>
-        </Pressable>
+
+                {/* Track Info */}
+                <View style={styles.info}>
+                    <Animated.Text
+                        numberOfLines={1}
+                        style={[
+                            styles.title,
+                            {
+                                fontFamily: theme.typography.fontFamily.bold,
+                                textTransform: trackStyles.variant === 'cyber' ? 'uppercase' as const : 'none' as const,
+                            },
+                            animatedTitleStyle,
+                        ]}
+                    >
+                        {track.title}
+                    </Animated.Text>
+                    <Animated.Text
+                        numberOfLines={1}
+                        style={[
+                            styles.subtitle,
+                            {
+                                fontFamily: theme.typography.fontFamily.regular,
+                                letterSpacing: trackStyles.variant === 'cyber' ? 1 : 0,
+                            },
+                            animatedSubtleStyle,
+                        ]}
+                    >
+                        {subtitle}
+                    </Animated.Text>
+                </View>
+
+                {/* Duration */}
+                <View style={styles.rightContainer}>
+                    <Animated.Text
+                        style={[styles.duration, { fontFamily: theme.typography.fontFamily.medium }, animatedSubtleStyle]}
+                    >
+                        {formatDuration(track.duration)}
+                    </Animated.Text>
+                    {track.favorite && (
+                        <AnimatedIcon
+                            name="heart"
+                            size={12}
+                            animatedProps={animatedHeartProps}
+                            style={{ marginLeft: 6, opacity: 0.9 }}
+                        />
+                    )}
+                    {onOptionsPress ? (
+                        <Pressable
+                            hitSlop={8}
+                            android_ripple={{ color: theme.colors.primary + '15', borderless: true }}
+                            style={styles.queueBtn}
+                            onPress={() => onOptionsPress(track)}
+                        >
+                            <AnimatedIcon
+                                name={(optionsIcon ?? 'dots-vertical') as any}
+                                size={19}
+                                animatedProps={animatedIconProps}
+                            />
+                        </Pressable>
+                    ) : null}
+                </View>
+            </Pressable>
+        </Animated.View>
     );
 }
 
@@ -180,7 +247,9 @@ function arePropsEqual(prev: TrackListItemProps, next: TrackListItemProps): bool
         prev.track.artist === next.track.artist &&
         prev.track.album === next.track.album &&
         prev.track.artwork === next.track.artwork &&
+        prev.track.artworkThumb === next.track.artworkThumb &&
         prev.track.duration === next.track.duration &&
+        prev.track.favorite === next.track.favorite &&
         prev.index === next.index &&
         prev.isPlaying === next.isPlaying &&
         prev.showArtwork === next.showArtwork &&
@@ -195,6 +264,11 @@ export default TrackListItem;
 
 const styles = StyleSheet.create({
     container: {
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    pressableInner: {
+        flex: 1,
         flexDirection: 'row',
         alignItems: 'center',
         paddingHorizontal: 12,
@@ -234,11 +308,18 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     queueBtn: {
-        margin: 0,
-        marginLeft: 2,
+        marginLeft: 8,
+        padding: 4,
+        borderRadius: 99,
     },
     indexText: {
         fontSize: 18,
+    },
+    subtitle: {
+        fontSize: 13,
+    },
+    duration: {
+        fontSize: 12,
     },
     divider: {
         height: StyleSheet.hairlineWidth,

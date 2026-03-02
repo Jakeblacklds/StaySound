@@ -2,11 +2,9 @@ import { EmptyState, PlaylistCard, TrackListItem } from '@/src/components/ui';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Playlist, Track } from '@/src/types';
-import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { Animated, Easing } from 'react-native';
+import { Animated, Easing, FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Dialog, Portal, Searchbar, Snackbar, Text, TextInput } from 'react-native-paper';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -166,7 +164,7 @@ export default function PlaylistsScreen() {
   const renderLibraryMode = () => {
     if (playlists.length === 0) {
       return (
-        <View style={[styles.emptyContainer, { paddingBottom: bottomSafePadding * 0.45 }]}>
+        <View style={styles.emptyContainer}>
           <EmptyState
             icon="🎼"
             title="No playlists yet"
@@ -200,7 +198,7 @@ export default function PlaylistsScreen() {
   const renderBuilderMode = () => {
     if (playlists.length === 0) {
       return (
-        <View style={[styles.emptyContainer, { paddingBottom: bottomSafePadding * 0.45 }]}>
+        <View style={styles.emptyContainer}>
           <EmptyState
             icon="🧩"
             title="Create a playlist first"
@@ -273,17 +271,18 @@ export default function PlaylistsScreen() {
         />
 
         {selectedPlaylist ? (
-          <FlashList
-            data={filteredTracks}
-            keyExtractor={trackKeyExtractor}
-            renderItem={renderBuilderTrackItem}
-            showsVerticalScrollIndicator={false}
-            contentContainerStyle={[styles.builderListContent, { paddingBottom: bottomSafePadding }]}
-            drawDistance={280}
-            removeClippedSubviews={false}
-          />
+          <View style={{ flex: 1 }}>
+            <FlatList
+              data={filteredTracks}
+              keyExtractor={trackKeyExtractor}
+              renderItem={renderBuilderTrackItem}
+              showsVerticalScrollIndicator={false}
+              contentContainerStyle={[styles.builderListContent, { paddingBottom: bottomSafePadding }]}
+              removeClippedSubviews={true}
+            />
+          </View>
         ) : (
-          <View style={[styles.emptyContainer, { paddingBottom: bottomSafePadding * 0.45 }]}>
+          <View style={styles.emptyContainer}>
             <Text style={{ color: theme.colors.onSurfaceVariant }}>Select a playlist to start adding tracks.</Text>
           </View>
         )}
@@ -300,7 +299,7 @@ export default function PlaylistsScreen() {
         </Button>
       </View>
 
-      <View style={[styles.modeRow, { borderBottomColor: theme.colors.outline }]}> 
+      <View style={[styles.modeRow, { borderBottomColor: theme.colors.outline }]}>
         <Pressable style={styles.modeTab} onPress={() => setMode('library')}>
           <Text
             style={[

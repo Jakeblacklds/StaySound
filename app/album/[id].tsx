@@ -36,6 +36,7 @@ export default function AlbumDetailScreen() {
     const getAllPlaylists = useLibraryStore(state => state.getAllPlaylists);
     const createPlaylist = useLibraryStore(state => state.createPlaylist);
     const addToPlaylist = useLibraryStore(state => state.addToPlaylist);
+    const deleteTrack = useLibraryStore(state => state.deleteTrack);
     const play = usePlayerStore(state => state.play);
     const addToQueue = usePlayerStore(state => state.addToQueue);
     const toggleShuffle = usePlayerStore(state => state.toggleShuffle);
@@ -84,8 +85,9 @@ export default function AlbumDetailScreen() {
             addToQueue,
             addToPlaylist,
             createPlaylist,
+            deleteTrack,
         });
-    }, [addToPlaylist, addToQueue, createPlaylist, getAllPlaylists]);
+    }, [addToPlaylist, addToQueue, createPlaylist, deleteTrack, getAllPlaylists]);
 
     const handlePlayAll = useCallback(() => {
         if (tracks.length > 0) {

@@ -1,6 +1,7 @@
 import { AlbumCard, EmptyState } from '@/src/components/ui';
+import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
-import { useTheme } from '@/src/theme';
+import { useAnimatedColors, useTheme } from '@/src/theme';
 import { Album, Artist, Track } from '@/src/types';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
@@ -16,6 +17,7 @@ import {
 import { Text } from 'react-native-paper';
 import Animated, {
   FadeInDown,
+  useAnimatedStyle,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
@@ -25,19 +27,21 @@ const ARTIST_CARD_SIZE = 80;
 // ─── Greeting based on time of day ──────────────────────────
 function getGreeting(): string {
   const hour = new Date().getHours();
-  if (hour < 6) return 'Good night';
-  if (hour < 12) return 'Good morning';
-  if (hour < 18) return 'Good afternoon';
-  return 'Good evening';
+  if (hour < 6) return 'Buenas noches';
+  if (hour < 12) return 'Buenos días';
+  if (hour < 18) return 'Buenas tardes';
+  return 'Buenas noches';
 }
 
 // ─── Horizontal Track Card (Optimized) ────────────────────
 const TrackCard = React.memo(({
   track,
   onPress,
+  onLongPress,
 }: {
   track: Track;
   onPress: (track: Track) => void;
+  onLongPress?: (track: Track) => void;
 }) => {
   const { theme } = useTheme();
 
@@ -61,6 +65,8 @@ const TrackCard = React.memo(({
   return (
     <Pressable
       onPress={() => onPress(track)}
+      onLongPress={() => onLongPress?.(track)}
+      delayLongPress={200}
       style={({ pressed }) => [
         styles.trackCard,
         cardBgStyle,
@@ -102,6 +108,7 @@ const TrackCard = React.memo(({
     </Pressable>
   );
 });
+
 
 // ─── Artist Bubble (Optimized) ────────────────────────────
 const ArtistBubble = React.memo(({
@@ -217,7 +224,7 @@ const SectionHeader = React.memo(({
       {onSeeAll != null && (
         <Pressable onPress={onSeeAll} hitSlop={12}>
           <Text variant="labelMedium" style={seeAllStyle}>
-            See all
+            Ver todo
           </Text>
         </Pressable>
       )}
@@ -308,7 +315,7 @@ const NowPlayingCard = React.memo(({
             variant="labelSmall"
             style={[styles.nowPlayingLabel, { color: theme.colors.primary }]}
           >
-            NOW PLAYING
+            REPRODUCIENDO
           </Text>
           <Text
             variant="bodyLarge"
@@ -346,8 +353,13 @@ export default function HomeScreen() {
   const artistsMap = useLibraryStore(s => s.artists);
   const isScanning = useLibraryStore(s => s.isScanning);
   const scanLibrary = useLibraryStore(s => s.scanLibrary);
+  const getAllPlaylists = useLibraryStore(s => s.getAllPlaylists);
+  const createPlaylist = useLibraryStore(s => s.createPlaylist);
+  const addToPlaylist = useLibraryStore(s => s.addToPlaylist);
+  const deleteTrack = useLibraryStore(s => s.deleteTrack);
 
   const play = usePlayerStore(s => s.play);
+  const addToQueue = usePlayerStore(s => s.addToQueue);
   const toggleShuffle = usePlayerStore(s => s.toggleShuffle);
   const shuffleEnabled = usePlayerStore(s => s.shuffleEnabled);
   const recentlyPlayed = usePlayerStore(s => s.recentlyPlayed);
@@ -406,6 +418,18 @@ export default function HomeScreen() {
     play(track, tracks);
   }, [tracks, play]);
 
+  const handleTrackLongPress = useCallback((track: Track) => {
+    openTrackActionsMenu({
+      track,
+      playlists: getAllPlaylists(),
+      addToQueue,
+      addToPlaylist,
+      createPlaylist,
+      deleteTrack,
+    });
+  }, [addToPlaylist, addToQueue, createPlaylist, deleteTrack, getAllPlaylists]);
+
+
   const handleAlbumPress = useCallback((album: Album) => {
     router.push({ pathname: '/album/[id]', params: { id: album.id } });
   }, []);
@@ -419,8 +443,9 @@ export default function HomeScreen() {
 
   // Render helpers
   const renderTrackCard = useCallback(({ item }: { item: Track }) => (
-    <TrackCard track={item} onPress={handleTrackPress} />
-  ), [handleTrackPress]);
+    <TrackCard track={item} onPress={handleTrackPress} onLongPress={handleTrackLongPress} />
+  ), [handleTrackPress, handleTrackLongPress]);
+
 
   const renderArtistBubble = useCallback(({ item }: { item: Artist }) => (
     <ArtistBubble artist={item} onPress={handleArtistPress} />
@@ -436,9 +461,10 @@ export default function HomeScreen() {
     index,
   }), []);
 
-  const containerStyle = useMemo(() => ({
-    backgroundColor: theme.colors.background
-  }), [theme.colors.background]);
+  const aC = useAnimatedColors();
+  const animBg = useAnimatedStyle(() => ({
+    backgroundColor: aC.background.value,
+  }));
 
   const heroCardStyle = useMemo(() => ({
     backgroundColor: theme.colors.surface + '80',
@@ -451,149 +477,151 @@ export default function HomeScreen() {
   }), [theme.colors.surface, theme.colors.outline]);
 
   return (
-    <ScrollView
-      style={[styles.container, containerStyle]}
-      contentContainerStyle={[styles.content, { paddingTop: insets.top + 6 }]}
-      showsVerticalScrollIndicator={false}
-      removeClippedSubviews
-      decelerationRate="fast"
-    >
-      <Animated.View entering={FadeInDown.duration(400)} style={[styles.heroCard, heroCardStyle]}>
-        <View style={styles.header}>
-          <View style={styles.headerTop}>
-            <View style={styles.headerTextContainer}>
-              <Text
-                variant="bodyMedium"
-                style={[styles.greetingText, { color: theme.colors.onSurfaceVariant }]}
-              >
-                {getGreeting()}
-              </Text>
-              <Text
-                variant="headlineMedium"
-                style={[styles.appTitle, { color: theme.colors.onBackground }]}
-              >
-                StaySound
-              </Text>
-            </View>
-            <Pressable
-              onPress={goToSettings}
-              style={[styles.settingsBtn, { backgroundColor: theme.colors.surfaceVariant + '66' }]}
-            >
-              <MaterialCommunityIcons name="cog-outline" size={22} color={theme.colors.onSurfaceVariant} />
-            </Pressable>
-          </View>
-        </View>
-
-        {hasMusic && (
-          <>
-            <View style={styles.quickChipRow}>
-              <QuickChip icon="play-circle" label="Play All" onPress={handlePlayAll} color={theme.colors.onPrimary} bgColor={theme.colors.primary} />
-              <QuickChip icon="shuffle-variant" label="Shuffle" onPress={handleShuffle} color={theme.colors.primary} bgColor={theme.colors.primaryContainer + '90'} />
-              <QuickChip icon="playlist-music" label="Library" onPress={goToLibrary} color={theme.colors.onSurfaceVariant} bgColor={theme.colors.surfaceVariant + '75'} />
-            </View>
-
-            <View style={styles.statsRow}>
-              <StatChip icon="music-note" value={tracks.length} label="songs" />
-              <StatChip icon="album" value={albums.length} label="albums" />
-              <StatChip icon="account-music" value={artists.length} label="artists" />
-            </View>
-          </>
-        )}
-      </Animated.View>
-
-      {recentlyPlayedSlice.length > 0 && (
-        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-          <SectionHeader title="Recently Played" icon="history" />
-          <FlashList
-            data={recentlyPlayedSlice}
-            renderItem={renderTrackCard}
-            keyExtractor={trackKeyExtractor}
-            ItemSeparatorComponent={renderHorizontalSeparator}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalList}
-            drawDistance={TRACK_CARD_WIDTH * 2}
-          />
-        </View>
-      )}
-
-      {recentlyAddedTracks.length > 0 && (
-        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-          <SectionHeader title="Recently Added" icon="clock-plus-outline" onSeeAll={goToLibrary} />
-          <FlashList
-            data={recentlyAddedTracks}
-            renderItem={renderTrackCard}
-            keyExtractor={trackKeyExtractor}
-            ItemSeparatorComponent={renderHorizontalSeparator}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalList}
-            drawDistance={TRACK_CARD_WIDTH * 2}
-          />
-        </View>
-      )}
-
-      {recentlyAddedAlbums.length > 0 && (
-        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-          <SectionHeader title="Albums" icon="album" onSeeAll={goToLibrary} />
-          <View style={styles.albumGrid}>
-            {recentlyAddedAlbums.map((album) => (
-              <View key={album.id} style={styles.albumWrapper}>
-                <AlbumCard album={album} size="medium" onPress={handleAlbumPress} />
+    <Animated.View style={[styles.container, animBg]}>
+      <ScrollView
+        style={styles.container}
+        contentContainerStyle={[styles.content, { paddingTop: insets.top + 6, paddingBottom: styles.content.paddingBottom + insets.bottom }]}
+        showsVerticalScrollIndicator={false}
+        removeClippedSubviews
+        decelerationRate="fast"
+      >
+        <Animated.View entering={FadeInDown.duration(400)} style={[styles.heroCard, heroCardStyle]}>
+          <View style={styles.header}>
+            <View style={styles.headerTop}>
+              <View style={styles.headerTextContainer}>
+                <Text
+                  variant="bodyMedium"
+                  style={[styles.greetingText, { color: theme.colors.onSurfaceVariant }]}
+                >
+                  {getGreeting()}
+                </Text>
+                <Text
+                  variant="headlineMedium"
+                  style={[styles.appTitle, { color: theme.colors.onBackground }]}
+                >
+                  StaySound
+                </Text>
               </View>
-            ))}
+              <Pressable
+                onPress={goToSettings}
+                style={[styles.settingsBtn, { backgroundColor: theme.colors.surfaceVariant + '66' }]}
+              >
+                <MaterialCommunityIcons name="cog-outline" size={22} color={theme.colors.onSurfaceVariant} />
+              </Pressable>
+            </View>
           </View>
-        </View>
-      )}
 
-      {topArtists.length > 0 && (
-        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-          <SectionHeader title="Your Artists" icon="account-group" onSeeAll={goToLibrary} />
-          <FlashList
-            data={topArtists}
-            renderItem={renderArtistBubble}
-            keyExtractor={artistKeyExtractor}
-            ItemSeparatorComponent={renderHorizontalSeparator}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalList}
-            drawDistance={ARTIST_CARD_SIZE * 2}
-          />
-        </View>
-      )}
+          {hasMusic && (
+            <>
+              <View style={styles.quickChipRow}>
+                <QuickChip icon="play-circle" label="Reproducir" onPress={handlePlayAll} color={theme.colors.onPrimary} bgColor={theme.colors.primary} />
+                <QuickChip icon="shuffle-variant" label="Aleatorio" onPress={handleShuffle} color={theme.colors.primary} bgColor={theme.colors.primaryContainer + '90'} />
+                <QuickChip icon="playlist-music" label="Biblioteca" onPress={goToLibrary} color={theme.colors.onSurfaceVariant} bgColor={theme.colors.surfaceVariant + '75'} />
+              </View>
 
-      {quickPicks.length > 0 && (
-        <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-          <SectionHeader title="Quick Picks" icon="dice-multiple" />
-          <FlashList
-            data={quickPicks}
-            renderItem={renderTrackCard}
-            keyExtractor={trackKeyExtractor}
-            ItemSeparatorComponent={renderHorizontalSeparator}
-            horizontal
-            showsHorizontalScrollIndicator={false}
-            contentContainerStyle={styles.horizontalList}
-            drawDistance={TRACK_CARD_WIDTH * 2}
-          />
-        </View>
-      )}
+              <View style={styles.statsRow}>
+                <StatChip icon="music-note" value={tracks.length} label="canciones" />
+                <StatChip icon="album" value={albums.length} label="álbumes" />
+                <StatChip icon="account-music" value={artists.length} label="artistas" />
+              </View>
+            </>
+          )}
+        </Animated.View>
 
-      {currentTrack != null && <NowPlayingCard track={currentTrack} />}
+        {recentlyPlayedSlice.length > 0 && (
+          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+            <SectionHeader title="Escuchado Recientemente" icon="history" />
+            <FlashList
+              data={recentlyPlayedSlice}
+              renderItem={renderTrackCard}
+              keyExtractor={trackKeyExtractor}
+              ItemSeparatorComponent={renderHorizontalSeparator}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              drawDistance={TRACK_CARD_WIDTH * 2}
+            />
+          </View>
+        )}
 
-      {!hasMusic && (
-        <View style={styles.emptyContainer}>
-          <EmptyState
-            icon="📁"
-            title="Scan your Library"
-            description="We didn't find any music files on your device. Let's scan your storage to find them."
-            actionLabel={isScanning ? 'Scanning...' : 'Scan for Music'}
-            onAction={scanLibrary}
-          />
-        </View>
-      )}
+        {recentlyAddedTracks.length > 0 && (
+          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+            <SectionHeader title="Agregado Recientemente" icon="clock-plus-outline" onSeeAll={goToLibrary} />
+            <FlashList
+              data={recentlyAddedTracks}
+              renderItem={renderTrackCard}
+              keyExtractor={trackKeyExtractor}
+              ItemSeparatorComponent={renderHorizontalSeparator}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              drawDistance={TRACK_CARD_WIDTH * 2}
+            />
+          </View>
+        )}
 
-      <View style={styles.bottomSpacer} />
-    </ScrollView>
+        {recentlyAddedAlbums.length > 0 && (
+          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+            <SectionHeader title="Álbumes" icon="album" onSeeAll={goToLibrary} />
+            <View style={styles.albumGrid}>
+              {recentlyAddedAlbums.map((album) => (
+                <View key={album.id} style={styles.albumWrapper}>
+                  <AlbumCard album={album} size="medium" onPress={handleAlbumPress} />
+                </View>
+              ))}
+            </View>
+          </View>
+        )}
+
+        {topArtists.length > 0 && (
+          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+            <SectionHeader title="Tus Artistas" icon="account-group" onSeeAll={goToLibrary} />
+            <FlashList
+              data={topArtists}
+              renderItem={renderArtistBubble}
+              keyExtractor={artistKeyExtractor}
+              ItemSeparatorComponent={renderHorizontalSeparator}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              drawDistance={ARTIST_CARD_SIZE * 2}
+            />
+          </View>
+        )}
+
+        {quickPicks.length > 0 && (
+          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
+            <SectionHeader title="Selecciones" icon="dice-multiple" />
+            <FlashList
+              data={quickPicks}
+              renderItem={renderTrackCard}
+              keyExtractor={trackKeyExtractor}
+              ItemSeparatorComponent={renderHorizontalSeparator}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              drawDistance={TRACK_CARD_WIDTH * 2}
+            />
+          </View>
+        )}
+
+        {currentTrack != null && <NowPlayingCard track={currentTrack} />}
+
+        {!hasMusic && (
+          <View style={styles.emptyContainer}>
+            <EmptyState
+              icon="📁"
+              title="Escanea tu Biblioteca"
+              description="No encontramos música en tu dispositivo. Vamos a buscar archivos de audio para comenzar."
+              actionLabel={isScanning ? 'Escaneando...' : 'Buscar Música'}
+              onAction={scanLibrary}
+            />
+          </View>
+        )}
+
+        <View style={styles.bottomSpacer} />
+      </ScrollView>
+    </Animated.View>
   );
 }
 

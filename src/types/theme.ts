@@ -1,22 +1,41 @@
 // Theme token types for StaySound
 export interface ColorTokens {
+    // Primary
     primary: string;
+    onPrimary: string;
     primaryContainer: string;
     onPrimaryContainer: string;
+    // Secondary
     secondary: string;
-    secondaryContainer: string;
-    background: string;
-    surface: string;
-    surfaceVariant: string;
-    error: string;
-    onPrimary: string;
     onSecondary: string;
+    secondaryContainer: string;
+    onSecondaryContainer?: string;
+    // Tertiary (M3 — optional so non-M3 themes don't break)
+    tertiary?: string;
+    onTertiary?: string;
+    tertiaryContainer?: string;
+    onTertiaryContainer?: string;
+    // Surfaces
+    background: string;
     onBackground: string;
+    surface: string;
     onSurface: string;
+    surfaceVariant: string;
     onSurfaceVariant: string;
+    // Error
+    error: string;
     onError: string;
+    errorContainer?: string;
+    onErrorContainer?: string;
+    // Outline
     outline: string;
+    outlineVariant?: string;
+    // Misc
     shadow: string;
+    scrim?: string;
+    inverseSurface?: string;
+    inverseOnSurface?: string;
+    inversePrimary?: string;
 }
 
 export interface SpacingTokens {
@@ -165,5 +184,6 @@ export interface ThemeConfig {
     mode: ThemeMode;
     accentColor: string;
     dynamicColors: boolean;
+    schemeVariant?: string;
     customTheme?: Theme;
 }

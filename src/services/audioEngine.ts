@@ -164,6 +164,10 @@ class AudioEngineClass {
                         album: track.album || 'Unknown',
                         artwork: track.artwork as string | undefined,
                         duration: (track.duration || 0) * 1000,
+                        format: (track as any).format,
+                        sampleRate: (track as any).sampleRate,
+                        bitDepth: (track as any).bitDepth,
+                        quality: (track as any).quality,
                         dateAdded: Date.now(),
                     };
                     this.currentState.currentTrack = normalized;
@@ -207,6 +211,7 @@ class AudioEngineClass {
     private lastPositionZustandUpdate = 0;
     private progressRequestInFlight = false;
     private lastProgressPull = 0;
+    private lastManualSeekTime = 0;
 
     /**
      * Start interval to update position
@@ -231,7 +236,13 @@ class AudioEngineClass {
             if (!isActivelyPlaying && !isPlayerExpanded) return;
 
             const now = Date.now();
-            const targetIntervalMs = isPlayerExpanded ? 64 : 240;
+
+            // CRITICAL: Seek Guard
+            // If we recently seeked manually, don't overwrite with (potentially stale) native position
+            // for a short window to avoid "flickering" or "jumping" back to old position.
+            if (now - this.lastManualSeekTime < 800) return;
+
+            const targetIntervalMs = isPlayerExpanded ? 64 : 1000;
             if ((now - this.lastProgressPull) < targetIntervalMs) return;
 
             this.progressRequestInFlight = true;
@@ -368,6 +379,7 @@ class AudioEngineClass {
      * It also updates positionShared immediately for instant visual feedback.
      */
     async seek(positionMs: number): Promise<void> {
+        this.lastManualSeekTime = Date.now();
         await TrackPlayerService.seekTo(positionMs / 1000);
         this.currentState.position = positionMs;
 

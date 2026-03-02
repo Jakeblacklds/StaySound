@@ -1,6 +1,6 @@
-import { EmptyState } from '@/src/components/ui';
+import { EmptyState, Skeleton } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
-import { createTidalStreamTrack, getTidalArtistDetail, isValidFlacFile } from '@/src/services/tidalService';
+import { createTidalStreamTrack, getTidalArtistDetail, isValidAudioFile } from '@/src/services/tidalService';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { TidalAlbum, TidalArtistDetail, TidalTrack } from '@/src/types';
@@ -10,7 +10,8 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, IconButton, Text } from 'react-native-paper';
+import { Button, IconButton, Text } from 'react-native-paper';
+import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 function formatTrackDuration(ms: number): string {
@@ -77,7 +78,8 @@ export default function TidalArtistScreen() {
         try {
             const downloadedTrack = getDownloadedTrack(track.id);
             if (downloadedTrack) {
-                const validLocal = await isValidFlacFile(downloadedTrack.uri);
+                const extension = downloadedTrack.uri.split('.').pop()?.toLowerCase() || 'flac';
+                const validLocal = await isValidAudioFile(downloadedTrack.uri, extension);
                 if (!validLocal) {
                     await forgetDownloadedTrack(track.id);
                     await download(track);
@@ -148,13 +150,56 @@ export default function TidalArtistScreen() {
 
     if (isLoading) {
         return (
-            <>
+            <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <SafeAreaView style={[styles.centered, { backgroundColor: theme.colors.background }]}> 
-                    <ActivityIndicator size="small" color={theme.colors.primary} />
-                    <Text style={{ color: theme.colors.onSurfaceVariant }}>Loading artist...</Text>
-                </SafeAreaView>
-            </>
+                <LinearGradient
+                    colors={[theme.colors.primaryContainer, theme.colors.background, theme.colors.background]}
+                    style={StyleSheet.absoluteFill}
+                />
+                <ScrollView contentContainerStyle={styles.content}>
+                    <View style={styles.heroWrap}>
+                        <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant, overflow: 'hidden' }]}>
+                            <Skeleton height={270} width="100%" borderRadius={24} />
+                            <View style={styles.heroContent}>
+                                <Skeleton height={32} width="60%" borderRadius={8} style={{ marginBottom: 12 }} />
+                                <View style={styles.statsRow}>
+                                    <Skeleton height={32} width={100} borderRadius={16} />
+                                    <Skeleton height={32} width={100} borderRadius={16} />
+                                </View>
+                            </View>
+                        </View>
+                    </View>
+
+                    <View style={styles.section}>
+                        <Skeleton height={24} width={120} borderRadius={4} style={{ marginBottom: 16 }} />
+                        {[1, 2, 3, 4].map((i) => (
+                            <View key={`s-tra-${i}`} style={[styles.trackRow, { backgroundColor: theme.colors.surface, opacity: 0.6 }]}>
+                                <View style={styles.trackContent}>
+                                    <Skeleton height={18} width="70%" borderRadius={4} style={{ marginBottom: 8 }} />
+                                    <Skeleton height={14} width="50%" borderRadius={4} style={{ marginBottom: 8 }} />
+                                    <Skeleton height={12} width="30%" borderRadius={4} />
+                                </View>
+                                <Skeleton height={36} width={36} borderRadius={18} />
+                                <Skeleton height={36} width={80} borderRadius={18} />
+                            </View>
+                        ))}
+                    </View>
+
+                    <View style={styles.section}>
+                        <Skeleton height={24} width={120} borderRadius={4} style={{ marginBottom: 16 }} />
+                        {[1, 2].map((i) => (
+                            <View key={`s-alb-${i}`} style={[styles.albumRow, { backgroundColor: theme.colors.surface, opacity: 0.6 }]}>
+                                <Skeleton height={56} width={56} borderRadius={8} />
+                                <View style={styles.albumContent}>
+                                    <Skeleton height={18} width="60%" borderRadius={4} style={{ marginBottom: 8 }} />
+                                    <Skeleton height={14} width="30%" borderRadius={4} />
+                                </View>
+                                <Skeleton height={40} width={40} borderRadius={20} />
+                            </View>
+                        ))}
+                    </View>
+                </ScrollView>
+            </SafeAreaView>
         );
     }
 
@@ -162,7 +207,7 @@ export default function TidalArtistScreen() {
         return (
             <>
                 <Stack.Screen options={{ headerShown: false }} />
-                <SafeAreaView style={[styles.centered, { backgroundColor: theme.colors.background }]}> 
+                <SafeAreaView style={[styles.centered, { backgroundColor: theme.colors.background }]}>
                     <EmptyState icon="⚠️" title="Artist unavailable" description={error ?? 'No se pudo cargar'} />
                     <Button onPress={() => router.back()}>Back</Button>
                 </SafeAreaView>
@@ -187,8 +232,8 @@ export default function TidalArtistScreen() {
             </View>
 
             <ScrollView contentContainerStyle={styles.content}>
-                <View style={styles.heroWrap}>
-                    <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant }]}> 
+                <Animated.View entering={FadeIn.duration(500)} style={styles.heroWrap}>
+                    <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant }]}>
                         <Image source={artistDetail.artist.artworkUrl ? { uri: artistDetail.artist.artworkUrl } : undefined} style={styles.artistImage} contentFit="cover" />
                         <LinearGradient
                             colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.65)']}
@@ -208,35 +253,43 @@ export default function TidalArtistScreen() {
                             </View>
                         </View>
                     </View>
-                </View>
+                </Animated.View>
 
                 {artistDetail.topTracks.length > 0 ? (
-                    <View style={styles.section}>
+                    <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
                         <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Top Tracks</Text>
                         {artistDetail.topTracks.map(track => {
                             const state = downloads.get(track.id);
                             const downloaded = isDownloaded(track.id) || state?.status === 'done';
-                            const loading = state?.status === 'downloading';
+                            const isDownloadingItem = state?.status === 'downloading';
+                            const isError = state?.status === 'error';
+                            const progressLabel = `${Math.round((state?.progress ?? 0) * 100)}%`;
+                            const buttonLabel = downloaded ? 'Saved' : isDownloadingItem ? progressLabel : isError ? 'Retry' : 'Save';
 
                             return (
-                                <View key={track.id} style={[styles.trackRow, { backgroundColor: theme.colors.surface }]}> 
+                                <View key={track.id} style={[styles.trackRow, { backgroundColor: theme.colors.surface }]}>
                                     <Pressable style={styles.trackContent} onPress={() => handleTidalPlay(track)}>
                                         <Text numberOfLines={1} style={[styles.trackTitle, { color: theme.colors.onSurface }]}>{track.title}</Text>
                                         <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{track.album}</Text>
                                         <Text style={{ color: theme.colors.onSurfaceVariant }}>{formatTrackDuration(track.durationMs)}</Text>
                                     </Pressable>
                                     <IconButton icon="play" mode="contained" size={18} onPress={() => handleTidalPlay(track)} />
-                                    <Button compact mode={downloaded ? 'contained' : 'contained-tonal'} loading={loading} onPress={() => handleTidalDownload(track)}>
-                                        {downloaded ? 'Saved' : loading ? '...' : 'Save'}
+                                    <Button
+                                        compact
+                                        mode={downloaded ? 'contained' : 'contained-tonal'}
+                                        onPress={() => handleTidalDownload(track)}
+                                        style={{ minWidth: 80 }}
+                                    >
+                                        {buttonLabel}
                                     </Button>
                                 </View>
                             );
                         })}
-                    </View>
+                    </Animated.View>
                 ) : null}
 
                 {sortedAlbums.length > 0 ? (
-                    <View style={styles.section}>
+                    <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.section}>
                         <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Albums</Text>
                         {sortedAlbums.map(album => (
                             <Pressable key={album.id} style={[styles.albumRow, { backgroundColor: theme.colors.surface }]} onPress={() => openAlbum(album)}>
@@ -248,7 +301,7 @@ export default function TidalArtistScreen() {
                                 <IconButton icon="chevron-right" />
                             </Pressable>
                         ))}
-                    </View>
+                    </Animated.View>
                 ) : null}
             </ScrollView>
         </SafeAreaView>

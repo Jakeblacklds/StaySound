@@ -640,14 +640,26 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                     // Preserve enriched metadata (like lazily loaded artwork) when
                     // native engine reports the same track id without those fields.
                     if (currentStoreTrack && nextTrack && currentStoreTrack.id === nextTrack.id) {
-                        nextState.currentTrack = {
+                        const mergedTrack = {
                             ...nextTrack,
                             title: nextTrack.title || currentStoreTrack.title,
                             artist: nextTrack.artist || currentStoreTrack.artist,
                             album: nextTrack.album || currentStoreTrack.album,
                             artwork: nextTrack.artwork || currentStoreTrack.artwork,
                             duration: nextTrack.duration || currentStoreTrack.duration,
+                            format: nextTrack.format || currentStoreTrack.format,
+                            sampleRate: nextTrack.sampleRate || currentStoreTrack.sampleRate,
+                            bitDepth: nextTrack.bitDepth || currentStoreTrack.bitDepth,
+                            quality: nextTrack.quality || currentStoreTrack.quality,
                         };
+
+                        const hasChanges = Object.keys(mergedTrack).some(
+                            (key) => (mergedTrack as any)[key] !== (currentStoreTrack as any)[key]
+                        );
+
+                        if (hasChanges) {
+                            nextState.currentTrack = mergedTrack;
+                        }
                     } else {
                         nextState.currentTrack = nextTrack;
                     }

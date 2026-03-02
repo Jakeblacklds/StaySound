@@ -37,6 +37,7 @@ import Animated, {
 
 import { usePlayerStore } from '@/src/stores';
 import type { KaraokeLyricsJSON } from '@/src/types/karaokeTypes';
+import { LyricsSkeleton } from '../ui';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const FONT_PATH = require('@/assets/fonts/SpaceMono-Regular.ttf');
@@ -281,7 +282,11 @@ export function KaraokeLyrics({
     const scrollTransform = useDerivedValue(() => [{ translateY: scrollY.value }]);
 
     if (!font || !precomputed || precomputed.lines.length === 0) {
-        return <View style={[styles.container, { height }]} />;
+        return (
+            <View style={[styles.container, { height, paddingTop: 40 }]}>
+                <LyricsSkeleton isDownloading={true} />
+            </View>
+        );
     }
 
     return (

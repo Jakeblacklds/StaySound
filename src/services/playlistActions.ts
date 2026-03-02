@@ -1,5 +1,4 @@
-import { Alert } from 'react-native';
-
+import { ActionItem, useUIStore } from '../stores/uiStore';
 import { Playlist, Track } from '../types';
 
 const MAX_PLAYLIST_CHOICES = 6;
@@ -10,6 +9,7 @@ type TrackActionOptions = {
   addToQueue: (track: Track) => void;
   addToPlaylist: (playlistId: string, trackId: string) => void;
   createPlaylist: (name: string, description?: string) => string;
+  deleteTrack?: (id: string, deleteFile?: boolean) => Promise<void>;
 };
 
 function getNextPlaylistName(playlists: Playlist[]): string {
@@ -23,59 +23,98 @@ export function openTrackActionsMenu({
   addToQueue,
   addToPlaylist,
   createPlaylist,
+  deleteTrack,
 }: TrackActionOptions): void {
   const sortedPlaylists = [...playlists].sort((a, b) => b.updatedAt - a.updatedAt);
 
-  const showPlaylistPicker = () => {
-    if (sortedPlaylists.length === 0) {
-      const playlistName = getNextPlaylistName(sortedPlaylists);
-      const playlistId = createPlaylist(playlistName, 'Created from quick add');
-      addToPlaylist(playlistId, track.id);
-      Alert.alert('Playlist creada', `Se agrego "${track.title}" a "${playlistName}".`);
-      return;
-    }
+  const handleDelete = () => {
+    if (!deleteTrack) return;
 
-    const buttons = [
+    useUIStore.getState().openConfirmModal({
+      title: '¿Eliminar de la biblioteca?',
+      message: `Esta acción quitará "${track.title}" de tu colección. El archivo permanecerá en tu dispositivo.`,
+      confirmLabel: 'Eliminar',
+      isDestructive: true,
+      onConfirm: () => deleteTrack(track.id, false),
+    });
+  };
+
+  const handleDeleteFromStorage = () => {
+    if (!deleteTrack) return;
+
+    useUIStore.getState().openConfirmModal({
+      title: '¿Borrar del dispositivo?',
+      message: `¡Cuidado! Se borrará el archivo "${track.title}" permanentemente de tu almacenamiento. No se puede deshacer.`,
+      confirmLabel: 'Borrar archivo',
+      isDestructive: true,
+      onConfirm: () => deleteTrack(track.id, true),
+    });
+  };
+
+
+  const showPlaylistPicker = () => {
+    const actions: ActionItem[] = [
       {
-        text: 'New playlist',
+        label: 'New playlist',
+        icon: 'plus',
         onPress: () => {
           const playlistName = getNextPlaylistName(sortedPlaylists);
           const playlistId = createPlaylist(playlistName, 'Created from quick add');
           addToPlaylist(playlistId, track.id);
-          Alert.alert('Track guardado', `Se agrego "${track.title}" a "${playlistName}".`);
         },
       },
       ...sortedPlaylists.slice(0, MAX_PLAYLIST_CHOICES).map(playlist => ({
-        text: playlist.name,
+        label: playlist.name,
+        icon: 'playlist-music',
         onPress: () => {
           addToPlaylist(playlist.id, track.id);
-          Alert.alert('Track guardado', `Se agrego "${track.title}" a "${playlist.name}".`);
         },
       })),
-      {
-        text: 'Cancel',
-        style: 'cancel' as const,
-      },
     ];
 
-    Alert.alert('Agregar a playlist', 'Elige una playlist de destino', buttons);
+    useUIStore.getState().openActionSheet({
+      title: 'Agregar a playlist',
+      subtitle: 'Elige una playlist de destino',
+      actions,
+      track,
+    });
   };
 
-  Alert.alert(track.title, 'Elige una accion rapida', [
+  const actions: ActionItem[] = [
     {
-      text: 'Agregar a cola',
+      label: 'Agregar a cola',
+      icon: 'playlist-play',
       onPress: () => {
         addToQueue(track);
-        Alert.alert('Cola actualizada', `Se agrego "${track.title}" a la cola.`);
       },
     },
     {
-      text: 'Agregar a playlist',
+      label: 'Agregar a playlist',
+      icon: 'playlist-plus',
       onPress: showPlaylistPicker,
     },
-    {
-      text: 'Cancel',
-      style: 'cancel',
-    },
-  ]);
+  ];
+
+  if (deleteTrack) {
+    actions.push({
+      label: 'Quitar de la biblioteca',
+      icon: 'minus-circle-outline',
+      destructive: true,
+      onPress: handleDelete,
+    });
+    actions.push({
+      label: 'Borrar del dispositivo',
+      icon: 'trash-can-outline',
+      destructive: true,
+      onPress: handleDeleteFromStorage,
+    });
+  }
+
+
+  useUIStore.getState().openActionSheet({
+    title: track.title,
+    subtitle: track.artist,
+    actions,
+    track,
+  });
 }

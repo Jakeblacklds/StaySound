@@ -1,6 +1,6 @@
 <lint-module
     format="1"
-    dir="C:\Users\final\OneDrive\Escritorio\StaySound\modules\karaoke-view\android"
+    dir="D:\StaySound\modules\karaoke-view\android"
     name=":karaoke-view"
     type="LIBRARY"
     maven="expo.modules.karaokeview:karaoke-view:1.0.0"

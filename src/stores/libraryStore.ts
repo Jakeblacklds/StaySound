@@ -5,6 +5,7 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { getArtistInfo } from '../services/artistApi';
+import { getArtworkThumbUri } from '../services/artworkThumbnails';
 import { MUSIC_FOLDERS, runConcurrent, scanMusicLibraryFast, withTimeout } from '../services/fileScanner';
 import { enrichTrackFromUri, generateAlbumId, organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
 import { FileSystemStorage } from '../services/storage';
@@ -12,6 +13,7 @@ import { Album, Artist, LibraryState, Playlist, ScanProgress, Track } from '../t
 
 const MAX_RECENT_SEARCHES = 12;
 let isRefreshingArtistPhotos = false;
+let isHydratingArtworkThumbs = false;
 
 const isRemoteArtworkUri = (uri?: string) =>
     typeof uri === 'string' && (uri.startsWith('http://') || uri.startsWith('https://'));
@@ -26,7 +28,9 @@ interface LibraryActions {
     addTrack: (track: Track) => void;
     updateTrack: (id: string, updates: Partial<Track>) => void;
     applyAlbumArtwork: (album: string, artist: string, artwork: string) => void;
+    ensureArtworkThumbsForTracks: (trackIds?: string[]) => Promise<void>;
     removeTrack: (id: string) => void;
+    deleteTrack: (id: string, deleteFile?: boolean) => Promise<void>;
     getTrack: (id: string) => Track | undefined;
     getAllTracks: () => Track[];
 
@@ -55,6 +59,9 @@ interface LibraryActions {
     getPlaylist: (id: string) => Playlist | undefined;
     getAllPlaylists: () => Playlist[];
     getPlaylistTracks: (id: string) => Track[];
+
+    // Favorite operations
+    toggleFavorite: (trackId: string) => void;
 
     // Search
     search: (query: string) => { tracks: Track[]; albums: Album[]; artists: Artist[] };
@@ -146,6 +153,8 @@ export const useLibraryStore = create<LibraryStore>()(
                         scanProgress: null,
                         lastScanDate: Date.now(),
                     });
+
+                    void get().ensureArtworkThumbsForTracks();
 
                     // No bulk metadata/artwork parsing here.
                     // Keep library scan instant and smooth like native players.
@@ -266,13 +275,157 @@ export const useLibraryStore = create<LibraryStore>()(
                 if (changed) {
                     set({ tracks: updatedTracks, albums: updatedAlbums });
                 }
+
+                void (async () => {
+                    const thumbUri = await getArtworkThumbUri(artwork);
+                    if (!thumbUri) return;
+
+                    const latestState = get();
+                    const nextTracks = new Map(latestState.tracks);
+                    const nextAlbums = new Map(latestState.albums);
+                    let thumbChanged = false;
+
+                    for (const [id, track] of nextTracks.entries()) {
+                        if (track.album === album && track.artist === artist && track.artworkThumb !== thumbUri) {
+                            nextTracks.set(id, { ...track, artworkThumb: thumbUri });
+                            thumbChanged = true;
+                        }
+                    }
+
+                    const albumId = generateAlbumId(album, artist);
+                    const albumEntry = nextAlbums.get(albumId);
+                    if (albumEntry && albumEntry.artworkThumb !== thumbUri) {
+                        nextAlbums.set(albumId, { ...albumEntry, artworkThumb: thumbUri });
+                        thumbChanged = true;
+                    }
+
+                    if (thumbChanged) {
+                        set({ tracks: nextTracks, albums: nextAlbums });
+                    }
+                })();
+            },
+
+            ensureArtworkThumbsForTracks: async (trackIds?: string[]) => {
+                if (isHydratingArtworkThumbs) return;
+                isHydratingArtworkThumbs = true;
+
+                try {
+                    const state = get();
+                    const sourceTracks = trackIds && trackIds.length > 0
+                        ? trackIds.map(id => state.tracks.get(id)).filter((track): track is Track => !!track)
+                        : Array.from(state.tracks.values());
+
+                    const tracksToHydrate = sourceTracks.filter(track => {
+                        const artwork = track.artwork?.trim();
+                        return !!artwork && !track.artworkThumb;
+                    });
+
+                    if (tracksToHydrate.length === 0) return;
+
+                    const nextTracks = new Map(state.tracks);
+                    const nextAlbums = new Map(state.albums);
+                    let changes = 0;
+
+                    await runConcurrent(tracksToHydrate, 2, async (track) => {
+                        const thumbUri = await getArtworkThumbUri(track.artwork);
+                        if (!thumbUri) return;
+
+                        const latestTrack = nextTracks.get(track.id);
+                        if (!latestTrack || latestTrack.artworkThumb === thumbUri) return;
+
+                        nextTracks.set(track.id, { ...latestTrack, artworkThumb: thumbUri });
+                        changes++;
+
+                        const albumId = generateAlbumId(latestTrack.album, latestTrack.artist);
+                        const albumEntry = nextAlbums.get(albumId);
+                        if (albumEntry && albumEntry.artwork === latestTrack.artwork && !albumEntry.artworkThumb) {
+                            nextAlbums.set(albumId, { ...albumEntry, artworkThumb: thumbUri });
+                        }
+
+                        if (changes % 12 === 0) {
+                            set({ tracks: new Map(nextTracks), albums: new Map(nextAlbums) });
+                        }
+                    });
+
+                    if (changes > 0) {
+                        set({ tracks: new Map(nextTracks), albums: new Map(nextAlbums) });
+                    }
+                } finally {
+                    isHydratingArtworkThumbs = false;
+                }
             },
 
             removeTrack: (id: string) => {
                 const { tracks } = get();
+                if (!tracks.has(id)) return;
+
                 const newTracks = new Map(tracks);
                 newTracks.delete(id);
-                set({ tracks: newTracks });
+
+                // Re-organize to maintain consistency in albums/artists
+                const tracksArray = Array.from(newTracks.values());
+                const nextAlbums = organizeIntoAlbums(tracksArray);
+                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums);
+
+                set({
+                    tracks: newTracks,
+                    albums: nextAlbums,
+                    artists: nextArtists,
+                });
+            },
+
+            deleteTrack: async (id: string, deleteFile = false) => {
+                const { tracks, playlists } = get();
+                const track = tracks.get(id);
+                if (!track) return;
+
+                // 1. Delete from File System if requested
+                if (deleteFile) {
+                    try {
+                        if (id.startsWith('tidal_')) {
+                            const FileSystem = require('expo-file-system/legacy');
+                            if (track.uri) {
+                                await FileSystem.deleteAsync(track.uri, { idempotent: true });
+                            }
+                        } else {
+                            const { deleteAssetsAsync } = require('expo-media-library');
+                            const assetId = id.startsWith('track_') ? id.replace('track_', '') : id;
+                            await deleteAssetsAsync([assetId]);
+                        }
+                    } catch (e) {
+                        console.warn('[LibraryStore] Failed to delete file from disk:', e);
+                    }
+                }
+
+                // 2. Remove from Tracks
+                const nextTracks = new Map(tracks);
+                nextTracks.delete(id);
+
+                // 3. Update Playlists
+                const nextPlaylists = new Map(playlists);
+                let playlistsChanged = false;
+                for (const [pid, playlist] of nextPlaylists.entries()) {
+                    if (playlist.trackIds.includes(id)) {
+                        nextPlaylists.set(pid, {
+                            ...playlist,
+                            trackIds: playlist.trackIds.filter(tid => tid !== id),
+                            updatedAt: Date.now(),
+                        });
+                        playlistsChanged = true;
+                    }
+                }
+
+                // 4. Re-organize Albums and Artists
+                const tracksArray = Array.from(nextTracks.values());
+                const nextAlbums = organizeIntoAlbums(tracksArray);
+                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums);
+
+                set({
+                    tracks: nextTracks,
+                    albums: nextAlbums,
+                    artists: nextArtists,
+                    ...(playlistsChanged ? { playlists: nextPlaylists } : {}),
+                });
             },
 
             getTrack: (id: string) => {
@@ -448,6 +601,51 @@ export const useLibraryStore = create<LibraryStore>()(
                 return playlist.trackIds
                     .map(trackId => tracksMap.get(trackId))
                     .filter((t): t is Track => t !== undefined);
+            },
+
+            toggleFavorite: (trackId: string) => {
+                const { tracks, playlists } = get();
+                const track = tracks.get(trackId);
+                if (!track) return;
+
+                const isFavorite = !track.favorite;
+                const newTracks = new Map(tracks);
+                newTracks.set(trackId, { ...track, favorite: isFavorite });
+
+                // Sync with "Me gusta" playlist
+                const LIKED_PLAYLIST_ID = 'playlist_liked';
+                const newPlaylists = new Map(playlists);
+                let likedPlaylist = newPlaylists.get(LIKED_PLAYLIST_ID);
+
+                if (!likedPlaylist) {
+                    likedPlaylist = {
+                        id: LIKED_PLAYLIST_ID,
+                        name: 'Me gusta',
+                        description: 'Canciones que te gustan',
+                        trackIds: [],
+                        createdAt: Date.now(),
+                        updatedAt: Date.now(),
+                    };
+                }
+
+                if (isFavorite) {
+                    if (!likedPlaylist.trackIds.includes(trackId)) {
+                        likedPlaylist = {
+                            ...likedPlaylist,
+                            trackIds: [trackId, ...likedPlaylist.trackIds],
+                            updatedAt: Date.now(),
+                        };
+                    }
+                } else {
+                    likedPlaylist = {
+                        ...likedPlaylist,
+                        trackIds: likedPlaylist.trackIds.filter(id => id !== trackId),
+                        updatedAt: Date.now(),
+                    };
+                }
+
+                newPlaylists.set(LIKED_PLAYLIST_ID, likedPlaylist);
+                set({ tracks: newTracks, playlists: newPlaylists });
             },
 
             search: (query: string) => {

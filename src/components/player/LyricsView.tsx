@@ -9,13 +9,16 @@ import { usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import type { KaraokeLyricsJSON } from '@/src/types';
 import React, { useEffect, useMemo, useRef } from 'react';
-import { Dimensions, FlatList, Pressable, StyleSheet, View } from 'react-native';
+import { Dimensions, FlatList, Pressable, StyleSheet } from 'react-native';
 import { Text } from 'react-native-paper';
 import Animated, {
+    FadeIn,
+    FadeOut,
     useAnimatedStyle,
     withSpring,
     withTiming
 } from 'react-native-reanimated';
+import { LyricsSkeleton } from '../ui';
 
 const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
@@ -133,16 +136,27 @@ export function LyricsView({ lyricsJson, isLoading = false }: LyricsViewProps) {
 
     if (lines.length === 0) {
         return (
-            <View style={styles.emptyContainer}>
-                <Text variant="titleMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-                    {isLoading ? 'Cargando lyrics...' : 'No lyrics found for this track'}
-                </Text>
-            </View>
+            <Animated.View
+                entering={FadeIn.duration(400)}
+                exiting={FadeOut.duration(400)}
+                style={[styles.emptyContainer, isLoading && { justifyContent: 'flex-start', paddingTop: 60 }]}
+            >
+                {isLoading ? (
+                    <LyricsSkeleton isDownloading={isLoading} />
+                ) : (
+                    <Text variant="titleMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                        No lyrics found for this track
+                    </Text>
+                )}
+            </Animated.View>
         );
     }
 
     return (
-        <View style={styles.container}>
+        <Animated.View
+            entering={FadeIn.duration(600)}
+            style={styles.container}
+        >
             <FlatList
                 ref={flatListRef}
                 data={lines}
@@ -164,7 +178,7 @@ export function LyricsView({ lyricsJson, isLoading = false }: LyricsViewProps) {
                     index,
                 })}
             />
-        </View>
+        </Animated.View>
     );
 }
 

@@ -28,7 +28,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Sync constants with FullPlayer
 const MINI_HEIGHT = 72;
@@ -37,7 +37,7 @@ const TAB_BAR_HEIGHT = 88;
 const TAB_BAR_FLOAT_OFFSET = 10;
 const MINI_GAP_FROM_TAB = 10;
 const DETAIL_HEIGHT = 84;
-const DETAIL_EXTRA_BOTTOM = 8;
+const DETAIL_EXTRA_BOTTOM = 0;
 
 // M3 Expressive: Emphasized easing curves
 const M3_EMPHASIZED = Easing.bezier(0.2, 0.0, 0, 1.0);
@@ -58,7 +58,11 @@ function MiniPlayerInner() {
     const isPlaying = usePlayerStore(s => s.isPlaying);
     const togglePlayPause = usePlayerStore(s => s.togglePlayPause);
     const setPlayerVisible = usePlayerStore(s => s.setPlayerVisible);
+    const stop = usePlayerStore(s => s.stop);
     const expansion = usePlayerStore(s => s.expansion);
+
+    const surfaceColor = theme.colors.surface;
+    const insetsBottom = insets.bottom;
 
     // ─── Dynamic Colors ──────────────────────────────────────────────
     // This hook is reactive but only "works" when artwork changes.
@@ -68,12 +72,21 @@ function MiniPlayerInner() {
     const miniArtworkRadius = playerVariant === 'brutal' ? 0 : 16;
     const radius = playerVariant === 'brutal' ? 8 : 24;
     const routeProgress = useSharedValue(0);
+    const translateX = useSharedValue(0);
+    const isHorizontal = useSharedValue(false);
+    const isVertical = useSharedValue(false);
+    const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.35;
     const tabReservedSpace = config.style === 'material3'
         ? TAB_BAR_HEIGHT + TAB_BAR_FLOAT_OFFSET
         : 85;
     const collapsedBottom = Math.max(insets.bottom + tabReservedSpace + MINI_GAP_FROM_TAB, 98);
 
-    const isDetailRoute = pathname.startsWith('/album/') || pathname.startsWith('/artist/') || pathname.startsWith('/playlist/');
+    const isDetailRoute =
+        pathname.startsWith('/album/') ||
+        pathname.startsWith('/artist/') ||
+        pathname.startsWith('/playlist/') ||
+        pathname.startsWith('/tidal-album/') ||
+        pathname.startsWith('/tidal-artist/');
 
     useEffect(() => {
         routeProgress.value = withTiming(isDetailRoute ? 1 : 0, {
@@ -82,29 +95,37 @@ function MiniPlayerInner() {
         });
     }, [isDetailRoute, routeProgress]);
 
+    useEffect(() => {
+        translateX.value = 0;
+    }, [currentTrack?.id, translateX]);
+
     // ─── Performance Styles ──────────────────────────────────────────
 
     // Merge background animations: opacity (expansion) + colors (track change)
     const bgAnimatedStyle = useAnimatedStyle(() => {
         const routeP = routeProgress.value;
-        const detailBottom = Math.max(insets.bottom + DETAIL_EXTRA_BOTTOM, DETAIL_EXTRA_BOTTOM);
+        const detailBottom = insetsBottom;
+        const collapseBtm = Math.max(insetsBottom + tabReservedSpace + MINI_GAP_FROM_TAB, 98);
 
         return {
-            backgroundColor: animColors?.background?.value || theme.colors.surface,
+            backgroundColor: animColors?.background?.value || surfaceColor,
             borderColor: 'transparent',
             borderWidth: 0,
             borderTopWidth: 0,
-            bottom: interpolate(routeP, [0, 1], [collapsedBottom, detailBottom], Extrapolation.CLAMP),
+            bottom: interpolate(routeP, [0, 1], [collapseBtm, detailBottom], Extrapolation.CLAMP),
             left: interpolate(routeP, [0, 1], [MINI_MARGIN, 0], Extrapolation.CLAMP),
             right: interpolate(routeP, [0, 1], [MINI_MARGIN, 0], Extrapolation.CLAMP),
             height: interpolate(routeP, [0, 1], [MINI_HEIGHT, DETAIL_HEIGHT], Extrapolation.CLAMP),
             borderRadius: interpolate(routeP, [0, 1], [radius, 0], Extrapolation.CLAMP),
             transform: [
-                { translateY: interpolate(routeP, [0, 1], [0, 6], Extrapolation.CLAMP) },
+                { translateY: 0 },
                 { scale: interpolate(routeP, [0, 1], [1, 1.01], Extrapolation.CLAMP) },
+                { translateX: translateX.value },
+                { rotate: `${interpolate(translateX.value, [-SCREEN_WIDTH, 0, SCREEN_WIDTH], [-10, 0, 10], Extrapolation.CLAMP)}deg` },
             ],
+            opacity: interpolate(Math.abs(translateX.value), [0, SCREEN_WIDTH * 0.8], [1, 0], Extrapolation.CLAMP),
         };
-    }, [animColors?.background, collapsedBottom, insets.bottom, radius, routeProgress, theme.colors.surface]);
+    });
 
     // Merge content animations: fade out and scale during expansion
     const contentAnimatedStyle = useAnimatedStyle(() => {
@@ -158,28 +179,89 @@ function MiniPlayerInner() {
 
     // Gesture Handlers (Memoized)
     const containerPan = useMemo(() => Gesture.Pan()
+        .onStart(() => {
+            isHorizontal.value = false;
+            isVertical.value = false;
+        })
         .onUpdate((e) => {
-            if (expansion) {
-                const travelRange = Math.max(240, SCREEN_HEIGHT - (collapsedBottom + MINI_HEIGHT));
-                const newVal = (-e.translationY / travelRange);
-                expansion.value = Math.max(0, Math.min(1, newVal));
+            // Determine direction lock on first significant movement (5px threshold)
+            if (!isHorizontal.value && !isVertical.value) {
+                if (Math.abs(e.translationX) > 5 || Math.abs(e.translationY) > 5) {
+                    if (Math.abs(e.translationX) > Math.abs(e.translationY)) {
+                        // Only allow horizontal swipe if we are completely collapsed
+                        // Checking < 0.05 accounts for floating point inaccuracies
+                        if (!expansion || expansion.value < 0.05) {
+                            isHorizontal.value = true;
+                        } else {
+                            isVertical.value = true;
+                        }
+                    } else {
+                        isVertical.value = true;
+                    }
+                }
+            }
+
+            if (isHorizontal.value) {
+                // Horizontal swipe for closing
+                translateX.value = e.translationX;
+            } else if (isVertical.value) {
+                // Vertical swipe for expansion
+                if (expansion) {
+                    const travelRange = Math.max(240, SCREEN_HEIGHT - (collapsedBottom + MINI_HEIGHT));
+                    const newVal = (-e.translationY / travelRange);
+                    expansion.value = Math.max(0, Math.min(1, newVal));
+                }
             }
         })
         .onEnd((e) => {
-            if (e.translationY < -120 || e.velocityY < -800) {
-                if (expansion) expansion.value = withTiming(1, {
-                    duration: EXPAND_DURATION,
-                    easing: M3_EMPHASIZED,
-                });
-                runOnJS(setPlayerVisible)(true);
+            if (isHorizontal.value) {
+                isHorizontal.value = false;
+                // Check horizontal swipe first
+                if (Math.abs(e.translationX) > SWIPE_THRESHOLD || Math.abs(e.velocityX) > 1000) {
+                    const targetX = e.translationX > 0 ? SCREEN_WIDTH : -SCREEN_WIDTH;
+                    translateX.value = withTiming(targetX, {
+                        duration: 300,
+                        easing: Easing.out(Easing.cubic)
+                    }, (finished) => {
+                        if (finished) {
+                            runOnJS(stop)();
+                        }
+                    });
+                } else {
+                    // Snap back horizontal
+                    translateX.value = withTiming(0, {
+                        duration: 250,
+                        easing: M3_EMPHASIZED_DECEL
+                    });
+                }
+            } else if (isVertical.value) {
+                isVertical.value = false;
+                // Vertical snaps
+                if (e.translationY < -120 || e.velocityY < -800) {
+                    if (expansion) expansion.value = withTiming(1, {
+                        duration: EXPAND_DURATION,
+                        easing: M3_EMPHASIZED,
+                    });
+                    runOnJS(setPlayerVisible)(true);
+                } else {
+                    if (expansion) expansion.value = withTiming(0, {
+                        duration: COLLAPSE_DURATION,
+                        easing: M3_EMPHASIZED_DECEL,
+                    });
+                    runOnJS(setPlayerVisible)(false);
+                }
             } else {
+                // Snap back default fallback
+                translateX.value = withTiming(0, {
+                    duration: 250,
+                    easing: M3_EMPHASIZED_DECEL
+                });
                 if (expansion) expansion.value = withTiming(0, {
                     duration: COLLAPSE_DURATION,
                     easing: M3_EMPHASIZED_DECEL,
                 });
-                runOnJS(setPlayerVisible)(false);
             }
-        }), [collapsedBottom, expansion, setPlayerVisible]);
+        }), [collapsedBottom, expansion, setPlayerVisible, stop, SWIPE_THRESHOLD, isHorizontal, isVertical]);
 
     const handleTap = useCallback(() => {
         setPlayerVisible(true);

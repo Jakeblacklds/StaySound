@@ -80,6 +80,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var touchStartX = 0f
     private var isTap = true
     private val TAP_SLOP = 10f * resources.displayMetrics.density
+    private var seekOnTapEnabled = false
 
     // --- Animator ---
     private var animator: LyricsAnimator? = null
@@ -181,6 +182,10 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         this.isPlaying = isPlaying
     }
 
+    fun setSeekOnTapEnabled(enabled: Boolean) {
+        seekOnTapEnabled = enabled
+    }
+
     private fun getInterpolatedTime(): Long {
         if (!isPlaying) return lastJsTimeMs
         val elapsedMs = (System.nanoTime() - lastJsUpdateNanos) / 1_000_000
@@ -255,7 +260,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (isTap && event.actionMasked == MotionEvent.ACTION_UP) {
+                if (seekOnTapEnabled && isTap && event.actionMasked == MotionEvent.ACTION_UP) {
                     // TAP: Find which line was tapped and seek
                     handleTap(event.x, event.y)
                 } else {

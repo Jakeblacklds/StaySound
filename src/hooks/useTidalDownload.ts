@@ -1,8 +1,8 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
-import { downloadTidalTrack } from '../services/tidalService';
-import { useLibraryStore } from '../stores';
+import { downloadTidalTrack, isValidAudioFile } from '../services/tidalService';
+import { useLibraryStore, useSettingsStore } from '../stores';
 import { DownloadState, TidalTrack } from '../types/audio';
 
 const createIdleState = (): DownloadState => ({
@@ -13,6 +13,7 @@ const createIdleState = (): DownloadState => ({
 
 export function useTidalDownload() {
     const tracks = useLibraryStore(s => s.tracks);
+    const tidalDownloadQuality = useSettingsStore(s => s.tidalDownloadQuality);
     const activeTasksRef = useRef<Map<number, FileSystem.DownloadResumable>>(new Map());
     const [downloads, setDownloads] = useState<Map<number, DownloadState>>(new Map());
 
@@ -38,16 +39,22 @@ export function useTidalDownload() {
         return tracks.get(`tidal_${tidalId}`) ?? null;
     }, [tracks]);
 
-    const download = useCallback(async (tidalTrack: TidalTrack) => {
-        if (isDownloaded(tidalTrack.id)) {
-            updateDownload(tidalTrack.id, { status: 'done', progress: 1, error: undefined });
-            return;
+    const download = useCallback(async (tidalTrack: TidalTrack, force = false) => {
+        const existing = tracks.get(`tidal_${tidalTrack.id}`);
+        if (existing && !force) {
+            const info = await FileSystem.getInfoAsync(existing.uri);
+            const extension = existing.uri.split('.').pop()?.toLowerCase() || 'flac';
+            if (info.exists && info.size > 0 && (await isValidAudioFile(existing.uri, extension))) {
+                updateDownload(tidalTrack.id, { status: 'done', progress: 1, error: undefined });
+                return;
+            }
+            // If it's 0B or invalid, we continue to download (effectively redownloading/repairing)
         }
 
         updateDownload(tidalTrack.id, { status: 'downloading', progress: 0, error: undefined });
 
         try {
-            const downloadedTrack = await downloadTidalTrack(tidalTrack, {
+            const downloadedTrack = await downloadTidalTrack(tidalTrack, tidalDownloadQuality, {
                 onProgress: progress => {
                     updateDownload(tidalTrack.id, {
                         status: 'downloading',

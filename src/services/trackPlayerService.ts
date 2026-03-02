@@ -107,7 +107,7 @@ export async function playTrack(track: Track): Promise<void> {
         // load() can sometimes preserve metadata from previous sessions on buggy Android versions.
         await TrackPlayer.reset();
 
-        const trackData = {
+        const trackData: any = {
             id: track.id,
             url: track.uri,
             title: track.title || 'Unknown Title',
@@ -115,6 +115,11 @@ export async function playTrack(track: Track): Promise<void> {
             album: track.album || 'Unknown Album',
             artwork: track.artwork || undefined,
             duration: track.duration ? track.duration / 1000 : undefined,
+            // Technical metadata preserved for UI
+            format: track.format,
+            sampleRate: track.sampleRate,
+            bitDepth: track.bitDepth,
+            quality: track.quality,
         };
 
         await TrackPlayer.add([trackData]);
@@ -149,6 +154,11 @@ export async function playQueue(tracks: Track[], startIndex: number = 0): Promis
             album: track.album || 'Unknown Album',
             artwork: track.artwork || undefined,
             duration: track.duration ? track.duration / 1000 : undefined,
+            // Technical metadata preserved for UI
+            format: track.format,
+            sampleRate: track.sampleRate,
+            bitDepth: track.bitDepth,
+            quality: track.quality,
         }));
 
         const safeIndex = Math.max(0, Math.min(startIndex, trackPlayerTracks.length - 1));
@@ -310,6 +320,10 @@ export async function getCurrentTrack(): Promise<Track | null> {
             album: track.album || 'Unknown',
             artwork: track.artwork as string | undefined,
             duration: (track.duration || 0) * 1000,
+            format: (track as any).format,
+            sampleRate: (track as any).sampleRate,
+            bitDepth: (track as any).bitDepth,
+            quality: (track as any).quality,
             dateAdded: Date.now(),
         };
     } catch (error) {
@@ -360,3 +374,4 @@ export async function destroyTrackPlayer(): Promise<void> {
 
 // Re-export types and enums for convenience
 export { Event, RepeatMode, State };
+
