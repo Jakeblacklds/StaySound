@@ -4,12 +4,13 @@
 
 import { useTheme } from '@/src/theme';
 import React from 'react';
-import { StyleSheet } from 'react-native';
+import { StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import Animated, { FadeIn } from 'react-native-reanimated';
+import { CustomIcon, IconName } from './CustomIcon';
 
 interface EmptyStateProps {
-    icon?: string;
+    icon?: string | IconName;
     title: string;
     description?: string;
     actionLabel?: string;
@@ -25,12 +26,27 @@ export function EmptyState({
 }: EmptyStateProps) {
     const { theme } = useTheme();
 
+    const isCustomIcon = (icon: string | IconName): icon is IconName => {
+        const customIcons: IconName[] = [
+            'Ajustes', 'Album', 'Artista', 'Canción', 'Cola', 'Descargar',
+            'Home', 'Library', 'Lyrics', 'Next', 'Pause', 'Play',
+            'Playlist', 'Previous', 'Reciente', 'Repetir 0', 'Repetir 1', 'Shuffle'
+        ];
+        return customIcons.includes(icon as IconName);
+    };
+
     return (
         <Animated.View
             entering={FadeIn.delay(200)}
             style={styles.container}
         >
-            <Text style={styles.icon}>{icon}</Text>
+            <View style={styles.iconContainer}>
+                {isCustomIcon(icon) ? (
+                    <CustomIcon name={icon} size={64} color={theme.colors.primary} />
+                ) : (
+                    <Text style={styles.icon}>{icon}</Text>
+                )}
+            </View>
             <Text
                 variant="titleLarge"
                 style={[styles.title, { color: theme.colors.onBackground }]}
@@ -65,9 +81,11 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
         padding: 32,
     },
+    iconContainer: {
+        marginBottom: 16,
+    },
     icon: {
         fontSize: 64,
-        marginBottom: 16,
     },
     title: {
         fontWeight: '600',

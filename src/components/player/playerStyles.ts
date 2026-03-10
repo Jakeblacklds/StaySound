@@ -1,0 +1,353 @@
+import { Dimensions, StyleSheet } from 'react-native';
+
+const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+
+export const playerStyles = StyleSheet.create({
+    root: {
+        position: 'absolute',
+        zIndex: 1000,
+        overflow: 'hidden',
+    },
+    mainContainer: {
+        flex: 1,
+    },
+    miniShellMetaRow: {
+        position: 'absolute',
+        left: 72,
+        right: 10,
+        top: 0,
+        bottom: 0,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingTop: 2,
+    },
+    miniShellMetaTextWrap: {
+        flex: 1,
+        marginRight: 10,
+    },
+    miniShellTitle: {
+        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: -0.1,
+    },
+    miniShellArtist: {
+        fontSize: 11,
+        marginTop: 1,
+    },
+    miniShellPlayBtn: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    miniShellAuraLayer: {
+        ...StyleSheet.absoluteFillObject,
+        overflow: 'hidden',
+    },
+    miniShellAuraOrbPrimary: {
+        position: 'absolute',
+        width: 210,
+        height: 210,
+        borderRadius: 105,
+        top: -84,
+        right: -48,
+    },
+    miniShellAuraOrbSecondary: {
+        position: 'absolute',
+        width: 180,
+        height: 180,
+        borderRadius: 90,
+        bottom: -96,
+        left: -40,
+    },
+    flexCenter: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    spacer: {
+        flex: 1,
+    },
+    content: {
+        // Removed as it was a fallback that might not be used
+        flex: 1,
+        paddingBottom: 40,
+        justifyContent: 'space-between',
+    },
+    header: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 10,
+        height: 60,
+    },
+    albumLabel: {
+        fontSize: 12,
+        fontWeight: '900',
+        letterSpacing: 2,
+        textTransform: 'uppercase',
+        opacity: 0.6,
+    },
+    fullImage: {
+        width: '100%',
+        height: '100%',
+    },
+    progressSection: {
+        paddingHorizontal: 25,
+    },
+    // --- Aurora Theme removed ---
+    // --- Immersive/Material 3 Theme (Redesigned) ---
+    contentImmersive: {
+        flex: 1,
+        paddingHorizontal: 24,
+        paddingTop: 16,
+        paddingBottom: 40,
+    },
+    headerImmersive: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        height: 56,
+        marginBottom: 8,
+    },
+    headerBtnImmersive: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    headerCenterImmersive: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    playingFromLabel: {
+        fontSize: 10,
+        fontWeight: '600',
+        letterSpacing: 1.5,
+        opacity: 0.5,
+    },
+    albumLabelImmersive: {
+        fontSize: 13,
+        fontWeight: '700',
+        marginTop: 2,
+    },
+    artworkSectionImmersive: {
+        flex: 1,
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingVertical: 16,
+    },
+    artworkFrameImmersive: {
+        borderRadius: 16,
+        backgroundColor: 'transparent', // Aseguramos que sea invisible
+    },
+    lyricsContainerImmersive: {
+        width: '100%',
+        borderRadius: 20,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        justifyContent: 'center',
+        alignItems: 'center',
+        paddingVertical: 10,
+    },
+    lyricsFullScreenContainer: {
+        position: 'absolute',
+        top: -100,
+        bottom: -200,
+        left: -24,
+        right: -24,
+        zIndex: 100,
+        backgroundColor: '#000',
+        borderRadius: 0,
+        paddingTop: 60,
+    },
+    fullScreenLyricsHeader: {
+        position: 'absolute',
+        top: 40,
+        left: 0,
+        right: 0,
+        height: 60,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        paddingHorizontal: 12,
+        zIndex: 110,
+    },
+    lyricsFallbackState: {
+        flex: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        paddingHorizontal: 32,
+        backgroundColor: 'transparent',
+    },
+    lyricsFallbackTitle: {
+        color: '#FFFFFF',
+        fontSize: 18,
+        fontWeight: '700',
+        textAlign: 'center',
+    },
+    lyricsFallbackSubtitle: {
+        color: 'rgba(255,255,255,0.74)',
+        fontSize: 14,
+        marginTop: 10,
+        textAlign: 'center',
+    },
+    trackInfoSectionImmersive: {
+        marginBottom: 16,
+    },
+    trackInfoRowImmersive: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+    },
+    trackTextImmersive: {
+        flex: 1,
+        marginRight: 16,
+    },
+    titleImmersiveNew: {
+        fontSize: 24,
+        fontWeight: '800',
+        letterSpacing: -0.3,
+    },
+    artistImmersive: {
+        fontSize: 16,
+        fontWeight: '500',
+        opacity: 0.8,
+        marginTop: 4,
+    },
+    techMetaImmersive: {
+        fontSize: 10,
+        opacity: 0.7,
+        letterSpacing: 0.4,
+        flexShrink: 1,
+    },
+    techMetaRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 4,
+    },
+    qualityBadge: {
+        paddingHorizontal: 6,
+        paddingVertical: 1,
+        borderRadius: 4,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    qualityBadgeText: {
+        fontSize: 9,
+        fontWeight: '900',
+        letterSpacing: 0.5,
+    },
+    trackActionsImmersive: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+    },
+    actionBtnImmersive: {
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    progressSectionImmersive: {
+        marginBottom: 24,
+    },
+    controlsSectionImmersive: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 8,
+        marginBottom: 24,
+    },
+    secondaryBtnImmersive: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    navBtnImmersive: {
+        width: 56,
+        height: 56,
+        borderRadius: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    playBtnImmersiveNew: {
+        width: 72,
+        height: 72,
+        borderRadius: 36,
+        justifyContent: 'center',
+        alignItems: 'center',
+        elevation: 6,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 4 },
+        shadowOpacity: 0.2,
+        shadowRadius: 8,
+    },
+    bottomActionsImmersive: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 32,
+    },
+    bottomBtnImmersive: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    // Legacy styles (kept for compatibility or reference)
+    lyricsContainer: {
+        width: '100%',
+        borderRadius: 20,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(0,0,0,0.3)',
+    },
+    downloadOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        backgroundColor: 'transparent',
+        zIndex: 200,
+        justifyContent: 'flex-start',
+    },
+    lyricsActionContainer: {
+        alignItems: 'center',
+        marginTop: 20,
+    },
+    downloadBtn: {
+        marginTop: 24,
+        borderRadius: 28,
+        paddingHorizontal: 12,
+    },
+    lyricsModeContainer: {
+        flex: 1,
+        alignItems: 'center',
+    },
+    lyricsModeSwitcher: {
+        flexDirection: 'row',
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        borderRadius: 20,
+        padding: 2,
+    },
+    modeTab: {
+        paddingHorizontal: 16,
+        paddingVertical: 6,
+        borderRadius: 18,
+    },
+    modeTabActive: {
+        backgroundColor: 'rgba(255,255,255,0.25)',
+    },
+    modeTabText: {
+        color: '#FFFFFF',
+        fontSize: 10,
+        fontWeight: '900',
+        letterSpacing: 1,
+    },
+});

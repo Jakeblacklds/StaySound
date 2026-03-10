@@ -9,7 +9,7 @@
  * 5. removeClippedSubviews for off-screen view detachment
  */
 
-import { AlbumCard, ArtistCard, EmptyState, ScanButton, TrackListItem } from '@/src/components/ui';
+import { AlbumCard, AlphabetScrubber, ArtistCard, EmptyState, ScanButton, TrackListItem } from '@/src/components/ui';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useAnimatedColors, useTheme } from '@/src/theme';
@@ -57,10 +57,25 @@ export default function LibraryScreen() {
     const albumsMap = useLibraryStore(s => s.albums);
     const artistsMap = useLibraryStore(s => s.artists);
 
-    // Derive arrays — guard against the Map not being a real Map (pre-hydration)
-    const tracks = useMemo(() => tracksMap instanceof Map ? Array.from(tracksMap.values()) : [], [tracksMap]);
-    const albums = useMemo(() => albumsMap instanceof Map ? Array.from(albumsMap.values()) : [], [albumsMap]);
-    const artists = useMemo(() => artistsMap instanceof Map ? Array.from(artistsMap.values()) : [], [artistsMap]);
+    // Derive arrays — support both Map and persisted entry arrays during hydration
+    const toValues = useCallback(<T,>(source: unknown): T[] => {
+        if (source instanceof Map) return Array.from(source.values()) as T[];
+        if (Array.isArray(source)) return (source as Array<[string, T]>).map(([, value]) => value);
+        return [];
+    }, []);
+
+    const tracks = useMemo(() => {
+        const values = toValues<Track>(tracksMap as unknown);
+        return values.sort((a, b) => a.title.localeCompare(b.title));
+    }, [toValues, tracksMap]);
+
+    const albums = useMemo(() => {
+        return toValues<Album>(albumsMap as unknown);
+    }, [toValues, albumsMap]);
+
+    const artists = useMemo(() => {
+        return toValues<Artist>(artistsMap as unknown);
+    }, [toValues, artistsMap]);
     const tabCounts = useMemo(
         () => ({ songs: tracks.length, albums: albums.length, artists: artists.length }),
         [albums.length, artists.length, tracks.length],
@@ -135,6 +150,56 @@ export default function LibraryScreen() {
         router.push({ pathname: '/artist/[id]', params: { id: artist.id } });
     }, []);
 
+    const songsListRef = React.useRef<any>(null);
+    const pendingScrollIndexRef = React.useRef<number | null>(null);
+    const rafScrollRef = React.useRef<number | null>(null);
+    const lastScrolledIndexRef = React.useRef(-1);
+
+    const firstIndexByLetter = useMemo(() => {
+        const indexMap = new Map<string, number>();
+
+        for (let i = 0; i < filteredTracks.length; i++) {
+            const firstChar = filteredTracks[i].title.charAt(0).toUpperCase();
+            const letter = /[A-Z]/.test(firstChar) ? firstChar : '#';
+            if (!indexMap.has(letter)) indexMap.set(letter, i);
+        }
+
+        return indexMap;
+    }, [filteredTracks]);
+
+    useEffect(() => {
+        lastScrolledIndexRef.current = -1;
+        pendingScrollIndexRef.current = null;
+    }, [filteredTracks]);
+
+    useEffect(() => {
+        return () => {
+            if (rafScrollRef.current !== null) {
+                cancelAnimationFrame(rafScrollRef.current);
+                rafScrollRef.current = null;
+            }
+        };
+    }, []);
+
+    const handleLetterScrub = useCallback((letter: string) => {
+        if (!songsListRef.current || filteredTracks.length === 0) return;
+
+        const targetIndex = firstIndexByLetter.get(letter) ?? (filteredTracks.length - 1);
+        pendingScrollIndexRef.current = targetIndex;
+
+        if (rafScrollRef.current !== null) return;
+
+        rafScrollRef.current = requestAnimationFrame(() => {
+            rafScrollRef.current = null;
+            const index = pendingScrollIndexRef.current;
+            if (index == null || !songsListRef.current) return;
+            if (lastScrolledIndexRef.current === index) return;
+
+            lastScrolledIndexRef.current = index;
+            songsListRef.current.scrollToIndex({ index, animated: false, viewPosition: 0 });
+        });
+    }, [filteredTracks.length, firstIndexByLetter]);
+
     // ─── Memoized render item functions ──────────────────
     const renderTrackItem = useCallback(({ item, index }: { item: Track; index: number }) => (
         <TrackListItem
@@ -152,11 +217,23 @@ export default function LibraryScreen() {
         </View>
     ), [handleAlbumPress]);
 
-    const renderArtistItem = useCallback(({ item }: { item: Artist }) => (
-        <View style={styles.artistWrapper}>
-            <ArtistCard artist={item} size="small" onPress={handleArtistPress} />
-        </View>
-    ), [handleArtistPress]);
+    const renderArtistItem = useCallback(({ item, index }: { item: Artist; index: number }) => {
+        const isLeft = index % 2 === 0;
+        const colIndex = Math.floor(index / 2);
+        const isSquare = !isLeft && colIndex === 0;
+        const height = isSquare ? 180 : 260;
+
+        return (
+            <View style={[styles.masonryWrapper, { padding: 6 }]}>
+                <ArtistCard
+                    artist={item}
+                    size="full"
+                    height={height}
+                    onPress={handleArtistPress}
+                />
+            </View>
+        );
+    }, [handleArtistPress]);
 
     // ─── Key extractors (stable) ─────────────────────────
     const trackKeyExtractor = useCallback((item: Track) => item.id, []);
@@ -180,8 +257,12 @@ export default function LibraryScreen() {
         [screenPadding, insets.bottom],
     );
     const gridContentStyle = useMemo(
-        () => ({ paddingBottom: 120 + insets.bottom, padding: screenPadding }),
-        [screenPadding, insets.bottom],
+        () => ({
+            paddingBottom: 120 + insets.bottom,
+            paddingHorizontal: screenPadding - 6,
+            paddingTop: 12
+        }),
+        [insets.bottom, screenPadding],
     );
 
     // Dynamic but stable track size based on theme (including vertical margins)
@@ -256,7 +337,7 @@ export default function LibraryScreen() {
                         filteredTracks.length === 0 ? (
                             <View style={styles.emptyContainer}>
                                 <EmptyState
-                                    icon="🎵"
+                                    icon="Canción"
                                     title={tracks.length === 0 ? 'No songs yet' : 'No songs match your search'}
                                     description={tracks.length === 0 ? 'Scan your device to find music files' : 'Try another title, artist, or album'}
                                 />
@@ -268,27 +349,30 @@ export default function LibraryScreen() {
                                 ) : null}
                             </View>
                         ) : (
-                            <FlashList
-                                data={filteredTracks}
-                                keyExtractor={trackKeyExtractor}
-                                renderItem={renderTrackItem}
-                                contentContainerStyle={listContentStyle}
-                                // @ts-ignore - estimatedItemSize is required for FlashList performance
-                                estimatedItemSize={trackSize}
-                                getItemType={getTrackItemType}
-                                // @ts-ignore - FlashList accepts overrideItemLayout for fixed-height rows
-                                overrideItemLayout={overrideTrackItemLayout}
-                                removeClippedSubviews
-                                drawDistance={TRACK_DRAW_DISTANCE}
-                                showsVerticalScrollIndicator={false}
-                            />
+                            <View style={{ flex: 1 }}>
+                                <FlashList
+                                    ref={songsListRef}
+                                    data={filteredTracks}
+                                    keyExtractor={trackKeyExtractor}
+                                    renderItem={renderTrackItem}
+                                    contentContainerStyle={listContentStyle}
+                                    // @ts-ignore - estimatedItemSize is required for FlashList performance
+                                    estimatedItemSize={trackSize}
+                                    getItemType={getTrackItemType}
+                                    // @ts-ignore - FlashList accepts overrideItemLayout for fixed-height rows
+                                    removeClippedSubviews
+                                    drawDistance={TRACK_DRAW_DISTANCE}
+                                    showsVerticalScrollIndicator={false}
+                                />
+                                {!searchQuery && <AlphabetScrubber onLetterChange={handleLetterScrub} />}
+                            </View>
                         )
                     ) : null}
 
                     {tab === 'albums' ? (
                         filteredAlbums.length === 0 ? (
                             <EmptyState
-                                icon="💿"
+                                icon="Album"
                                 title={albums.length === 0 ? 'No albums yet' : 'No albums match your search'}
                                 description={albums.length === 0 ? 'Albums will appear after scanning your music' : 'Try searching another album or artist'}
                                 actionLabel={albums.length === 0 ? 'Scan Library' : undefined}
@@ -298,16 +382,27 @@ export default function LibraryScreen() {
                             <FlashList
                                 data={filteredAlbums}
                                 keyExtractor={albumKeyExtractor}
-                                numColumns={2}
-                                renderItem={renderAlbumItem}
+                                numColumns={3}
+                                masonry={true}
+                                optimizeItemArrangement={true}
+                                renderItem={({ item, index }: any) => {
+                                    // Staggered pattern: ensure they never align
+                                    const isTall = index % 4 === 0;
+                                    const height = isTall ? 190 : (index % 3 === 0 ? 130 : 160);
+                                    return (
+                                        <View style={{ padding: 4 }}>
+                                            <AlbumCard
+                                                album={item}
+                                                size="full"
+                                                height={height}
+                                                onPress={handleAlbumPress}
+                                            />
+                                        </View>
+                                    );
+                                }}
                                 contentContainerStyle={gridContentStyle}
-                                // @ts-ignore
-                                estimatedItemSize={ESTIMATED_ALBUM_SIZE}
-                                getItemType={getAlbumItemType}
-                                // @ts-ignore
-                                overrideItemLayout={overrideAlbumItemLayout}
-                                removeClippedSubviews
                                 showsVerticalScrollIndicator={false}
+                                removeClippedSubviews
                             />
                         )
                     ) : null}
@@ -315,7 +410,7 @@ export default function LibraryScreen() {
                     {tab === 'artists' ? (
                         filteredArtists.length === 0 ? (
                             <EmptyState
-                                icon="🎤"
+                                icon="Artista"
                                 title={artists.length === 0 ? 'No artists yet' : 'No artists match your search'}
                                 description={artists.length === 0 ? 'Artists will appear after scanning your music' : 'Try searching another artist name'}
                                 actionLabel={artists.length === 0 ? 'Scan Library' : undefined}
@@ -325,16 +420,13 @@ export default function LibraryScreen() {
                             <FlashList
                                 data={filteredArtists}
                                 keyExtractor={artistKeyExtractor}
-                                numColumns={3}
+                                numColumns={2}
+                                masonry={true}
+                                optimizeItemArrangement={true}
                                 renderItem={renderArtistItem}
                                 contentContainerStyle={gridContentStyle}
-                                // @ts-ignore
-                                estimatedItemSize={ESTIMATED_ARTIST_SIZE}
-                                getItemType={getArtistItemType}
-                                // @ts-ignore
-                                overrideItemLayout={overrideArtistItemLayout}
-                                removeClippedSubviews
                                 showsVerticalScrollIndicator={false}
+                                removeClippedSubviews
                             />
                         )
                     ) : null}
@@ -395,9 +487,8 @@ const styles = StyleSheet.create({
         padding: 8,
         maxWidth: '50%',
     },
-    artistWrapper: {
+    masonryWrapper: {
         flex: 1,
-        padding: 8,
-        alignItems: 'center',
+        marginBottom: 8,
     },
 });

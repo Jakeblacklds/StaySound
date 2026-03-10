@@ -8,6 +8,8 @@ import {
     TidalAlbumDetail,
     TidalArtist,
     TidalArtistDetail,
+    TidalPlaylist,
+    TidalPlaylistDetail,
     TidalQuality,
     TidalSearchResult,
     TidalTrack,
@@ -109,6 +111,38 @@ interface TidalAlbumDetailApiResponse {
     };
 }
 
+interface TidalPlaylistApiResponse {
+    uuid: string;
+    title: string;
+    description?: string;
+    numberOfTracks?: number;
+    image?: string;
+    cover?: string;
+    picture?: string;
+    squareImage?: string;
+}
+
+interface TidalPlaylistSearchApiResponse {
+    data?: {
+        playlists?: {
+            items?: TidalPlaylistApiResponse[];
+        };
+        items?: TidalPlaylistApiResponse[];
+    };
+}
+
+interface TidalPlaylistDetailApiResponse {
+    data?: TidalPlaylistApiResponse & {
+        items?: Array<{
+            item?: TidalTrackApiResponse;
+        }>;
+    };
+    playlist?: TidalPlaylistApiResponse;
+    items?: Array<{
+        item?: TidalTrackApiResponse;
+    }>;
+}
+
 interface TidalManifestApiResponse {
     data?: {
         manifest?: string;
@@ -138,16 +172,14 @@ type PersistedPublicDownloadsPermission = {
     directoryUri: string;
 };
 
+import { sanitizeFilename as utilsSanitizeFilename } from './audioUtils';
+
 function sanitizeFilename(input: string): string {
-    return input
-        .replace(/[<>:"/\\|?*]/g, '_')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 160);
+    return utilsSanitizeFilename(input);
 }
 
-function getTrackBaseFilename(track: Pick<TidalTrack, 'id' | 'title' | 'artist'>): string {
-    const sanitized = sanitizeFilename(`${track.artist} - ${track.title}`);
+function getTrackBaseFilename(track: Pick<TidalTrack, 'id' | 'title' | 'artist' | 'album'>): string {
+    const sanitized = sanitizeFilename(`${track.artist} - ${track.album} - ${track.title}`);
     if (sanitized.length > 0) return sanitized;
     return `tidal_${track.id}`;
 }
@@ -156,7 +188,7 @@ function getExtensionFromMime(mimeType?: string, codecs?: string): string {
     const m = (mimeType ?? '').toLowerCase();
     const c = (codecs ?? '').toLowerCase();
     if (m.includes('flac') || c.includes('flac')) return 'flac';
-    if (m.includes('mp4') || m.includes('aac') || c.includes('mp4') || c.includes('aac')) return 'm4a';
+    if (m.includes('mp4') || m.includes('aac') || m.includes('m4a') || c.includes('mp4') || c.includes('aac')) return 'm4a';
     if (m.includes('mpeg') || m.includes('mp3')) return 'mp3';
     return 'flac'; // fallback
 }
@@ -278,6 +310,78 @@ async function persistInPublicDownloads(tempUri: string, baseFilename: string, e
     });
 
     return destinationUri;
+}
+
+async function persistArtworkInPublicDownloads(artworkUrl: string, artist: string, album: string): Promise<void> {
+    try {
+        if (!artworkUrl) return;
+
+        const directoryUri = await getPublicDownloadsDirectoryUri();
+        const baseFilename = sanitizeFilename(`${artist} - ${album}`);
+        const filename = `${baseFilename}.jpg`;
+
+        const existing = await findSafChildByName(directoryUri, filename);
+        if (existing) return;
+
+        const tempArtworkUri = `${FileSystem.cacheDirectory}temp_artwork.jpg`;
+        await FileSystem.downloadAsync(artworkUrl, tempArtworkUri);
+
+        const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            directoryUri,
+            baseFilename,
+            'image/jpeg',
+        );
+
+        const payload = await FileSystem.readAsStringAsync(tempArtworkUri, {
+            encoding: FileSystem.EncodingType.Base64,
+        });
+
+        await FileSystem.StorageAccessFramework.writeAsStringAsync(destinationUri, payload, {
+            encoding: FileSystem.EncodingType.Base64,
+        });
+
+        await FileSystem.deleteAsync(tempArtworkUri, { idempotent: true });
+    } catch (error) {
+        console.warn('[TidalService] Failed to persist artwork:', error);
+    }
+}
+
+async function persistMetadataInPublicDownloads(track: TidalTrack, baseFilename: string): Promise<void> {
+    try {
+        const directoryUri = await getPublicDownloadsDirectoryUri();
+        const filename = `${baseFilename}.json`;
+        const payload = JSON.stringify({
+            title: track.title,
+            artist: track.artist,
+            album: track.album,
+            artwork: track.artworkUrl,
+            trackNumber: track.trackNumber,
+            year: track.year,
+            quality: track.quality,
+            codec: track.codec,
+            sampleRate: track.sampleRate,
+            bitDepth: track.bitDepth,
+            source: 'tidal',
+            tidalId: track.id,
+            tidalAlbumId: track.albumId,
+        });
+
+        const existing = await findSafChildByName(directoryUri, filename);
+        if (existing) {
+            await FileSystem.StorageAccessFramework.writeAsStringAsync(existing, payload);
+            return;
+        }
+
+        const destinationUri = await FileSystem.StorageAccessFramework.createFileAsync(
+            directoryUri,
+            baseFilename,
+            'application/json',
+        );
+
+        await FileSystem.StorageAccessFramework.writeAsStringAsync(destinationUri, payload);
+    } catch (error) {
+        console.warn('[TidalService] Failed to persist metadata:', error);
+    }
 }
 
 function withTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cleanup: () => void } {
@@ -523,18 +627,37 @@ function normalizeArtistItem(item: TidalArtistApiResponse): TidalArtist {
 }
 
 function normalizeAlbumItem(item: TidalAlbumApiResponse): TidalAlbum {
-    const artist = item.artist ?? item.artists?.[0];
     return {
         id: item.id,
         title: item.title,
-        artistId: artist?.id,
-        artistName: artist?.name ?? 'Unknown Artist',
-        coverUuid: item.cover,
-        artworkUrl: getArtworkUrl(item.cover),
+        artistId: item.artist?.id ?? item.artists?.[0]?.id,
+        artistName: item.artist?.name ?? item.artists?.[0]?.name ?? 'Artista Desconocido',
         releaseDate: item.releaseDate,
-        year: parseYearFromReleaseDate(item.releaseDate),
+        year: item.releaseDate ? new Date(item.releaseDate).getFullYear() : undefined,
         numberOfTracks: item.numberOfTracks,
         explicit: item.explicit,
+        artworkUrl: getArtworkUrl(item.cover ?? undefined),
+    };
+}
+
+function normalizePlaylistItem(item: TidalPlaylistApiResponse): TidalPlaylist {
+    const rawImage = item.image || item.cover || item.picture || item.squareImage;
+    let artworkUrl = undefined;
+
+    if (rawImage) {
+        if (rawImage.startsWith('http')) {
+            artworkUrl = rawImage;
+        } else {
+            artworkUrl = getPlaylistArtworkUrl(rawImage);
+        }
+    }
+
+    return {
+        uuid: item.uuid,
+        title: item.title,
+        description: item.description,
+        numberOfTracks: item.numberOfTracks,
+        artworkUrl,
     };
 }
 
@@ -620,6 +743,9 @@ function toLibraryTrack(tidalTrack: TidalTrack, uri: string): Track {
         sampleRate: tidalTrack.sampleRate,
         bitDepth: tidalTrack.bitDepth,
         quality: tidalTrack.quality,
+        source: 'tidal',
+        tidalId: tidalTrack.id,
+        tidalAlbumId: tidalTrack.albumId,
         dateAdded: Date.now(),
     };
 }
@@ -627,6 +753,18 @@ function toLibraryTrack(tidalTrack: TidalTrack, uri: string): Track {
 export function getArtworkUrl(coverUuid?: string | null): string | undefined {
     if (!coverUuid) return undefined;
     const normalized = coverUuid.replace(/-/g, '/');
+    return `${TIDAL_ARTWORK_BASE}/${normalized}/640x640.jpg`;
+}
+
+export function getPlaylistArtworkUrl(playlistImageId?: string | null): string | undefined {
+    if (!playlistImageId) return undefined;
+
+    // Some playlist images are direct square hashes, while others follow the UUID pattern
+    // If it's a UUID style (with dashes), we normalize it
+    const normalized = playlistImageId.includes('-')
+        ? playlistImageId.replace(/-/g, '/')
+        : playlistImageId;
+
     return `${TIDAL_ARTWORK_BASE}/${normalized}/640x640.jpg`;
 }
 
@@ -653,6 +791,18 @@ export async function searchTidalArtists(query: string): Promise<TidalArtist[]> 
     return artistItems.map(normalizeArtistItem);
 }
 
+export async function searchTidalPlaylists(query: string): Promise<TidalPlaylist[]> {
+    const trimmed = query.trim();
+    if (!trimmed) return [];
+
+    const response = await fetchJson<TidalPlaylistSearchApiResponse>(
+        `/search/?p=${encodeURIComponent(trimmed)}`,
+    );
+
+    const playlistItems = response.data?.playlists?.items ?? response.data?.items ?? [];
+    return playlistItems.map(normalizePlaylistItem);
+}
+
 export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
     const albumsMap = new Map<number, TidalAlbum>();
 
@@ -672,7 +822,6 @@ export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
 
     return Array.from(albumsMap.values());
 }
-
 export async function getTidalAlbumDetail(albumId: number): Promise<TidalAlbumDetail> {
     const response = await fetchJson<TidalAlbumDetailApiResponse>(
         `/album/?id=${albumId}`,
@@ -690,6 +839,57 @@ export async function getTidalAlbumDetail(albumId: number): Promise<TidalAlbumDe
         .map(item => normalizeArtistTrack(item, album.artistId ? { id: album.artistId, name: album.artistName } : undefined));
 
     return { album, tracks };
+}
+
+export async function getTidalPlaylistDetail(playlistUuid: string): Promise<TidalPlaylistDetail> {
+    const response = await fetchJson<any>(
+        `/playlist/?id=${playlistUuid}`,
+    );
+
+    // Try multiple possible paths for the playlist metadata
+    const playlistData = response.data || response.playlist || (response.uuid ? response : null);
+
+    if (!playlistData) {
+        console.error('Tidal Playlist Error: No playlist data in response', response);
+        throw new Error('No se pudo cargar la playlist de Tidal');
+    }
+
+    // Ensure the playlistData has the best image possible
+    if (!playlistData.image && !playlistData.cover && !playlistData.picture && !playlistData.squareImage) {
+        playlistData.image = response.image || response.cover || response.picture || response.squareImage;
+    }
+
+    // Convert tracks first so we can use their artwork as fallback
+    const items = response.data?.items ?? response.items ?? playlistData.items ?? [];
+    const tracks = items
+        .map((entry: any) => entry.item || entry)
+        .filter((item: any): item is TidalTrackApiResponse => !!item && !!item.id)
+        .map((item: any) => normalizeArtistTrack(item));
+
+    const playlist = normalizePlaylistItem(playlistData);
+
+    // CRITICAL: If playlist still has no artwork, use the artwork from the first track
+    if (!playlist.artworkUrl && tracks.length > 0 && tracks[0].artworkUrl) {
+        playlist.artworkUrl = tracks[0].artworkUrl;
+    }
+
+    return { playlist, tracks };
+}
+
+export async function getTidalArtistInfo(artistId: number): Promise<TidalArtist> {
+    const response = await fetchJson<TidalArtistDetailApiResponse>(
+        `/artist/?id=${artistId}`,
+    );
+
+    const apiArtist = response.artist;
+    if (!apiArtist) {
+        throw new Error('Artista no encontrado');
+    }
+
+    return {
+        ...normalizeArtistItem(apiArtist),
+        artworkUrl: response.cover?.['750'] || getArtworkUrl(apiArtist.picture ?? undefined),
+    };
 }
 
 export async function getTidalArtistDetail(artistId: number, artistNameHint?: string): Promise<TidalArtistDetail> {
@@ -769,6 +969,10 @@ export async function downloadTidalTrack(
     if (Platform.OS === 'android') {
         const existingPublicUri = await findExistingPublicTrackUri(filename);
         if (existingPublicUri) {
+            await persistMetadataInPublicDownloads(tidalTrack, baseFilename);
+            if (tidalTrack.artworkUrl) {
+                await persistArtworkInPublicDownloads(tidalTrack.artworkUrl, tidalTrack.artist, tidalTrack.album);
+            }
             options.onProgress?.(1);
             return toLibraryTrack(tidalTrack, existingPublicUri);
         }
@@ -827,6 +1031,16 @@ export async function downloadTidalTrack(
         try {
             persistentUri = await persistInPublicDownloads(outputUri, baseFilename, extension);
             await FileSystem.deleteAsync(outputUri, { idempotent: true });
+
+            await persistMetadataInPublicDownloads(enrichedTrack, baseFilename);
+
+            if (enrichedTrack.artworkUrl) {
+                await persistArtworkInPublicDownloads(
+                    enrichedTrack.artworkUrl,
+                    enrichedTrack.artist,
+                    enrichedTrack.album
+                );
+            }
         } catch (persistError) {
             console.error('[TidalService] Failed to persist in public folder:', persistError);
             throw new Error(`Failed to save track to public folder: ${persistError instanceof Error ? persistError.message : 'Unknown error'}`);
@@ -887,6 +1101,9 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
         sampleRate: enrichedTrack.sampleRate,
         bitDepth: enrichedTrack.bitDepth,
         quality: enrichedTrack.quality,
+        source: 'tidal_stream',
+        tidalId: tidalTrack.id,
+        tidalAlbumId: tidalTrack.albumId,
         dateAdded: Date.now(),
     };
 }
@@ -910,3 +1127,7 @@ export async function isValidAudioFile(uri: string, extension: string): Promise<
         return false;
     }
 }
+
+
+
+

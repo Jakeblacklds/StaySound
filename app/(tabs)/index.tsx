@@ -1,9 +1,9 @@
-import { AlbumCard, EmptyState } from '@/src/components/ui';
+import { AlbumCard, CustomIcon, EmptyState } from '@/src/components/ui';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
+import { useOnboardingStore } from '@/src/stores/onboardingStore';
 import { useAnimatedColors, useTheme } from '@/src/theme';
 import { Album, Artist, Track } from '@/src/types';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
@@ -84,8 +84,8 @@ const TrackCard = React.memo(({
             transition={0}
           />
         ) : (
-          <MaterialCommunityIcons
-            name="music-note"
+          <CustomIcon
+            name="Canción"
             size={32}
             color={theme.colors.onSurfaceVariant + '60'}
           />
@@ -147,8 +147,8 @@ const ArtistBubble = React.memo(({
             transition={0}
           />
         ) : (
-          <MaterialCommunityIcons
-            name="account-music"
+          <CustomIcon
+            name="Artista"
             size={30}
             color={theme.colors.onSurfaceVariant + '80'}
           />
@@ -173,7 +173,7 @@ const QuickChip = React.memo(({
   color,
   bgColor,
 }: {
-  icon: string;
+  icon: any;
   label: string;
   onPress: () => void;
   color: string;
@@ -188,7 +188,7 @@ const QuickChip = React.memo(({
         pressed && styles.pressedChip
       ]}
     >
-      <MaterialCommunityIcons name={icon as any} size={20} color={color} />
+      <CustomIcon name={icon} size={20} color={color} />
       <Text style={[styles.quickChipText, { color }]}>{label}</Text>
     </Pressable>
   );
@@ -201,7 +201,7 @@ const SectionHeader = React.memo(({
   onSeeAll,
 }: {
   title: string;
-  icon: string;
+  icon: any;
   onSeeAll?: () => void;
 }) => {
   const { theme } = useTheme();
@@ -211,8 +211,8 @@ const SectionHeader = React.memo(({
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionTitleRow}>
-        <MaterialCommunityIcons
-          name={icon as any}
+        <CustomIcon
+          name={icon}
           size={22}
           color={theme.colors.primary}
           style={styles.sectionIcon}
@@ -238,7 +238,7 @@ const StatChip = React.memo(({
   value,
   label,
 }: {
-  icon: string;
+  icon: any;
   value: number;
   label: string;
 }) => {
@@ -252,17 +252,21 @@ const StatChip = React.memo(({
 
   return (
     <View style={[styles.statChip, chipStyle]}>
-      <MaterialCommunityIcons
-        name={icon as any}
-        size={18}
-        color={theme.colors.primary}
-      />
-      <Text variant="titleMedium" style={[styles.statValue, valueStyle]}>
-        {value}
-      </Text>
-      <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant }}>
-        {label}
-      </Text>
+      <View style={styles.statIconContainer}>
+        <CustomIcon
+          name={icon}
+          size={16}
+          color={theme.colors.primary}
+        />
+      </View>
+      <View style={styles.statTextContainer}>
+        <Text variant="titleSmall" style={[styles.statValue, valueStyle]} numberOfLines={1}>
+          {value}
+        </Text>
+        <Text variant="labelSmall" style={[styles.statLabel, { color: theme.colors.onSurfaceVariant }]} numberOfLines={1}>
+          {label}
+        </Text>
+      </View>
     </View>
   );
 });
@@ -303,8 +307,8 @@ const NowPlayingCard = React.memo(({
               transition={0}
             />
           ) : (
-            <MaterialCommunityIcons
-              name="music-note"
+            <CustomIcon
+              name="Canción"
               size={24}
               color={theme.colors.onSurfaceVariant}
             />
@@ -332,8 +336,8 @@ const NowPlayingCard = React.memo(({
             {track.artist}
           </Text>
         </View>
-        <MaterialCommunityIcons
-          name="chevron-right"
+        <CustomIcon
+          name="Next"
           size={24}
           color={theme.colors.primary}
         />
@@ -365,10 +369,23 @@ export default function HomeScreen() {
   const recentlyPlayed = usePlayerStore(s => s.recentlyPlayed);
   const currentTrack = usePlayerStore(s => s.currentTrack);
 
+  const { userName, userAvatarUri } = useOnboardingStore();
+
+  const toValues = useCallback(<T,>(source: unknown): T[] => {
+    if (source instanceof Map) return Array.from(source.values()) as T[];
+    if (Array.isArray(source)) {
+      return (source as unknown[]).map((entry) => {
+        if (Array.isArray(entry) && entry.length === 2) return entry[1] as T;
+        return entry as T;
+      });
+    }
+    return [];
+  }, []);
+
   // Derived arrays
-  const tracks = useMemo(() => Array.from(tracksMap.values()), [tracksMap]);
-  const albums = useMemo(() => Array.from(albumsMap.values()), [albumsMap]);
-  const artists = useMemo(() => Array.from(artistsMap.values()), [artistsMap]);
+  const tracks = useMemo(() => toValues<Track>(tracksMap as unknown), [toValues, tracksMap]);
+  const albums = useMemo(() => toValues<Album>(albumsMap as unknown), [toValues, albumsMap]);
+  const artists = useMemo(() => toValues<Artist>(artistsMap as unknown), [toValues, artistsMap]);
 
   // Data derivations
   const recentlyAddedAlbums = useMemo(
@@ -482,31 +499,52 @@ export default function HomeScreen() {
         style={styles.container}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 6, paddingBottom: styles.content.paddingBottom + insets.bottom }]}
         showsVerticalScrollIndicator={false}
-        removeClippedSubviews
         decelerationRate="fast"
       >
-        <Animated.View entering={FadeInDown.duration(400)} style={[styles.heroCard, heroCardStyle]}>
+        <Animated.View entering={FadeInDown.duration(400)} style={styles.heroCard}>
           <View style={styles.header}>
             <View style={styles.headerTop}>
-              <View style={styles.headerTextContainer}>
-                <Text
-                  variant="bodyMedium"
-                  style={[styles.greetingText, { color: theme.colors.onSurfaceVariant }]}
-                >
-                  {getGreeting()}
-                </Text>
-                <Text
-                  variant="headlineMedium"
-                  style={[styles.appTitle, { color: theme.colors.onBackground }]}
-                >
-                  StaySound
-                </Text>
-              </View>
+              <Pressable
+                onPress={() => router.push('/settings')}
+                style={styles.profileArea}
+              >
+                <View style={[styles.avatarContainer, { borderColor: theme.colors.primary }]}>
+                  {userAvatarUri ? (
+                    <Image
+                      source={{ uri: userAvatarUri }}
+                      style={styles.avatar}
+                      contentFit="cover"
+                    />
+                  ) : (
+                    <View style={[styles.avatarPlaceholder, { backgroundColor: theme.colors.primaryContainer }]}>
+                      <Text style={{ color: theme.colors.primary, fontWeight: '800' }}>
+                        {userName ? userName.charAt(0).toUpperCase() : 'U'}
+                      </Text>
+                    </View>
+                  )}
+                </View>
+                <View style={styles.headerTextContainer}>
+                  <Text
+                    variant="bodyMedium"
+                    style={[styles.greetingText, { color: theme.colors.onSurfaceVariant }]}
+                  >
+                    {getGreeting()}
+                  </Text>
+                  <Text
+                    variant="headlineSmall"
+                    style={[styles.appTitle, { color: theme.colors.onBackground }]}
+                    numberOfLines={1}
+                  >
+                    {userName || 'StaySound'}
+                  </Text>
+                </View>
+              </Pressable>
+
               <Pressable
                 onPress={goToSettings}
-                style={[styles.settingsBtn, { backgroundColor: theme.colors.surfaceVariant + '66' }]}
+                style={[styles.settingsBtn, { backgroundColor: theme.colors.surfaceVariant + '44' }]}
               >
-                <MaterialCommunityIcons name="cog-outline" size={22} color={theme.colors.onSurfaceVariant} />
+                <CustomIcon name="Ajustes" size={22} color={theme.colors.onSurfaceVariant} />
               </Pressable>
             </View>
           </View>
@@ -514,23 +552,22 @@ export default function HomeScreen() {
           {hasMusic && (
             <>
               <View style={styles.quickChipRow}>
-                <QuickChip icon="play-circle" label="Reproducir" onPress={handlePlayAll} color={theme.colors.onPrimary} bgColor={theme.colors.primary} />
-                <QuickChip icon="shuffle-variant" label="Aleatorio" onPress={handleShuffle} color={theme.colors.primary} bgColor={theme.colors.primaryContainer + '90'} />
-                <QuickChip icon="playlist-music" label="Biblioteca" onPress={goToLibrary} color={theme.colors.onSurfaceVariant} bgColor={theme.colors.surfaceVariant + '75'} />
+                <QuickChip icon="Play" label="Reproducir" onPress={handlePlayAll} color={theme.colors.onPrimary} bgColor={theme.colors.primary} />
+                <QuickChip icon="Shuffle" label="Aleatorio" onPress={handleShuffle} color={theme.colors.primary} bgColor={theme.colors.primaryContainer + '90'} />
               </View>
 
               <View style={styles.statsRow}>
-                <StatChip icon="music-note" value={tracks.length} label="canciones" />
-                <StatChip icon="album" value={albums.length} label="álbumes" />
-                <StatChip icon="account-music" value={artists.length} label="artistas" />
+                <StatChip icon="Canción" value={tracks.length} label="canciones" />
+                <StatChip icon="Album" value={albums.length} label="álbumes" />
+                <StatChip icon="Artista" value={artists.length} label="artistas" />
               </View>
             </>
           )}
         </Animated.View>
 
         {recentlyPlayedSlice.length > 0 && (
-          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-            <SectionHeader title="Escuchado Recientemente" icon="history" />
+          <View style={styles.sectionBlock}>
+            <SectionHeader title="Escuchado Recientemente" icon="Reciente" />
             <FlashList
               data={recentlyPlayedSlice}
               renderItem={renderTrackCard}
@@ -545,8 +582,8 @@ export default function HomeScreen() {
         )}
 
         {recentlyAddedTracks.length > 0 && (
-          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-            <SectionHeader title="Agregado Recientemente" icon="clock-plus-outline" onSeeAll={goToLibrary} />
+          <View style={styles.sectionBlock}>
+            <SectionHeader title="Agregado Recientemente" icon="Reciente" onSeeAll={goToLibrary} />
             <FlashList
               data={recentlyAddedTracks}
               renderItem={renderTrackCard}
@@ -561,8 +598,8 @@ export default function HomeScreen() {
         )}
 
         {recentlyAddedAlbums.length > 0 && (
-          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-            <SectionHeader title="Álbumes" icon="album" onSeeAll={goToLibrary} />
+          <View style={styles.sectionBlock}>
+            <SectionHeader title="Álbumes" icon="Album" onSeeAll={goToLibrary} />
             <View style={styles.albumGrid}>
               {recentlyAddedAlbums.map((album) => (
                 <View key={album.id} style={styles.albumWrapper}>
@@ -574,8 +611,8 @@ export default function HomeScreen() {
         )}
 
         {topArtists.length > 0 && (
-          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-            <SectionHeader title="Tus Artistas" icon="account-group" onSeeAll={goToLibrary} />
+          <View style={styles.sectionBlock}>
+            <SectionHeader title="Tus Artistas" icon="Artista" onSeeAll={goToLibrary} />
             <FlashList
               data={topArtists}
               renderItem={renderArtistBubble}
@@ -590,8 +627,8 @@ export default function HomeScreen() {
         )}
 
         {quickPicks.length > 0 && (
-          <View style={[styles.sectionBlock, sectionSurfaceStyle]}>
-            <SectionHeader title="Selecciones" icon="dice-multiple" />
+          <View style={styles.sectionBlock}>
+            <SectionHeader title="Selecciones" icon="Shuffle" />
             <FlashList
               data={quickPicks}
               renderItem={renderTrackCard}
@@ -635,27 +672,52 @@ function hashSimple(str: string | number): number {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingBottom: 140 },
-  heroCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 20, borderWidth: 1, borderRadius: 24, overflow: 'hidden' },
-  header: { paddingHorizontal: 18, paddingTop: 16, marginBottom: 14 },
-  headerTop: { flexDirection: 'row', alignItems: 'center' },
+  heroCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 20 },
+  header: { paddingHorizontal: 0, paddingTop: 16, marginBottom: 20 },
+  headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  profileArea: { flexDirection: 'row', alignItems: 'center', flex: 1 },
+  avatarContainer: { width: 56, height: 56, borderRadius: 28, borderWidth: 1.5, overflow: 'hidden', marginRight: 14, elevation: 4 },
+  avatar: { width: '100%', height: '100%' },
+  avatarPlaceholder: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
   headerTextContainer: { flex: 1 },
-  greetingText: { marginBottom: 2 },
-  appTitle: { fontWeight: '800', letterSpacing: -0.8, fontSize: 28 },
-  settingsBtn: { width: 42, height: 42, borderRadius: 21, alignItems: 'center', justifyContent: 'center' },
-  quickChipRow: { flexDirection: 'row', paddingHorizontal: 18, gap: 10, marginBottom: 14 },
-  quickChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 12, borderRadius: 14, gap: 6 },
-  quickChipText: { fontSize: 13, fontWeight: '600' },
-  pressedChip: { opacity: 0.7, transform: [{ scale: 0.97 }] },
-  statsRow: { flexDirection: 'row', paddingHorizontal: 18, gap: 10, marginBottom: 18 },
-  statChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 12, gap: 2 },
-  statValue: { fontWeight: 'bold', marginHorizontal: 4 },
-  sectionBlock: { marginHorizontal: 16, marginBottom: 14, borderWidth: 1, borderRadius: 20, paddingTop: 12, paddingBottom: 8 },
-  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 14, marginBottom: 12 },
+  greetingText: { fontSize: 13, marginBottom: 0, fontWeight: '500', opacity: 0.8 },
+  appTitle: { fontWeight: '900', letterSpacing: -0.8, fontSize: 32 },
+  settingsBtn: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+  quickChipRow: { flexDirection: 'row', paddingHorizontal: 0, gap: 12, marginBottom: 20 },
+  quickChip: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 14, borderRadius: 16, gap: 8, overflow: 'hidden' },
+  quickChipText: { fontSize: 14, fontWeight: '700' },
+  pressedChip: { opacity: 0.7, transform: [{ scale: 0.96 }] },
+  statsRow: { flexDirection: 'row', paddingHorizontal: 0, gap: 8, marginBottom: 10 },
+  statChip: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 16,
+    overflow: 'hidden'
+  },
+  statIconContainer: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+  },
+  statTextContainer: {
+    flex: 1,
+    justifyContent: 'center',
+  },
+  statValue: { fontWeight: '800', fontSize: 13, lineHeight: 16 },
+  statLabel: { fontSize: 10, lineHeight: 12, opacity: 0.8 },
+  sectionBlock: { marginHorizontal: 16, marginBottom: 26 },
+  sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 0, marginBottom: 16 },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center' },
   sectionIcon: { marginRight: 8 },
   sectionTitle: { fontWeight: '700', letterSpacing: -0.3 },
-  horizontalList: { paddingLeft: 14, paddingRight: 14, marginBottom: 2 },
-  listSeparator: { width: 12 },
+  horizontalList: { paddingLeft: 0, paddingRight: 0, marginBottom: 2 },
+  listSeparator: { width: 14 },
   trackCard: { width: TRACK_CARD_WIDTH, borderRadius: 14, overflow: 'hidden', paddingBottom: 10 },
   pressedCard: { opacity: 0.8, transform: [{ scale: 0.96 }] },
   trackCardArt: { width: TRACK_CARD_WIDTH, height: TRACK_CARD_WIDTH, borderRadius: 14, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 8 },

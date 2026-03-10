@@ -15,6 +15,7 @@ import { readDirectoryAsync } from 'expo-file-system/legacy';
 import * as MediaLibrary from 'expo-media-library';
 import { MusicInfo } from 'expo-music-info-2';
 import { ScanProgress, Track } from '../types/audio';
+import { getFormatFromUri, parseFilename } from './audioUtils';
 import { extractFlacMetadata, isFlacFile } from './flacParser';
 import { canUseNativeLibraryIndexer, scanMusicNative } from './nativeLibraryIndexer';
 
@@ -81,50 +82,6 @@ function generateTrackId(uri: string): string {
 }
 
 /**
- * Parse filename to extract artist and title
- * Handles formats like: "Artist - Title.mp3", "01 Title.mp3"
- */
-function parseFilename(filename: string): { title: string; artist: string; album: string } {
-    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-
-    // Try "Artist - Title" format
-    if (nameWithoutExt.includes(' - ')) {
-        const parts = nameWithoutExt.split(' - ');
-        if (parts.length >= 2) {
-            const firstPart = parts[0].trim();
-            // Check if first part is just a track number
-            if (/^\d+$/.test(firstPart) && parts.length >= 3) {
-                return {
-                    artist: parts[1].trim(),
-                    title: parts.slice(2).join(' - ').trim(),
-                    album: 'Unknown Album',
-                };
-            }
-            return {
-                artist: firstPart,
-                title: parts.slice(1).join(' - ').trim(),
-                album: 'Unknown Album',
-            };
-        }
-    }
-
-    // Remove track number prefix
-    const withoutTrackNum = nameWithoutExt.replace(/^\d+[\s._-]*/, '').trim();
-
-    return {
-        title: withoutTrackNum || nameWithoutExt,
-        artist: 'Unknown Artist',
-        album: 'Unknown Album',
-    };
-}
-
-function getFormatFromUri(uri: string): string | undefined {
-    const match = uri.toLowerCase().match(/\.([a-z0-9]+)(\?|$)/);
-    if (!match) return undefined;
-    return match[1].toUpperCase();
-}
-
-/**
  * FAST: Convert MediaLibrary asset to Track without metadata extraction
  * Uses filename parsing instead of reading file metadata
  */
@@ -133,10 +90,10 @@ function assetToTrackFast(asset: MediaLibrary.Asset, folderName: string): Track 
     const parsed = parseFilename(filename);
 
     // Use parent folder as album name if not generic
-    const genericFolders = ['download', 'music', 'audio', '0', 'documents'];
-    const albumFromFolder = genericFolders.includes(folderName.toLowerCase())
-        ? 'Unknown Album'
-        : decodeURIComponent(folderName);
+    const genericFolders = ['download', 'music', 'audio', '0', 'documents', 'staysound'];
+    const albumFromFolder = (parsed.album === 'Unknown Album' && !genericFolders.includes(folderName.toLowerCase()))
+        ? decodeURIComponent(folderName)
+        : parsed.album;
 
     return {
         id: generateTrackId(asset.uri),
@@ -148,6 +105,7 @@ function assetToTrackFast(asset: MediaLibrary.Asset, folderName: string): Track 
         duration: (asset.duration || 0) * 1000,
         format: getFormatFromUri(asset.uri),
         dateAdded: new Date(asset.creationTime).getTime(),
+        _filename: filename,  // carry original filename for filename-based matching in libraryStore
     };
 }
 
@@ -252,6 +210,7 @@ export async function runConcurrent<T>(
     }
 
     const workers = Array.from({ length: Math.min(limit, items.length) }, () => worker());
+    await Promise.all(workers);
 }
 
 /**
@@ -336,17 +295,15 @@ export async function scanMusicLibraryFast(
         let hasNextPage = true;
         let endCursor: string | undefined;
         let totalScanned = 0;
-        let pageCount = 0;
 
         while (hasNextPage) {
             const result = await MediaLibrary.getAssetsAsync({
                 mediaType: MediaLibrary.MediaType.audio,
-                first: 100, // Larger batches since we're not extracting metadata
+                first: 100,
                 after: endCursor,
                 sortBy: [[MediaLibrary.SortBy.creationTime, false]],
             });
 
-            pageCount++;
             totalScanned += result.assets.length;
 
             // Filter by folder pattern and audio extension
@@ -354,7 +311,6 @@ export async function scanMusicLibraryFast(
                 const ext = asset.filename?.split('.').pop()?.toLowerCase();
                 if (!ext || !AUDIO_EXTENSIONS.includes(ext)) return false;
 
-                // Apply folder filter if specified
                 if (folderPattern) {
                     const uri = decodeURIComponent(asset.uri || '');
                     return uri.includes(folderPattern);
@@ -363,9 +319,7 @@ export async function scanMusicLibraryFast(
             });
 
             if (matchingAssets.length > 0) {
-                // Convert to tracks instantly (no file I/O)
                 const batchTracks = matchingAssets.map(asset => {
-                    // Extract folder name from URI
                     const uriParts = decodeURIComponent(asset.uri).split('/');
                     const folderName = uriParts[uriParts.length - 2] || '';
                     return assetToTrackFast(asset, folderName);
@@ -373,7 +327,6 @@ export async function scanMusicLibraryFast(
 
                 tracks.push(...batchTracks);
 
-                // Stream tracks to UI immediately
                 if (onTrackFound) {
                     onTrackFound(batchTracks);
                 }
@@ -392,8 +345,6 @@ export async function scanMusicLibraryFast(
         }
 
         const duration = Date.now() - startTime;
-        console.log(`[FileScanner] FAST SCAN complete: ${tracks.length} tracks in ${duration}ms`);
-
         return { tracks, errors, duration };
 
     } catch (error) {
@@ -414,7 +365,6 @@ export async function scanMusicLibrary(
     onProgress?: ScanProgressCallback,
     onTrackFound?: TrackFoundCallback
 ): Promise<ScanResult> {
-    // Delegate to fast scan without metadata extraction
     return scanMusicLibraryFast(
         { folderPattern: MUSIC_FOLDERS.download, extractMetadata: false },
         onProgress,
@@ -425,10 +375,10 @@ export async function scanMusicLibrary(
 /**
  * Find artwork image in the same folder as the audio file
  */
-export async function findArtworkInFolder(audioUri: string): Promise<string | undefined> {
+export async function findArtworkInFolder(audioUri: string, artist?: string, album?: string): Promise<string | undefined> {
     try {
-        const folderUri = audioUri.substring(0, audioUri.lastIndexOf('/') + 1);
         const decodedUri = decodeURIComponent(audioUri);
+        const folderUri = audioUri.substring(0, audioUri.lastIndexOf('/') + 1);
         const folderPath = decodedUri.substring(0, decodedUri.lastIndexOf('/') + 1);
         const folderName = folderPath.split('/').filter(Boolean).pop() || '';
 
@@ -446,7 +396,13 @@ export async function findArtworkInFolder(audioUri: string): Promise<string | un
         const imageExtensions = ['.jpg', '.jpeg', '.png'];
         const priorityNames = ['cover', 'folder', 'album', 'front'];
 
-        // Find valid images
+        if (artist && album) {
+            priorityNames.unshift(`${artist} - ${album}`);
+        }
+        if (album) {
+            priorityNames.unshift(album);
+        }
+
         const imageFiles = files.filter(file => {
             const lower = file.toLowerCase();
             const isImage = imageExtensions.some(ext => lower.endsWith(ext));
@@ -462,10 +418,10 @@ export async function findArtworkInFolder(audioUri: string): Promise<string | un
             return undefined;
         }
 
-        // Priority match
         for (const name of priorityNames) {
+            const normalizedName = name.toLowerCase();
             for (const ext of imageExtensions) {
-                const target = `${name}${ext}`;
+                const target = `${normalizedName}${ext}`;
                 const match = imageFiles.find(f => f.toLowerCase() === target);
                 if (match) {
                     return `${folderUri}${match}`;
@@ -473,13 +429,19 @@ export async function findArtworkInFolder(audioUri: string): Promise<string | un
             }
         }
 
-        // Fallback: only for album folders
-        const genericFolders = ['0', 'download', 'music', 'audio', 'dcim', 'documents', 'pictures'];
+        const audioFilename = decodedUri.split('/').pop()?.replace(/\.[^/.]+$/, '') || '';
+        if (audioFilename) {
+            for (const ext of imageExtensions) {
+                const match = imageFiles.find(f => f.toLowerCase() === `${audioFilename.toLowerCase()}${ext}`);
+                if (match) return `${folderUri}${match}`;
+            }
+        }
+
+        const genericFolders = ['0', 'download', 'music', 'audio', 'dcim', 'documents', 'pictures', 'staysound'];
         if (genericFolders.includes(folderName.toLowerCase())) {
             return undefined;
         }
 
-        // Pick best candidate
         const likelyCover = imageFiles.find(f => {
             const l = f.toLowerCase();
             return priorityNames.some(p => l.includes(p));

@@ -1,8 +1,10 @@
 export { ActionSheet } from './ActionSheet';
 export { AlbumCard } from './AlbumCard';
+export { AlphabetScrubber } from './AlphabetScrubber';
 export { ArtistAbout } from './ArtistAbout';
 export { ArtistCard } from './ArtistCard';
 export { ConfirmationModal } from './ConfirmationModal';
+export { CustomIcon, IconName } from './CustomIcon';
 export { EmptyState } from './EmptyState';
 export { GlobalNotification } from './GlobalNotification';
 export { LyricsSkeleton } from './LyricsSkeleton';
@@ -10,4 +12,3 @@ export { PlaylistCard } from './PlaylistCard';
 export { ScanButton } from './ScanButton';
 export { Skeleton } from './Skeleton';
 export { TrackListItem as MemoizedTrackListItem, TrackListItem } from './TrackListItem';
-

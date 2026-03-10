@@ -1,4 +1,5 @@
 import { MaterialLiquidTabBar } from '@/src/components/navigation/MaterialLiquidTabBar';
+import { CustomIcon } from '@/src/components/ui';
 import { useTheme } from '@/src/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
@@ -32,9 +33,9 @@ export default function TabLayout() {
         name="index"
         options={{
           title: 'Inicio',
-          tabBarIcon: ({ color, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? "home" : "home-outline"}
+          tabBarIcon: ({ color }) => (
+            <CustomIcon
+              name="Home"
               size={26}
               color={color}
             />
@@ -45,9 +46,9 @@ export default function TabLayout() {
         name="library"
         options={{
           title: 'Biblioteca',
-          tabBarIcon: ({ color, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? "music-box-multiple" : "music-box-multiple-outline"}
+          tabBarIcon: ({ color }) => (
+            <CustomIcon
+              name="Library"
               size={26}
               color={color}
             />
@@ -58,9 +59,9 @@ export default function TabLayout() {
         name="playlists"
         options={{
           title: 'Playlists',
-          tabBarIcon: ({ color, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? "playlist-music" : "playlist-music-outline"}
+          tabBarIcon: ({ color }) => (
+            <CustomIcon
+              name="Playlist"
               size={26}
               color={color}
             />
@@ -71,9 +72,9 @@ export default function TabLayout() {
         name="tidal"
         options={{
           title: 'Descargar',
-          tabBarIcon: ({ color, focused }) => (
-            <MaterialCommunityIcons
-              name={focused ? 'music-circle' : 'music-circle-outline'}
+          tabBarIcon: ({ color }) => (
+            <CustomIcon
+              name="Descargar"
               size={26}
               color={color}
             />
@@ -83,10 +84,11 @@ export default function TabLayout() {
       <Tabs.Screen
         name="settings"
         options={{
+          href: null,
           title: 'Ajustes',
-          tabBarIcon: ({ color, focused }) => (
+          tabBarIcon: ({ color }) => (
             <MaterialCommunityIcons
-              name={focused ? "cog" : "cog-outline"}
+              name="cog"
               size={26}
               color={color}
             />

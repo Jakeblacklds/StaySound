@@ -1,25 +1,78 @@
-import { EmptyState, Skeleton } from '@/src/components/ui';
+import { CustomIcon, EmptyState, Skeleton } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
-import { createTidalStreamTrack, extractAlbumsFromTracks, getTidalArtistDetail, isValidAudioFile, searchTidal, searchTidalArtists, TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
+import { createTidalStreamTrack, extractAlbumsFromTracks, getTidalArtistInfo, isValidAudioFile, searchTidal, searchTidalArtists, searchTidalPlaylists, TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
 import { useLibraryStore, useNotificationStore, usePlayerStore, useSettingsStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
-import { TidalAlbum, TidalArtist, TidalQuality, TidalTrack } from '@/src/types/audio';
+import { TidalAlbum, TidalArtist, TidalPlaylist, TidalQuality, TidalTrack } from '@/src/types/audio';
+import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { Button, IconButton, Searchbar, Text } from 'react-native-paper';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import { Button, Divider, IconButton, Menu, Searchbar, Text } from 'react-native-paper';
+import Animated, { FadeIn, FadeInDown, FadeOut, interpolate, interpolateColor, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-type TidalTab = 'all' | 'artists' | 'albums' | 'tracks';
+type TidalTab = 'all' | 'artists' | 'albums' | 'tracks' | 'playlists';
 
-const TIDAL_TABS: ReadonlyArray<{ value: TidalTab; label: string }> = [
-    { value: 'all', label: 'Todo' },
-    { value: 'artists', label: 'Artistas' },
-    { value: 'albums', label: 'Álbumes' },
-    { value: 'tracks', label: 'Canciones' },
+const EXPLORE_MASONRY_CARDS: ReadonlyArray<{ title: string; subtitle: string; query: string; colors: [string, string]; height: number }> = [
+    {
+        title: 'Radar de novedades',
+        subtitle: 'Lanzamientos',
+        query: 'new releases',
+        colors: ['#1F6FEB', '#0B1F4A'],
+        height: 220,
+    },
+    {
+        title: 'Top Global',
+        subtitle: 'Más escuchados',
+        query: 'Top global',
+        colors: ['#8A2387', '#E94057'],
+        height: 140,
+    },
+    {
+        title: 'Rock',
+        subtitle: 'Clásicos y nuevos',
+        query: 'Rock',
+        colors: ['#141E30', '#243B55'],
+        height: 140,
+    },
+    {
+        title: 'Reggaeton',
+        subtitle: 'Baila sin parar',
+        query: 'Reggaeton 2026',
+        colors: ['#f12711', '#f5af19'],
+        height: 220,
+    },
+    {
+        title: 'Sesion Hi-Res',
+        subtitle: 'Calidad de estudio',
+        query: 'hi-res lossless',
+        colors: ['#F26D3D', '#7A1D1D'],
+        height: 220,
+    },
+    {
+        title: 'Lo-Fi Chill',
+        subtitle: 'Relájate',
+        query: 'Lo-fi chill',
+        colors: ['#005C97', '#363795'],
+        height: 140,
+    },
+    {
+        title: 'Gym',
+        subtitle: 'Motivación',
+        query: 'Gym motivation',
+        colors: ['#FF416C', '#FF4B2B'],
+        height: 140,
+    },
+    {
+        title: 'Jazz',
+        subtitle: 'Instrumental',
+        query: 'Jazz instrumental',
+        colors: ['#42275a', '#734b6d'],
+        height: 220,
+    },
 ];
 
 function formatTrackDuration(ms: number): string {
@@ -28,6 +81,153 @@ function formatTrackDuration(ms: number): string {
     const seconds = totalSeconds % 60;
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
+
+const GRID_GAP = 12;
+const CARD_HEIGHT_SQUARE = 180;
+const CARD_HEIGHT_TALL = 260;
+
+// ─── Standalone card to prevent remounting flicker ─────────────────────────
+interface GridCardProps {
+    item: any;
+    colIndex: number;
+    isLeft: boolean;
+    type: 'artists' | 'albums' | 'playlists';
+    artistArtworkUri?: string;
+    onPress: () => void;
+}
+
+const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, isLeft, type, artistArtworkUri, onPress }: GridCardProps) {
+    const { theme } = useTheme();
+
+    let height = CARD_HEIGHT_TALL;
+    if (type === 'albums') {
+        // Zig-zag pattern for albums: 
+        // Left: [Tall, Square, Tall...]
+        // Right: [Square, Tall, Square...]
+        const isSquare = isLeft ? (colIndex % 2 !== 0) : (colIndex % 2 === 0);
+        height = isSquare ? CARD_HEIGHT_SQUARE : CARD_HEIGHT_TALL;
+    } else {
+        // Simple unaligned pattern for artists/playlists:
+        // Right col starts with a square to shift the whole column
+        const isSquare = !isLeft && colIndex === 0;
+        height = isSquare ? CARD_HEIGHT_SQUARE : CARD_HEIGHT_TALL;
+    }
+
+    const title = type === 'artists' ? item.name : item.title;
+    const subtitle = type === 'artists' ? 'Artista' : type === 'playlists' ? 'Playlist' : item.artistName;
+    const rawImageUri = type === 'artists' ? (artistArtworkUri || item.artworkUrl) : item.artworkUrl;
+    // Perfect middle ground: 500x500 for retina-sharp masonry cards without overtaxing the GPU/RAM
+    const imageUri = rawImageUri ? rawImageUri.replace('100x100', '500x500').replace('200x200', '500x500').replace('300x300', '500x500') : undefined;
+
+    const fallbackBg = theme.colors.surfaceVariant || '#1E1E1E';
+
+    return (
+        <View style={{ height, borderRadius: 28, overflow: 'hidden', backgroundColor: fallbackBg }}>
+            <Pressable
+                onPress={onPress}
+                style={StyleSheet.absoluteFill}
+            >
+                {/* Background color placeholder/fallback */}
+                <View style={[StyleSheet.absoluteFill, { backgroundColor: fallbackBg }]} />
+
+                {imageUri ? (
+                    <Image
+                        source={{ uri: imageUri }}
+                        style={StyleSheet.absoluteFill}
+                        contentFit="cover"
+                        cachePolicy="memory-disk"
+                        transition={400}
+                    />
+                ) : (
+                    <LinearGradient
+                        colors={[fallbackBg, withAlpha(fallbackBg, 'CC')]}
+                        style={StyleSheet.absoluteFill}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 1, y: 1 }}
+                    />
+                )}
+
+                {/* Bottom Overlay with Glass Effect */}
+                <View style={styles.gridCardFooter}>
+                    <BlurView
+                        intensity={25}
+                        tint="dark"
+                        style={StyleSheet.absoluteFill}
+                    />
+                    <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.85)']}
+                        style={StyleSheet.absoluteFill}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0, y: 1 }}
+                    />
+
+                    {/* Content */}
+                    <View style={styles.gridCardContent}>
+                        <Text numberOfLines={2} style={styles.gridCardTitle}>{title}</Text>
+                        <Text numberOfLines={1} style={styles.gridCardSubtitle}>{subtitle}</Text>
+                    </View>
+                </View>
+            </Pressable>
+        </View>
+    );
+});
+
+interface MasonryGridProps {
+    items: any[];
+    type: 'artists' | 'albums' | 'playlists';
+    artistArtworkOverrides: Map<number, string>;
+    openArtist: (a: any) => void;
+    openAlbum: (a: any) => void;
+    openPlaylist: (p: any) => void;
+}
+
+const MasonryGrid = React.memo(function MasonryGrid({ items, type, artistArtworkOverrides, openArtist, openAlbum, openPlaylist }: MasonryGridProps) {
+    const leftCol: any[] = [];
+    const rightCol: any[] = [];
+    items.forEach((item, index) => {
+        if (index % 2 === 0) leftCol.push(item);
+        else rightCol.push(item);
+    });
+
+    return (
+        <View style={styles.gridContainer}>
+            <View style={styles.gridColumn}>
+                {leftCol.map((item, idx) => (
+                    <MasonryGridCard
+                        key={String(item.id || item.uuid)}
+                        item={item}
+                        colIndex={idx}
+                        isLeft={true}
+                        type={type}
+                        artistArtworkUri={type === 'artists' ? artistArtworkOverrides.get(item.id) : undefined}
+                        onPress={() => {
+                            if (type === 'artists') openArtist(item);
+                            else if (type === 'albums') openAlbum(item);
+                            else openPlaylist(item);
+                        }}
+                    />
+                ))}
+            </View>
+            <View style={styles.gridColumn}>
+                {rightCol.map((item, idx) => (
+                    <MasonryGridCard
+                        key={String(item.id || item.uuid)}
+                        item={item}
+                        colIndex={idx}
+                        isLeft={false}
+                        type={type}
+                        artistArtworkUri={type === 'artists' ? artistArtworkOverrides.get(item.id) : undefined}
+                        onPress={() => {
+                            if (type === 'artists') openArtist(item);
+                            else if (type === 'albums') openAlbum(item);
+                            else openPlaylist(item);
+                        }}
+                    />
+                ))}
+            </View>
+        </View>
+    );
+});
 
 function withAlpha(color: string, alphaHex: string): string {
     if (!color) return color;
@@ -42,22 +242,111 @@ function withAlpha(color: string, alphaHex: string): string {
 export default function TidalScreen() {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
+
+    const palette = useMemo(() => ({
+        heroBackground: withAlpha(theme.colors.surfaceVariant, 'A6'),
+        heroBorder: withAlpha(theme.colors.outline, '59'),
+        searchBackground: withAlpha(theme.colors.surface, 'F2'),
+        searchBorder: withAlpha(theme.colors.outline, '54'),
+        chipBackground: withAlpha(theme.colors.surfaceVariant, 'E6'),
+        chipSelectedBackground: theme.colors.primary,
+        cardBackground: withAlpha(theme.colors.surface, 'F5'),
+        cardBorder: withAlpha(theme.colors.outline, '42'),
+        qualityBackground: theme.colors.primaryContainer,
+        floatingGlow: withAlpha(theme.colors.primary, '1A'),
+    }), [theme.colors]);
+
     const [query, setQuery] = useState('');
     const [debouncedQuery, setDebouncedQuery] = useState('');
+    const [uiDebouncedQuery, setUiDebouncedQuery] = useState('');
     const [activeTab, setActiveTab] = useState<TidalTab>('all');
     const [tracks, setTracks] = useState<TidalTrack[]>([]);
     const [artists, setArtists] = useState<TidalArtist[]>([]);
     const [artistArtworkOverrides, setArtistArtworkOverrides] = useState<Map<number, string>>(new Map());
+    const [playlists, setPlaylists] = useState<TidalPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showMirrorModal, setShowMirrorModal] = useState(false);
+    const [showSettingsMenu, setShowSettingsMenu] = useState(false);
     const {
         tidalDownloadQuality, setTidalDownloadQuality,
         tidalMirror, setTidalMirror
     } = useSettingsStore();
 
     const showNotification = useNotificationStore(s => s.showNotification);
+
+    const isSearching = useSharedValue(0);
+
+    // Trigger header/search morph only after user pauses typing
+    useEffect(() => {
+        if (!query.trim()) {
+            isSearching.value = withTiming(0, { duration: 1000 });
+            return;
+        }
+
+        isSearching.value = withSpring(uiDebouncedQuery.trim() ? 1 : 0, {
+            damping: 20,
+            stiffness: 120,
+            mass: 0.8,
+        });
+    }, [query, uiDebouncedQuery, isSearching]);
+
+    const headStyle = useAnimatedStyle(() => {
+        return {
+            marginTop: interpolate(isSearching.value, [0, 1], [22, 10]),
+            paddingVertical: interpolate(isSearching.value, [0, 1], [18, 0]),
+        };
+    });
+
+    const titleRowAnimatedStyle = useAnimatedStyle(() => {
+        return {
+            opacity: interpolate(isSearching.value, [0, 1], [1, 0]),
+            height: interpolate(isSearching.value, [0, 1], [92, 0]),
+            marginBottom: interpolate(isSearching.value, [0, 1], [10, 0]),
+            overflow: 'hidden',
+        };
+    });
+
+    const titleAnimatedStyle = useAnimatedStyle(() => {
+        return {
+            transform: [
+                { translateX: interpolate(isSearching.value, [0, 1], [0, 15]) },
+            ],
+        };
+    });
+
+    const searchAnimatedStyle = useAnimatedStyle(() => {
+        return {
+            backgroundColor: interpolateColor(
+                isSearching.value,
+                [0, 1],
+                [palette.searchBackground, 'transparent']
+            ) as string,
+            borderRadius: 999,
+            borderColor: interpolateColor(
+                isSearching.value,
+                [0, 1],
+                [palette.searchBorder, 'transparent']
+            ) as string,
+            borderWidth: interpolate(isSearching.value, [0, 1], [1, 0]),
+            transform: [
+                { scale: interpolate(isSearching.value, [0, 1], [1, 1.15]) },
+                { translateY: interpolate(isSearching.value, [0, 1], [0, 15]) }
+            ],
+            marginBottom: interpolate(isSearching.value, [0, 1], [0, 10]),
+        };
+    });
+
+    const bentoAnimatedStyle = useAnimatedStyle(() => {
+        return {
+            opacity: interpolate(isSearching.value, [0.5, 1], [0, 1]),
+            transform: [
+                { translateY: interpolate(isSearching.value, [0, 1], [-20, 0]) },
+                { scale: interpolate(isSearching.value, [0, 1], [0.95, 1]) },
+            ],
+        };
+    });
 
     const handleMirrorChange = (mirror: string) => {
         setTidalMirror(mirror);
@@ -83,22 +372,23 @@ export default function TidalScreen() {
 
     const play = usePlayerStore(s => s.play);
 
-    const palette = useMemo(() => ({
-        heroBackground: withAlpha(theme.colors.primaryContainer, '99'),
-        heroBorder: withAlpha(theme.colors.primary, '4D'),
-        searchBackground: withAlpha(theme.colors.surface, 'F0'),
-        chipBackground: withAlpha(theme.colors.surfaceVariant, 'E6'),
-        chipSelectedBackground: theme.colors.primary,
-        cardBackground: withAlpha(theme.colors.surface, 'F5'),
-        cardBorder: withAlpha(theme.colors.outline, '42'),
-        qualityBackground: theme.colors.primaryContainer,
-        floatingGlow: withAlpha(theme.colors.primary, '1A'),
-    }), [theme.colors]);
-
     useEffect(() => {
         const timeout = setTimeout(() => {
             setDebouncedQuery(query);
         }, 320);
+
+        return () => clearTimeout(timeout);
+    }, [query]);
+
+    useEffect(() => {
+        if (!query.trim()) {
+            setUiDebouncedQuery('');
+            return;
+        }
+
+        const timeout = setTimeout(() => {
+            setUiDebouncedQuery(query);
+        }, 1400);
 
         return () => clearTimeout(timeout);
     }, [query]);
@@ -122,11 +412,13 @@ export default function TidalScreen() {
         Promise.all([
             searchTidal(currentQuery),
             searchTidalArtists(currentQuery),
+            searchTidalPlaylists(currentQuery),
         ])
-            .then(([nextTracks, nextArtists]) => {
+            .then(([nextTracks, nextArtists, nextPlaylists]) => {
                 if (cancelled) return;
                 setTracks(nextTracks);
                 setArtists(nextArtists);
+                setPlaylists(nextPlaylists);
                 setArtistArtworkOverrides(new Map());
                 artistArtworkAttempted.current.clear();
             })
@@ -134,6 +426,7 @@ export default function TidalScreen() {
                 if (cancelled) return;
                 setTracks([]);
                 setArtists([]);
+                setPlaylists([]);
                 const message = searchError instanceof Error ? searchError.message : 'No se pudo consultar Tidal';
                 setError(message);
             })
@@ -236,13 +529,20 @@ export default function TidalScreen() {
         });
     }, []);
 
+    const openPlaylist = useCallback((playlist: TidalPlaylist) => {
+        router.push({
+            pathname: '/tidal-playlist/[id]',
+            params: { id: playlist.uuid },
+        });
+    }, []);
+
     const resolveArtistArtwork = useCallback(async (artist: TidalArtist) => {
         if (artistArtworkAttempted.current.has(artist.id)) return;
         artistArtworkAttempted.current.add(artist.id);
 
         try {
-            const detail = await getTidalArtistDetail(artist.id, artist.name);
-            const nextArtwork = detail.artist.artworkUrl;
+            const artistInfo = await getTidalArtistInfo(artist.id);
+            const nextArtwork = artistInfo.artworkUrl;
             if (!nextArtwork) return;
 
             setArtistArtworkOverrides(prev => {
@@ -251,10 +551,11 @@ export default function TidalScreen() {
                 return next;
             });
         } catch {
-            // Keep placeholder if detail artwork fetch fails.
+            // Keep placeholder if fetch fails.
         }
     }, []);
 
+    // Fetches artist artwork in background without slowing down search results
     useEffect(() => {
         if (artists.length === 0) return;
         artists.forEach(artist => {
@@ -301,12 +602,13 @@ export default function TidalScreen() {
                         </View>
                     </View>
                 </Pressable>
-                <IconButton icon="play" mode="contained-tonal" size={18} onPress={() => handleTidalPlay(track)} style={styles.playButton} />
+                <IconButton icon={() => <CustomIcon name="Play" size={18} color={theme.colors.onPrimary} />} mode="contained" containerColor={theme.colors.primary} size={18} onPress={() => handleTidalPlay(track)} style={styles.playButton} />
                 <Button
                     compact
                     mode={downloaded ? 'contained' : 'outlined'}
                     onPress={() => handleTidalDownload(track)}
                     style={{ minWidth: 80 }}
+                    icon={downloaded ? undefined : () => <CustomIcon name="Descargar" size={14} color={theme.colors.primary} />}
                 >
                     {downloaded ? 'Guardado' : isDownloadingItem ? progressLabel : isError ? 'Reintentar' : 'Descargar'}
                 </Button>
@@ -314,47 +616,15 @@ export default function TidalScreen() {
         );
     }, [downloads, handleTidalDownload, handleTidalPlay, isDownloaded, theme.colors]);
 
-    const renderArtistRow = useCallback((artist: TidalArtist) => (
-        <Pressable
-            key={artist.id}
-            style={[styles.entityRow, { backgroundColor: palette.cardBackground, borderColor: palette.cardBorder }]}
-            onPress={() => openArtist(artist)}
-        >
-            <Image
-                source={artistArtworkOverrides.get(artist.id) ? { uri: artistArtworkOverrides.get(artist.id) as string } : undefined}
-                style={styles.artistArtwork}
-                contentFit="cover"
-                transition={120}
-            />
-            <View style={styles.entityContent}>
-                <Text numberOfLines={1} style={[styles.entityTitle, { color: theme.colors.onSurface }]}>{artist.name}</Text>
-                <Text style={{ color: theme.colors.onSurfaceVariant }}>Artista</Text>
-            </View>
-            <IconButton icon="chevron-right" onPress={() => openArtist(artist)} />
-        </Pressable>
-    ), [artistArtworkOverrides, openArtist, palette.cardBackground, palette.cardBorder, resolveArtistArtwork, theme.colors]);
+    // MasonryGrid and MasonryGridCard are defined at module level above
 
-    const renderAlbumRow = useCallback((album: TidalAlbum) => (
-        <Pressable
-            key={album.id}
-            style={[styles.entityRow, { backgroundColor: palette.cardBackground, borderColor: palette.cardBorder }]}
-            onPress={() => openAlbum(album)}
-        >
-            <Image
-                source={album.artworkUrl ? { uri: album.artworkUrl } : undefined}
-                style={styles.artwork}
-                contentFit="cover"
-                transition={120}
-            />
-            <View style={styles.entityContent}>
-                <Text numberOfLines={1} style={[styles.entityTitle, { color: theme.colors.onSurface }]}>{album.title}</Text>
-                <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{album.artistName}</Text>
-            </View>
-            <IconButton icon="chevron-right" onPress={() => openAlbum(album)} />
-        </Pressable>
-    ), [openAlbum, palette.cardBackground, palette.cardBorder, theme.colors]);
+    const hasQuery = query.trim().length > 0;
+    const hasSettledQuery = uiDebouncedQuery.trim().length > 0;
+    const isSearchPending = hasQuery && query.trim() !== debouncedQuery.trim();
 
-    const hasResults = tracks.length > 0 || artists.length > 0 || albums.length > 0;
+    const applySuggestion = useCallback((nextQuery: string) => {
+        setQuery(nextQuery);
+    }, []);
 
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
@@ -364,104 +634,170 @@ export default function TidalScreen() {
             />
 
             <ScrollView contentContainerStyle={[styles.pageContent, { paddingBottom: styles.pageContent.paddingBottom + insets.bottom }]} showsVerticalScrollIndicator={false}>
-                <View style={[styles.headerGlow, { backgroundColor: palette.floatingGlow }]} />
-                <View style={[styles.header, { backgroundColor: palette.heroBackground, borderColor: palette.heroBorder }]}>
-                    <View style={styles.headerTopRow}>
-                        <View>
-                            <Text style={[styles.badge, { color: theme.colors.primary }]}>NEXT SOUND</Text>
-                            <Text variant="headlineMedium" style={[styles.title, { color: theme.colors.onBackground }]}>Descargar Música</Text>
-                        </View>
-                        <View style={styles.headerTopActions}>
-                            <Pressable
-                                style={[styles.qualityToggleButton, { backgroundColor: theme.colors.primaryContainer }]}
-                                onPress={() => setShowQualityModal(true)}
-                            >
-                                <IconButton icon="tune" size={16} iconColor={theme.colors.onPrimaryContainer} style={{ margin: 0 }} />
-                                <Text variant="labelSmall" style={{ color: theme.colors.onPrimaryContainer, fontWeight: '800' }}>
-                                    {tidalDownloadQuality === 'HI_RES_LOSSLESS' ? 'HI-RES' :
-                                        tidalDownloadQuality === 'LOSSLESS' ? 'FLAC' :
-                                            tidalDownloadQuality === 'HIGH' ? 'ALTA' : 'LOW'}
-                                </Text>
-                            </Pressable>
-                            <Pressable
-                                style={[styles.qualityToggleButton, { backgroundColor: theme.colors.secondaryContainer, marginLeft: 8 }]}
-                                onPress={() => setShowMirrorModal(true)}
-                            >
-                                <IconButton icon="server" size={14} iconColor={theme.colors.onSecondaryContainer} style={{ margin: 0 }} />
-                                <Text variant="labelSmall" style={{ color: theme.colors.onSecondaryContainer, fontWeight: '800' }}>
-                                    {tidalMirror === 'auto' ? 'AUTO' : (TIDAL_MIRROR_NAMES[tidalMirror]?.split(' ')[1] || 'SERV').toUpperCase()}
-                                </Text>
-                            </Pressable>
-                        </View>
-                    </View>
-                    <Searchbar
-                        placeholder="Busca artistas, álbumes, canciones..."
-                        value={query}
-                        onChangeText={setQuery}
-                        style={[styles.searchbar, { backgroundColor: palette.searchBackground }]}
-                        iconColor={theme.colors.primary}
-                        inputStyle={styles.searchInput}
-                    />
+                <Animated.View style={[styles.header, { gap: 0 }, headStyle]}>
+                    <Animated.View style={[styles.headerTitleRow, titleRowAnimatedStyle]}>
+                        <Animated.View style={[styles.headerTitleBlock, titleAnimatedStyle]}>
+                            <Text variant="headlineMedium" style={styles.headerTitle}>Explorar</Text>
+                        </Animated.View>
+                        <Menu
+                            visible={showSettingsMenu}
+                            onDismiss={() => setShowSettingsMenu(false)}
+                            anchor={
+                                <IconButton
+                                    icon="cog-outline"
+                                    iconColor={theme.colors.onSurface}
+                                    size={20}
+                                    onPress={() => setShowSettingsMenu(true)}
+                                    style={styles.settingsButton}
+                                    containerColor={withAlpha(theme.colors.surface, 'F2')}
+                                />
+                            }
+                            contentStyle={{ backgroundColor: palette.cardBackground, borderRadius: 16 }}
+                        >
+                            <Menu.Item
+                                onPress={() => { setShowSettingsMenu(false); setShowQualityModal(true); }}
+                                title="Calidad de Audio"
+                                leadingIcon="tune-variant"
+                            />
+                            <Divider style={{ opacity: 0.1 }} />
+                            <Menu.Item
+                                onPress={() => { setShowSettingsMenu(false); setShowMirrorModal(true); }}
+                                title="Cambiar Servidor"
+                                leadingIcon="server-network"
+                            />
+                        </Menu>
+                    </Animated.View>
 
-                    {debouncedQuery.trim() ? (
-                        <View style={styles.statRow}>
-                            <View style={[styles.statPill, { backgroundColor: theme.colors.secondaryContainer }]}>
-                                <Text style={{ color: theme.colors.onSecondaryContainer, fontWeight: '800' }}>{artists.length}</Text>
-                                <Text style={{ color: theme.colors.onSecondaryContainer, opacity: 0.8, fontSize: 11 }}>Artistas</Text>
-                            </View>
-                            <View style={[styles.statPill, { backgroundColor: theme.colors.secondaryContainer }]}>
-                                <Text style={{ color: theme.colors.onSecondaryContainer, fontWeight: '800' }}>{albums.length}</Text>
-                                <Text style={{ color: theme.colors.onSecondaryContainer, opacity: 0.8, fontSize: 11 }}>Álbumes</Text>
-                            </View>
-                            <View style={[styles.statPill, { backgroundColor: theme.colors.secondaryContainer }]}>
-                                <Text style={{ color: theme.colors.onSecondaryContainer, fontWeight: '800' }}>{tracks.length}</Text>
-                                <Text style={{ color: theme.colors.onSecondaryContainer, opacity: 0.8, fontSize: 11 }}>Canciones</Text>
-                            </View>
-                        </View>
-                    ) : null}
-                </View>
+                    <Animated.View style={[styles.searchShell, searchAnimatedStyle]}>
+                        <Searchbar
+                            placeholder="Busca artistas, álbumes, canciones..."
+                            value={query}
+                            onChangeText={setQuery}
+                            style={[
+                                styles.searchbar,
+                                {
+                                    backgroundColor: 'transparent',
+                                    minHeight: hasSettledQuery ? 88 : 52,
+                                }
+                            ]}
+                            iconColor={hasSettledQuery ? 'transparent' : theme.colors.primary}
+                            inputStyle={[styles.searchInput, {
+                                fontWeight: hasSettledQuery ? '900' : 'normal',
+                                textAlign: hasSettledQuery ? 'left' : 'left',
+                                fontSize: hasSettledQuery ? 56 : 15,
+                                lineHeight: hasSettledQuery ? 58 : 20,
+                                letterSpacing: hasSettledQuery ? -1.2 : 0,
+                                paddingVertical: hasSettledQuery ? 0 : undefined,
+                            }]}
+                            placeholderTextColor={withAlpha(theme.colors.onSurfaceVariant, '40')}
+                        />
+                    </Animated.View>
+                </Animated.View>
 
-                <View style={styles.tabsBar}>
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabsContent}>
-                        {TIDAL_TABS.map(tab => {
-                            const selected = activeTab === tab.value;
-                            return (
+                {debouncedQuery.trim() ? (
+                    <Animated.View style={[styles.bentoContainer, bentoAnimatedStyle]}>
+                        {/* Columna Izquierda: Todo (Alta) */}
+                        <Pressable
+                            onPress={() => setActiveTab('all')}
+                            style={[
+                                styles.bentoItem,
+                                styles.bentoTall,
+                                {
+                                    backgroundColor: activeTab === 'all' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
+                                    borderColor: activeTab === 'all' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
+                                },
+                                activeTab === 'all' && styles.bentoActive
+                            ]}
+                        >
+                            <Text style={[styles.bentoLabel, styles.bentoTallLabel, { color: activeTab === 'all' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'all' && styles.bentoActiveLabel]}>Todo</Text>
+                        </Pressable>
+
+                        <View style={styles.bentoRightCol}>
+                            {/* Fila Superior: Artistas, Álbumes, Playlists */}
+                            <View style={styles.bentoRow}>
                                 <Pressable
-                                    key={tab.value}
+                                    onPress={() => setActiveTab('artists')}
                                     style={[
-                                        styles.tabButton,
+                                        styles.bentoItem,
+                                        styles.bentoSmall,
                                         {
-                                            backgroundColor: selected ? theme.colors.primary : palette.chipBackground,
-                                            borderColor: selected ? theme.colors.primary : 'transparent',
+                                            backgroundColor: activeTab === 'artists' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
+                                            borderColor: activeTab === 'artists' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
                                         },
+                                        activeTab === 'artists' && styles.bentoActive
                                     ]}
-                                    onPress={() => setActiveTab(tab.value)}
                                 >
-                                    <Text style={{ color: selected ? theme.colors.onPrimary : theme.colors.onSurfaceVariant, fontWeight: selected ? '800' : '500' }}>
-                                        {tab.label}
-                                    </Text>
+                                    <Text style={[styles.bentoLabel, { color: activeTab === 'artists' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'artists' && styles.bentoActiveLabel]}>Artistas</Text>
                                 </Pressable>
-                            );
-                        })}
-                    </ScrollView>
-                </View>
+                                <Pressable
+                                    onPress={() => setActiveTab('albums')}
+                                    style={[
+                                        styles.bentoItem,
+                                        styles.bentoSmall,
+                                        {
+                                            backgroundColor: activeTab === 'albums' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
+                                            borderColor: activeTab === 'albums' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
+                                        },
+                                        activeTab === 'albums' && styles.bentoActive
+                                    ]}
+                                >
+                                    <Text style={[styles.bentoLabel, { color: activeTab === 'albums' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'albums' && styles.bentoActiveLabel]}>Álbumes</Text>
+                                </Pressable>
+                                <Pressable
+                                    onPress={() => setActiveTab('playlists')}
+                                    style={[
+                                        styles.bentoItem,
+                                        styles.bentoSmall,
+                                        {
+                                            backgroundColor: activeTab === 'playlists' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
+                                            borderColor: activeTab === 'playlists' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
+                                        },
+                                        activeTab === 'playlists' && styles.bentoActive
+                                    ]}
+                                >
+                                    <Text style={[styles.bentoLabel, { color: activeTab === 'playlists' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'playlists' && styles.bentoActiveLabel]}>Playlists</Text>
+                                </Pressable>
+                            </View>
 
-                {isLoading ? (
+                            {/* Fila Inferior: Canciones (Ancha) */}
+                            <View style={styles.bentoRow}>
+                                <Pressable
+                                    onPress={() => setActiveTab('tracks')}
+                                    style={[
+                                        styles.bentoItem,
+                                        styles.bentoWide,
+                                        {
+                                            backgroundColor: activeTab === 'tracks' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
+                                            borderColor: activeTab === 'tracks' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
+                                        },
+                                        activeTab === 'tracks' && styles.bentoActive
+                                    ]}
+                                >
+                                    <Text style={[styles.bentoLabel, { color: activeTab === 'tracks' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'tracks' && styles.bentoActiveLabel]}>Canciones</Text>
+                                </Pressable>
+                            </View>
+                        </View>
+                    </Animated.View>
+                ) : null}
+
+                {isLoading || isSearchPending ? (
                     <View style={styles.resultsContent}>
                         {(activeTab === 'all' || activeTab === 'artists') && (
                             <View style={styles.section}>
                                 <View style={styles.sectionHeader}>
                                     <Skeleton height={24} width={100} borderRadius={6} />
                                 </View>
-                                {[1, 2, 3].map((i) => (
-                                    <View key={`s-art-${i}`} style={[styles.entityRow, { backgroundColor: palette.cardBackground, borderColor: palette.cardBorder, opacity: 0.6 }]}>
-                                        <Skeleton height={62} width={62} borderRadius={31} />
-                                        <View style={styles.entityContent}>
-                                            <Skeleton height={18} width="60%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                            <Skeleton height={14} width="30%" borderRadius={4} />
-                                        </View>
+                                {/* Masonry skeleton: two columns */}
+                                <View style={styles.gridContainer}>
+                                    <View style={styles.gridColumn}>
+                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
+                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
                                     </View>
-                                ))}
+                                    <View style={styles.gridColumn}>
+                                        <Skeleton height={CARD_HEIGHT_SQUARE} width="100%" borderRadius={28} />
+                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
+                                    </View>
+                                </View>
                             </View>
                         )}
 
@@ -470,15 +806,16 @@ export default function TidalScreen() {
                                 <View style={styles.sectionHeader}>
                                     <Skeleton height={24} width={100} borderRadius={6} />
                                 </View>
-                                {[1, 2, 3].map((i) => (
-                                    <View key={`s-alb-${i}`} style={[styles.entityRow, { backgroundColor: palette.cardBackground, borderColor: palette.cardBorder, opacity: 0.6 }]}>
-                                        <Skeleton height={62} width={62} borderRadius={12} />
-                                        <View style={styles.entityContent}>
-                                            <Skeleton height={18} width="70%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                            <Skeleton height={14} width="40%" borderRadius={4} />
-                                        </View>
+                                <View style={styles.gridContainer}>
+                                    <View style={styles.gridColumn}>
+                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
+                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
                                     </View>
-                                ))}
+                                    <View style={styles.gridColumn}>
+                                        <Skeleton height={CARD_HEIGHT_SQUARE} width="100%" borderRadius={28} />
+                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
+                                    </View>
+                                </View>
                             </View>
                         )}
 
@@ -509,17 +846,47 @@ export default function TidalScreen() {
                     <View style={styles.centered}>
                         <EmptyState icon="⚠️" title="TIDAL unavailable" description={error} />
                     </View>
-                ) : !query.trim() ? (
+                ) : !hasQuery ? (
+                    <Animated.View entering={FadeInDown.duration(450)} exiting={FadeOut.duration(280)} style={styles.discoveryContainer}>
+
+
+
+                        <View style={styles.gridContainer}>
+                            <View style={styles.gridColumn}>
+                                {EXPLORE_MASONRY_CARDS.filter((_, i) => i % 2 === 0).map((card) => (
+                                    <View key={card.title} style={{ height: card.height, borderRadius: 22, overflow: 'hidden' }}>
+                                        <Pressable
+                                            onPress={() => applySuggestion(card.query)}
+                                            style={StyleSheet.absoluteFill}
+                                        >
+                                            <LinearGradient colors={card.colors} style={[styles.discoveryCard, { flex: 1, height: undefined, minHeight: undefined }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                                                <Text style={styles.discoveryCardTitle}>{card.title}</Text>
+                                                <Text style={styles.discoveryCardSubtitle}>{card.subtitle}</Text>
+                                            </LinearGradient>
+                                        </Pressable>
+                                    </View>
+                                ))}
+                            </View>
+                            <View style={styles.gridColumn}>
+                                {EXPLORE_MASONRY_CARDS.filter((_, i) => i % 2 !== 0).map((card) => (
+                                    <View key={card.title} style={{ height: card.height, borderRadius: 22, overflow: 'hidden' }}>
+                                        <Pressable
+                                            onPress={() => applySuggestion(card.query)}
+                                            style={StyleSheet.absoluteFill}
+                                        >
+                                            <LinearGradient colors={card.colors} style={[styles.discoveryCard, { flex: 1, height: undefined, minHeight: undefined }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
+                                                <Text style={styles.discoveryCardTitle}>{card.title}</Text>
+                                                <Text style={styles.discoveryCardSubtitle}>{card.subtitle}</Text>
+                                            </LinearGradient>
+                                        </Pressable>
+                                    </View>
+                                ))}
+                            </View>
+                        </View>
+                    </Animated.View>
+                ) : !tracks.length && !albums.length && !artists.length && !playlists.length ? (
                     <View style={styles.centered}>
-                        <EmptyState
-                            icon="⬢"
-                            title="Explora el catálogo"
-                            description="Busca por artista, álbum y canción. Puedes descargar tus favoritos para escucharlos sin conexión."
-                        />
-                    </View>
-                ) : !tracks.length && !albums.length && !artists.length ? (
-                    <View style={styles.centered}>
-                        <EmptyState icon="🫧" title="No matches" description={`No encontramos resultados para "${query.trim()}"`} />
+                        <EmptyState icon="🫧" title="No matches" description={`No encontramos resultados para "${debouncedQuery.trim()}"`} />
                     </View>
                 ) : (
                     <Animated.View entering={FadeIn.duration(400)} style={styles.resultsContent}>
@@ -527,9 +894,8 @@ export default function TidalScreen() {
                             <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.section}>
                                 <View style={styles.sectionHeader}>
                                     <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Artistas</Text>
-                                    <Text style={{ color: theme.colors.onSurfaceVariant }}>{artists.length}</Text>
                                 </View>
-                                {artists.slice(0, activeTab === 'all' ? 6 : artists.length).map(renderArtistRow)}
+                                {<MasonryGrid items={artists.slice(0, activeTab === 'all' ? 6 : artists.length)} type="artists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />}
                             </Animated.View>
                         ) : null}
 
@@ -537,9 +903,17 @@ export default function TidalScreen() {
                             <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
                                 <View style={styles.sectionHeader}>
                                     <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Álbumes</Text>
-                                    <Text style={{ color: theme.colors.onSurfaceVariant }}>{albums.length}</Text>
                                 </View>
-                                {albums.slice(0, activeTab === 'all' ? 8 : albums.length).map(renderAlbumRow)}
+                                {<MasonryGrid items={albums.slice(0, activeTab === 'all' ? 8 : albums.length)} type="albums" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />}
+                            </Animated.View>
+                        ) : null}
+
+                        {(activeTab === 'all' || activeTab === 'playlists') && playlists.length > 0 ? (
+                            <Animated.View entering={FadeInDown.delay(250).duration(400)} style={styles.section}>
+                                <View style={styles.sectionHeader}>
+                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Playlists</Text>
+                                </View>
+                                {<MasonryGrid items={playlists.slice(0, activeTab === 'all' ? 6 : playlists.length)} type="playlists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />}
                             </Animated.View>
                         ) : null}
 
@@ -547,7 +921,6 @@ export default function TidalScreen() {
                             <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.section}>
                                 <View style={styles.sectionHeader}>
                                     <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Canciones</Text>
-                                    <Text style={{ color: theme.colors.onSurfaceVariant }}>{tracks.length}</Text>
                                 </View>
                                 {tracks.slice(0, activeTab === 'all' ? 12 : tracks.length).map(renderTrackRow)}
                             </Animated.View>
@@ -560,80 +933,94 @@ export default function TidalScreen() {
             <Modal
                 visible={showMirrorModal}
                 transparent
-                animationType="fade"
+                animationType="slide"
                 onRequestClose={() => setShowMirrorModal(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, maxHeight: '80%' }]}>
+                    <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
                         <View style={styles.modalHeader}>
-                            <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
-                                Servidor de Tidal
-                            </Text>
-                            <Pressable onPress={() => setShowMirrorModal(false)} hitSlop={12}>
-                                <IconButton icon="close" iconColor={theme.colors.onSurfaceVariant} />
-                            </Pressable>
+                            <View>
+                                <Text variant="titleLarge" style={{ color: theme.colors.onSurface, fontWeight: '900' }}>
+                                    Servidores
+                                </Text>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    Selecciona tu fuente de datos
+                                </Text>
+                            </View>
+                            <IconButton icon="close" mode="contained-tonal" onPress={() => setShowMirrorModal(false)} />
                         </View>
 
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
-                                Elige un servidor específico o deja en automático para rotar si uno falla.
-                            </Text>
-
+                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 20 }}>
                             <Pressable
                                 onPress={() => handleMirrorChange('auto')}
-                                style={[
-                                    styles.qualityOption,
+                                style={({ pressed }) => [
+                                    styles.premiumOption,
                                     {
-                                        backgroundColor: tidalMirror === 'auto' ? `${theme.colors.primary}15` : 'transparent',
-                                        borderColor: tidalMirror === 'auto' ? theme.colors.primary : `${theme.colors.outline}33`,
-                                        borderWidth: 1,
-                                        borderRadius: 20,
-                                        padding: 16
+                                        backgroundColor: tidalMirror === 'auto' ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
+                                        borderColor: tidalMirror === 'auto' ? theme.colors.primary : 'transparent',
+                                        opacity: pressed ? 0.7 : 1
                                     }
                                 ]}
                             >
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                    <IconButton icon="auto-fix" iconColor={tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurfaceVariant} style={{ margin: 0 }} />
-                                    <View style={{ flex: 1 }}>
-                                        <Text variant="titleMedium" style={{ color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface }}>
-                                            Automático (Recomendado)
-                                        </Text>
-                                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                            Prueba todos los servidores disponibles hasta encontrar uno que funcione.
-                                        </Text>
-                                    </View>
+                                <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
+                                    <IconButton icon="auto-fix" size={20} iconColor={tidalMirror === 'auto' ? theme.colors.onPrimary : theme.colors.onSurface} style={{ margin: 0 }} />
                                 </View>
+                                <View style={{ flex: 1 }}>
+                                    <Text variant="titleMedium" style={{
+                                        color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface,
+                                        fontWeight: '800'
+                                    }}>
+                                        Enrutamiento Automático
+                                    </Text>
+                                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                        Alterna servidores si falla la conexión.
+                                    </Text>
+                                </View>
+                                {tidalMirror === 'auto' && (
+                                    <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
+                                        <CustomIcon name="Play" size={12} color={theme.colors.onPrimary} />
+                                    </View>
+                                )}
                             </Pressable>
 
                             {TIDAL_API_BASES.map((mirror) => (
                                 <Pressable
                                     key={mirror}
                                     onPress={() => handleMirrorChange(mirror)}
-                                    style={[
-                                        styles.qualityOption,
+                                    style={({ pressed }) => [
+                                        styles.premiumOption,
                                         {
-                                            backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
-                                            borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
-                                            borderWidth: 1,
-                                            borderRadius: 20,
-                                            padding: 16
+                                            backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
+                                            borderColor: tidalMirror === mirror ? theme.colors.primary : 'transparent',
+                                            opacity: pressed ? 0.7 : 1
                                         }
                                     ]}
                                 >
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                        <IconButton icon="server" iconColor={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} style={{ margin: 0 }} />
-                                        <View style={{ flex: 1 }}>
-                                            <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
-                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                            </Text>
-                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                {mirror.replace('https://', '')}
-                                            </Text>
-                                        </View>
-                                        {tidalMirror === mirror && (
-                                            <IconButton icon="check" iconColor={theme.colors.primary} style={{ margin: 0 }} />
-                                        )}
+                                    <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
+                                        <IconButton
+                                            icon="server"
+                                            size={20}
+                                            iconColor={tidalMirror === mirror ? theme.colors.onPrimary : theme.colors.onSurface}
+                                            style={{ margin: 0 }}
+                                        />
                                     </View>
+                                    <View style={{ flex: 1 }}>
+                                        <Text variant="titleMedium" style={{
+                                            color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface,
+                                            fontWeight: '800'
+                                        }}>
+                                            {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                                        </Text>
+                                        <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>
+                                            {mirror.replace('https://', '')}
+                                        </Text>
+                                    </View>
+                                    {tidalMirror === mirror && (
+                                        <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
+                                            <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
+                                        </View>
+                                    )}
                                 </Pressable>
                             ))}
                         </ScrollView>
@@ -645,21 +1032,25 @@ export default function TidalScreen() {
             <Modal
                 visible={showQualityModal}
                 transparent
-                animationType="fade"
+                animationType="slide"
                 onRequestClose={() => setShowQualityModal(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, maxHeight: '80%' }]}>
+                    <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
                         <View style={styles.modalHeader}>
-                            <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
-                                Calidad de Audio
-                            </Text>
-                            <Pressable onPress={() => setShowQualityModal(false)} hitSlop={12}>
-                                <IconButton icon="close" iconColor={theme.colors.onSurfaceVariant} />
-                            </Pressable>
+                            <View>
+                                <Text variant="titleLarge" style={{ color: theme.colors.onSurface, fontWeight: '900' }}>
+                                    Fidelidad
+                                </Text>
+                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                    Calidad de flujo y descarga
+                                </Text>
+                            </View>
+                            <IconButton icon="close" mode="contained-tonal" onPress={() => setShowQualityModal(false)} />
                         </View>
 
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
+                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 20 }}>
                             <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
                                 Selecciona el formato preferido para tus descargas de Tidal.
                             </Text>
@@ -699,34 +1090,42 @@ export default function TidalScreen() {
                                             setTidalDownloadQuality(q);
                                             setShowQualityModal(false);
                                         }}
-                                        style={[
-                                            styles.qualityOption,
+                                        style={({ pressed }) => [
+                                            styles.premiumOption,
                                             {
-                                                backgroundColor: tidalDownloadQuality === q ? `${theme.colors.primary}15` : 'transparent',
-                                                borderColor: tidalDownloadQuality === q ? theme.colors.primary : `${theme.colors.outline}33`,
-                                                borderWidth: 1,
-                                                borderRadius: 20,
-                                                padding: 16
+                                                backgroundColor: tidalDownloadQuality === q ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
+                                                borderColor: tidalDownloadQuality === q ? theme.colors.primary : 'transparent',
+                                                opacity: pressed ? 0.7 : 1
                                             }
                                         ]}
                                     >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                            <IconButton icon={details.icon} iconColor={tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurfaceVariant} style={{ margin: 0 }} />
-                                            <View style={{ flex: 1 }}>
-                                                <Text variant="titleMedium" style={{ color: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurface }}>
-                                                    {details.title}
-                                                </Text>
-                                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                    {details.desc}
-                                                </Text>
-                                                <Text variant="labelSmall" style={{ color: theme.colors.primary, marginTop: 4, fontWeight: 'bold' }}>
-                                                    {details.adv}
-                                                </Text>
-                                            </View>
-                                            {tidalDownloadQuality === q && (
-                                                <IconButton icon="check" iconColor={theme.colors.primary} style={{ margin: 0 }} />
-                                            )}
+                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
+                                            <IconButton
+                                                icon={details.icon}
+                                                size={22}
+                                                iconColor={tidalDownloadQuality === q ? theme.colors.onPrimary : theme.colors.onSurface}
+                                                style={{ margin: 0 }}
+                                            />
                                         </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text variant="titleMedium" style={{
+                                                color: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurface,
+                                                fontWeight: '800'
+                                            }}>
+                                                {details.title}
+                                            </Text>
+                                            <Text variant="labelSmall" style={{ color: theme.colors.primary, fontWeight: 'bold', marginBottom: 2 }}>
+                                                {details.adv.split(' / ')[0]}
+                                            </Text>
+                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                                {details.desc}
+                                            </Text>
+                                        </View>
+                                        {tidalDownloadQuality === q && (
+                                            <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
+                                                <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
+                                            </View>
+                                        )}
                                     </Pressable>
                                 );
                             })}
@@ -737,6 +1136,7 @@ export default function TidalScreen() {
         </SafeAreaView>
     );
 }
+
 
 const styles = StyleSheet.create({
     container: {
@@ -755,72 +1155,105 @@ const styles = StyleSheet.create({
     },
     header: {
         marginHorizontal: 16,
-        marginTop: 8,
-        marginBottom: 12,
-        borderWidth: 1,
-        borderRadius: 24,
-        paddingHorizontal: 16,
-        paddingTop: 16,
-        paddingBottom: 16,
+        marginTop: 10,
+        marginBottom: 10,
+        paddingHorizontal: 0,
+        paddingTop: 12,
+        paddingBottom: 10,
         gap: 12,
+        elevation: 0,
     },
-    headerTopRow: {
+    headerTitleRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
-    },
-    headerTopActions: {
-        flexDirection: 'row',
         alignItems: 'center',
     },
-    qualityToggleButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingRight: 12,
-        paddingLeft: 4,
-        paddingVertical: 4,
-        borderRadius: 20,
+    headerTitleBlock: {
+        flex: 1,
+        paddingRight: 10,
+        justifyContent: 'center',
     },
-    badge: {
-        letterSpacing: 1.6,
-        fontSize: 11,
-        fontWeight: '800',
+    headerTitle: {
+        fontWeight: '900',
+        letterSpacing: -1.2,
+        fontSize: 56,
+        lineHeight: 58,
+    },
+    settingsButton: {
+        margin: 0,
+        width: 36,
+        height: 36,
+        borderRadius: 12,
     },
     title: {
         fontWeight: '800',
     },
+    searchShell: {
+        borderRadius: 999,
+        paddingHorizontal: 4,
+    },
     searchbar: {
-        borderRadius: 14,
+        borderRadius: 999,
+        minHeight: 52,
         elevation: 0,
     },
     searchInput: {
         fontSize: 15,
+        paddingLeft: 2,
     },
-    statRow: {
+    bentoContainer: {
         flexDirection: 'row',
-        gap: 8,
-    },
-    statPill: {
-        flex: 1,
-        borderRadius: 14,
-        paddingVertical: 8,
-        alignItems: 'center',
-    },
-    tabsBar: {
         paddingHorizontal: 16,
-        paddingBottom: 10,
+        paddingBottom: 24,
+        gap: 10,
+        height: 140,
     },
-    tabsContent: {
-        gap: 8,
-    },
-    tabButton: {
-        minWidth: 80,
-        alignItems: 'center',
+    bentoItem: {
+        borderRadius: 24,
+        borderWidth: 1.5,
         justifyContent: 'center',
-        borderRadius: 999,
-        borderWidth: 1,
-        paddingHorizontal: 14,
-        height: 40,
+        alignItems: 'center',
+    },
+    bentoTall: {
+        width: 75,
+        height: '100%',
+        justifyContent: 'flex-end',
+        paddingBottom: 16,
+    },
+    bentoWide: {
+        flex: 2,
+        height: '100%',
+        alignItems: 'flex-start',
+        paddingLeft: 16,
+    },
+    bentoSmall: {
+        flex: 1,
+        height: '100%',
+    },
+    bentoRightCol: {
+        flex: 1,
+        gap: 10,
+    },
+    bentoRow: {
+        flex: 1,
+        flexDirection: 'row',
+        gap: 10,
+    },
+    bentoLabel: {
+        fontSize: 13,
+        fontWeight: '600',
+    },
+    bentoTallLabel: {
+        fontSize: 14,
+    },
+    bentoActive: {
+        transform: [{ scale: 1.02 }],
+    },
+    bentoActiveLabel: {
+        fontWeight: '800',
+    },
+    bentoIconBox: {
+        opacity: 0.8,
     },
     centered: {
         minHeight: 320,
@@ -828,6 +1261,60 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         paddingHorizontal: 20,
         gap: 12,
+    },
+    discoveryContainer: {
+        paddingHorizontal: 16,
+        paddingBottom: 24,
+        gap: 10,
+    },
+    discoveryTitle: {
+        fontSize: 22,
+        fontWeight: '900',
+        letterSpacing: -0.4,
+    },
+    discoverySubtitle: {
+        fontSize: 14,
+        marginBottom: 4,
+    },
+    discoveryCardsRow: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    discoveryCardPressable: {
+        flex: 1,
+    },
+    discoveryCard: {
+        minHeight: 132,
+        borderRadius: 22,
+        padding: 14,
+        justifyContent: 'flex-end',
+    },
+    discoveryCardTitle: {
+        color: '#FFFFFF',
+        fontSize: 16,
+        fontWeight: '900',
+        letterSpacing: -0.3,
+    },
+    discoveryCardSubtitle: {
+        color: 'rgba(255,255,255,0.88)',
+        fontSize: 12,
+        marginTop: 5,
+    },
+    suggestionWrap: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+        marginTop: 6,
+    },
+    suggestionChip: {
+        borderRadius: 999,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 7,
+    },
+    suggestionChipLabel: {
+        fontSize: 12,
+        fontWeight: '700',
     },
     resultsContent: {
         paddingBottom: 8,
@@ -905,22 +1392,112 @@ const styles = StyleSheet.create({
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.65)',
+        backgroundColor: 'rgba(0,0,0,0.4)',
         justifyContent: 'flex-end',
     },
     modalContent: {
-        borderTopLeftRadius: 32,
-        borderTopRightRadius: 32,
+        borderTopLeftRadius: 36,
+        borderTopRightRadius: 36,
         padding: 24,
-        paddingBottom: 48,
+        paddingBottom: 40,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.1)',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: -10 },
+        shadowOpacity: 0.2,
+        shadowRadius: 20,
+        elevation: 24,
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
-        marginBottom: 16,
+        alignItems: 'flex-start',
+        marginBottom: 24,
     },
-    qualityOption: {
-        marginVertical: 4,
+    premiumOption: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 16,
+        borderRadius: 20,
+        borderWidth: 1,
+        gap: 16,
+    },
+    optionIconContainer: {
+        width: 48,
+        height: 48,
+        borderRadius: 16,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    checkCircle: {
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    gridContainer: {
+        flexDirection: 'row',
+        gap: GRID_GAP,
+    },
+    gridColumn: {
+        flex: 1,
+        gap: GRID_GAP,
+    },
+    gridCard: {
+        borderRadius: 28,
+        padding: 20,
+        overflow: 'hidden',
+    },
+    gridCardFooter: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        minHeight: 80,
+        justifyContent: 'flex-end',
+        overflow: 'hidden',
+    },
+    gridCardContent: {
+        padding: 16,
+        paddingBottom: 20,
+        zIndex: 2,
+    },
+    gridCardTitle: {
+        color: '#fff',
+        fontWeight: '900',
+        fontSize: 18,
+        letterSpacing: -0.5,
+        textShadowColor: 'rgba(0,0,0,0.4)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 6,
+        lineHeight: 22,
+    },
+    gridCardSubtitle: {
+        color: 'rgba(255,255,255,0.8)',
+        fontWeight: '700',
+        fontSize: 13,
+        marginTop: 4,
+        textShadowColor: 'rgba(0,0,0,0.3)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 4,
+    },
+    gridIconPlaceholder: {
+        position: 'absolute',
+        bottom: 20,
+        right: 20,
+        opacity: 0.3,
+    },
+    gridImageContainer: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 0,
+    },
+    gridImage: {
+        width: '100%',
+        height: '100%',
+    },
+    gridImageGradientOverlay: {
+        ...StyleSheet.absoluteFillObject,
+        zIndex: 1,
     },
 });

@@ -1,13 +1,12 @@
+import { CustomIcon, IconName } from '@/src/components/ui';
 import { useAnimatedColors, useTheme } from '@/src/theme';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { ColorTokens } from '@/src/types/theme';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   interpolate,
-  interpolateColor,
   useAnimatedStyle,
   useSharedValue,
   withSpring,
@@ -15,435 +14,318 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const TAB_HEIGHT = 88;
-const TAB_BOTTOM = 10;
-const TAB_HORIZONTAL = 10;
-const TAB_RADIUS = 24;
-const TAB_ITEM_RADIUS = 16;
-const DROP_WIDTH = 56;
-const DROP_HEIGHT = 36;
+// ─── Layout constants ─────────────────────────────────────────────────────────
+const BAR_HEIGHT = 64;
+const H_INSET = 12;
+const PILL_W = 68;
+const PILL_H = 36;
+const ICON_SIZE = 28;
+const LABEL_H = 14;
+const ITEM_GAP = 3;
+/** Top position of the pill — aligned with the iconArea, not the full button */
+const PILL_TOP = Math.round((BAR_HEIGHT - (PILL_H + ITEM_GAP + LABEL_H)) / 2);
 
-import { ColorTokens } from '@/src/types/theme';
+// ─── Helpers ──────────────────────────────────────────────────────────────────
+function hex(color: string, alpha: string) {
+  return `${color}${alpha}`;
+}
 
-/**
- * Get the color role for the active tab's bubble/drop
- */
-function getRouteTabColors(
-  routeName: string,
-  colors: ColorTokens
-) {
-  // Use primary roles for ALL active tabs to ensure absolute consistency.
-  // This allows Dynamic Colors (album colors) to be the sole accent in the navbar.
-  const isSettings = routeName === 'settings';
-
+function getTabColors(colors: ColorTokens) {
   return {
-    pill: isSettings ? colors.surfaceVariant : colors.primaryContainer,
-    icon: isSettings ? colors.onSurfaceVariant : (colors.onPrimaryContainer || colors.onPrimary),
-    accent: colors.primary
+    // Color del ícono activo: onPrimaryContainer siempre contrasta con el pill
+    activeIcon: colors.onPrimaryContainer ?? colors.onPrimary,
+    accent: colors.primary,
   };
 }
 
-function withAlpha(color: string, alphaHex: string) {
-  return `${color}${alphaHex}`;
-}
-
-type LiquidItemProps = {
+// ─── Single tab item ──────────────────────────────────────────────────────────
+type ItemProps = {
   label: string;
-  icon: string;
+  icon: IconName;
   focused: boolean;
-  activeColor: string;
-  inactiveColor: string;
+  /** onPrimaryContainer — guaranteed to contrast against the pill */
+  activeIconColor: string;
+  /** onSurfaceVariant — used for labels AND inactive icons */
+  mutedColor: string;
+  /** primary — for ripple */
+  accentColor: string;
   onPress: () => void;
   onLongPress: () => void;
 };
 
-const LiquidTabItem = memo(function LiquidTabItem({
+const TabItem = memo(function TabItem({
   label,
   icon,
   focused,
-  activeColor,
-  inactiveColor,
+  activeIconColor,
+  mutedColor,
+  accentColor,
   onPress,
   onLongPress,
-}: LiquidItemProps) {
-  const selected = useSharedValue(focused ? 1 : 0);
+}: ItemProps) {
+  const sel = useSharedValue(focused ? 1 : 0);
 
   useEffect(() => {
-    selected.value = withSpring(focused ? 1 : 0, {
-      damping: 14,
-      stiffness: 220,
-      mass: 0.8,
+    sel.value = withSpring(focused ? 1 : 0, {
+      damping: 20,
+      stiffness: 260,
+      mass: 0.7,
     });
-  }, [focused, selected]);
+  }, [focused, sel]);
 
-  const iconStyle = useAnimatedStyle(() => ({
+  const iconAnim = useAnimatedStyle(() => ({
     transform: [
-      { translateY: interpolate(selected.value, [0, 1], [0, -2]) },
-      { scale: interpolate(selected.value, [0, 1], [1, 1.08]) },
-      { rotate: `${interpolate(selected.value, [0, 1], [0, -4])}deg` },
+      { translateY: interpolate(sel.value, [0, 1], [0, -1.5]) },
+      { scale: interpolate(sel.value, [0, 1], [1, 1.06]) },
     ],
   }));
 
-  const labelStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(selected.value, [0, 1], [0.86, 1]),
-    transform: [{ translateY: interpolate(selected.value, [0, 1], [0, -1]) }],
+  const labelAnim = useAnimatedStyle(() => ({
+    opacity: interpolate(sel.value, [0, 0.5, 1], [0.45, 0.65, 0.9]),
+    transform: [{ translateY: interpolate(sel.value, [0, 1], [2, 0]) }],
   }));
-
-  const color = focused ? activeColor : inactiveColor;
 
   return (
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
       style={styles.itemButton}
-      android_ripple={{ color: withAlpha(activeColor, '22') }}
+      android_ripple={{ color: hex(accentColor, '20'), borderless: true, radius: 36 }}
+      accessibilityRole="tab"
+      accessibilityState={{ selected: focused }}
     >
-      <Animated.View style={iconStyle}>
-        <MaterialCommunityIcons name={icon as any} size={25} color={color} />
+      {/* Fixed-size box matches pill dimensions → icon always centred under pill */}
+      <Animated.View style={[styles.iconArea, iconAnim]}>
+        {focused ? (
+          // Active icon: onPrimaryContainer always contrasts against the pill.
+          // forceDynamicColor=false so we use the exact semantic color, not a
+          // hue-shifted version that might blend into the primaryContainer pill.
+          <CustomIcon
+            name={icon}
+            size={ICON_SIZE}
+            color={activeIconColor}
+            forceDynamicColor={false}
+          />
+        ) : (
+          // Inactive icon: forceDynamicColor=true gives a nice album-tinted tint.
+          // We pass onSurfaceVariant as the base so it always remains readable.
+          <CustomIcon
+            name={icon}
+            size={ICON_SIZE}
+            color={mutedColor}
+            forceDynamicColor={true}
+          />
+        )}
       </Animated.View>
-      <Animated.Text style={[styles.itemLabel, { color: inactiveColor }, labelStyle]} numberOfLines={1}>
+
+      {/* Label — always muted.
+          The pill only covers the iconArea, NOT the label.
+          Colouring the label with the accent makes it look disconnected and odd. */}
+      <Animated.Text
+        style={[styles.itemLabel, { color: mutedColor }, labelAnim]}
+        numberOfLines={1}
+      >
         {label}
       </Animated.Text>
     </Pressable>
   );
 });
 
-export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({ state, descriptors, navigation }: BottomTabBarProps) {
+// ─── Main navbar ──────────────────────────────────────────────────────────────
+export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
+  state,
+  descriptors,
+  navigation,
+}: BottomTabBarProps) {
   const { theme } = useTheme();
   const insets = useSafeAreaInsets();
-  const aC = useAnimatedColors(); // singleton animated shared values from ThemeProvider
+  const aC = useAnimatedColors();
   const [barWidth, setBarWidth] = useState(0);
 
   const visibleRoutes = useMemo(
-    () => state.routes.filter((route) => (descriptors[route.key]?.options as any)?.href !== null),
-    [descriptors, state.routes]
+    () =>
+      state.routes.filter((route) => {
+        const options = descriptors[route.key]?.options;
+        return (options as any)?.href !== null && route.name !== 'settings';
+      }),
+    [descriptors, state.routes],
   );
 
-  const activeVisibleIndex = useMemo(() => {
+  const activeIdx = useMemo(() => {
     const activeKey = state.routes[state.index]?.key;
-    return Math.max(0, visibleRoutes.findIndex((route) => route.key === activeKey));
+    return Math.max(0, visibleRoutes.findIndex((r) => r.key === activeKey));
   }, [state.index, state.routes, visibleRoutes]);
 
-  const slotWidth = barWidth > 0 ? barWidth / Math.max(visibleRoutes.length, 1) : 0;
-  const dropX = useSharedValue(0);
-  const dropStretch = useSharedValue(0);
-  const dropDirection = useSharedValue(0);
-  const dropEnergy = useSharedValue(0);
-
-  // Animated versions of the accent color (derived from animated primary)
-  const activeAccent = theme.colors.primary; // for non-animated uses
-  const activeAccent85 = `${activeAccent}85`;
-  const activeAccentC4 = `${activeAccent}C4`;
-
-  // Animated style for the navbar background
-  const animNavBg = useAnimatedStyle(() => ({
-    backgroundColor: aC.surface.value,
-  }));
-
-  // Animated style for the drop fill and border
-  const animDropStyle = useAnimatedStyle(() => ({
-    backgroundColor: aC.primaryContainer.value,
-    borderColor: `${aC.primary.value}70`,
-  }));
-
-  // Shimmer inside the drop pill — must be top-level (Rules of Hooks)
-  const animDropShimmer = useAnimatedStyle(() => ({
-    backgroundColor: `${aC.primary.value}20`,
-    borderRadius: DROP_HEIGHT / 2,
-  }));
+  // ── Pill animation ────────────────────────────────────────────────────────
+  const slotWidth =
+    barWidth > 0 ? (barWidth - H_INSET * 2) / Math.max(visibleRoutes.length, 1) : 0;
+  const pillX = useSharedValue(0);
+  const stretch = useSharedValue(0);
 
   useEffect(() => {
     if (slotWidth <= 0) return;
-    const targetX = activeVisibleIndex * slotWidth + (slotWidth - DROP_WIDTH) / 2;
-    const delta = targetX - dropX.value;
-    const distance = Math.abs(delta);
-    const pulse = Math.min(distance / Math.max(slotWidth, 1), 1);
-    dropDirection.value = delta === 0 ? 0 : delta > 0 ? 1 : -1;
-    dropEnergy.value = pulse;
+    const target = H_INSET + activeIdx * slotWidth + (slotWidth - PILL_W) / 2;
+    const delta = Math.abs(target - pillX.value);
+    const energy = Math.min(delta / Math.max(slotWidth, 1), 1);
 
-    dropStretch.value = pulse;
-    dropX.value = withSpring(targetX, {
-      damping: 18,
-      stiffness: 150,
-      mass: 0.6,
-    });
-    dropStretch.value = withTiming(0, {
-      duration: 520,
-      easing: Easing.out(Easing.exp),
-    });
-    dropEnergy.value = withTiming(0, {
-      duration: 560,
-      easing: Easing.out(Easing.exp),
-    });
-  }, [activeVisibleIndex, dropDirection, dropEnergy, dropStretch, dropX, slotWidth]);
+    stretch.value = energy;
+    pillX.value = withSpring(target, { damping: 26, stiffness: 200, mass: 1 });
+    stretch.value = withTiming(0, { duration: 480, easing: Easing.out(Easing.cubic) });
+  }, [activeIdx, slotWidth, pillX, stretch]);
 
-  const dropStyle = useAnimatedStyle(() => ({
+  const pillTransformStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateX: dropX.value },
+      { translateX: pillX.value },
+      { scaleX: interpolate(stretch.value, [0, 1], [1, 1.1]) },
+      { scaleY: interpolate(stretch.value, [0, 1], [1, 0.9]) },
     ],
   }));
 
-  const reflectionStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dropStretch.value, [0, 1], [0.35, 0.65]),
-    transform: [
-      { translateX: interpolate(dropStretch.value, [0, 1], [0, 10]) },
-      { skewX: `${interpolate(dropStretch.value, [0, 1], [0, 10])}deg` },
-      { scaleX: interpolate(dropStretch.value, [0, 1], [1, 1.14]) },
-    ],
+  // Pill background — tracks album dynamic color
+  const pillBgStyle = useAnimatedStyle(() => ({
+    backgroundColor: aC.primaryContainer?.value ?? theme.colors.primaryContainer,
   }));
 
-  const lensDistortStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dropStretch.value, [0, 1], [0.36, 0.56]),
-    transform: [
-      { scaleX: interpolate(dropStretch.value, [0, 1], [1.06, 1.22]) },
-      { scaleY: interpolate(dropStretch.value, [0, 1], [1.12, 0.9]) },
-      { translateX: interpolate(dropStretch.value, [0, 1], [0, 6]) },
-      { rotate: `${interpolate(dropStretch.value, [0, 1], [0, 5])}deg` },
-    ],
+  const navBgStyle = useAnimatedStyle(() => ({
+    backgroundColor: aC.surface.value,
   }));
 
-  const causticStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dropStretch.value, [0, 1], [0.26, 0.58]),
-    transform: [
-      { translateX: interpolate(dropStretch.value, [0, 1], [0, 12]) },
-      { skewX: `${interpolate(dropStretch.value, [0, 1], [0, 12])}deg` },
-      { scaleX: interpolate(dropStretch.value, [0, 1], [1, 1.2]) },
-    ],
-  }));
-
-  const prismaticLeftStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dropEnergy.value, [0, 1], [0.22, 0.58]),
-    transform: [
-      { translateX: interpolate(dropDirection.value, [-1, 0, 1], [-2, 0, 5]) },
-      { scaleY: interpolate(dropStretch.value, [0, 1], [1, 1.15]) },
-      { skewY: `${interpolate(dropStretch.value, [0, 1], [0, -8])}deg` },
-    ],
-  }));
-
-  const prismaticRightStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dropEnergy.value, [0, 1], [0.18, 0.5]),
-    transform: [
-      { translateX: interpolate(dropDirection.value, [-1, 0, 1], [-5, 0, 2]) },
-      { scaleY: interpolate(dropStretch.value, [0, 1], [1, 1.12]) },
-      { skewY: `${interpolate(dropStretch.value, [0, 1], [0, 8])}deg` },
-    ],
-  }));
-
-  const bottomRimStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(dropEnergy.value, [0, 1], [0.28, 0.66]),
-    transform: [
-      { scaleX: interpolate(dropStretch.value, [0, 1], [1, 1.18]) },
-      { translateY: interpolate(dropStretch.value, [0, 1], [0, 1.5]) },
-    ],
-  }));
-
-  const accentColorStyle = useAnimatedStyle(() => ({
-    borderColor: interpolateColor(
-      dropStretch.value,
-      [0, 1],
-      [activeAccent85, activeAccentC4]
-    ) as string,
-    shadowColor: activeAccent,
-  }));
+  // Resolved colors – read from theme (updated on every re-render when album color changes)
+  const palette = getTabColors(theme.colors);
 
   return (
-    <View pointerEvents="box-none" style={[styles.outer, { bottom: insets.bottom + TAB_BOTTOM }]}>
-      <View
-        style={[
-          styles.wrapper,
-          {
-            borderColor: withAlpha(theme.colors.outline, '7A'),
-            shadowColor: theme.colors.shadow,
-          },
-        ]}
-      >
-        {/* Animated background gradient — responds to dynamic album colors */}
-        <Animated.View
-          pointerEvents="none"
-          style={[StyleSheet.absoluteFill, animNavBg, { borderRadius: TAB_RADIUS }]}
-        />
+    <View style={[styles.outer, { height: BAR_HEIGHT + insets.bottom }]} pointerEvents="box-none">
+      {/* Background */}
+      <Animated.View style={[StyleSheet.absoluteFill, navBgStyle]} />
 
-        <View
-          onLayout={(event) => setBarWidth(event.nativeEvent.layout.width)}
-          style={styles.itemsRow}
-        >
-          {slotWidth > 0 ? (
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                styles.drop,
-                { width: DROP_WIDTH, height: DROP_HEIGHT },
-                animDropStyle,
-                dropStyle,
-              ]}
-            >
-              {/* Inner shimmer overlay on top of the animated bg */}
-              <Animated.View
-                pointerEvents="none"
-                style={[StyleSheet.absoluteFill, animDropShimmer]}
+      {/* Top hair-line divider */}
+      <View style={[styles.topDivider, { backgroundColor: hex(theme.colors.outline, '30') }]} />
+
+      {/* Items row */}
+      <View style={styles.itemsRow} onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}>
+        {/* Sliding pill — absolute, behind icons */}
+        {slotWidth > 0 && (
+          <Animated.View
+            pointerEvents="none"
+            style={[
+              styles.pill,
+              { width: PILL_W, height: PILL_H },
+              pillBgStyle,
+              pillTransformStyle,
+            ]}
+          />
+        )}
+
+        {/* Tab items */}
+        {visibleRoutes.map((route, index) => {
+          const descriptor = descriptors[route.key];
+          const options = descriptor.options;
+          const focused = index === activeIdx;
+
+          const label =
+            typeof options.tabBarLabel === 'string'
+              ? options.tabBarLabel
+              : typeof options.title === 'string'
+                ? options.title
+                : route.name;
+
+          const iconName: IconName =
+            route.name === 'index'
+              ? 'Home'
+              : route.name === 'library'
+                ? 'Library'
+                : route.name === 'playlists'
+                  ? 'Playlist'
+                  : route.name === 'tidal'
+                    ? 'Descargar'
+                    : 'Ajustes';
+
+          const onPress = () => {
+            const event = navigation.emit({
+              type: 'tabPress',
+              target: route.key,
+              canPreventDefault: true,
+            });
+            if (!focused && !event.defaultPrevented) {
+              navigation.navigate(route.name, route.params);
+            }
+          };
+
+          const onLongPress = () => {
+            navigation.emit({ type: 'tabLongPress', target: route.key });
+          };
+
+          return (
+            <View key={route.key} style={styles.itemContainer}>
+              <TabItem
+                label={label}
+                icon={iconName}
+                focused={focused}
+                activeIconColor={palette.activeIcon}
+                mutedColor={theme.colors.onSurfaceVariant}
+                accentColor={palette.accent}
+                onPress={onPress}
+                onLongPress={onLongPress}
               />
-            </Animated.View>
-          ) : null}
-
-          {visibleRoutes.map((route, index) => {
-            const descriptor = descriptors[route.key];
-            const options = descriptor.options;
-            const focused = index === activeVisibleIndex;
-            const label =
-              typeof options.tabBarLabel === 'string'
-                ? options.tabBarLabel
-                : typeof options.title === 'string'
-                  ? options.title
-                  : route.name;
-
-            const onPress = () => {
-              const event = navigation.emit({
-                type: 'tabPress',
-                target: route.key,
-                canPreventDefault: true,
-              });
-
-              if (!focused && !event.defaultPrevented) {
-                navigation.navigate(route.name, route.params);
-              }
-            };
-
-            const onLongPress = () => {
-              navigation.emit({
-                type: 'tabLongPress',
-                target: route.key,
-              });
-            };
-
-            const iconName =
-              route.name === 'index'
-                ? focused ? 'home' : 'home-outline'
-                : route.name === 'library'
-                  ? focused ? 'music-box-multiple' : 'music-box-multiple-outline'
-                  : route.name === 'playlists'
-                    ? focused ? 'playlist-music' : 'playlist-music-outline'
-                    : route.name === 'tidal'
-                      ? focused ? 'music-circle' : 'music-circle-outline'
-                      : focused ? 'cog' : 'cog-outline';
-
-            return (
-              <View key={route.key} style={styles.itemContainer}>
-                <LiquidTabItem
-                  label={label}
-                  icon={iconName}
-                  focused={focused}
-                  activeColor={theme.colors.onPrimaryContainer || theme.colors.onPrimary}
-                  inactiveColor={theme.colors.onSurfaceVariant}
-                  onPress={onPress}
-                  onLongPress={onLongPress}
-                />
-              </View>
-            );
-          })}
-        </View>
+            </View>
+          );
+        })}
       </View>
-    </View >
+
+      {/* Safe-area spacer */}
+      <View style={{ height: insets.bottom }} />
+    </View>
   );
 });
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
 const styles = StyleSheet.create({
   outer: {
     position: 'absolute',
-    left: TAB_HORIZONTAL,
-    right: TAB_HORIZONTAL,
-    bottom: TAB_BOTTOM,
-  },
-  wrapper: {
-    height: TAB_HEIGHT,
-    borderRadius: TAB_RADIUS,
-    borderWidth: 1,
+    left: 0,
+    right: 0,
+    bottom: 0,
     overflow: 'hidden',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.18,
-    shadowRadius: 16,
-    elevation: 10,
+    elevation: 8,
+    shadowOffset: { width: 0, height: -2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 8,
+  },
+  topDivider: {
+    height: StyleSheet.hairlineWidth,
+    width: '100%',
   },
   itemsRow: {
-    flex: 1,
+    height: BAR_HEIGHT,
     flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 2,
-    paddingTop: 8,
-    paddingBottom: 8,
+    paddingHorizontal: H_INSET,
   },
   itemContainer: {
     flex: 1,
-    zIndex: 2,
   },
   itemButton: {
+    flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    borderRadius: TAB_ITEM_RADIUS,
-    paddingVertical: 3,
-    marginHorizontal: 2,
-    overflow: 'hidden',
+    gap: ITEM_GAP,
+  },
+  /** Fixed box matching PILL_W × PILL_H → icon always sits perfectly under the pill */
+  iconArea: {
+    width: PILL_W,
+    height: PILL_H,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   itemLabel: {
     fontSize: 11,
-    fontWeight: '600',
-    letterSpacing: 0.2,
-    marginTop: 1,
+    fontWeight: '500',
+    letterSpacing: 0.1,
+    textAlign: 'center',
   },
-  drop: {
+  pill: {
     position: 'absolute',
-    top: 10,
-    borderRadius: 20,
-    borderWidth: 1,
-    zIndex: 1,
-    overflow: 'hidden',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.35,
-    shadowRadius: 6,
-  },
-  prismaticLeft: {
-    position: 'absolute',
-    left: -2,
-    top: 4,
-    bottom: 4,
-    width: 12,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  prismaticRight: {
-    position: 'absolute',
-    right: -2,
-    top: 4,
-    bottom: 5,
-    width: 12,
-    borderRadius: 12,
-    overflow: 'hidden',
-  },
-  bottomRim: {
-    position: 'absolute',
-    left: 5,
-    right: 5,
-    bottom: -1,
-    height: 8,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  reflection: {
-    position: 'absolute',
-    top: 5,
-    left: 7,
-    width: 28,
-    height: 14,
-    borderRadius: 999,
-    overflow: 'hidden',
-  },
-  caustic: {
-    position: 'absolute',
-    top: 4,
-    left: 8,
-    width: 36,
-    height: 18,
-    borderRadius: 999,
-    overflow: 'hidden',
+    top: PILL_TOP,
+    left: 0,
+    borderRadius: PILL_H / 2,
   },
 });

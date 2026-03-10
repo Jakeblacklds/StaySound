@@ -19,8 +19,13 @@ export interface Track {
     sampleRate?: number; // Hz
     bitDepth?: number;
     quality?: string;
+    source?: 'local' | 'tidal' | 'tidal_stream';
+    tidalId?: number;
+    tidalAlbumId?: number;
     dateAdded: number;
     favorite?: boolean;
+    /** @internal Temporary field set during scan for filename-based matching. Not persisted. */
+    _filename?: string;
 }
 
 export interface Album {
@@ -133,6 +138,19 @@ export interface TidalAlbumDetail {
     tracks: TidalTrack[];
 }
 
+export interface TidalPlaylist {
+    uuid: string;
+    title: string;
+    description?: string;
+    numberOfTracks?: number;
+    artworkUrl?: string;
+}
+
+export interface TidalPlaylistDetail {
+    playlist: TidalPlaylist;
+    tracks: TidalTrack[];
+}
+
 export interface DownloadState {
     status: 'idle' | 'downloading' | 'done' | 'error';
     progress: number;
@@ -151,3 +169,5 @@ export interface LibraryState {
     lastScanDate: number | null;
     _hasHydrated: boolean;
 }
+
+

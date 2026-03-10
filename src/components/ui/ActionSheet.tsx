@@ -1,4 +1,3 @@
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import React, { useCallback, useEffect } from 'react';
@@ -17,6 +16,7 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUIStore } from '../../stores/uiStore';
 import { useTheme } from '../../theme';
+import { CustomIcon, IconName } from './CustomIcon';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.6;
@@ -154,8 +154,8 @@ export function ActionSheet() {
                                     styles.iconContainer,
                                     { backgroundColor: action.destructive ? theme.colors.error + '15' : theme.colors.primary + '10' }
                                 ]}>
-                                    <MaterialCommunityIcons
-                                        name={action.icon as any}
+                                    <CustomIcon
+                                        name={action.icon as IconName}
                                         size={22}
                                         color={action.destructive ? theme.colors.error : theme.colors.primary}
                                     />

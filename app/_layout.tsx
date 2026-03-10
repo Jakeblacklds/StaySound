@@ -12,7 +12,7 @@ import 'react-native-reanimated';
 import { FullPlayer, MiniPlayer } from '@/src/components/player';
 import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
 import { useAudioEngine } from '@/src/services';
-import { useLibraryStore, usePlayerStore, useSettingsStore } from '@/src/stores';
+import { useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
 import { ThemeProvider, useTheme } from '@/src/theme';
 
 function isTrackPlayerNotificationUrl(url: string | null | undefined): boolean {
@@ -47,12 +47,13 @@ export default function RootLayout() {
 
   const _hasLibraryHydrated = useLibraryStore(state => state._hasHydrated);
   const _hasSettingsHydrated = useSettingsStore(state => state._hasHydrated);
+  const _hasOnboardingHydrated = useOnboardingStore(state => state._hasHydrated);
 
   useEffect(() => {
-    if (loaded && _hasLibraryHydrated && _hasSettingsHydrated) {
+    if (loaded && _hasLibraryHydrated && _hasSettingsHydrated && _hasOnboardingHydrated) {
       SplashScreen.hideAsync();
     }
-  }, [loaded, _hasLibraryHydrated, _hasSettingsHydrated]);
+  }, [loaded, _hasLibraryHydrated, _hasSettingsHydrated, _hasOnboardingHydrated]);
 
   // Emergency timeout to hide splash screen after 5 seconds
   useEffect(() => {
@@ -62,7 +63,7 @@ export default function RootLayout() {
     return () => clearTimeout(timer);
   }, []);
 
-  if (!loaded || !_hasLibraryHydrated || !_hasSettingsHydrated) {
+  if (!loaded || !_hasLibraryHydrated || !_hasSettingsHydrated || !_hasOnboardingHydrated) {
     return null;
   }
 
@@ -149,7 +150,14 @@ function AudioSync() {
 
 function RootLayoutNav() {
   const { theme, isDark } = useTheme();
-  // MiniPlayer is now handled via overlay, so we don't need to hide it based on route
+  const hasCompletedOnboarding = useOnboardingStore(state => state.hasCompletedOnboarding);
+
+  // Redirect to onboarding when navigator is ready
+  useEffect(() => {
+    if (!hasCompletedOnboarding) {
+      router.replace('/onboarding');
+    }
+  }, [hasCompletedOnboarding]);
 
   useEffect(() => {
     const handleUrl = (url: string | null | undefined) => {
@@ -229,6 +237,14 @@ function RootLayoutNav() {
             <AudioSync />
             <Stack>
               <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+              <Stack.Screen
+                name="onboarding"
+                options={{
+                  headerShown: false,
+                  animation: 'fade',
+                  gestureEnabled: false,
+                }}
+              />
               <Stack.Screen name="artist" options={{ headerShown: false }} />
               <Stack.Screen name="album" options={{ headerShown: false }} />
               <Stack.Screen name="playlist" options={{ headerShown: false }} />

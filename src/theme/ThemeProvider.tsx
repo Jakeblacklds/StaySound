@@ -4,17 +4,11 @@ import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors } from '../services/colorExtractor';
 import { useSettingsStore } from '../stores/settingsStore';
 import { Theme, ThemeMode, ThemeStyle } from '../types/theme';
-import { auroraDark } from './styles/aurora';
-import { brutalDark } from './styles/brutal';
-import { cyberDark } from './styles/cyber';
 import { material3Dark, material3Light } from './styles/material3';
 import { generateM3Palette, SchemeVariant } from './utils';
 
 const themes: Record<ThemeStyle, { dark: Theme; light: Theme }> = {
     material3: { dark: material3Dark, light: material3Light },
-    aurora: { dark: auroraDark, light: auroraDark },
-    cyber: { dark: cyberDark, light: cyberDark },
-    brutal: { dark: brutalDark, light: brutalDark },
 };
 
 // ─── Animated color transition config ───────────────────────────
@@ -100,53 +94,52 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }), [aPrimary, aBackground, aSurface, aSurfaceVariant, aPrimaryContainer, aOnPrimaryContainer, aOnSurface, aOnSurfaceVariant, aOnBackground]);
 
     const theme = React.useMemo(() => {
-        const themeVariants = themes[settings.style] || themes.material3;
+        const themeVariants = themes.material3;
         const selectedTheme = isDark ? themeVariants.dark : themeVariants.light;
 
-        if (settings.style === 'material3') {
-            const isDynamic = settings.dynamicColors && dynamicPalette;
-            const seed = isDynamic ? dynamicPalette.primary : settings.accentColor;
-            const colorToUse = seed.startsWith('#') ? seed : `#${seed}`;
+        const isDynamic = settings.dynamicColors && dynamicPalette;
+        const seed = isDynamic ? dynamicPalette.primary : settings.accentColor;
+        const colorToUse = seed.startsWith('#') ? seed : `#${seed}`;
 
-            try {
-                const variant = isDynamic ? 'content' : (settings.schemeVariant as SchemeVariant) || 'expressive';
-                const m3Colors = generateM3Palette(colorToUse, isDark, variant);
+        try {
+            const variant = isDynamic ? 'content' : (settings.schemeVariant as SchemeVariant) || 'expressive';
+            const m3Colors = generateM3Palette(colorToUse, isDark, variant);
 
-                let finalColors: Theme['colors'];
+            let finalColors: Theme['colors'];
 
-                if (isDynamic) {
-                    finalColors = {
-                        ...selectedTheme.colors,
-                        ...m3Colors,
-                        // We only force the background/surface to match the album's mood.
-                        // All other colors (primary, onSurface, etc.) are left to the 
-                        // M3 generator (m3Colors) which computes valid tonal shifts
-                        // (e.g. making them light enough in dark mode) for legibility.
-                        background: dynamicPalette.background,
-                        surface: dynamicPalette.background,
-                    };
-                } else {
-                    finalColors = { ...selectedTheme.colors, ...m3Colors };
-                }
-
-                // ── Animate shared values towards the new colors ──────────
-                aPrimary.value = withTiming(finalColors.primary, COLOR_ANIM_CONFIG);
-                aBackground.value = withTiming(finalColors.background, COLOR_ANIM_CONFIG);
-                aSurface.value = withTiming(finalColors.surface, COLOR_ANIM_CONFIG);
-                aSurfaceVariant.value = withTiming(finalColors.surfaceVariant, COLOR_ANIM_CONFIG);
-                aPrimaryContainer.value = withTiming(finalColors.primaryContainer, COLOR_ANIM_CONFIG);
-                aOnPrimaryContainer.value = withTiming(finalColors.onPrimaryContainer ?? finalColors.onPrimary, COLOR_ANIM_CONFIG);
-                aOnSurface.value = withTiming(finalColors.onSurface, COLOR_ANIM_CONFIG);
-                aOnSurfaceVariant.value = withTiming(finalColors.onSurfaceVariant ?? finalColors.onSurface, COLOR_ANIM_CONFIG);
-                aOnBackground.value = withTiming(finalColors.onBackground, COLOR_ANIM_CONFIG);
-
-                return { ...selectedTheme, colors: finalColors };
-            } catch {
-                return selectedTheme;
+            if (isDynamic) {
+                finalColors = {
+                    ...selectedTheme.colors,
+                    ...m3Colors,
+                    background: dynamicPalette.background,
+                    surface: dynamicPalette.background,
+                    onSurface: dynamicPalette.onSurface,
+                    onSurfaceVariant: dynamicPalette.onSurface,
+                };
+            } else {
+                finalColors = { ...selectedTheme.colors, ...m3Colors };
             }
+
+            return { ...selectedTheme, colors: finalColors };
+        } catch {
+            return selectedTheme;
         }
-        return selectedTheme;
-    }, [settings.style, settings.mode, settings.accentColor, settings.dynamicColors, settings.schemeVariant, isDark, dynamicPalette, aPrimary, aBackground, aSurface, aSurfaceVariant, aPrimaryContainer, aOnPrimaryContainer, aOnSurface, aOnSurfaceVariant, aOnBackground]);
+    }, [settings.mode, settings.accentColor, settings.dynamicColors, settings.schemeVariant, isDark, dynamicPalette]);
+
+    // ─── Sync Shared Values ──────────────────────────────────────────
+    // We do this in useEffect to avoid "Writing to value during render" warnings.
+    React.useEffect(() => {
+        const finalColors = theme.colors;
+        aPrimary.value = withTiming(finalColors.primary, COLOR_ANIM_CONFIG);
+        aBackground.value = withTiming(finalColors.background, COLOR_ANIM_CONFIG);
+        aSurface.value = withTiming(finalColors.surface, COLOR_ANIM_CONFIG);
+        aSurfaceVariant.value = withTiming(finalColors.surfaceVariant, COLOR_ANIM_CONFIG);
+        aPrimaryContainer.value = withTiming(finalColors.primaryContainer, COLOR_ANIM_CONFIG);
+        aOnPrimaryContainer.value = withTiming(finalColors.onPrimaryContainer ?? finalColors.onPrimary, COLOR_ANIM_CONFIG);
+        aOnSurface.value = withTiming(finalColors.onSurface, COLOR_ANIM_CONFIG);
+        aOnSurfaceVariant.value = withTiming(finalColors.onSurfaceVariant ?? finalColors.onSurface, COLOR_ANIM_CONFIG);
+        aOnBackground.value = withTiming(finalColors.onBackground, COLOR_ANIM_CONFIG);
+    }, [theme.colors, aPrimary, aBackground, aSurface, aSurfaceVariant, aPrimaryContainer, aOnPrimaryContainer, aOnSurface, aOnSurfaceVariant, aOnBackground]);
 
     const setDynamicPalette = useCallback((colors: AlbumColors) => {
         setDynamicPaletteState(prev => {

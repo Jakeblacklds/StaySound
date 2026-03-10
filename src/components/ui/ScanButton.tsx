@@ -16,6 +16,7 @@ import Animated, {
     withRepeat,
     withTiming
 } from 'react-native-reanimated';
+import { CustomIcon } from './CustomIcon';
 
 interface ScanButtonProps {
     isScanning: boolean;
@@ -75,7 +76,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                         }
                     ]}
                 >
-                    <Text style={{ fontSize: 20 }}>🔍</Text>
+                    <CustomIcon name="Library" size={24} color={theme.colors.onPrimaryContainer} />
                     <Text
                         variant="labelLarge"
                         style={{
@@ -155,12 +156,13 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                             <Button
                                 mode="contained"
                                 onPress={handleStartScan}
-                                icon="magnify"
                                 style={{
                                     borderRadius: globalStyles.buttonRadius,
                                     borderWidth: globalStyles.borderWidth,
                                     borderColor: globalStyles.borderColor,
                                 }}
+                                contentStyle={{ flexDirection: 'row-reverse' }}
+                                icon={() => <CustomIcon name="Next" size={18} color={theme.colors.onPrimary} />}
                                 labelStyle={{ fontFamily: theme.typography.fontFamily.bold }}
                             >
                                 Scan Now
@@ -173,7 +175,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
             {isScanning && progress && (
                 <Animated.View entering={FadeIn} style={styles.progressContainer}>
                     <View style={styles.scanningHeader}>
-                        <Text style={{ fontSize: 24 }}>🎵</Text>
+                        <CustomIcon name="Canción" size={32} color={theme.colors.primary} />
                         <Text
                             variant="titleMedium"
                             style={{

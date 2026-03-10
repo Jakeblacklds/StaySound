@@ -15,14 +15,13 @@
 import { formatDuration } from '@/src/services';
 import { useAnimatedColors, useTheme } from '@/src/theme';
 import { Track } from '@/src/types';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Text } from 'react-native-paper';
 import Animated, { useAnimatedProps, useAnimatedStyle } from 'react-native-reanimated';
+import { CustomIcon, IconName } from './CustomIcon';
 
-const AnimatedIcon = Animated.createAnimatedComponent(MaterialCommunityIcons);
+const AnimatedCustomIcon = Animated.createAnimatedComponent(CustomIcon);
 
 interface TrackListItemProps {
     track: Track;
@@ -32,7 +31,7 @@ interface TrackListItemProps {
     isPlaying?: boolean;
     onPress: (track: Track) => void;
     onOptionsPress?: (track: Track) => void;
-    optionsIcon?: string;
+    optionsIcon?: IconName;
     optionsIconColor?: string;
 }
 
@@ -64,11 +63,11 @@ function TrackListItemInner({
         styles.container,
         {
             height: trackStyles.height,
-            borderRadius: trackStyles.variant === 'glass' ? 16 : globalStyles.buttonRadius,
-            borderWidth: trackStyles.variant === 'brutal' ? globalStyles.borderWidth : (isMaterial3 ? 1 : 0),
-            borderColor: trackStyles.variant === 'brutal' ? globalStyles.borderColor : (isMaterial3 ? `${theme.colors.outline}4D` : globalStyles.borderColor),
+            borderRadius: globalStyles.buttonRadius,
+            borderWidth: isMaterial3 ? 1 : 0,
+            borderColor: isMaterial3 ? `${theme.colors.outline}4D` : globalStyles.borderColor,
             marginHorizontal: globalStyles.screenPadding / 2,
-            marginVertical: trackStyles.variant === 'brutal' ? 8 : (isMaterial3 ? 4 : 0),
+            marginVertical: isMaterial3 ? 4 : 0,
             overflow: 'hidden' as const,
             shadowColor: 'transparent',
             shadowOffset: { width: 0, height: 0 },
@@ -111,14 +110,16 @@ function TrackListItemInner({
         color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurface.value,
     }));
     const animatedSubtleStyle = useAnimatedStyle(() => ({
-        color: aC.onSurfaceVariant.value,
+        color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurface.value,
+        opacity: isPlaying ? 0.85 : 0.65,
     }));
     const animatedIndexStyle = useAnimatedStyle(() => ({
         color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurfaceVariant.value,
+        opacity: isPlaying ? 1 : 0.8,
     }));
 
     const animatedIconProps = useAnimatedProps(() => ({
-        color: optionsIconColor ?? aC.onSurfaceVariant.value,
+        color: optionsIconColor ?? (isPlaying ? aC.onPrimaryContainer.value : aC.onSurfaceVariant.value),
     }));
 
     const animatedHeartProps = useAnimatedProps(() => ({
@@ -134,7 +135,7 @@ function TrackListItemInner({
                     style={[
                         StyleSheet.absoluteFillObject,
                         {
-                            borderRadius: trackStyles.variant === 'glass' ? 16 : globalStyles.buttonRadius,
+                            borderRadius: globalStyles.buttonRadius,
                         },
                         animatedPlayingStyle,
                     ]}
@@ -168,7 +169,7 @@ function TrackListItemInner({
                                 transition={0}
                             />
                         ) : (
-                            <Text style={{ fontSize: trackStyles.artworkSize * 0.4 }}>🎵</Text>
+                            <CustomIcon name="Canción" size={trackStyles.artworkSize * 0.6} color={theme.colors.primary} />
                         )}
                     </Animated.View>
                 ) : null}
@@ -181,7 +182,7 @@ function TrackListItemInner({
                             styles.title,
                             {
                                 fontFamily: theme.typography.fontFamily.bold,
-                                textTransform: trackStyles.variant === 'cyber' ? 'uppercase' as const : 'none' as const,
+                                fontWeight: '900' as const,
                             },
                             animatedTitleStyle,
                         ]}
@@ -194,7 +195,6 @@ function TrackListItemInner({
                             styles.subtitle,
                             {
                                 fontFamily: theme.typography.fontFamily.regular,
-                                letterSpacing: trackStyles.variant === 'cyber' ? 1 : 0,
                             },
                             animatedSubtleStyle,
                         ]}
@@ -211,8 +211,8 @@ function TrackListItemInner({
                         {formatDuration(track.duration)}
                     </Animated.Text>
                     {track.favorite && (
-                        <AnimatedIcon
-                            name="heart"
+                        <AnimatedCustomIcon
+                            name="Play"
                             size={12}
                             animatedProps={animatedHeartProps}
                             style={{ marginLeft: 6, opacity: 0.9 }}
@@ -225,10 +225,11 @@ function TrackListItemInner({
                             style={styles.queueBtn}
                             onPress={() => onOptionsPress(track)}
                         >
-                            <AnimatedIcon
-                                name={(optionsIcon ?? 'dots-vertical') as any}
+                            <AnimatedCustomIcon
+                                name={optionsIcon ?? 'Cola'}
                                 size={19}
                                 animatedProps={animatedIconProps}
+                                style={{ opacity: isPlaying ? 0.9 : 0.75 }}
                             />
                         </Pressable>
                     ) : null}
@@ -302,6 +303,7 @@ const styles = StyleSheet.create({
     },
     title: {
         fontSize: 16,
+        fontWeight: 'bold',
     },
     rightContainer: {
         flexDirection: 'row',

@@ -9,15 +9,18 @@
 
 import { useAnimatedColors, useTheme } from '@/src/theme';
 import { Album } from '@/src/types';
+import { BlurView } from 'expo-blur';
 import { Image as ExpoImage } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import React, { useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import { Text } from 'react-native-paper';
 import Animated, { useAnimatedStyle } from 'react-native-reanimated';
+import { CustomIcon } from './CustomIcon';
 
 interface AlbumCardProps {
     album: Album;
-    size?: 'small' | 'medium' | 'large';
+    size?: 'small' | 'medium' | 'large' | 'full';
+    height?: number;
     onPress: (album: Album) => void;
 }
 
@@ -25,13 +28,14 @@ const SIZES = {
     small: 100,
     medium: 150,
     large: 180,
+    full: '100%' as any,
 };
 
-function AlbumCardInner({ album, size = 'medium', onPress }: AlbumCardProps) {
+function AlbumCardInner({ album, size = 'medium', height: customHeight, onPress }: AlbumCardProps) {
     const { theme } = useTheme();
     const aC = useAnimatedColors();
     const isMaterial3 = theme.id.startsWith('material3');
-    const cardSize = SIZES[size];
+    const cardWidth = SIZES[size as keyof typeof SIZES] || SIZES.medium;
 
     const cardStyles = theme.components.card;
     const globalStyles = theme.components.global;
@@ -41,17 +45,17 @@ function AlbumCardInner({ album, size = 'medium', onPress }: AlbumCardProps) {
         const base: any[] = [
             styles.artwork,
             {
-                width: cardSize,
-                height: cardSize,
+                width: cardWidth,
+                height: customHeight || cardWidth,
                 borderRadius: cardStyles.imageRadius,
-                borderWidth: cardStyles.variant === 'brutal' ? globalStyles.borderWidth : (isMaterial3 ? 1 : 0),
-                borderColor: cardStyles.variant === 'brutal' ? globalStyles.borderColor : (isMaterial3 ? `${theme.colors.outline}55` : globalStyles.borderColor),
+                borderWidth: cardStyles.variant === 'brutal' ? globalStyles.borderWidth : 0,
+                borderColor: cardStyles.variant === 'brutal' ? globalStyles.borderColor : 'transparent',
                 overflow: 'hidden' as const,
-                shadowColor: isMaterial3 ? theme.colors.shadow : 'transparent',
-                shadowOffset: { width: 0, height: isMaterial3 ? 8 : 0 },
-                shadowOpacity: isMaterial3 ? 0.16 : 0,
-                shadowRadius: isMaterial3 ? 12 : 0,
-                elevation: isMaterial3 ? 5 : 0,
+                shadowColor: 'transparent',
+                shadowOffset: { width: 0, height: 0 },
+                shadowOpacity: 0,
+                shadowRadius: 0,
+                elevation: 0,
             }
         ];
 
@@ -66,14 +70,14 @@ function AlbumCardInner({ album, size = 'medium', onPress }: AlbumCardProps) {
         }
 
         return base;
-    }, [cardSize, cardStyles.imageRadius, cardStyles.variant, globalStyles.borderWidth, globalStyles.borderColor, isMaterial3, theme.colors.outline, theme.colors.shadow]);
+    }, [cardWidth, customHeight, cardStyles.imageRadius, cardStyles.variant, globalStyles.borderWidth, globalStyles.borderColor, isMaterial3, theme.colors.outline, theme.colors.shadow]);
 
     // Animated background — UI-thread worklet, zero JS overhead during scroll.
     const animatedArtworkStyle = useAnimatedStyle(() => ({
         backgroundColor: aC.surfaceVariant.value,
     }));
 
-    const containerWidth = useMemo(() => ({ width: cardSize }), [cardSize]);
+    const containerWidthStyle = useMemo(() => ({ width: cardWidth }), [cardWidth]);
 
     const infoAlign = useMemo(() => ({
         alignItems: cardStyles.textAlign === 'center' ? 'center' as const : 'flex-start' as const,
@@ -85,6 +89,7 @@ function AlbumCardInner({ album, size = 'medium', onPress }: AlbumCardProps) {
     }));
     const animatedSubtitleStyle = useAnimatedStyle(() => ({
         color: aC.onSurfaceVariant.value,
+        opacity: 0.72,
     }));
 
     return (
@@ -92,14 +97,14 @@ function AlbumCardInner({ album, size = 'medium', onPress }: AlbumCardProps) {
             onPress={() => onPress(album)}
             style={({ pressed }) => [
                 styles.container,
-                containerWidth,
+                containerWidthStyle,
                 pressed && styles.pressed,
             ]}
         >
             <Animated.View style={[artworkStyle, animatedArtworkStyle]}>
                 {album.artwork || album.artworkThumb ? (
                     <ExpoImage
-                        source={{ uri: album.artworkThumb || album.artwork }}
+                        source={{ uri: album.artwork || album.artworkThumb }}
                         style={styles.artworkImage}
                         contentFit="cover"
                         recyclingKey={album.id}
@@ -107,38 +112,53 @@ function AlbumCardInner({ album, size = 'medium', onPress }: AlbumCardProps) {
                         transition={0}
                     />
                 ) : (
-                    <Text style={{ fontSize: cardSize * 0.3 }}>💿</Text>
+                    <CustomIcon name="Album" size={cardWidth === '100%' ? 60 : (cardWidth as number) * 0.4} color={theme.colors.primary} />
                 )}
-            </Animated.View>
 
-            <View style={[styles.info, infoAlign]}>
-                <Animated.Text
-                    numberOfLines={1}
-                    style={[
-                        styles.name,
-                        {
-                            fontFamily: theme.typography.fontFamily.bold,
-                            textAlign: cardStyles.textAlign as any,
-                        },
-                        animatedNameStyle,
-                    ]}
-                >
-                    {album.name}
-                </Animated.Text>
-                <Animated.Text
-                    numberOfLines={1}
-                    style={[
-                        styles.subtitle,
-                        {
-                            fontFamily: theme.typography.fontFamily.regular,
-                            textAlign: cardStyles.textAlign as any,
-                        },
-                        animatedSubtitleStyle,
-                    ]}
-                >
-                    {album.artist}
-                </Animated.Text>
-            </View>
+                {/* Info Overlay at the bottom */}
+                <View style={styles.infoOverlay}>
+                    <BlurView
+                        intensity={20}
+                        tint="dark"
+                        style={StyleSheet.absoluteFill}
+                    />
+                    <LinearGradient
+                        colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                        style={StyleSheet.absoluteFill}
+                        start={{ x: 0, y: 0 }}
+                        end={{ x: 0, y: 1 }}
+                    />
+
+                    <View style={[styles.info, infoAlign]}>
+                        <Animated.Text
+                            numberOfLines={1}
+                            style={[
+                                styles.name,
+                                {
+                                    fontFamily: theme.typography.fontFamily.bold,
+                                    textAlign: cardStyles.textAlign as any,
+                                    color: '#FFFFFF'
+                                },
+                            ]}
+                        >
+                            {album.name}
+                        </Animated.Text>
+                        <Animated.Text
+                            numberOfLines={1}
+                            style={[
+                                styles.subtitle,
+                                {
+                                    fontFamily: theme.typography.fontFamily.regular,
+                                    textAlign: cardStyles.textAlign as any,
+                                    color: 'rgba(255,255,255,0.7)'
+                                },
+                            ]}
+                        >
+                            {album.artist}
+                        </Animated.Text>
+                    </View>
+                </View>
+            </Animated.View>
         </Pressable>
     );
 }
@@ -172,15 +192,22 @@ const styles = StyleSheet.create({
         width: '100%',
         height: '100%',
     },
+    infoOverlay: {
+        position: 'absolute',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        paddingBottom: 4,
+    },
     info: {
-        marginTop: 12,
-        paddingHorizontal: 2,
+        paddingVertical: 8,
+        paddingHorizontal: 10,
     },
     name: {
-        fontSize: 14,
-        fontWeight: '600',
+        fontSize: 13,
+        fontWeight: 'bold',
     },
     subtitle: {
-        fontSize: 12,
+        fontSize: 11,
     },
 });

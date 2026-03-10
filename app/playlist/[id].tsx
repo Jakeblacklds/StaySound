@@ -2,7 +2,7 @@
  * Playlist Detail Screen - Shows playlist info with track list
  */
 
-import { MemoizedTrackListItem } from '@/src/components/ui';
+import { CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
 import { formatDuration } from '@/src/services';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
@@ -202,9 +202,11 @@ export default function PlaylistDetailScreen() {
                                 transition={120}
                             />
                         ) : (
-                            <Text style={{ fontSize: 48 }}>
-                                {playlist.id === 'playlist_liked' ? '❤️' : '🎶'}
-                            </Text>
+                            <CustomIcon
+                                name={playlist.id === 'playlist_liked' ? 'Play' : 'Playlist'}
+                                size={64}
+                                color={theme.colors.onPrimaryContainer}
+                            />
                         )}
                     </View>
                     <Text
@@ -233,25 +235,22 @@ export default function PlaylistDetailScreen() {
 
                 <View style={styles.actions}>
                     <IconButton
-                        icon="play-circle"
+                        icon={() => <CustomIcon name="Play" size={32} color={theme.colors.onPrimary} />}
                         mode="contained"
                         size={56}
-                        iconColor={theme.colors.onPrimary}
                         containerColor={theme.colors.primary}
                         onPress={handlePlayAll}
                     />
                     <IconButton
-                        icon="shuffle"
+                        icon={() => <CustomIcon name="Shuffle" size={24} color={theme.colors.primary} />}
                         mode="contained-tonal"
                         size={32}
-                        iconColor={theme.colors.primary}
                         onPress={handleShuffle}
                     />
                     <IconButton
-                        icon="pencil"
+                        icon={() => <CustomIcon name="Ajustes" size={20} color={theme.colors.onSurfaceVariant} />}
                         mode="contained-tonal"
                         size={32}
-                        iconColor={theme.colors.onSurfaceVariant}
                         onPress={() => {
                             setEditName(playlist.name);
                             setEditDescription(playlist.description ?? '');
@@ -299,9 +298,8 @@ export default function PlaylistDetailScreen() {
             <View style={[styles.backButton, { top: insets.top + 8 }]}>
                 <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={styles.blurButton}>
                     <IconButton
-                        icon="arrow-left"
+                        icon={() => <CustomIcon name="Previous" size={24} color={theme.colors.onBackground} />}
                         size={24}
-                        iconColor={theme.colors.onBackground}
                         onPress={() => router.back()}
                     />
                 </BlurView>

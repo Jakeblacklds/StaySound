@@ -1,9 +1,12 @@
 import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
 import { useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
+import { useOnboardingStore } from '@/src/stores/onboardingStore';
 import { useTheme } from '@/src/theme';
 import { generateM3Palette, SchemeVariant } from '@/src/theme/utils';
 import { TidalQuality } from '@/src/types/audio';
-import { ThemeStyle } from '@/src/types/theme';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
+import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Button, Divider, List, Switch, Text, TextInput } from 'react-native-paper';
@@ -40,6 +43,28 @@ export default function SettingsScreen() {
         tidalMirror, setTidalMirror
     } = useSettingsStore();
 
+    const { userName, userAvatarUri, setUserName, setUserAvatarUri } = useOnboardingStore();
+    const [editingName, setEditingName] = useState(false);
+    const [tempName, setTempName] = useState(userName);
+
+    const handlePickImage = async () => {
+        const result = await ImagePicker.launchImageLibraryAsync({
+            mediaTypes: ['images'],
+            allowsEditing: true,
+            aspect: [1, 1],
+            quality: 0.8,
+        });
+
+        if (!result.canceled) {
+            setUserAvatarUri(result.assets[0].uri);
+        }
+    };
+
+    const handleSaveName = () => {
+        setUserName(tempName);
+        setEditingName(false);
+    };
+
     const showNotification = useNotificationStore(s => s.showNotification);
 
     const handleMirrorChange = (mirror: string) => {
@@ -72,12 +97,7 @@ export default function SettingsScreen() {
         }
     };
 
-    const themeStyles: { label: string; value: ThemeStyle }[] = [
-        { label: '🎨 Material 3 Expressive (2026)', value: 'material3' },
-        { label: '✨ Aurora Glass (Frosted)', value: 'aurora' },
-        { label: '👾 Cyber Neon (Technical)', value: 'cyber' },
-        { label: '💥 Neo Brutalist (Bold)', value: 'brutal' },
-    ];
+
 
     const colorPresets = [
         '#6750A4', // Purple
@@ -134,6 +154,61 @@ export default function SettingsScreen() {
             style={[styles.container, { backgroundColor: theme.colors.background }]}
             contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
         >
+            {/* Profile Section */}
+            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
+                PERFIL
+            </Text>
+
+            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
+                <View style={styles.profileItem}>
+                    <Pressable onPress={handlePickImage} style={styles.avatarWrapper}>
+                        <View style={[styles.avatarCircle, { borderColor: theme.colors.primary }]}>
+                            {userAvatarUri ? (
+                                <Image source={{ uri: userAvatarUri }} style={styles.avatarImage} />
+                            ) : (
+                                <View style={[styles.avatarPlaceholder, { backgroundColor: theme.colors.primaryContainer }]}>
+                                    <Text style={{ color: theme.colors.primary, fontSize: 24, fontWeight: '800' }}>
+                                        {userName ? userName.charAt(0).toUpperCase() : 'U'}
+                                    </Text>
+                                </View>
+                            )}
+                            <View style={[styles.editBadge, { backgroundColor: theme.colors.primary }]}>
+                                <MaterialCommunityIcons name="pencil" size={12} color={theme.colors.onPrimary} />
+                            </View>
+                        </View>
+                    </Pressable>
+
+                    <View style={styles.profileInfo}>
+                        {editingName ? (
+                            <View style={styles.nameEditRow}>
+                                <TextInput
+                                    value={tempName}
+                                    onChangeText={setTempName}
+                                    mode="outlined"
+                                    dense
+                                    autoFocus
+                                    style={{ flex: 1, backgroundColor: 'transparent' }}
+                                    placeholder="Tu nombre"
+                                />
+                                <Button onPress={handleSaveName} mode="contained" compact style={{ marginLeft: 8 }}>
+                                    ✓
+                                </Button>
+                            </View>
+                        ) : (
+                            <Pressable onPress={() => { setTempName(userName); setEditingName(true); }} style={styles.nameRow}>
+                                <Text variant="titleLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
+                                    {userName || 'StaySound'}
+                                </Text>
+                                <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.colors.primary} style={{ marginLeft: 8 }} />
+                            </Pressable>
+                        )}
+                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                            Toca para editar tu información
+                        </Text>
+                    </View>
+                </View>
+            </View>
+
             {/* Appearance Section */}
             <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
                 APARIENCIA
@@ -145,7 +220,7 @@ export default function SettingsScreen() {
                     description={config.mode === 'system' ? 'Siguiendo sistema' : isDark ? 'Encendido' : 'Apagado'}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <List.Icon {...props} icon="brightness-6" color={theme.colors.primary} />}
+                    left={(props) => <MaterialCommunityIcons name="brightness-4" size={24} color={theme.colors.primary} style={props.style} />}
                     right={() => (
                         <Switch
                             value={isDark}
@@ -159,7 +234,7 @@ export default function SettingsScreen() {
                     description="Extraer colores de la portada"
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <List.Icon {...props} icon="palette" color={theme.colors.primary} />}
+                    left={(props) => <MaterialCommunityIcons name="palette-swatch-outline" size={24} color={theme.colors.primary} style={props.style} />}
                     right={() => (
                         <Switch
                             value={config.dynamicColors}
@@ -169,30 +244,7 @@ export default function SettingsScreen() {
                 />
             </View>
 
-            {/* Theme Style */}
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                ESTILO DEL TEMA
-            </Text>
-
-            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
-                {themeStyles.map((item, index) => (
-                    <React.Fragment key={item.value}>
-                        <List.Item
-                            title={item.label}
-                            titleStyle={{ color: theme.colors.onSurface }}
-                            left={(props) => (
-                                <List.Icon
-                                    {...props}
-                                    icon={config.style === item.value ? "radiobox-marked" : "radiobox-blank"}
-                                    color={theme.colors.primary}
-                                />
-                            )}
-                            onPress={() => setThemeStyle(item.value)}
-                        />
-                        {index < themeStyles.length - 1 && <Divider />}
-                    </React.Fragment>
-                ))}
-            </View>
+            {/* Theme Style section removed as only Material 3 is supported */}
 
             {/* Color Selection - Only for Material 3 without Dynamic Colors */}
             {isMaterial3 && !config.dynamicColors && (
@@ -245,7 +297,7 @@ export default function SettingsScreen() {
                                     {config.accentColor.toUpperCase()}
                                 </Text>
                             </View>
-                            <List.Icon icon="eyedropper-variant" color={theme.colors.primary} />
+                            <MaterialCommunityIcons name="palette-outline" size={24} color={theme.colors.primary} />
                         </Pressable>
 
                         {/* Bottom-sheet modal color picker */}
@@ -263,7 +315,7 @@ export default function SettingsScreen() {
                                             Elige un Color
                                         </Text>
                                         <Pressable onPress={() => setShowPicker(false)} hitSlop={12}>
-                                            <List.Icon icon="close" color={theme.colors.onSurfaceVariant} />
+                                            <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
                                         </Pressable>
                                     </View>
 
@@ -407,8 +459,8 @@ export default function SettingsScreen() {
                     description="Ajustar frecuencias de audio"
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <List.Icon {...props} icon="equalizer" color={theme.colors.primary} />}
-                    right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.onSurfaceVariant} />}
+                    left={(props) => <MaterialCommunityIcons name="tune" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
                 />
                 <Divider />
                 <List.Item
@@ -416,8 +468,8 @@ export default function SettingsScreen() {
                     description="Desactivado"
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <List.Icon {...props} icon="timer-outline" color={theme.colors.primary} />}
-                    right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.onSurfaceVariant} />}
+                    left={(props) => <MaterialCommunityIcons name="timer-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
                 />
             </View>
 
@@ -432,10 +484,10 @@ export default function SettingsScreen() {
                     description={isScanning ? 'Escaneando...' : `${trackCount} canciones • Último: ${lastScan}`}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <List.Icon {...props} icon="folder-music" color={theme.colors.primary} />}
+                    left={(props) => <MaterialCommunityIcons name="magnify-scan" size={24} color={theme.colors.primary} style={props.style} />}
                     right={(props) => isScanning
                         ? <ActivityIndicator size="small" color={theme.colors.primary} />
-                        : <List.Icon {...props} icon="refresh" color={theme.colors.onSurfaceVariant} />
+                        : <MaterialCommunityIcons name="refresh" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />
                     }
                     onPress={handleScan}
                     disabled={isScanning}
@@ -457,8 +509,8 @@ export default function SettingsScreen() {
                     }
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <List.Icon {...props} icon="download-network" color={theme.colors.primary} />}
-                    right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.onSurfaceVariant} />}
+                    left={(props) => <MaterialCommunityIcons name="download-circle-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => setShowQualityModal(true)}
                 />
                 <Divider />
@@ -467,8 +519,8 @@ export default function SettingsScreen() {
                     description={TIDAL_MIRROR_NAMES[tidalMirror] || 'Personalizado'}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <List.Icon {...props} icon="server-network" color={theme.colors.primary} />}
-                    right={(props) => <List.Icon {...props} icon="chevron-right" color={theme.colors.onSurfaceVariant} />}
+                    left={(props) => <MaterialCommunityIcons name="server-network" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => setShowMirrorModal(true)}
                 />
             </View>
@@ -487,7 +539,7 @@ export default function SettingsScreen() {
                                 Servidor de Tidal
                             </Text>
                             <Pressable onPress={() => setShowMirrorModal(false)} hitSlop={12}>
-                                <List.Icon icon="close" color={theme.colors.onSurfaceVariant} />
+                                <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
                             </Pressable>
                         </View>
 
@@ -510,7 +562,7 @@ export default function SettingsScreen() {
                                 ]}
                             >
                                 <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                    <List.Icon icon="auto-fix" color={tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurfaceVariant} />
+                                    <MaterialCommunityIcons name="auto-fix" size={24} color={tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurfaceVariant} />
                                     <View style={{ flex: 1 }}>
                                         <Text variant="titleMedium" style={{ color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface }}>
                                             Automático (Recomendado)
@@ -538,7 +590,7 @@ export default function SettingsScreen() {
                                     ]}
                                 >
                                     <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                        <List.Icon icon="server" color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
+                                        <MaterialCommunityIcons name="server" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
                                         <View style={{ flex: 1 }}>
                                             <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
                                                 {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
@@ -548,7 +600,7 @@ export default function SettingsScreen() {
                                             </Text>
                                         </View>
                                         {tidalMirror === mirror && (
-                                            <List.Icon icon="check" color={theme.colors.primary} />
+                                            <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
                                         )}
                                     </View>
                                 </Pressable>
@@ -572,7 +624,7 @@ export default function SettingsScreen() {
                                 Calidad de Audio
                             </Text>
                             <Pressable onPress={() => setShowQualityModal(false)} hitSlop={12}>
-                                <List.Icon icon="close" color={theme.colors.onSurfaceVariant} />
+                                <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
                             </Pressable>
                         </View>
 
@@ -587,7 +639,7 @@ export default function SettingsScreen() {
                                         title: 'Hi-Res Lossless (FLAC)',
                                         desc: 'Calidad de estudio (24-bit). El mejor sonido posible.',
                                         adv: '✓ Máximo detalle / ✗ Archivos gigantes (~100MB)',
-                                        icon: 'crown'
+                                        icon: 'high-definition'
                                     },
                                     LOSSLESS: {
                                         title: 'Lossless (FLAC)',
@@ -599,7 +651,7 @@ export default function SettingsScreen() {
                                         title: 'Alta (AAC/MP3)',
                                         desc: 'Excelente calidad comprimida (320kbps).',
                                         adv: '✓ Ahorro de espacio / ✓ Muy buena calidad',
-                                        icon: 'check-circle'
+                                        icon: 'music-note-outline'
                                     },
                                     LOW: {
                                         title: 'Básica (AAC)',
@@ -628,7 +680,7 @@ export default function SettingsScreen() {
                                         ]}
                                     >
                                         <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                            <List.Icon icon={details.icon} color={tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurfaceVariant} />
+                                            <MaterialCommunityIcons name={details.icon as any} size={24} color={tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurfaceVariant} />
                                             <View style={{ flex: 1 }}>
                                                 <Text variant="titleMedium" style={{ color: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurface }}>
                                                     {details.title}
@@ -641,7 +693,7 @@ export default function SettingsScreen() {
                                                 </Text>
                                             </View>
                                             {tidalDownloadQuality === q && (
-                                                <List.Icon icon="check" color={theme.colors.primary} />
+                                                <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
                                             )}
                                         </View>
                                     </Pressable>
@@ -806,5 +858,56 @@ const styles = StyleSheet.create({
     about: {
         marginTop: 40,
         alignItems: 'center',
+    },
+    profileItem: {
+        padding: 20,
+        flexDirection: 'row',
+        alignItems: 'center',
+    },
+    avatarWrapper: {
+        marginRight: 20,
+    },
+    avatarCircle: {
+        width: 80,
+        height: 80,
+        borderRadius: 40,
+        borderWidth: 2,
+        overflow: 'hidden',
+        position: 'relative',
+    },
+    avatarImage: {
+        width: '100%',
+        height: '100%',
+    },
+    avatarPlaceholder: {
+        width: '100%',
+        height: '100%',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    editBadge: {
+        position: 'absolute',
+        bottom: 0,
+        right: 0,
+        width: 24,
+        height: 24,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 2,
+        borderColor: 'white',
+    },
+    profileInfo: {
+        flex: 1,
+    },
+    nameRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
+    },
+    nameEditRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 4,
     },
 });

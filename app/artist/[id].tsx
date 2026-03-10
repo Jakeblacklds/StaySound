@@ -2,7 +2,7 @@
  * Artist Detail Screen - Shows artist info with albums and top songs
  */
 
-import { AlbumCard, ArtistAbout, MemoizedTrackListItem } from '@/src/components/ui';
+import { AlbumCard, ArtistAbout, CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
 import { useArtistInfo, useDynamicColors } from '@/src/hooks';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
@@ -139,7 +139,7 @@ export default function ArtistDetailScreen() {
                     {artworkUri ? (
                         <Image source={{ uri: artworkUri }} style={styles.avatarImage} />
                     ) : (
-                        <Text style={{ fontSize: 64 }}>🎤</Text>
+                        <CustomIcon name="Artista" size={100} color={theme.colors.onSurfaceVariant} />
                     )}
                 </View>
             </Animated.View>
@@ -148,9 +148,8 @@ export default function ArtistDetailScreen() {
             <View style={[styles.backButton, { top: insets.top + BACK_BUTTON_TOP_OFFSET }]}>
                 <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={styles.blurButton}>
                     <IconButton
-                        icon="arrow-left"
+                        icon={() => <CustomIcon name="Previous" size={24} color={artistColors.text} />}
                         size={24}
-                        iconColor={artistColors.text}
                         onPress={() => router.back()}
                     />
                 </BlurView>
@@ -186,7 +185,7 @@ export default function ArtistDetailScreen() {
                 <Animated.View entering={FadeIn.delay(300)} style={styles.actions}>
                     <Button
                         mode="contained"
-                        icon="play"
+                        icon={() => <CustomIcon name="Play" size={20} color={artistColors.isDark ? '#000000' : '#FFFFFF'} />}
                         onPress={handlePlayAll}
                         style={[styles.playButton, { backgroundColor: artistColors.primary }]}
                         labelStyle={{ color: artistColors.isDark ? '#000000' : '#FFFFFF' }}
@@ -196,7 +195,7 @@ export default function ArtistDetailScreen() {
                     </Button>
                     <Button
                         mode="contained-tonal"
-                        icon="shuffle"
+                        icon={() => <CustomIcon name="Shuffle" size={20} color={artistColors.primary} />}
                         onPress={handleShuffle}
                         style={[styles.shuffleButton, { backgroundColor: artistColors.primary + '20' }]}
                         labelStyle={{ color: artistColors.primary }}

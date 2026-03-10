@@ -8,10 +8,9 @@
 import { registerRootComponent } from 'expo';
 import { ExpoRoot } from 'expo-router';
 import TrackPlayer from 'react-native-track-player';
-import { PlaybackService } from './src/services/playbackService';
 
 // Must be registered before anything else
-TrackPlayer.registerPlaybackService(() => PlaybackService);
+TrackPlayer.registerPlaybackService(() => require('./src/services/trackPlayerEvents'));
 
 // Export the app with expo-router
 export function App() {

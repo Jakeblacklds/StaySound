@@ -18,6 +18,25 @@ let isHydratingArtworkThumbs = false;
 const isRemoteArtworkUri = (uri?: string) =>
     typeof uri === 'string' && (uri.startsWith('http://') || uri.startsWith('https://'));
 
+const GENERIC_LIBRARY_VALUES = new Set(['unknown', 'unknown title', 'unknown artist', 'unknown album', 'media', 'external', 'staysound']);
+
+const hasMeaningfulLibraryValue = (value?: string) => {
+    const normalized = value?.trim().toLowerCase();
+    return !!normalized && !GENERIC_LIBRARY_VALUES.has(normalized);
+};
+
+const isMediaStoreAlbumArtUri = (uri?: string) =>
+    typeof uri === 'string' && uri.startsWith('content://media/external/audio/albumart/');
+
+const resolveArtworkFromScan = (scannedArtwork?: string, existingArtwork?: string) => {
+    if (!existingArtwork) return scannedArtwork;
+    if (!scannedArtwork) return existingArtwork;
+    if (isMediaStoreAlbumArtUri(scannedArtwork) && !isMediaStoreAlbumArtUri(existingArtwork)) {
+        return existingArtwork;
+    }
+    return scannedArtwork;
+};
+
 interface LibraryActions {
     // Scanning
     scanLibrary: (folderPath?: string) => Promise<void>;
@@ -101,49 +120,130 @@ export const useLibraryStore = create<LibraryStore>()(
 
                 try {
                     // PHASE 1: Fast scan — collect ALL tracks from MediaStore instantly
-                    // Do NOT call organizeIntoAlbums/Artists per-batch (too expensive).
-                    // Instead, accumulate into a local map and flush once after scanning.
                     const scanPath = folderPath ?? MUSIC_FOLDERS.download;
                     console.log(`[LibraryStore] FAST SCAN starting: ${scanPath || 'DOWNLOAD ONLY'}`);
 
                     const collectedTracks = new Map<string, Track>();
+                    const currentTracks = get().tracks;
+
+                    // Build a filename → existing track lookup.
+                    // WHY: Downloaded tracks use SAF URIs (content://com.android.externalstorage.documents/...)
+                    // but MediaStore gives the SAME file a completely different URI (content://media/external/...).
+                    // So matching by URI never works. Matching by filename (without extension) is reliable.
+                    const existingByFilename = new Map<string, Track>(); // filename_no_ext (lowercase) → track
+                    const { sanitizeFilename: sanitize } = require('../services/audioUtils');
+
+                    currentTracks.forEach((t) => {
+                        if (!t.uri) return;
+
+                        // Strategy 1: Extract filename from the URI (works for SAF URIs)
+                        // SAF URIs: content://...primary%3ADownload%2FStaySound%2FArtist+-+Album+-+Title.flac
+                        // Decoding and splitting gives "Artist - Album - Title.flac"
+                        const uriFilename = decodeURIComponent(t.uri)
+                            .split('/').pop()
+                            ?.replace(/\.[^/.]+$/, '')  // strip extension
+                            ?.toLowerCase()
+                            .trim();
+                        if (uriFilename && uriFilename.length > 5 && !/^\d+$/.test(uriFilename)) {
+                            // Reject pure numeric strings like "12345" (MediaStore IDs)
+                            existingByFilename.set(uriFilename, t);
+                        }
+
+                        // Strategy 2: Reconstruct expected filename from metadata (covers Tidal downloads)
+                        // Tidal saves files as: sanitize("Artist - Album - Title")
+                        // So we can reverse-engineer the expected filename key from stored metadata.
+                        if (t.artist && t.album && t.title
+                            && t.artist !== 'Unknown Artist' && t.album !== 'Unknown Album') {
+                            const reconstructed = sanitize(`${t.artist} - ${t.album} - ${t.title}`)
+                                .toLowerCase()
+                                .trim();
+                            if (reconstructed) existingByFilename.set(reconstructed, t);
+                        }
+                    });
+
                     let batchCount = 0;
                     let lastUiFlush = 0;
-                    const UI_FLUSH_INTERVAL_MS = 300;
+                    const UI_FLUSH_INTERVAL_MS = 250;
 
-                    const result = await scanMusicLibraryFast(
+                    await scanMusicLibraryFast(
                         { folderPattern: scanPath },
                         (progress: ScanProgress) => {
                             set({ scanProgress: progress });
                         },
-                        // During fast scan: sólo acumular tracks sin organizar en albums.
-                        // Los nombres de álbumes del filename suelen ser incorrectos ("Unknown Album").
-                        // Organizamos una sola vez al final con nombres correctos de carpeta.
                         (newTracks: Track[]) => {
                             batchCount++;
                             newTracks.forEach(track => {
-                                const enriched = enrichTrackFromUri(track, track.uri);
-                                collectedTracks.set(track.id, enriched);
+                                const enrichmentSource = track._filename || track.uri;
+                                const enriched = enrichTrackFromUri(track, enrichmentSource);
+
+                                // Build the filename key for matching:
+                                // 1. Prefer track._filename (set by NativeLibraryIndexer from MediaStore DISPLAY_NAME)
+                                //    This is necessary because MediaStore URIs like content://media/external/audio/media/12345
+                                //    don't contain the actual filename - extracting the last segment gives just "12345".
+                                // 2. Fall back to URI decoding (works for SAF URIs from the non-native path)
+                                const rawFilenameSource = track._filename
+                                    || decodeURIComponent(track.uri).split('/').pop()
+                                    || '';
+                                const filenameKey = rawFilenameSource
+                                    .replace(/\.[^/.]+$/, '') // strip extension
+                                    .toLowerCase()
+                                    .trim();
+
+                                const existingTrack = filenameKey ? existingByFilename.get(filenameKey) : undefined;
+
+                                // Strip _filename before storing (it's a temporary scan-only field)
+                                const { _filename: _discard, ...cleanEnriched } = enriched;
+
+                                if (existingTrack) {
+                                    // Found a match by filename -> fully restore metadata from the stored track.
+                                    // WHY we always prefer stored title/artist/album:
+                                    // - MediaStore title: often the full filename ("SZA - SOS - Kill Bill") for untagged files
+                                    // - MediaStore album: often the folder name ("StaySound") for untagged files
+                                    // We also protect good Tidal artwork from being overwritten by a generic MediaStore albumart URI.
+                                    const resolvedArtwork = resolveArtworkFromScan(cleanEnriched.artwork, existingTrack.artwork);
+                                    const resolvedArtworkThumb = resolvedArtwork === existingTrack.artwork
+                                        ? existingTrack.artworkThumb
+                                        : undefined;
+
+                                    collectedTracks.set(cleanEnriched.id, {
+                                        ...cleanEnriched,            // base: uri, duration, format, dateAdded from scanner
+                                        title: hasMeaningfulLibraryValue(existingTrack.title) ? existingTrack.title : cleanEnriched.title,
+                                        artist: hasMeaningfulLibraryValue(existingTrack.artist) ? existingTrack.artist : cleanEnriched.artist,
+                                        album: hasMeaningfulLibraryValue(existingTrack.album) ? existingTrack.album : cleanEnriched.album,
+                                        artwork: resolvedArtwork,
+                                        artworkThumb: resolvedArtworkThumb,
+                                        year: cleanEnriched.year || existingTrack.year,
+                                        trackNumber: cleanEnriched.trackNumber || existingTrack.trackNumber,
+                                        genre: cleanEnriched.genre || existingTrack.genre,
+                                        quality: cleanEnriched.quality || existingTrack.quality,
+                                        sampleRate: cleanEnriched.sampleRate || existingTrack.sampleRate,
+                                        bitDepth: cleanEnriched.bitDepth || existingTrack.bitDepth,
+                                        codec: cleanEnriched.codec || existingTrack.codec,
+                                        source: cleanEnriched.source || existingTrack.source,
+                                        tidalId: cleanEnriched.tidalId || existingTrack.tidalId,
+                                        tidalAlbumId: cleanEnriched.tidalAlbumId || existingTrack.tidalAlbumId,
+                                        favorite: existingTrack.favorite,
+                                    });
+                                } else {
+                                    collectedTracks.set(cleanEnriched.id, cleanEnriched);
+                                }
                             });
-                            // Throttle store writes to keep JS thread smooth.
+
                             const now = Date.now();
                             if (batchCount === 1 || now - lastUiFlush >= UI_FLUSH_INTERVAL_MS) {
                                 lastUiFlush = now;
                                 set({ tracks: new Map(collectedTracks) });
                             }
-                            console.log(`[LibraryStore] Fast batch #${batchCount}: ${collectedTracks.size} tracks collected`);
                         }
                     );
 
                     const scanDuration = Date.now() - startTime;
-                    console.log(`[LibraryStore] FAST SCAN complete in ${scanDuration}ms: ${collectedTracks.size} tracks total`);
+                    console.log(`[LibraryStore] Scan complete in ${scanDuration}ms: ${collectedTracks.size} total`);
 
-                    // Organizar albums/artists UNA sola vez con los nombres de carpeta correctos
+                    // PHASE 3: Final Organization
                     const finalTracks = Array.from(collectedTracks.values());
                     const initialAlbums = organizeIntoAlbums(finalTracks);
                     const initialArtists = organizeIntoArtists(finalTracks, initialAlbums);
-
-                    console.log(`[LibraryStore] Initial organization: ${initialAlbums.size} albums, ${initialArtists.size} artists`);
 
                     set({
                         tracks: collectedTracks,
@@ -156,8 +256,9 @@ export const useLibraryStore = create<LibraryStore>()(
 
                     void get().ensureArtworkThumbsForTracks();
 
-                    // No bulk metadata/artwork parsing here.
-                    // Keep library scan instant and smooth like native players.
+                    // Mantenimiento (DESACTIVADO TRAS EXPERIMENTO)
+                    // const { syncInternalCacheHeaders } = require('../services/cacheHeadersProvider');
+                    // void syncInternalCacheHeaders(true);
 
                 } catch (error) {
                     console.error('[LibraryStore] Scan error:', error);
@@ -736,3 +837,10 @@ export const useLibraryStore = create<LibraryStore>()(
         }
     )
 );
+
+
+
+
+
+
+

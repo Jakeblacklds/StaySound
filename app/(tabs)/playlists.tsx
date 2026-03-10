@@ -1,13 +1,13 @@
-import { EmptyState, PlaylistCard, TrackListItem } from '@/src/components/ui';
+import { CustomIcon, EmptyState, PlaylistCard, TrackListItem } from '@/src/components/ui';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Playlist, Track } from '@/src/types';
+import { FlashList } from '@shopify/flash-list';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Animated, Easing, FlatList, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Dialog, Portal, Searchbar, Snackbar, Text, TextInput } from 'react-native-paper';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-
 type PlaylistsMode = 'library' | 'builder';
 
 export default function PlaylistsScreen() {
@@ -152,7 +152,7 @@ export default function PlaylistsScreen() {
           isPlaying={currentTrackId === item.id}
           onPress={handleTrackPress}
           onOptionsPress={handleToggleTrackInPlaylist}
-          optionsIcon={isAdded ? 'check-circle' : 'playlist-plus'}
+          optionsIcon={isAdded ? 'Play' : 'Playlist'}
           optionsIconColor={isAdded ? theme.colors.primary : theme.colors.onSurfaceVariant}
         />
       </Animated.View>
@@ -166,11 +166,11 @@ export default function PlaylistsScreen() {
       return (
         <View style={styles.emptyContainer}>
           <EmptyState
-            icon="🎼"
+            icon="Playlist"
             title="No playlists yet"
             description="Create your first playlist and start organizing your music."
           />
-          <Button mode="contained" icon="plus" onPress={openCreatePlaylist}>
+          <Button mode="contained" contentStyle={{ flexDirection: 'row-reverse' }} icon={() => <CustomIcon name="Play" size={18} color={theme.colors.onPrimary} />} onPress={openCreatePlaylist}>
             Create playlist
           </Button>
         </View>
@@ -178,20 +178,37 @@ export default function PlaylistsScreen() {
     }
 
     return (
-      <ScrollView contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomSafePadding }]} showsVerticalScrollIndicator={false}>
-        {playlists.map(playlist => (
-          <PlaylistCard
-            key={playlist.id}
-            playlist={playlist}
-            onPress={handleOpenPlaylist}
-            trackCount={playlist.trackIds.length}
-            onOptionsPress={() => {
-              setSelectedPlaylistId(playlist.id);
-              setMode('builder');
-            }}
-          />
-        ))}
-      </ScrollView>
+      <View style={{ flex: 1 }}>
+        <FlashList
+          data={playlists}
+          keyExtractor={(item) => item.id}
+          numColumns={2}
+          masonry={true}
+          optimizeItemArrangement={true}
+          renderItem={({ item, index }: any) => {
+            const isTall = index % 3 === 0;
+            const height = isTall ? 260 : (index % 2 === 0 ? 180 : 220);
+            return (
+              <View style={{ padding: 4 }}>
+                <PlaylistCard
+                  playlist={item}
+                  size="full"
+                  height={height}
+                  onPress={handleOpenPlaylist}
+                  trackCount={item.trackIds.length}
+                  onOptionsPress={() => {
+                    setSelectedPlaylistId(item.id);
+                    setMode('builder');
+                  }}
+                />
+              </View>
+            );
+          }}
+          contentContainerStyle={[styles.gridContent, { paddingBottom: bottomSafePadding }]}
+          showsVerticalScrollIndicator={false}
+          removeClippedSubviews
+        />
+      </View>
     );
   };
 
@@ -200,11 +217,11 @@ export default function PlaylistsScreen() {
       return (
         <View style={styles.emptyContainer}>
           <EmptyState
-            icon="🧩"
+            icon="Playlist"
             title="Create a playlist first"
             description="You need at least one playlist to start adding tracks."
           />
-          <Button mode="contained" icon="plus" onPress={openCreatePlaylist}>
+          <Button mode="contained" contentStyle={{ flexDirection: 'row-reverse' }} icon={() => <CustomIcon name="Play" size={18} color={theme.colors.onPrimary} />} onPress={openCreatePlaylist}>
             Create playlist
           </Button>
         </View>
@@ -294,7 +311,7 @@ export default function PlaylistsScreen() {
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top']}>
       <View style={styles.header}>
         <Text variant="headlineMedium" style={[styles.title, { color: theme.colors.onBackground }]}>Playlists</Text>
-        <Button mode="contained-tonal" icon="plus" onPress={openCreatePlaylist}>
+        <Button mode="contained-tonal" contentStyle={{ flexDirection: 'row-reverse' }} icon={() => <CustomIcon name="Playlist" size={18} color={theme.colors.onSecondaryContainer} />} onPress={openCreatePlaylist}>
           New
         </Button>
       </View>
@@ -420,6 +437,11 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 140,
+  },
+  gridContent: {
+    paddingHorizontal: 12,
     paddingTop: 12,
     paddingBottom: 140,
   },

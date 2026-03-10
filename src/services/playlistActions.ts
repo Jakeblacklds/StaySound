@@ -56,7 +56,7 @@ export function openTrackActionsMenu({
     const actions: ActionItem[] = [
       {
         label: 'New playlist',
-        icon: 'plus',
+        icon: 'Playlist',
         onPress: () => {
           const playlistName = getNextPlaylistName(sortedPlaylists);
           const playlistId = createPlaylist(playlistName, 'Created from quick add');
@@ -65,7 +65,7 @@ export function openTrackActionsMenu({
       },
       ...sortedPlaylists.slice(0, MAX_PLAYLIST_CHOICES).map(playlist => ({
         label: playlist.name,
-        icon: 'playlist-music',
+        icon: 'Playlist',
         onPress: () => {
           addToPlaylist(playlist.id, track.id);
         },
@@ -83,14 +83,14 @@ export function openTrackActionsMenu({
   const actions: ActionItem[] = [
     {
       label: 'Agregar a cola',
-      icon: 'playlist-play',
+      icon: 'Play',
       onPress: () => {
         addToQueue(track);
       },
     },
     {
       label: 'Agregar a playlist',
-      icon: 'playlist-plus',
+      icon: 'Playlist',
       onPress: showPlaylistPicker,
     },
   ];
@@ -98,13 +98,13 @@ export function openTrackActionsMenu({
   if (deleteTrack) {
     actions.push({
       label: 'Quitar de la biblioteca',
-      icon: 'minus-circle-outline',
+      icon: 'Cola',
       destructive: true,
       onPress: handleDelete,
     });
     actions.push({
       label: 'Borrar del dispositivo',
-      icon: 'trash-can-outline',
+      icon: 'Cola',
       destructive: true,
       onPress: handleDeleteFromStorage,
     });

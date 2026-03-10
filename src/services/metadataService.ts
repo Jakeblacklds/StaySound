@@ -1,50 +1,9 @@
 /**
- * MetadataService - Audio file metadata extraction
- * 
- * Extracts ID3 tags, album art, and other metadata from audio files.
- * Uses react-native-music-metadata for tag parsing.
+ * MetadataService - Audio file metadata extraction and organization
  */
 
 import { Album, Artist, Track } from '../types/audio';
-
-// Note: react-native-music-metadata requires native module
-// For now, we'll use filename-based parsing as fallback
-
-/**
- * Parse artist and title from filename
- * Handles common formats: "Artist - Title.mp3", "01 Title.mp3", etc.
- */
-export function parseFilename(filename: string): { title: string; artist: string } {
-    // Remove extension
-    const nameWithoutExt = filename.replace(/\.[^/.]+$/, '');
-
-    // Try "Artist - Title" format
-    if (nameWithoutExt.includes(' - ')) {
-        const parts = nameWithoutExt.split(' - ');
-        if (parts.length >= 2) {
-            // Check if first part is just a number (track number)
-            const firstPart = parts[0].trim();
-            if (/^\d+$/.test(firstPart) && parts.length >= 3) {
-                return {
-                    artist: parts[1].trim(),
-                    title: parts.slice(2).join(' - ').trim(),
-                };
-            }
-            return {
-                artist: firstPart,
-                title: parts.slice(1).join(' - ').trim(),
-            };
-        }
-    }
-
-    // Try to remove track number prefix and look for title
-    const withoutTrackNum = nameWithoutExt.replace(/^\d+[\s._-]*/, '').trim();
-
-    return {
-        title: withoutTrackNum || nameWithoutExt,
-        artist: 'Unknown Artist',
-    };
-}
+import { parseFilename } from './audioUtils';
 
 /**
  * Format duration from milliseconds to mm:ss
@@ -138,10 +97,6 @@ export function organizeIntoAlbums(tracks: Track[]): Map<string, Album> {
         }
     }
 
-    // Debug: count albums with artwork
-    const albumsWithArtwork = Array.from(albums.values()).filter(a => a.artwork).length;
-    console.log(`[MetadataService] Organized ${albums.size} albums, ${albumsWithArtwork} have artwork`);
-
     return albums;
 }
 
@@ -195,27 +150,18 @@ export function enrichTrackFromUri(track: Track, uri: string): Track {
 
     // Get parent directory name as potential album name
     const pathParts = uri.split('/');
-    // For file:///storage/emulated/0/Music/Album/Song.mp3, parent is "Album"
     const parentFolder = pathParts.length > 2 ? pathParts[pathParts.length - 2] : null;
 
     const genericParentFolders = new Set([
-        '0',
-        'download',
-        'downloads',
-        'music',
-        'musica',
-        'música',
-        'audio',
-        'documents',
-        'documentos',
+        '0', 'download', 'downloads', 'music', 'musica', 'música', 'audio', 'documents', 'documentos', 'staysound', 'media', 'external'
     ]);
 
     return {
         ...track,
-        title: (track.title === nameWithoutExt || track.title === 'Unknown') ? parsed.title : track.title,
+        title: (track.title === nameWithoutExt || track.title === 'Unknown' || track.title === 'Unknown Title') ? parsed.title : track.title,
         artist: (track.artist === 'Unknown Artist' || track.artist === 'Unknown') ? parsed.artist : track.artist,
         album: (track.album === 'Unknown Album' || track.album === 'Unknown')
-            ? (parentFolder && !genericParentFolders.has(parentFolder.toLowerCase()) ? decodeURIComponent(parentFolder) : 'Unknown Album')
+            ? (parsed.album !== 'Unknown Album' ? parsed.album : (parentFolder && !genericParentFolders.has(parentFolder.toLowerCase()) ? decodeURIComponent(parentFolder) : 'Unknown Album'))
             : track.album,
     };
 }
@@ -226,3 +172,4 @@ export function enrichTrackFromUri(track: Track, uri: string): Track {
 export function enrichTrackFromFilename(track: Track, filename: string): Track {
     return enrichTrackFromUri(track, `file:///${filename}`);
 }
+

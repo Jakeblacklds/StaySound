@@ -53,20 +53,21 @@ export async function initializeTrackPlayer(): Promise<boolean> {
                     Capability.SeekTo,
                     Capability.Stop,
                 ],
+                // Android specific options
+                android: {
+                    // Stop playback and remove notification when the app is swiped away
+                    appKilledPlaybackBehavior: AppKilledPlaybackBehavior.StopPlaybackAndRemoveNotification,
+                },
                 notificationCapabilities: [
                     Capability.Play,
                     Capability.Pause,
                     Capability.SkipToNext,
                     Capability.SkipToPrevious,
                     Capability.SeekTo,
+                    Capability.Stop,
                 ],
                 // Progress bar update interval in seconds
                 progressUpdateEventInterval: 1,
-                // Android specific options
-                android: {
-                    // Show notification immediately when track is added
-                    appKilledPlaybackBehavior: AppKilledPlaybackBehavior.ContinuePlayback,
-                },
             });
 
             isInitialized = true;
@@ -214,6 +215,7 @@ export async function togglePlayPause(): Promise<void> {
 export async function stop(): Promise<void> {
     if (!isInitialized) return;
     await TrackPlayer.stop();
+    await TrackPlayer.reset();
     console.log('[TrackPlayer] Stopped');
 }
 
@@ -257,6 +259,83 @@ export async function skipToTrack(index: number): Promise<void> {
     if (!isInitialized) return;
     await TrackPlayer.skip(index);
     console.log('[TrackPlayer] Skipped to track:', index);
+}
+
+/**
+ * Skip to a track by its ID in the native engine queue.
+ * This is the safe way to navigate when the store's queue order differs from the
+ * native engine's queue order (e.g. after shuffle).
+ *
+ * @param trackId The ID of the track to skip to.
+ * @returns Whether the skip was successful.
+ */
+export async function skipToTrackById(trackId: string): Promise<boolean> {
+    if (!isInitialized) return false;
+
+    try {
+        const queue = await TrackPlayer.getQueue() as any[];
+        const nativeIds = queue.map(t => (t.id?.toString() ?? ''));
+        const nativeIndex = nativeIds.indexOf(trackId);
+
+        if (nativeIndex < 0) {
+            console.warn('[TrackPlayer] skipToTrackById: track NOT FOUND in native queue:', trackId);
+            console.log('[TrackPlayer] Native Queue Track IDs:', nativeIds);
+            return false;
+        }
+        await TrackPlayer.skip(nativeIndex);
+        console.log('[TrackPlayer] skipToTrackById: skipped to index', nativeIndex, 'for id', trackId);
+        return true;
+    } catch (error) {
+        console.error('[TrackPlayer] skipToTrackById error:', error);
+        return false;
+    }
+}
+
+/**
+ * Synchronize the native engine queue order to match a target list of track IDs.
+ * Uses TrackPlayer.move() to reorder without interrupting playback.
+ * This ensures the engine's "Next" track is correctly aligned with the store's queue.
+ */
+export async function syncNativeQueue(targetTrackIds: string[]): Promise<void> {
+    if (!isInitialized) return;
+    if (targetTrackIds.length === 0) return;
+
+    try {
+        const nativeQueue = await TrackPlayer.getQueue();
+
+        // Match only what's currently in the native queue
+        const nativeIds = nativeQueue.map((t: any) => t.id?.toString() ?? '');
+
+        // Local state tracking to update indices after each move
+        let currentNativeQueueIds = [...nativeIds];
+
+        for (let targetIdx = 0; targetIdx < targetTrackIds.length; targetIdx++) {
+            const targetId = targetTrackIds[targetIdx];
+            const currentIdx = currentNativeQueueIds.indexOf(targetId);
+
+            if (currentIdx !== -1 && currentIdx !== targetIdx) {
+                // Perform movement in native engine
+                await TrackPlayer.move(currentIdx, targetIdx);
+
+                // Locally track the move for the next iteration's index calculations
+                const item = currentNativeQueueIds.splice(currentIdx, 1)[0];
+                currentNativeQueueIds.splice(targetIdx, 0, item);
+            }
+        }
+
+        console.log('[TrackPlayer] Native queue synced via moves');
+    } catch (error) {
+        console.error('[TrackPlayer] syncNativeQueue error:', error);
+    }
+}
+
+/**
+ * Remove tracks from native queue by index
+ */
+export async function removeTracks(indices: number[]): Promise<void> {
+    if (!isInitialized) return;
+    await TrackPlayer.remove(indices);
+    console.log('[TrackPlayer] Removed tracks at indices:', indices);
 }
 
 /**

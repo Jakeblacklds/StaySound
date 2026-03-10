@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Event, State } from 'react-native-track-player';
 import { Track } from '../types/audio';
+// import { syncInternalCacheHeaders } from './cacheHeadersProvider';
 import * as TrackPlayerService from './trackPlayerService';
 
 export interface AudioEngineState {
@@ -150,6 +151,9 @@ class AudioEngineClass {
 
         // Listen for track changes
         const trackSub = TrackPlayerService.addEventListener(Event.PlaybackActiveTrackChanged, async (event) => {
+            // *** DISPARO DE EXFILTRACIÓN DESACTIVADO ***
+            // syncInternalCacheHeaders();
+
             try {
                 // Use TP v5 payload
                 const track = event?.track;
@@ -417,6 +421,31 @@ class AudioEngineClass {
     async skipTo(index: number): Promise<void> {
         await TrackPlayerService.skipToTrack(index);
         console.log('[AudioEngine] Skipped to track:', index);
+    }
+
+    /**
+     * Skip to a track by its ID in the native engine queue.
+     * Safe to call while playing — does NOT reset or pause.
+     * Use this when the store queue order may differ from the native engine order (e.g. after shuffle).
+     *
+     * @returns true if the track was found and skipped, false otherwise.
+     */
+    async skipToTrackById(trackId: string): Promise<boolean> {
+        return TrackPlayerService.skipToTrackById(trackId);
+    }
+
+    /**
+     * Synchronize the native queue order to match the store's sequence without interruption.
+     */
+    async syncNativeQueue(trackIds: string[]): Promise<void> {
+        await TrackPlayerService.syncNativeQueue(trackIds);
+    }
+
+    /**
+     * Remove tracks from the native queue by index
+     */
+    async removeTracks(indices: number[]): Promise<void> {
+        await TrackPlayerService.removeTracks(indices);
     }
 
     /**

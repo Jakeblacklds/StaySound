@@ -8,10 +8,10 @@
  * - React.memo to isolate from layout changes.
  */
 
+import { CustomIcon } from '@/src/components/ui';
 import { useDynamicColors } from '@/src/hooks';
 import { usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo } from 'react';
@@ -31,12 +31,12 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
 // Sync constants with FullPlayer
-const MINI_HEIGHT = 72;
-const MINI_MARGIN = 14;
-const TAB_BAR_HEIGHT = 88;
-const TAB_BAR_FLOAT_OFFSET = 10;
-const MINI_GAP_FROM_TAB = 10;
-const DETAIL_HEIGHT = 84;
+const MINI_HEIGHT = 66;
+const MINI_MARGIN = 12;
+const TAB_BAR_HEIGHT = 72;
+const TAB_BAR_FLOAT_OFFSET = 12;
+const MINI_GAP_FROM_TAB = 6;
+const DETAIL_HEIGHT = 78;
 const DETAIL_EXTRA_BOTTOM = 0;
 
 // M3 Expressive: Emphasized easing curves
@@ -68,9 +68,8 @@ function MiniPlayerInner() {
     // This hook is reactive but only "works" when artwork changes.
     const { colors: albumColors, animated: animColors } = useDynamicColors(currentTrack?.artwork);
 
-    const playerVariant = theme.components?.player?.variant || 'standard';
-    const miniArtworkRadius = playerVariant === 'brutal' ? 0 : 16;
-    const radius = playerVariant === 'brutal' ? 8 : 24;
+    const miniArtworkRadius = 16;
+    const radius = 24;
     const routeProgress = useSharedValue(0);
     const translateX = useSharedValue(0);
     const isHorizontal = useSharedValue(false);
@@ -79,7 +78,7 @@ function MiniPlayerInner() {
     const tabReservedSpace = config.style === 'material3'
         ? TAB_BAR_HEIGHT + TAB_BAR_FLOAT_OFFSET
         : 85;
-    const collapsedBottom = Math.max(insets.bottom + tabReservedSpace + MINI_GAP_FROM_TAB, 98);
+    const collapsedBottom = Math.max(insets.bottom + tabReservedSpace + MINI_GAP_FROM_TAB, 88);
 
     const isDetailRoute =
         pathname.startsWith('/album/') ||
@@ -105,7 +104,7 @@ function MiniPlayerInner() {
     const bgAnimatedStyle = useAnimatedStyle(() => {
         const routeP = routeProgress.value;
         const detailBottom = insetsBottom;
-        const collapseBtm = Math.max(insetsBottom + tabReservedSpace + MINI_GAP_FROM_TAB, 98);
+        const collapseBtm = Math.max(insetsBottom + tabReservedSpace + MINI_GAP_FROM_TAB, 88);
 
         return {
             backgroundColor: animColors?.background?.value || surfaceColor,
@@ -275,37 +274,6 @@ function MiniPlayerInner() {
 
     const playButtonAnimatedStyle = useAnimatedStyle(() => {
         const p = playPress.value;
-
-        if (playerVariant === 'cyber') {
-            return {
-                opacity: interpolate(p, [0, 1], [1, 0.85]),
-                transform: [
-                    { scale: interpolate(p, [0, 1], [1, 0.95]) },
-                    { translateY: interpolate(p, [0, 1], [0, 1]) },
-                ],
-            };
-        }
-
-        if (playerVariant === 'brutal') {
-            return {
-                transform: [
-                    { scale: interpolate(p, [0, 1], [1, 0.91]) },
-                    { translateX: interpolate(p, [0, 1], [0, 1.8]) },
-                    { translateY: interpolate(p, [0, 1], [0, 1.8]) },
-                ],
-            };
-        }
-
-        if (playerVariant === 'aurora') {
-            return {
-                transform: [
-                    { scale: interpolate(p, [0, 1], [1, 0.93]) },
-                    { translateY: interpolate(p, [0, 1], [0, 1.8]) },
-                    { rotate: `${interpolate(p, [0, 1], [0, -2])}deg` },
-                ],
-            };
-        }
-
         return {
             transform: [
                 { scale: interpolate(p, [0, 1], [1, 0.94]) },
@@ -316,17 +284,17 @@ function MiniPlayerInner() {
 
     const handlePlayPressIn = useCallback(() => {
         playPress.value = withTiming(1, {
-            duration: playerVariant === 'cyber' ? 60 : 90,
+            duration: 90,
             easing: Easing.out(Easing.quad),
         });
-    }, [playPress, playerVariant]);
+    }, [playPress]);
 
     const handlePlayPressOut = useCallback(() => {
         playPress.value = withTiming(0, {
-            duration: playerVariant === 'brutal' ? 110 : 140,
+            duration: 140,
             easing: Easing.out(Easing.cubic),
         });
-    }, [playPress, playerVariant]);
+    }, [playPress]);
 
     if (!currentTrack) return null;
 
@@ -384,8 +352,8 @@ function MiniPlayerInner() {
                         ]}
                         hitSlop={12}
                     >
-                        <MaterialCommunityIcons
-                            name={isPlaying ? "pause" : "play"}
+                        <CustomIcon
+                            name={isPlaying ? "Pause" : "Play"}
                             size={24}
                             color={albumColors.text || theme.colors.onSurface}
                         />
@@ -420,8 +388,8 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     artworkContainer: {
-        width: 52,
-        height: 52,
+        width: 48,
+        height: 48,
         overflow: 'hidden',
     },
     artwork: {
@@ -443,9 +411,9 @@ const styles = StyleSheet.create({
         opacity: 0.7,
     },
     playButton: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
         borderWidth: 1,
         alignItems: 'center',
         justifyContent: 'center',

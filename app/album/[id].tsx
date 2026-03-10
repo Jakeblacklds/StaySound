@@ -1,4 +1,4 @@
-import { MemoizedTrackListItem } from '@/src/components/ui';
+import { CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
 import { useDynamicColors } from '@/src/hooks';
 import { formatDuration } from '@/src/services';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
@@ -152,35 +152,31 @@ export default function AlbumDetailScreen() {
                 {/* Action Buttons */}
                 <View style={styles.actions}>
                     <IconButton
-                        icon="play"
+                        icon={() => <CustomIcon name="Play" size={28} color={albumColors.isDark ? '#000000' : '#FFFFFF'} />}
                         mode="contained"
                         size={56}
-                        iconColor={albumColors.isDark ? '#000000' : '#FFFFFF'}
                         containerColor={albumColors.primary}
                         onPress={handlePlayAll}
                         style={{ margin: 0 }}
                     />
                     <IconButton
-                        icon="shuffle"
+                        icon={() => <CustomIcon name="Shuffle" size={20} color={albumColors.primary} />}
                         mode="contained-tonal"
                         size={32}
-                        iconColor={albumColors.primary}
                         containerColor={albumColors.primary + '20'}
                         onPress={handleShuffle}
                     />
                     <IconButton
-                        icon="heart-outline"
+                        icon={() => <CustomIcon name="Play" size={18} color={albumColors.text} />}
                         mode="contained-tonal"
                         size={32}
-                        iconColor={albumColors.text}
                         containerColor={albumColors.text + '20'}
                         onPress={() => { }}
                     />
                     <IconButton
-                        icon="dots-vertical"
+                        icon={() => <CustomIcon name="Cola" size={18} color={albumColors.text} />}
                         mode="contained-tonal"
                         size={32}
-                        iconColor={albumColors.text}
                         containerColor={albumColors.text + '20'}
                         onPress={() => { }}
                     />
@@ -232,7 +228,7 @@ export default function AlbumDetailScreen() {
                     {album.artwork ? (
                         <Image source={{ uri: album.artwork }} style={styles.artworkImage} />
                     ) : (
-                        <Text style={{ fontSize: 80 }}>💿</Text>
+                        <CustomIcon name="Album" size={100} color={theme.colors.onSurfaceVariant} />
                     )}
                 </View>
             </Animated.View>
@@ -241,9 +237,8 @@ export default function AlbumDetailScreen() {
             <View style={[styles.backButton, { top: insets.top + BACK_BUTTON_TOP_OFFSET }]}>
                 <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={styles.blurButton}>
                     <IconButton
-                        icon="arrow-left"
+                        icon={() => <CustomIcon name="Previous" size={24} color={theme.colors.onBackground} />}
                         size={24}
-                        iconColor={theme.colors.onBackground}
                         onPress={() => router.back()}
                     />
                 </BlurView>

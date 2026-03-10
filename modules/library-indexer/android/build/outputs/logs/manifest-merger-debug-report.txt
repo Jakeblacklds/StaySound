@@ -1,15 +1,15 @@
 -- Merging decision tree log ---
 manifest
-ADDED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml:1:1-51
-INJECTED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml:1:1-51
+ADDED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml:1:1-51
+INJECTED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml:1:1-51
 	package
-		ADDED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml:1:11-48
-		INJECTED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
+		ADDED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml:1:11-48
+		INJECTED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
 uses-sdk
-INJECTED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml reason: use-sdk injection requested
-INJECTED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
-INJECTED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
+INJECTED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
+INJECTED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
 	android:targetSdkVersion
-		INJECTED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
+		INJECTED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
 	android:minSdkVersion
-		INJECTED from C:\Users\final\OneDrive\Escritorio\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml
+		INJECTED from D:\StaySound\modules\library-indexer\android\src\main\AndroidManifest.xml

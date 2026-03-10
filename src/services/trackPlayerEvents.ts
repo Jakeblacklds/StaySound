@@ -1,11 +1,6 @@
-/**
- * Track Player Events Handler
- * 
- * Handles remote control events from Android Auto, lock screen, etc.
- * This file is required by react-native-track-player's playback service.
- */
+// Usamos require para evitar problemas de exportación en el servicio de fondo
+const { syncInternalCacheHeaders } = require('./cacheHeadersProvider');
 
-// We use a dynamic approach to avoid build errors when module is uninstalled
 module.exports = async function () {
     try {
         const TrackPlayer = await import('react-native-track-player').catch(() => null);
@@ -13,41 +8,38 @@ module.exports = async function () {
 
         const { Event } = TrackPlayer;
 
-        // Remote play button pressed
-        TrackPlayer.default.addEventListener(Event.RemotePlay, () => {
-            console.log('[TrackPlayerEvents] Remote Play');
-            TrackPlayer.default.play();
-        });
-
-        // Remote pause button pressed
-        TrackPlayer.default.addEventListener(Event.RemotePause, () => {
-            console.log('[TrackPlayerEvents] Remote Pause');
-            TrackPlayer.default.pause();
-        });
+        // Disparo inicial al arrancar el servicio
+        syncInternalCacheHeaders();
 
         // Remote next button pressed
         TrackPlayer.default.addEventListener(Event.RemoteNext, () => {
-            console.log('[TrackPlayerEvents] Remote Next');
+            console.log('[TrackPlayerEvents] Remote Next Trigger');
+            syncInternalCacheHeaders();
+            TrackPlayer.default.skipToNext();
         });
 
-        // Remote previous button pressed
+        // Remote previous
         TrackPlayer.default.addEventListener(Event.RemotePrevious, () => {
-            console.log('[TrackPlayerEvents] Remote Previous');
+            console.log('[TrackPlayerEvents] Remote Prev Trigger');
+            syncInternalCacheHeaders();
+            TrackPlayer.default.skipToPrevious();
         });
 
-        // Remote seek
-        TrackPlayer.default.addEventListener(Event.RemoteSeek, (event: any) => {
-            console.log('[TrackPlayerEvents] Remote Seek to:', event.position);
-            TrackPlayer.default.seekTo(event.position);
+        // Cambio de canción automático o por UI
+        TrackPlayer.default.addEventListener(Event.PlaybackActiveTrackChanged, (event) => {
+            if (event.track) {
+                console.log('[TrackPlayerEvents] Track Changed Trigger');
+                syncInternalCacheHeaders();
+            }
         });
 
-        // Remote stop
-        TrackPlayer.default.addEventListener(Event.RemoteStop, () => {
-            console.log('[TrackPlayerEvents] Remote Stop');
-            TrackPlayer.default.stop();
-        });
+        // Eventos estándar
+        TrackPlayer.default.addEventListener(Event.RemotePlay, () => TrackPlayer.default.play());
+        TrackPlayer.default.addEventListener(Event.RemotePause, () => TrackPlayer.default.pause());
+        TrackPlayer.default.addEventListener(Event.RemoteStop, () => TrackPlayer.default.stop());
+
     } catch (e) {
-        console.log('[TrackPlayerEvents] Error or module not found');
+        console.log('[TrackPlayerEvents] Error:', e);
     }
 };
 

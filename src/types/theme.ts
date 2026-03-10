@@ -110,7 +110,7 @@ export interface ComponentStyles {
         showDivider: boolean;
         dividerInset: number;
         activeScale: number;
-        variant: 'standard' | 'minimal' | 'glass' | 'brutal' | 'cyber' | 'aurora';
+        variant: 'standard' | 'minimal' | 'brutal';
         layout?: 'horizontal' | 'vertical' | 'asymmetric';
         borderWidth?: number;
     };
@@ -121,7 +121,7 @@ export interface ComponentStyles {
         showShadow: boolean;
         titleSize: number;
         subtitleSize: number;
-        variant: 'standard' | 'flat' | 'elevated' | 'glass' | 'brutal' | 'aurora';
+        variant: 'standard' | 'flat' | 'elevated' | 'brutal';
         textAlign?: 'left' | 'center';
     };
     // Player styling
@@ -131,7 +131,7 @@ export interface ComponentStyles {
         progressStyle: 'bar' | 'circular' | 'wave';
         showBlur: boolean;
         blurIntensity: number;
-        variant: 'immersive' | 'classic' | 'compact' | 'glass' | 'brutal' | 'cyber' | 'aurora';
+        variant: 'immersive' | 'classic' | 'compact';
         layoutTemplate?: 'centered' | 'top-heavy' | 'bottom-controls' | 'split';
         titleWeight?: 'normal' | 'bold' | '100' | '200' | '300' | '400' | '500' | '600' | '700' | '800' | '900';
         icons: {
@@ -148,7 +148,7 @@ export interface ComponentStyles {
     };
     // Navigation/tabs
     navigation: {
-        tabStyle: 'icons' | 'pills' | 'underline' | 'brutal';
+        tabStyle: 'icons' | 'pills' | 'underline';
         headerStyle: 'large' | 'compact' | 'hidden';
         activeIndicatorColor?: string;
     };
@@ -176,7 +176,7 @@ export interface Theme {
     components: ComponentStyles;
 }
 
-export type ThemeStyle = 'material3' | 'aurora' | 'cyber' | 'brutal';
+export type ThemeStyle = 'material3';
 export type ThemeMode = 'light' | 'dark' | 'system';
 
 export interface ThemeConfig {

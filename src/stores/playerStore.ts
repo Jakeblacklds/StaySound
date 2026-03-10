@@ -14,7 +14,7 @@ import { PlayerState, RepeatMode, Track } from '../types/audio';
 import { useLibraryStore } from './libraryStore';
 
 const MAX_RECENT = 50;
-const MAX_QUEUE_ITEMS = 15;
+const MAX_QUEUE_ITEMS = 500;
 const ENGINE_TRACK_GUARD_MS = 5000; // Increased significantly for slow Android JNI
 
 let expectedEngineTrackId: string | null = null;
@@ -96,32 +96,21 @@ function normalizeQueueWindow(tracks: Track[], startIndex = 0): { queue: Track[]
 function shouldAcceptEngineTrackId(nextTrackId: string | undefined, currentQueue: Track[]): boolean {
     if (!nextTrackId) return true;
 
-    // If we have an expected track and it matches the engine, always accept.
-    if (expectedEngineTrackId && nextTrackId === expectedEngineTrackId) {
-        return true;
-    }
-
     // If the reported track IS the currently playing track in the store, always accept.
-    // This prevents blocking repeated state updates for the same (valid) track.
+    // (Same track = metadata update, not a track change)
     const storeTrackId = usePlayerStore.getState().currentTrack?.id;
     if (storeTrackId && nextTrackId === storeTrackId) {
         return true;
     }
 
-    // If the track ID is NOT in our queue AND not our current track, it's stale.
-    // Silently block — this happens normally during track transitions as the engine
-    // reports the old track while position updates continue.
-    const isInQueue = currentQueue.some(t => t.id === nextTrackId);
-    if (!isInQueue) {
-        return false;
-    }
-
-    // Protection period: Only accept track changes that match what we intended to play.
-    if (Date.now() < expectedEngineTrackUntil) {
+    // During the active protection window: only accept the specific track we asked for.
+    // This prevents a stale engine event from overriding our intentional track change.
+    if (expectedEngineTrackId && Date.now() < expectedEngineTrackUntil) {
         return nextTrackId === expectedEngineTrackId;
     }
 
-    // After protection period, we accept any track that is actually in our queue (e.g. auto-next).
+    // Outside the guard window: accept any track change from the engine.
+    // This covers auto-advance (song ended naturally) and remote control events.
     return true;
 }
 
@@ -169,7 +158,7 @@ async function hydrateAlbumArtworkOnDemand(track: Track): Promise<void> {
 
             // 3) Folder fallback (cover.jpg, folder.jpg, etc.)
             if (!artwork) {
-                artwork = await withTimeout(findArtworkInFolder(existingTrack.uri), 1500) ?? undefined;
+                artwork = await withTimeout(findArtworkInFolder(existingTrack.uri, existingTrack.artist, existingTrack.album), 1500) ?? undefined;
             }
 
             if (!artwork) return;
@@ -233,7 +222,7 @@ interface PlayerActions {
     setPlayerVisible: (visible: boolean) => void;
     expansion: SharedValue<number>;
     setExpansion: (val: SharedValue<number>) => void;
-    setPlayerVariant: (variant: 'aurora' | 'cyber' | 'brutal' | 'immersive') => void;
+    setPlayerVariant: (variant: 'immersive') => void;
 
     // Recently played history
     recentlyPlayed: Track[];
@@ -268,7 +257,7 @@ const initialState: PlayerState = {
     repeatMode: 'off',
     shuffleEnabled: false,
     volume: 1,
-    playerVariant: 'aurora',
+    playerVariant: 'immersive',
 };
 
 export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
@@ -406,6 +395,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
         }
 
         set({ queue: newQueue, queueIndex: newIndex });
+        AudioEngine.removeTracks([index]).catch(() => { });
     },
 
     clearQueue: () => {
@@ -482,8 +472,19 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             position: 0,
         });
 
-        // Use Track Player's skip functionality
-        await AudioEngine.skipTo(nextIndex);
+        // Navigate using track ID so the engine finds the correct position even
+        // when the store queue order differs from the native engine order (shuffle).
+        if (targetTrack?.id) {
+            const found = await AudioEngine.skipToTrackById(targetTrack.id);
+            if (!found) {
+                // Engine is out of sync (e.g. tracks missing after shuffle/window change).
+                // Force a full queue reload to restore correct playback.
+                console.warn('[PlayerStore] skipToTrackById failed in next(), forcing playQueue sync');
+                await AudioEngine.playQueue(queue, nextIndex);
+            }
+        } else {
+            await AudioEngine.skipTo(nextIndex);
+        }
     },
 
     previous: async () => {
@@ -516,7 +517,17 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             position: 0,
         });
 
-        await AudioEngine.skipTo(prevIndex);
+        // Navigate using track ID so the engine finds the correct position even
+        // when the store queue order differs from the native engine order (shuffle).
+        if (targetTrack?.id) {
+            const found = await AudioEngine.skipToTrackById(targetTrack.id);
+            if (!found) {
+                console.warn('[PlayerStore] skipToTrackById failed in previous(), forcing playQueue sync');
+                await AudioEngine.playQueue(queue, prevIndex);
+            }
+        } else {
+            await AudioEngine.skipTo(prevIndex);
+        }
     },
 
     skipTo: async (index) => {
@@ -535,7 +546,17 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                 position: 0,
             });
 
-            await AudioEngine.skipTo(index);
+            // Navigate using track ID so the engine finds the correct position even
+            // when the store queue order differs from the native engine order (shuffle).
+            if (targetTrack?.id) {
+                const found = await AudioEngine.skipToTrackById(targetTrack.id);
+                if (!found) {
+                    console.warn('[PlayerStore] skipToTrackById failed in skipTo(), forcing playQueue sync');
+                    await AudioEngine.playQueue(queue, index);
+                }
+            } else {
+                await AudioEngine.skipTo(index);
+            }
         }
     },
 
@@ -573,19 +594,11 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             currentTrack: targetTrack || state.currentTrack,
         });
 
-        AudioEngine.playQueue(nextQueue, nextQueueIndex)
-            .then(async () => {
-                if (state.position > 0) {
-                    await AudioEngine.seek(state.position);
-                }
-
-                if (!state.isPlaying) {
-                    await AudioEngine.pause();
-                }
-            })
-            .catch(error => {
-                console.error('[PlayerStore] toggleShuffle playQueue error:', error);
-            });
+        // We intentionally do NOT reorder the native engine queue here.
+        // The native engine keeps its original queue order.
+        // All navigation (skipTo/next/previous) uses skipToTrackById to find the correct
+        // track by ID, making it work regardless of native queue order.
+        // Using move() to reorder the native queue causes state corruption in the engine.
     },
 
     playerVisible: false,
@@ -660,16 +673,38 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                         if (hasChanges) {
                             nextState.currentTrack = mergedTrack;
                         }
-                    } else {
+                    } else if (nextTrack && (!currentStoreTrack || currentStoreTrack.id !== nextTrack.id)) {
+                        // Engine auto-advanced to a different track (end of song, auto-next, or
+                        // the user's manual skip was acknowledged by the engine).
+                        // Always accept this — we've already validated it via shouldAcceptEngineTrackId.
+                        // Clear the guard so the next auto-advance isn't blocked.
+                        clearExpectedEngineTrack();
+
+                        // Prefer the richer track object from our store queue (has artwork, metadata, etc.)
+                        const storeQueue = get().queue;
+                        const storeQueueIndex = storeQueue.findIndex(t => t.id === nextTrack.id);
+                        if (storeQueueIndex >= 0) {
+                            // Track found in our visual queue — use store's richer version
+                            const richTrack = {
+                                ...nextTrack,
+                                ...storeQueue[storeQueueIndex],
+                            };
+                            nextState.currentTrack = richTrack;
+                            nextState.queueIndex = storeQueueIndex;
+                        } else {
+                            // Track NOT in visual queue (auto-advance from native order after reorder).
+                            // Accept the engine's track as-is; next manual navigation will re-sync.
+                            nextState.currentTrack = nextTrack;
+                        }
+                    } else if (nextTrack) {
                         nextState.currentTrack = nextTrack;
                     }
                 }
             }
         }
-        // NOTE: Do NOT sync queueIndex from engine → store.
-        // The store manages queueIndex as the single source of truth in next/previous/skipTo/play.
-        // The engine's queueIndex is unreliable due to async race conditions with native TrackPlayer
-        // (e.g., PlaybackActiveTrackChanged fires with stale index before skip completes).
+        // NOTE: queueIndex is only synced from the engine when the engine auto-advances
+        // to a different track (handled above). For manual navigation (next/previous/skipTo),
+        // the store sets queueIndex proactively before the async engine call.
 
         if (Object.keys(nextState).length > 0) {
             set(nextState as Partial<PlayerStore>);

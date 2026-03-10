@@ -4,7 +4,7 @@ module.exports = {
     expo: {
         name: IS_DEV ? "StaySound dev" : "StaySound",
         slug: "StaySound",
-        version: "1.0.0",
+        version: "1.0.1",
         orientation: "portrait",
         icon: "./assets/images/appicon.png",
         scheme: "staysound",
@@ -31,7 +31,7 @@ module.exports = {
             },
             edgeToEdgeEnabled: true,
             package: IS_DEV ? "com.staysound.app.dev" : "com.staysound.app.pro",
-            versionCode: 1,
+            versionCode: 2,
             compileSdkVersion: 35,
             targetSdkVersion: 35,
             permissions: [
