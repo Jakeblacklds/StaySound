@@ -7,7 +7,7 @@
  * For the grid listing, we show local data only (initials or cached artwork).
  */
 
-import { useAnimatedColors, useTheme } from '@/src/theme';
+import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { Artist } from '@/src/types';
 import { BlurView } from 'expo-blur';
 import { Image as ExpoImage } from 'expo-image';
@@ -21,6 +21,7 @@ interface ArtistCardProps {
     artist: Artist;
     size?: 'small' | 'medium' | 'large' | 'full';
     height?: number;
+    presentation?: 'overlay' | 'masonry';
     onPress: (artist: Artist) => void;
 }
 
@@ -31,12 +32,14 @@ const SIZES = {
     full: '100%' as any,
 };
 
-function ArtistCardInner({ artist, size = 'medium', height: customHeight, onPress }: ArtistCardProps) {
+function ArtistCardInner({ artist, size = 'medium', height: customHeight, presentation = 'overlay', onPress }: ArtistCardProps) {
     const { theme } = useTheme();
+    const performanceProfile = usePerformanceProfile();
     const aC = useAnimatedColors();
     const isMaterial3 = theme.id.startsWith('material3');
     const cardSize = SIZES[size as keyof typeof SIZES] || SIZES.medium;
     const [imageFailed, setImageFailed] = useState(false);
+    const isMasonry = presentation === 'masonry';
 
     const cardStyles = theme.components.card;
     const globalStyles = theme.components.global;
@@ -49,7 +52,7 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, onPres
     }, [artist.id, artworkUri]);
 
     // Determine radius based on theme - matching the premium Tidal card look
-    const borderRadius = cardStyles.variant === 'brutal' ? 0 : 28;
+    const borderRadius = cardStyles.variant === 'brutal' ? 0 : (isMasonry ? 22 : 28);
 
     const imageContainerStyle = useMemo(() => {
         const base: any[] = [
@@ -109,6 +112,7 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, onPres
             onPress={() => onPress(artist)}
             style={({ pressed }) => [
                 containerStyle,
+                isMasonry && styles.masonryContainer,
                 pressed && styles.pressed,
             ]}
         >
@@ -119,7 +123,7 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, onPres
                         style={styles.image}
                         contentFit="cover"
                         recyclingKey={artist.id}
-                        cachePolicy="memory-disk"
+                        cachePolicy={performanceProfile.imageCachePolicyList}
                         transition={0}
                         onError={() => setImageFailed(true)}
                     />
@@ -127,25 +131,29 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, onPres
                     <CustomIcon name="Artista" size={cardSize * 0.5} color={aC.onPrimaryContainer.value} />
                 )}
 
-                {/* Info Overlay at the bottom */}
                 <View style={styles.infoOverlay}>
-                    <BlurView
-                        intensity={20}
-                        tint="dark"
-                        style={StyleSheet.absoluteFill}
-                    />
+                    {performanceProfile.enableBlurEffects ? (
+                        <BlurView
+                            intensity={isMasonry ? 12 : 20}
+                            tint="dark"
+                            style={StyleSheet.absoluteFill}
+                        />
+                    ) : null}
                     <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                        colors={isMasonry
+                            ? ['transparent', 'rgba(8,11,18,0.14)', 'rgba(8,11,18,0.64)']
+                            : ['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
                         style={StyleSheet.absoluteFill}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 0, y: 1 }}
                     />
 
-                    <View style={styles.info}>
+                    <View style={[styles.info, isMasonry && styles.masonryInfo]}>
                         <Animated.Text
-                            numberOfLines={1}
+                            numberOfLines={isMasonry ? 2 : 1}
                             style={[
                                 styles.name,
+                                isMasonry && styles.masonryName,
                                 {
                                     fontFamily: theme.typography.fontFamily.bold,
                                     textTransform: cardStyles.variant === 'brutal' ? 'uppercase' : 'none',
@@ -158,9 +166,10 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, onPres
                         <Animated.Text
                             style={[
                                 styles.albumCount,
+                                isMasonry && styles.masonryAlbumCount,
                                 {
                                     fontFamily: theme.typography.fontFamily.regular,
-                                    color: 'rgba(255,255,255,0.7)'
+                                    color: 'rgba(255,255,255,0.74)'
                                 },
                             ]}
                         >
@@ -190,8 +199,11 @@ const styles = StyleSheet.create({
     container: {
         marginBottom: 10,
     },
+    masonryContainer: {
+        marginBottom: 14,
+    },
     pressed: {
-        opacity: 0.7,
+        opacity: 0.82,
     },
     imageContainer: {
         alignItems: 'center',
@@ -216,13 +228,29 @@ const styles = StyleSheet.create({
         width: '100%',
         paddingHorizontal: 8,
     },
+    masonryInfo: {
+        paddingHorizontal: 12,
+        paddingBottom: 6,
+    },
     name: {
+        ...typeScale.caption,
         textAlign: 'center',
-        fontSize: 13,
-        fontWeight: 'bold',
+        fontWeight: '600',
+    },
+    masonryName: {
+        ...typeScale.bodyStrong,
+        textAlign: 'left',
+        lineHeight: 20,
+        letterSpacing: -0.2,
     },
     albumCount: {
-        fontSize: 11,
+        ...typeScale.micro,
         textAlign: 'center',
+    },
+    masonryAlbumCount: {
+        ...typeScale.label,
+        textAlign: 'left',
+        marginTop: 5,
+        opacity: 0.82,
     },
 });

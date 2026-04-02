@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { StyleProp, View, ViewStyle } from 'react-native';
 import * as Icons from './icons';
 import { useTheme } from '@/src/theme';
@@ -7,9 +7,10 @@ export type IconName =
     | 'Ajustes'
     | 'Album'
     | 'Artista'
-    | 'Canción'
+    | 'Cancion'
     | 'Cola'
     | 'Descargar'
+    | 'Heart'
     | 'Home'
     | 'Library'
     | 'Lyrics'
@@ -23,34 +24,34 @@ export type IconName =
     | 'Repetir 1'
     | 'Shuffle';
 
-// Map icon names to their generated SVGR React Native components
 const iconMap: Record<IconName, React.ElementType> = {
-    'Ajustes': Icons.Ajustes,
-    'Album': Icons.Album,
-    'Artista': Icons.Artista,
-    'Canción': Icons.Canción,
-    'Cola': Icons.Cola,
-    'Descargar': Icons.Descargar,
-    'Home': Icons.Home,
-    'Library': Icons.Library,
-    'Lyrics': Icons.Lyrics,
-    'Next': Icons.Next,
-    'Pause': Icons.Pause,
-    'Play': Icons.Play,
-    'Playlist': Icons.Playlist,
-    'Previous': Icons.Previous,
-    'Reciente': Icons.Reciente,
+    Ajustes: Icons.Ajustes,
+    Album: Icons.Album,
+    Artista: Icons.Artista,
+    Cancion: Icons.Cancion,
+    Cola: Icons.Cola,
+    Descargar: Icons.Descargar,
+    Heart: Icons.Heart,
+    Home: Icons.Home,
+    Library: Icons.Library,
+    Lyrics: Icons.Lyrics,
+    Next: Icons.Next,
+    Pause: Icons.Pause,
+    Play: Icons.Play,
+    Playlist: Icons.Playlist,
+    Previous: Icons.Previous,
+    Reciente: Icons.Reciente,
     'Repetir 0': Icons.Repetir0,
     'Repetir 1': Icons.Repetir1,
-    'Shuffle': Icons.Shuffle,
+    Shuffle: Icons.Shuffle,
 };
 
 interface CustomIconProps {
     name: IconName;
     size?: number;
-    // Optional incoming color; we enhance it with dynamic theme accenting.
     color?: string;
     forceDynamicColor?: boolean;
+    preserveColor?: boolean;
     style?: StyleProp<ViewStyle>;
 }
 
@@ -137,7 +138,14 @@ const getDynamicIconColor = (inputColor: string | undefined, primary: string, fo
     return toHex(mix(base, accent, mixAmount));
 };
 
-export const CustomIcon: React.FC<CustomIconProps> = ({ name, size = 24, color, forceDynamicColor = false, style }) => {
+export const CustomIcon: React.FC<CustomIconProps> = ({
+    name,
+    size = 24,
+    color,
+    forceDynamicColor = false,
+    preserveColor = false,
+    style,
+}) => {
     const { theme } = useTheme();
     const SvgComponent = iconMap[name];
 
@@ -146,7 +154,9 @@ export const CustomIcon: React.FC<CustomIconProps> = ({ name, size = 24, color, 
         return null;
     }
 
-    const dynamicColor = getDynamicIconColor(color, theme.colors.primary, forceDynamicColor);
+    const dynamicColor = preserveColor
+        ? (color ?? theme.colors.primary)
+        : getDynamicIconColor(color, theme.colors.primary, forceDynamicColor);
 
     return (
         <View style={style}>

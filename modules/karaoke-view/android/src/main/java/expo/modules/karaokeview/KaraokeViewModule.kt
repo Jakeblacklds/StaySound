@@ -15,7 +15,7 @@ class KaraokeViewModule : Module() {
     init {
         remoteDataSource.configure(
             BuildConfig.SUPABASE_URL,
-            BuildConfig.SUPABASE_SECRET_KEY,
+            BuildConfig.SUPABASE_ANON_KEY,
         )
     }
 
@@ -104,6 +104,10 @@ class KaraokeViewModule : Module() {
 
             Prop("enableSeekOnTap") { view: KaraokeView, value: Boolean? ->
                 view.setSeekOnTapEnabled(value ?: false)
+            }
+
+            Prop("enableSpectralParticles") { view: KaraokeView, value: Boolean? ->
+                view.setEnableSpectralParticles(value ?: true)
             }
 
             // Events emitted to JS

@@ -1,6 +1,7 @@
-import { MaterialLiquidTabBar } from '@/src/components/navigation/MaterialLiquidTabBar';
+﻿import { MaterialLiquidTabBar } from '@/src/components/navigation/MaterialLiquidTabBar';
 import { CustomIcon } from '@/src/components/ui';
-import { useTheme } from '@/src/theme';
+import { useI18n } from '@/src/i18n';
+import { typeScale, useTheme } from '@/src/theme';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { Tabs } from 'expo-router';
@@ -8,12 +9,14 @@ import React from 'react';
 
 export default function TabLayout() {
   const { theme, config } = useTheme();
+  const { t } = useI18n();
   const isMaterial3 = config.style === 'material3';
 
   return (
     <Tabs
       tabBar={isMaterial3 ? (props: BottomTabBarProps) => <MaterialLiquidTabBar {...props} /> : undefined}
       screenOptions={{
+        animation: 'fade',
         headerShown: false,
         tabBarActiveTintColor: theme.colors.primary,
         tabBarInactiveTintColor: theme.colors.onSurfaceVariant,
@@ -25,14 +28,13 @@ export default function TabLayout() {
           height: 85,
         },
         tabBarLabelStyle: {
-          fontSize: 11,
-          fontWeight: '500',
+          ...typeScale.micro,
         },
       }}>
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Inicio',
+          title: t('tabs.home'),
           tabBarIcon: ({ color }) => (
             <CustomIcon
               name="Home"
@@ -45,7 +47,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="library"
         options={{
-          title: 'Biblioteca',
+          title: t('tabs.library'),
           tabBarIcon: ({ color }) => (
             <CustomIcon
               name="Library"
@@ -58,7 +60,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="playlists"
         options={{
-          title: 'Playlists',
+          title: t('tabs.playlists'),
           tabBarIcon: ({ color }) => (
             <CustomIcon
               name="Playlist"
@@ -71,10 +73,10 @@ export default function TabLayout() {
       <Tabs.Screen
         name="tidal"
         options={{
-          title: 'Descargar',
+          title: t('tabs.download'),
           tabBarIcon: ({ color }) => (
-            <CustomIcon
-              name="Descargar"
+            <MaterialCommunityIcons
+              name="magnify"
               size={26}
               color={color}
             />
@@ -85,7 +87,7 @@ export default function TabLayout() {
         name="settings"
         options={{
           href: null,
-          title: 'Ajustes',
+          title: t('tabs.settings'),
           tabBarIcon: ({ color }) => (
             <MaterialCommunityIcons
               name="cog"
@@ -98,3 +100,4 @@ export default function TabLayout() {
     </Tabs>
   );
 }
+

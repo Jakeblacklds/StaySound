@@ -1,38 +1,31 @@
-import FontAwesome from '@expo/vector-icons/FontAwesome';
+﻿import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
-import { router, Stack } from 'expo-router';
-import * as SplashScreen from 'expo-splash-screen';
+import { router, Stack, usePathname, useRootNavigationState } from 'expo-router';
 import { useEffect, useRef } from 'react';
-import { Linking, StyleSheet, View } from 'react-native';
+import { AppState, InteractionManager, Platform, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper';
 import 'react-native-reanimated';
 
 import { FullPlayer, MiniPlayer } from '@/src/components/player';
+import { scheduleAndroidAutoCatalogSync } from '@/src/services/androidAutoCatalogSync';
+import { refreshAndroidEqualizerCapabilities, syncAndroidEqualizerFromSettings } from '@/src/services/androidEqualizerService';
 import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
-import { useAudioEngine } from '@/src/services';
-import { useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
-import { ThemeProvider, useTheme } from '@/src/theme';
-
-function isTrackPlayerNotificationUrl(url: string | null | undefined): boolean {
-  if (!url) return false;
-  const normalized = url.toLowerCase();
-  return normalized.includes('notification.click');
-}
+import { ensureOnboardingMirrorPlaylist } from '@/src/services/onboardingTasteService';
+import { hydrateCloudPlaylists, syncPlaylistsNow } from '@/src/services/playlistSyncService';
+import { ensureSeededSpotifyTop50Playlist, hydrateSpotifyTop50GlobalPlaylist } from '@/src/services/spotifyChartsService';
+import { AudioEngine } from '@/src/services';
+import { useAuthStore, useDabAuthStore, useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
+import { createPaperFonts, ThemeProvider, useTheme } from '@/src/theme';
 
 export {
-  // Catch any errors thrown by the Layout component.
   ErrorBoundary
 } from 'expo-router';
 
 export const unstable_settings = {
-  // Ensure that reloading on `/modal` keeps a back button present.
   initialRouteName: '(tabs)',
 };
-
-// Prevent the splash screen from auto-hiding before asset loading is complete.
-SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
   const [loaded, error] = useFonts({
@@ -40,7 +33,6 @@ export default function RootLayout() {
     ...FontAwesome.font,
   });
 
-  // Expo Router uses Error Boundaries to catch errors in the navigation tree.
   useEffect(() => {
     if (error) throw error;
   }, [error]);
@@ -48,54 +40,32 @@ export default function RootLayout() {
   const _hasLibraryHydrated = useLibraryStore(state => state._hasHydrated);
   const _hasSettingsHydrated = useSettingsStore(state => state._hasHydrated);
   const _hasOnboardingHydrated = useOnboardingStore(state => state._hasHydrated);
-
-  useEffect(() => {
-    if (loaded && _hasLibraryHydrated && _hasSettingsHydrated && _hasOnboardingHydrated) {
-      SplashScreen.hideAsync();
-    }
-  }, [loaded, _hasLibraryHydrated, _hasSettingsHydrated, _hasOnboardingHydrated]);
-
-  // Emergency timeout to hide splash screen after 5 seconds
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      SplashScreen.hideAsync();
-    }, 5000);
-    return () => clearTimeout(timer);
-  }, []);
-
-  if (!loaded || !_hasLibraryHydrated || !_hasSettingsHydrated || !_hasOnboardingHydrated) {
-    return null;
-  }
+  const _hasAuthHydrated = useAuthStore(state => state._hasHydrated);
+  const _hasDabAuthHydrated = useDabAuthStore(state => state._hasHydrated);
+  const isAppReady =
+    loaded &&
+    _hasLibraryHydrated &&
+    _hasSettingsHydrated &&
+    _hasOnboardingHydrated &&
+    _hasAuthHydrated &&
+    _hasDabAuthHydrated;
 
   return (
     <GestureHandlerRootView style={styles.container}>
       <ThemeProvider>
-        <RootLayoutNav />
+        <RootLayoutNav isAppReady={isAppReady} />
       </ThemeProvider>
     </GestureHandlerRootView>
   );
 }
 
-
-
 function AudioSync() {
   const next = usePlayerStore(state => state.next);
-  const setLoading = usePlayerStore(state => state.setLoading);
-  const setPosition = usePlayerStore(state => state.setPosition);
-  const updateFromEngine = usePlayerStore(state => state.updateFromEngine);
 
-  // Initialize the audio engine hook - this sets up Track Player
-  const audioState = useAudioEngine();
-
-  // Sync AudioEngine state to PlayerStore
   useEffect(() => {
-    // Initialize Database
     import('@/src/services/database').then(m => m.getDatabase());
   }, []);
 
-  // Sync audio state to player store
-  // BUG FIX: Initialize ref with current store state so we don't think "Old Track" from native 
-  // is a "new change" if we already had a null/new track in store.
   const lastState = useRef({
     isPlaying: false,
     isLoading: false,
@@ -106,90 +76,195 @@ function AudioSync() {
   });
 
   useEffect(() => {
-    const storeTrackId = usePlayerStore.getState().currentTrack?.id;
+    void AudioEngine.initialize({
+      onStateChange: (audioState) => {
+        const hasMeaningfulChange =
+          audioState.isPlaying !== lastState.current.isPlaying ||
+          audioState.isLoading !== lastState.current.isLoading ||
+          audioState.queueIndex !== lastState.current.queueIndex ||
+          audioState.currentTrack?.id !== lastState.current.trackId ||
+          Math.abs((audioState.duration ?? 0) - lastState.current.duration) > 1000 ||
+          Math.abs((audioState.position ?? 0) - lastState.current.position) > 1000;
 
-    // Only update store if meaningful changes occurred
-    const hasMeaningfulChange =
-      audioState.isPlaying !== lastState.current.isPlaying ||
-      audioState.isLoading !== lastState.current.isLoading ||
-      audioState.queueIndex !== lastState.current.queueIndex ||
-      audioState.currentTrack?.id !== lastState.current.trackId ||
-      Math.abs((audioState.duration ?? 0) - lastState.current.duration) > 1000 ||
-      Math.abs((audioState.position ?? 0) - lastState.current.position) > 1000;
+        if (!hasMeaningfulChange) {
+          return;
+        }
 
-    if (hasMeaningfulChange) {
-      updateFromEngine({
-        isPlaying: audioState.isPlaying,
-        isLoading: audioState.isLoading,
-        position: audioState.position,
-        duration: audioState.duration,
-        currentTrack: audioState.currentTrack,
-        queueIndex: audioState.queueIndex,
-      });
-      lastState.current = {
-        isPlaying: audioState.isPlaying ?? false,
-        isLoading: audioState.isLoading ?? false,
-        position: audioState.position ?? 0,
-        duration: audioState.duration ?? 0,
-        queueIndex: audioState.queueIndex ?? -1,
-        trackId: audioState.currentTrack?.id,
-      };
-    }
-  }, [audioState.isPlaying, audioState.isLoading, audioState.position, audioState.duration, audioState.currentTrack, audioState.queueIndex, updateFromEngine]);
-
-  // Handle track end - skip to next
-  useEffect(() => {
-    if (audioState.duration > 0 && audioState.position >= audioState.duration - 100) {
-      // Track ended, play next
-      // Note: Track Player handles this automatically when in queue mode
-    }
-  }, [audioState.position, audioState.duration, next]);
+        usePlayerStore.getState().updateFromEngine({
+          isPlaying: audioState.isPlaying,
+          isLoading: audioState.isLoading,
+          position: audioState.position,
+          duration: audioState.duration,
+          currentTrack: audioState.currentTrack,
+          queueIndex: audioState.queueIndex,
+        });
+        lastState.current = {
+          isPlaying: audioState.isPlaying ?? false,
+          isLoading: audioState.isLoading ?? false,
+          position: audioState.position ?? 0,
+          duration: audioState.duration ?? 0,
+          queueIndex: audioState.queueIndex ?? -1,
+          trackId: audioState.currentTrack?.id,
+        };
+      },
+      onTrackEnd: () => {
+        void next();
+      },
+    });
+  }, [next]);
 
   return null;
 }
 
-function RootLayoutNav() {
-  const { theme, isDark } = useTheme();
-  const hasCompletedOnboarding = useOnboardingStore(state => state.hasCompletedOnboarding);
+function SessionBootstrap() {
+  const bootstrap = useAuthStore(state => state.bootstrap);
+  const dabBootstrap = useDabAuthStore(state => state.bootstrap);
+  const heartbeat = useAuthStore(state => state.heartbeat);
+  const hasSessionLock = useAuthStore(state => state.hasSessionLock);
+  const status = useAuthStore(state => state.status);
 
-  // Redirect to onboarding when navigator is ready
   useEffect(() => {
-    if (!hasCompletedOnboarding) {
-      router.replace('/onboarding');
+    void bootstrap();
+    void dabBootstrap();
+    ensureSeededSpotifyTop50Playlist();
+    void hydrateSpotifyTop50GlobalPlaylist();
+  }, [bootstrap, dabBootstrap]);
+
+  useEffect(() => {
+    if (status !== 'authenticated' || !hasSessionLock) {
+      return;
     }
-  }, [hasCompletedOnboarding]);
 
-  useEffect(() => {
-    const handleUrl = (url: string | null | undefined) => {
-      if (!isTrackPlayerNotificationUrl(url)) return;
+    void hydrateCloudPlaylists();
+    void hydrateSpotifyTop50GlobalPlaylist({ force: true });
+    void syncPlaylistsNow();
+    void heartbeat();
+    void ensureOnboardingMirrorPlaylist();
 
-      const { currentTrack, setPlayerVisible } = usePlayerStore.getState();
-      if (currentTrack != null) {
-        setPlayerVisible(true);
+    const interval = setInterval(() => {
+      void heartbeat();
+    }, 25_000);
+
+    const subscription = AppState.addEventListener('change', nextState => {
+      if (nextState === 'active') {
+        void heartbeat();
+        void hydrateCloudPlaylists();
+        void hydrateSpotifyTop50GlobalPlaylist({ force: true });
+        void ensureOnboardingMirrorPlaylist();
       }
-
-      router.replace('/');
-    };
-
-    Linking.getInitialURL()
-      .then(handleUrl)
-      .catch(() => {
-        // Ignore malformed initial URLs
-      });
-
-    const subscription = Linking.addEventListener('url', ({ url }: { url: string }) => {
-      handleUrl(url);
     });
 
     return () => {
+      clearInterval(interval);
       subscription.remove();
     };
-  }, []);
+  }, [hasSessionLock, heartbeat, status]);
 
-  // Create Paper theme from our tokens
+  return null;
+}
+
+function AndroidAutoCatalogBootstrap() {
+  const hasHydrated = useLibraryStore(state => state._hasHydrated);
+  const catalogRevision = useLibraryStore(state => state.catalogRevision);
+
+  useEffect(() => {
+    if (!hasHydrated) {
+      return;
+    }
+
+    scheduleAndroidAutoCatalogSync();
+  }, [hasHydrated, catalogRevision]);
+
+  return null;
+}
+
+function EqualizerBootstrap() {
+  const hasHydrated = useSettingsStore(state => state._hasHydrated);
+  const currentTrackId = usePlayerStore(state => state.currentTrack?.id);
+  const equalizerMode = useSettingsStore(state => state.equalizer.mode);
+  const equalizerEnabled = useSettingsStore(state => state.equalizer.enabled);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !hasHydrated) {
+      return;
+    }
+
+    void refreshAndroidEqualizerCapabilities(false);
+  }, [hasHydrated]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !hasHydrated) {
+      return;
+    }
+
+    if (equalizerMode === 'app' && equalizerEnabled) {
+      void syncAndroidEqualizerFromSettings();
+      return;
+    }
+
+    void refreshAndroidEqualizerCapabilities(false);
+  }, [equalizerEnabled, equalizerMode, hasHydrated]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !hasHydrated) {
+      return;
+    }
+
+    if (equalizerMode !== 'app' || !equalizerEnabled || !currentTrackId) {
+      return;
+    }
+
+    void syncAndroidEqualizerFromSettings();
+  }, [currentTrackId, equalizerEnabled, equalizerMode, hasHydrated]);
+
+  return null;
+}
+
+function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
+  const { theme, isDark } = useTheme();
+  const authStatus = useAuthStore(state => state.status);
+  const hasCompletedOnboarding = useOnboardingStore(state => state.hasCompletedOnboarding);
+  const currentTrack = usePlayerStore(state => state.currentTrack);
+  const isPlayerVisible = usePlayerStore(state => state.playerVisible);
+  const pathname = usePathname();
+  const rootNavigationState = useRootNavigationState();
+  const canNavigate = isAppReady && !!rootNavigationState?.key;
+  const shouldMountFullPlayer = isPlayerVisible || currentTrack != null;
+
+  useEffect(() => {
+    if (!canNavigate || authStatus === 'loading' || authStatus === 'idle') {
+      return;
+    }
+
+    const task = InteractionManager.runAfterInteractions(() => {
+      if (authStatus !== 'authenticated') {
+        if (pathname !== '/auth') {
+          router.navigate('/auth' as any);
+        }
+        return;
+      }
+
+      if (!hasCompletedOnboarding) {
+        if (pathname !== '/onboarding') {
+          router.navigate('/onboarding' as any);
+        }
+        return;
+      }
+
+      if (pathname === '/auth' || pathname === '/onboarding') {
+        router.navigate('/');
+      }
+    });
+
+    return () => {
+      task.cancel();
+    };
+  }, [authStatus, canNavigate, hasCompletedOnboarding, pathname]);
+
+  const basePaperTheme = isDark ? MD3DarkTheme : MD3LightTheme;
   const paperTheme = isDark
     ? {
-      ...MD3DarkTheme,
+      ...basePaperTheme,
       colors: {
         ...MD3DarkTheme.colors,
         primary: theme.colors.primary,
@@ -207,9 +282,10 @@ function RootLayoutNav() {
         onSurfaceVariant: theme.colors.onSurfaceVariant,
         outline: theme.colors.outline,
       },
+      fonts: createPaperFonts(basePaperTheme.fonts),
     }
     : {
-      ...MD3LightTheme,
+      ...basePaperTheme,
       colors: {
         ...MD3LightTheme.colors,
         primary: theme.colors.primary,
@@ -227,6 +303,7 @@ function RootLayoutNav() {
         onSurfaceVariant: theme.colors.onSurfaceVariant,
         outline: theme.colors.outline,
       },
+      fonts: createPaperFonts(basePaperTheme.fonts),
     };
 
   return (
@@ -234,9 +311,18 @@ function RootLayoutNav() {
       <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={styles.container}>
+            <SessionBootstrap />
+            <AndroidAutoCatalogBootstrap />
+            <EqualizerBootstrap />
             <AudioSync />
-            <Stack>
-              <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+            <Stack
+              screenOptions={{
+                headerShown: false,
+                animation: 'fade_from_bottom',
+              }}
+            >
+              <Stack.Screen name="auth" options={{ animation: 'fade', gestureEnabled: false }} />
+              <Stack.Screen name="(tabs)" />
               <Stack.Screen
                 name="onboarding"
                 options={{
@@ -245,11 +331,19 @@ function RootLayoutNav() {
                   gestureEnabled: false,
                 }}
               />
-              <Stack.Screen name="artist" options={{ headerShown: false }} />
-              <Stack.Screen name="album" options={{ headerShown: false }} />
-              <Stack.Screen name="playlist" options={{ headerShown: false }} />
-              <Stack.Screen name="tidal-artist" options={{ headerShown: false }} />
-              <Stack.Screen name="tidal-album" options={{ headerShown: false }} />
+              <Stack.Screen name="artist" />
+              <Stack.Screen name="album" />
+              <Stack.Screen name="playlist" />
+              <Stack.Screen
+                name="playlist-create"
+                options={{
+                  presentation: 'fullScreenModal',
+                  headerShown: false,
+                  animation: 'slide_from_bottom',
+                }}
+              />
+              <Stack.Screen name="tidal-artist" />
+              <Stack.Screen name="tidal-album" />
               <Stack.Screen name="modal" options={{ presentation: 'modal' }} />
               <Stack.Screen
                 name="lyrics"
@@ -259,12 +353,14 @@ function RootLayoutNav() {
                   animation: 'slide_from_bottom',
                 }}
               />
+              <Stack.Screen name="equalizer" options={{ animation: 'slide_from_right' }} />
             </Stack>
+            {!isAppReady ? <View pointerEvents="none" style={styles.startupOverlay} /> : null}
             <ActionSheet />
             <ConfirmationModal />
             <GlobalNotification />
             <MiniPlayer />
-            <FullPlayer />
+            {shouldMountFullPlayer ? <FullPlayer /> : null}
           </View>
         </GestureHandlerRootView>
       </NavigationThemeProvider>
@@ -276,4 +372,9 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  startupOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: '#000',
+  },
 });
+

@@ -18,6 +18,9 @@ export interface KaraokeWordRaw {
     s: number;   // Start time (seconds)
     e: number;   // End time (seconds)
     n: boolean;  // New line after this word?
+    sp?: boolean; // Preserve a trailing space after this fragment
+    bg?: boolean; // Background vocal / harmony fragment
+    p?: boolean;  // Continuation of previous visual word
 }
 
 // Processed word with layout info

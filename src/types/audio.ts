@@ -1,4 +1,4 @@
-// Audio types for StaySound
+﻿// Audio types for StaySound
 
 export interface Track {
     id: string;
@@ -19,13 +19,20 @@ export interface Track {
     sampleRate?: number; // Hz
     bitDepth?: number;
     quality?: string;
-    source?: 'local' | 'tidal' | 'tidal_stream';
+    source?: 'local' | 'tidal' | 'tidal_stream' | 'spotify';
     tidalId?: number;
     tidalAlbumId?: number;
+    spotifyId?: string;
+    spotifyUri?: string;
+    spotifyUrl?: string;
+    isrc?: string;
     dateAdded: number;
     favorite?: boolean;
     /** @internal Temporary field set during scan for filename-based matching. Not persisted. */
     _filename?: string;
+    /** @internal Native MediaStore relative path used for deferred local/Tidal enrichment. */
+    relativePath?: string;
+    cloudOnly?: boolean;
 }
 
 export interface Album {
@@ -57,6 +64,9 @@ export interface Playlist {
     trackIds: string[];
     createdAt: number;
     updatedAt: number;
+    source?: 'local' | 'spotify';
+    readonly?: boolean;
+    externalUrl?: string;
 }
 
 export type RepeatMode = 'off' | 'one' | 'all';
@@ -81,7 +91,7 @@ export interface ScanProgress {
     currentPath: string;
 }
 
-export type TidalQuality = 'HI_RES_LOSSLESS' | 'LOSSLESS' | 'HIGH' | 'LOW';
+export type TidalQuality = 'HI_RES_LOSSLESS' | 'LOSSLESS' | 'MP3' | 'HIGH' | 'LOW';
 
 export interface TidalTrack {
     id: number;
@@ -163,11 +173,14 @@ export interface LibraryState {
     albums: Map<string, Album>;
     artists: Map<string, Artist>;
     playlists: Map<string, Playlist>;
+    cloudPlaylistTracks: Map<string, Map<string, Track>>;
+    catalogRevision: number;
     recentSearches: string[];
     isScanning: boolean;
     scanProgress: ScanProgress | null;
     lastScanDate: number | null;
     _hasHydrated: boolean;
 }
+
 
 

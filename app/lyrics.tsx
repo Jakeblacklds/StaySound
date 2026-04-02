@@ -4,13 +4,12 @@
 
 import { KaraokeLyrics } from '@/src/components/lyrics';
 import { LyricsView } from '@/src/components/player/LyricsView';
+import { ThemeBackground } from '@/src/components/player/backgrounds/ThemeBackground';
 import { LyricsSkeleton } from '@/src/components/ui';
+import { useDynamicColors } from '@/src/hooks';
 import { LyricsRepository } from '@/src/services';
 import { usePlayerStore } from '@/src/stores';
-import { useTheme } from '@/src/theme';
 import type { KaraokeLyricsJSON } from '@/src/types';
-import { BlurView } from 'expo-blur';
-import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useEffect, useState } from 'react';
 import { Pressable, StatusBar, StyleSheet, View } from 'react-native';
@@ -18,10 +17,14 @@ import { IconButton, Text } from 'react-native-paper';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+
+
 export default function LyricsScreen() {
-    const { theme, isDark } = useTheme();
     const insets = useSafeAreaInsets();
     const { currentTrack } = usePlayerStore();
+
+    // Dynamic colors from album artwork — same source as the player background
+    const { colors: albumColors, animated: animColors } = useDynamicColors(currentTrack?.artwork);
 
     // Toggle between standard LRC and Karaoke mode
     const [karaokeMode, setKaraokeMode] = useState(true);
@@ -57,23 +60,22 @@ export default function LyricsScreen() {
         <View style={styles.container}>
             <StatusBar barStyle="light-content" />
 
-            {/* Background with album art blur */}
-            {currentTrack?.artwork ? (
-                <View style={styles.backgroundImageContainer}>
-                    <Image
-                        source={{ uri: currentTrack.artwork }}
-                        style={styles.backgroundImage}
-                        contentFit="cover"
-                        transition={300}
-                    />
-                    <BlurView
-                        intensity={80}
-                        tint="dark"
-                        style={StyleSheet.absoluteFill}
-                    />
-                    <View style={styles.overlay} />
-                </View>
-            ) : null}
+            {/* Background — same ThemeBackground used in the player,
+                   but with a heavy dark base so white lyrics are ALWAYS readable
+                   regardless of album palette. The blobs still tint through subtly. */}
+            <View style={StyleSheet.absoluteFill}>
+                {/* Layer 1: always-dark base — prevents any album from making
+                    the background close to white */}
+                <View style={styles.bgBase} />
+                {/* Layer 2: dynamic color blobs (subtle tint only) */}
+                <ThemeBackground
+                    colors={albumColors}
+                    animColors={animColors}
+                    isVisible={true}
+                />
+                {/* Layer 3: dark overlay that mutes the blobs to a safe level */}
+                <View style={styles.bgOverlay} />
+            </View>
 
             {/* Header */}
             <Animated.View
@@ -140,21 +142,19 @@ export default function LyricsScreen() {
 const styles = StyleSheet.create({
     container: {
         flex: 1,
-        backgroundColor: '#000000',
+        backgroundColor: '#080B12',
         zIndex: 9999,
         elevation: 9999,
     },
-    backgroundImageContainer: {
+    bgBase: {
         ...StyleSheet.absoluteFillObject,
+        // Always-dark foundation — no album can make this light
+        backgroundColor: '#06080F',
     },
-    backgroundImage: {
+    bgOverlay: {
         ...StyleSheet.absoluteFillObject,
-        width: '100%',
-        height: '100%',
-    },
-    overlay: {
-        ...StyleSheet.absoluteFillObject,
-        backgroundColor: 'rgba(0,0,0,0.4)',
+        // Mutes the dynamic blobs to a tint, not a dominant color
+        backgroundColor: 'rgba(0,0,0,0.62)',
     },
     header: {
         flexDirection: 'row',

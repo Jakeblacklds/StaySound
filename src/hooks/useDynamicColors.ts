@@ -14,7 +14,7 @@
  *   - The theme useMemo in ThemeProvider only re-runs when the palette changes.
  */
 
-import { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors, getImageColors } from '../services/colorExtractor';
 import { useTheme } from '../theme/ThemeProvider';
@@ -30,10 +30,29 @@ const DEFAULT_COLORS: AlbumColors = {
     isDark: true,
 };
 
-export function useDynamicColors(imageUri: string | undefined) {
-    const { config, setDynamicPalette } = useTheme();
-    const [rawColors, setRawColors] = useState<AlbumColors>(DEFAULT_COLORS);
+export function useDynamicColors(imageUri: string | undefined, options?: UseDynamicColorsOptions) {
+    return useDynamicColorsWithOptions(imageUri, options);
+}
+
+interface UseDynamicColorsOptions {
+    enabled?: boolean;
+}
+
+export function useDynamicColorsWithOptions(imageUri: string | undefined, options?: UseDynamicColorsOptions) {
+    const { config, isDark, theme, setDynamicPalette } = useTheme();
+    const fallbackColors = useMemo<AlbumColors>(() => ({
+        primary: theme.colors.primary,
+        secondary: theme.colors.secondary,
+        background: theme.colors.surface,
+        text: theme.colors.onSurface,
+        onPrimary: theme.colors.onPrimary,
+        onSurface: theme.colors.onSurface,
+        accent: theme.colors.primary,
+        isDark,
+    }), [isDark, theme.colors.onPrimary, theme.colors.onSurface, theme.colors.primary, theme.colors.secondary, theme.colors.surface]);
+    const [rawColors, setRawColors] = useState<AlbumColors>(fallbackColors);
     const [isLoading, setIsLoading] = useState(false);
+    const enabled = options?.enabled ?? true;
 
     // Shared values for smooth per-frame color transitions in the UI
     const primary = useSharedValue(DEFAULT_COLORS.primary);
@@ -54,12 +73,31 @@ export function useDynamicColors(imageUri: string | undefined) {
         onSurface,
     }), [accent, background, onPrimary, onSurface, primary, secondary, text]);
 
+    const animatePalette = React.useCallback((palette: AlbumColors) => {
+        const cfg = { duration: 600 };
+        primary.value = withTiming(palette.primary, cfg);
+        secondary.value = withTiming(palette.secondary, cfg);
+        background.value = withTiming(palette.background, cfg);
+        accent.value = withTiming(palette.accent, cfg);
+        text.value = withTiming(palette.text, cfg);
+        onPrimary.value = withTiming(palette.onPrimary, cfg);
+        onSurface.value = withTiming(palette.onSurface, cfg);
+    }, [accent, background, onPrimary, onSurface, primary, secondary, text]);
+
     useEffect(() => {
+        if (!enabled) {
+            setRawColors(fallbackColors);
+            setIsLoading(false);
+            animatePalette(fallbackColors);
+            return;
+        }
+
         if (!imageUri) {
-            setRawColors(DEFAULT_COLORS);
+            setRawColors(fallbackColors);
+            animatePalette(fallbackColors);
             // Reset theme to default colors when no artwork
             if (config.dynamicColors) {
-                setDynamicPalette(DEFAULT_COLORS);
+                setDynamicPalette(fallbackColors);
             }
             return;
         }
@@ -75,14 +113,7 @@ export function useDynamicColors(imageUri: string | undefined) {
                 setIsLoading(false);
 
                 // Animate local shared values (for FullPlayer background, etc.)
-                const cfg = { duration: 600 };
-                primary.value = withTiming(extracted.primary, cfg);
-                secondary.value = withTiming(extracted.secondary, cfg);
-                background.value = withTiming(extracted.background, cfg);
-                accent.value = withTiming(extracted.accent, cfg);
-                text.value = withTiming(extracted.text, cfg);
-                onPrimary.value = withTiming(extracted.onPrimary, cfg);
-                onSurface.value = withTiming(extracted.onSurface, cfg);
+                animatePalette(extracted);
 
                 // Push the full palette to ThemeProvider → allows using REAL background/primary.
                 if (config.dynamicColors && config.style === 'material3') {
@@ -91,15 +122,16 @@ export function useDynamicColors(imageUri: string | undefined) {
             })
             .catch(() => {
                 if (cancelled) return;
-                setRawColors(DEFAULT_COLORS);
+                setRawColors(fallbackColors);
                 setIsLoading(false);
+                animatePalette(fallbackColors);
             });
 
         return () => {
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [imageUri, setDynamicPalette]);
+    }, [animatePalette, config.dynamicColors, enabled, fallbackColors, imageUri, setDynamicPalette]);
 
     return {
         colors: rawColors,

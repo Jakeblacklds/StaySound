@@ -53,6 +53,9 @@ export interface KaraokeViewProps extends ViewProps {
     /** Enables tap-to-seek behavior when touching lyrics */
     enableSeekOnTap?: boolean;
 
+    /** Enables the suspended shimmer particles around the active lyric sweep */
+    enableSpectralParticles?: boolean;
+
     /** Called when active line changes */
     onLineChange?: (event: { nativeEvent: { lineIndex: number } }) => void;
 

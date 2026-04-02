@@ -5,7 +5,37 @@ import { AlbumColors } from '../services/colorExtractor';
 import { useSettingsStore } from '../stores/settingsStore';
 import { Theme, ThemeMode, ThemeStyle } from '../types/theme';
 import { material3Dark, material3Light } from './styles/material3';
-import { generateM3Palette, SchemeVariant } from './utils';
+import { generateM3Palette, generateManualAccentPalette, SchemeVariant } from './utils';
+
+function parseHexColor(value: string) {
+    const hex = value.trim().replace('#', '');
+    if (hex.length < 6) return null;
+
+    const r = parseInt(hex.slice(0, 2), 16);
+    const g = parseInt(hex.slice(2, 4), 16);
+    const b = parseInt(hex.slice(4, 6), 16);
+
+    if ([r, g, b].some(Number.isNaN)) return null;
+    return { r, g, b };
+}
+
+function toHex({ r, g, b }: { r: number; g: number; b: number }) {
+    const channel = (value: number) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0');
+    return `#${channel(r)}${channel(g)}${channel(b)}`;
+}
+
+function mixHexColors(from: string, to: string, amount: number) {
+    const source = parseHexColor(from);
+    const target = parseHexColor(to);
+    if (!source || !target) return from;
+
+    const t = Math.max(0, Math.min(1, amount));
+    return toHex({
+        r: source.r + (target.r - source.r) * t,
+        g: source.g + (target.g - source.g) * t,
+        b: source.b + (target.b - source.b) * t,
+    });
+}
 
 const themes: Record<ThemeStyle, { dark: Theme; light: Theme }> = {
     material3: { dark: material3Dark, light: material3Light },
@@ -47,6 +77,7 @@ interface ThemeContextType {
         mode: ThemeMode;
         accentColor: string;
         dynamicColors: boolean;
+        lightweightMode: boolean;
         schemeVariant?: string;
     };
     animatedColors: AnimatedColors;
@@ -55,6 +86,7 @@ interface ThemeContextType {
     setAccentColor: (color: string) => void;
     setSchemeVariant: (variant: SchemeVariant) => void;
     toggleDynamicColors: () => void;
+    toggleLightweightMode: () => void;
     /** Called by useDynamicColors when a new album's palette is extracted.
      *  Only takes effect when config.dynamicColors === true. */
     setDynamicPalette: (colors: AlbumColors) => void;
@@ -103,19 +135,42 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
         try {
             const variant = isDynamic ? 'content' : (settings.schemeVariant as SchemeVariant) || 'expressive';
-            const m3Colors = generateM3Palette(colorToUse, isDark, variant);
+            const m3Colors = isDynamic
+                ? generateM3Palette(colorToUse, isDark, variant)
+                : generateManualAccentPalette(colorToUse, isDark, variant);
 
             let finalColors: Theme['colors'];
 
             if (isDynamic) {
-                finalColors = {
-                    ...selectedTheme.colors,
-                    ...m3Colors,
-                    background: dynamicPalette.background,
-                    surface: dynamicPalette.background,
-                    onSurface: dynamicPalette.onSurface,
-                    onSurfaceVariant: dynamicPalette.onSurface,
-                };
+                if (isDark) {
+                    const mutedBackground = mixHexColors(
+                        dynamicPalette.background,
+                        selectedTheme.colors.background,
+                        0.34
+                    );
+
+                    finalColors = {
+                        ...selectedTheme.colors,
+                        ...m3Colors,
+                        background: mutedBackground,
+                        surface: dynamicPalette.background,
+                        onSurface: dynamicPalette.onSurface,
+                        onSurfaceVariant: dynamicPalette.onSurface,
+                    };
+                } else {
+                    finalColors = {
+                        ...selectedTheme.colors,
+                        ...m3Colors,
+                        background: mixHexColors(selectedTheme.colors.background, dynamicPalette.background, 0.06),
+                        surface: mixHexColors(selectedTheme.colors.surface, dynamicPalette.background, 0.08),
+                        surfaceVariant: mixHexColors(selectedTheme.colors.surfaceVariant, dynamicPalette.background, 0.14),
+                        primaryContainer: mixHexColors(m3Colors.primaryContainer, dynamicPalette.primary, 0.14),
+                        secondaryContainer: mixHexColors(m3Colors.secondaryContainer ?? selectedTheme.colors.secondaryContainer, dynamicPalette.secondary, 0.12),
+                        onSurface: selectedTheme.colors.onSurface,
+                        onSurfaceVariant: selectedTheme.colors.onSurfaceVariant,
+                        onBackground: selectedTheme.colors.onBackground,
+                    };
+                }
             } else {
                 finalColors = { ...selectedTheme.colors, ...m3Colors };
             }
@@ -155,6 +210,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
             mode: settings.mode,
             accentColor: settings.accentColor,
             dynamicColors: settings.dynamicColors,
+            lightweightMode: settings.lightweightMode,
             schemeVariant: settings.schemeVariant,
         },
         animatedColors,
@@ -163,6 +219,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setAccentColor: settings.setAccentColor,
         setSchemeVariant: (v) => settings.setSchemeVariant(v as string),
         toggleDynamicColors: () => settings.setDynamicColors(!settings.dynamicColors),
+        toggleLightweightMode: () => settings.setLightweightMode(!settings.lightweightMode),
         setDynamicPalette,
         isDark,
     };

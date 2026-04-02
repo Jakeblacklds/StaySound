@@ -1,79 +1,40 @@
 import { CustomIcon, EmptyState, Skeleton } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
-import { createTidalStreamTrack, extractAlbumsFromTracks, getTidalArtistInfo, isValidAudioFile, searchTidal, searchTidalArtists, searchTidalPlaylists, TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
+import { FileSystemStorage } from '@/src/services/storage';
+import {
+    createTidalStreamTrack,
+    extractAlbumsFromTracks,
+    getTidalAlbumDetail,
+    getTidalArtistInfo,
+    getTidalMirrorAvailability,
+    isValidAudioFile,
+    searchTidal,
+    searchTidalArtists,
+    searchTidalPlaylists,
+    TIDAL_API_BASES,
+    TIDAL_MIRROR_NAMES,
+    TidalMirrorAvailability,
+} from '@/src/services/tidalService';
 import { useLibraryStore, useNotificationStore, usePlayerStore, useSettingsStore } from '@/src/stores';
-import { useTheme } from '@/src/theme';
-import { TidalAlbum, TidalArtist, TidalPlaylist, TidalQuality, TidalTrack } from '@/src/types/audio';
-import { BlurView } from 'expo-blur';
+import { typeScale, useTheme } from '@/src/theme';
+import { TidalAlbum, TidalArtist, TidalPlaylist, TidalTrack } from '@/src/types/audio';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Divider, IconButton, Menu, Searchbar, Text } from 'react-native-paper';
-import Animated, { FadeIn, FadeInDown, FadeOut, interpolate, interpolateColor, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type TidalTab = 'all' | 'artists' | 'albums' | 'tracks' | 'playlists';
-
-const EXPLORE_MASONRY_CARDS: ReadonlyArray<{ title: string; subtitle: string; query: string; colors: [string, string]; height: number }> = [
-    {
-        title: 'Radar de novedades',
-        subtitle: 'Lanzamientos',
-        query: 'new releases',
-        colors: ['#1F6FEB', '#0B1F4A'],
-        height: 220,
-    },
-    {
-        title: 'Top Global',
-        subtitle: 'Más escuchados',
-        query: 'Top global',
-        colors: ['#8A2387', '#E94057'],
-        height: 140,
-    },
-    {
-        title: 'Rock',
-        subtitle: 'Clásicos y nuevos',
-        query: 'Rock',
-        colors: ['#141E30', '#243B55'],
-        height: 140,
-    },
-    {
-        title: 'Reggaeton',
-        subtitle: 'Baila sin parar',
-        query: 'Reggaeton 2026',
-        colors: ['#f12711', '#f5af19'],
-        height: 220,
-    },
-    {
-        title: 'Sesion Hi-Res',
-        subtitle: 'Calidad de estudio',
-        query: 'hi-res lossless',
-        colors: ['#F26D3D', '#7A1D1D'],
-        height: 220,
-    },
-    {
-        title: 'Lo-Fi Chill',
-        subtitle: 'Relájate',
-        query: 'Lo-fi chill',
-        colors: ['#005C97', '#363795'],
-        height: 140,
-    },
-    {
-        title: 'Gym',
-        subtitle: 'Motivación',
-        query: 'Gym motivation',
-        colors: ['#FF416C', '#FF4B2B'],
-        height: 140,
-    },
-    {
-        title: 'Jazz',
-        subtitle: 'Instrumental',
-        query: 'Jazz instrumental',
-        colors: ['#42275a', '#734b6d'],
-        height: 220,
-    },
-];
+const RECENT_SEARCHES_STORAGE_KEY = 'tidal-recent-searches';
+const MAX_RECENT_SEARCHES = 8;
+function formatRecentSearchTitle(query: string): string {
+    const trimmed = query.trim();
+    if (!trimmed) return 'Busqueda';
+    return trimmed.length > 26 ? `${trimmed.slice(0, 26).trim()}…` : trimmed;
+}
 
 function formatTrackDuration(ms: number): string {
     const totalSeconds = Math.max(0, Math.floor(ms / 1000));
@@ -82,9 +43,60 @@ function formatTrackDuration(ms: number): string {
     return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+function normalizeTrackText(value: string): string {
+    return value
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+function scoreDownloadCandidate(source: TidalTrack, candidate: TidalTrack): number {
+    let score = 0;
+
+    if (source.id === candidate.id) score += 100;
+
+    const sourceTitle = normalizeTrackText(source.title);
+    const sourceArtist = normalizeTrackText(source.artist);
+    const sourceAlbum = normalizeTrackText(source.album);
+    const candidateTitle = normalizeTrackText(candidate.title);
+    const candidateArtist = normalizeTrackText(candidate.artist);
+    const candidateAlbum = normalizeTrackText(candidate.album);
+
+    if (sourceTitle === candidateTitle) score += 50;
+    else if (sourceTitle && candidateTitle && (sourceTitle.includes(candidateTitle) || candidateTitle.includes(sourceTitle))) score += 20;
+
+    if (sourceArtist === candidateArtist) score += 40;
+    else if (sourceArtist && candidateArtist && (sourceArtist.includes(candidateArtist) || candidateArtist.includes(sourceArtist))) score += 15;
+
+    if (sourceAlbum && sourceAlbum === candidateAlbum) score += 15;
+
+    if (source.durationMs > 0 && candidate.durationMs > 0) {
+        const delta = Math.abs(source.durationMs - candidate.durationMs);
+        if (delta <= 1200) score += 20;
+        else if (delta <= 4000) score += 10;
+    }
+
+    return score;
+}
+
 const GRID_GAP = 12;
 const CARD_HEIGHT_SQUARE = 180;
 const CARD_HEIGHT_TALL = 260;
+const SEARCH_COMMIT_DELAY_MS = 2_000;
+const DISCOVERY_GENRES: Array<{ label: string; query: string }> = [
+    { label: 'House', query: 'house' },
+    { label: 'Jazz', query: 'jazz' },
+    { label: 'R&B', query: 'r&b' },
+    { label: 'Ambient', query: 'ambient' },
+    { label: 'Techno', query: 'techno' },
+    { label: 'Soul', query: 'soul' },
+    { label: 'Afro', query: 'afrobeats' },
+    { label: 'Indie', query: 'indie' },
+    { label: 'Clásica', query: 'clasica' },
+    { label: 'Latino', query: 'latino' },
+];
 
 // ─── Standalone card to prevent remounting flicker ─────────────────────────
 interface GridCardProps {
@@ -94,6 +106,17 @@ interface GridCardProps {
     type: 'artists' | 'albums' | 'playlists';
     artistArtworkUri?: string;
     onPress: () => void;
+}
+
+function normalizeCardImageUri(value: unknown): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+
+    return trimmed
+        .replace('100x100', '500x500')
+        .replace('200x200', '500x500')
+        .replace('300x300', '500x500');
 }
 
 const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, isLeft, type, artistArtworkUri, onPress }: GridCardProps) {
@@ -116,8 +139,7 @@ const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, is
     const title = type === 'artists' ? item.name : item.title;
     const subtitle = type === 'artists' ? 'Artista' : type === 'playlists' ? 'Playlist' : item.artistName;
     const rawImageUri = type === 'artists' ? (artistArtworkUri || item.artworkUrl) : item.artworkUrl;
-    // Perfect middle ground: 500x500 for retina-sharp masonry cards without overtaxing the GPU/RAM
-    const imageUri = rawImageUri ? rawImageUri.replace('100x100', '500x500').replace('200x200', '500x500').replace('300x300', '500x500') : undefined;
+    const imageUri = normalizeCardImageUri(rawImageUri);
 
     const fallbackBg = theme.colors.surfaceVariant || '#1E1E1E';
 
@@ -147,15 +169,10 @@ const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, is
                     />
                 )}
 
-                {/* Bottom Overlay with Glass Effect */}
+                {/* Calm footer overlay so artwork stays the focus */}
                 <View style={styles.gridCardFooter}>
-                    <BlurView
-                        intensity={25}
-                        tint="dark"
-                        style={StyleSheet.absoluteFill}
-                    />
                     <LinearGradient
-                        colors={['transparent', 'rgba(0,0,0,0.4)', 'rgba(0,0,0,0.85)']}
+                        colors={['transparent', 'rgba(12,12,14,0.34)', 'rgba(12,12,14,0.78)']}
                         style={StyleSheet.absoluteFill}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 0, y: 1 }}
@@ -239,36 +256,48 @@ function withAlpha(color: string, alphaHex: string): string {
     return color;
 }
 
+function formatMirrorStatus(availability?: TidalMirrorAvailability): string {
+    if (!availability) return 'Verificando disponibilidad...';
+    if (availability.status === 'available') {
+        return availability.latencyMs ? `Disponible (${availability.latencyMs} ms)` : 'Disponible';
+    }
+    if (availability.status === 'slow') {
+        return availability.latencyMs ? `Lento (${availability.latencyMs} ms)` : 'Disponible con latencia alta';
+    }
+    return 'No disponible ahora';
+}
+
 export default function TidalScreen() {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
 
     const palette = useMemo(() => ({
-        heroBackground: withAlpha(theme.colors.surfaceVariant, 'A6'),
-        heroBorder: withAlpha(theme.colors.outline, '59'),
         searchBackground: withAlpha(theme.colors.surface, 'F2'),
         searchBorder: withAlpha(theme.colors.outline, '54'),
-        chipBackground: withAlpha(theme.colors.surfaceVariant, 'E6'),
-        chipSelectedBackground: theme.colors.primary,
         cardBackground: withAlpha(theme.colors.surface, 'F5'),
         cardBorder: withAlpha(theme.colors.outline, '42'),
-        qualityBackground: theme.colors.primaryContainer,
-        floatingGlow: withAlpha(theme.colors.primary, '1A'),
+        mutedSurface: withAlpha(theme.colors.surfaceVariant, 'B8'),
+        strongBorder: withAlpha(theme.colors.outline, '70'),
     }), [theme.colors]);
 
     const [query, setQuery] = useState('');
-    const [debouncedQuery, setDebouncedQuery] = useState('');
-    const [uiDebouncedQuery, setUiDebouncedQuery] = useState('');
+    const [committedQuery, setCommittedQuery] = useState('');
+    const [recentSearches, setRecentSearches] = useState<string[]>([]);
+    const [searchRunId, setSearchRunId] = useState(0);
     const [activeTab, setActiveTab] = useState<TidalTab>('all');
     const [tracks, setTracks] = useState<TidalTrack[]>([]);
     const [artists, setArtists] = useState<TidalArtist[]>([]);
     const [artistArtworkOverrides, setArtistArtworkOverrides] = useState<Map<number, string>>(new Map());
     const [playlists, setPlaylists] = useState<TidalPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(false);
+    const [hasResolvedSearch, setHasResolvedSearch] = useState(false);
     const [error, setError] = useState<string | null>(null);
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showMirrorModal, setShowMirrorModal] = useState(false);
+    const [showLegacyMirrors, setShowLegacyMirrors] = useState(false);
     const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+    const [mirrorAvailability, setMirrorAvailability] = useState<Record<string, TidalMirrorAvailability>>({});
+    const [isRefreshingMirrors, setIsRefreshingMirrors] = useState(false);
     const {
         tidalDownloadQuality, setTidalDownloadQuality,
         tidalMirror, setTidalMirror
@@ -276,77 +305,35 @@ export default function TidalScreen() {
 
     const showNotification = useNotificationStore(s => s.showNotification);
 
-    const isSearching = useSharedValue(0);
-
-    // Trigger header/search morph only after user pauses typing
     useEffect(() => {
-        if (!query.trim()) {
-            isSearching.value = withTiming(0, { duration: 1000 });
-            return;
-        }
+        let cancelled = false;
 
-        isSearching.value = withSpring(uiDebouncedQuery.trim() ? 1 : 0, {
-            damping: 20,
-            stiffness: 120,
-            mass: 0.8,
-        });
-    }, [query, uiDebouncedQuery, isSearching]);
+        FileSystemStorage.getItem(RECENT_SEARCHES_STORAGE_KEY)
+            .then(raw => {
+                if (!raw || cancelled) return;
+                try {
+                    const parsed = JSON.parse(raw) as unknown;
+                    if (!Array.isArray(parsed)) return;
+                    const nextRecent = parsed
+                        .filter((value): value is string => typeof value === 'string')
+                        .map(value => value.trim())
+                        .filter(Boolean)
+                        .slice(0, MAX_RECENT_SEARCHES);
+                    if (!cancelled) {
+                        setRecentSearches(nextRecent);
+                    }
+                } catch {
+                    // ignore invalid persisted history
+                }
+            })
+            .catch(() => {
+                // ignore storage errors
+            });
 
-    const headStyle = useAnimatedStyle(() => {
-        return {
-            marginTop: interpolate(isSearching.value, [0, 1], [22, 10]),
-            paddingVertical: interpolate(isSearching.value, [0, 1], [18, 0]),
+        return () => {
+            cancelled = true;
         };
-    });
-
-    const titleRowAnimatedStyle = useAnimatedStyle(() => {
-        return {
-            opacity: interpolate(isSearching.value, [0, 1], [1, 0]),
-            height: interpolate(isSearching.value, [0, 1], [92, 0]),
-            marginBottom: interpolate(isSearching.value, [0, 1], [10, 0]),
-            overflow: 'hidden',
-        };
-    });
-
-    const titleAnimatedStyle = useAnimatedStyle(() => {
-        return {
-            transform: [
-                { translateX: interpolate(isSearching.value, [0, 1], [0, 15]) },
-            ],
-        };
-    });
-
-    const searchAnimatedStyle = useAnimatedStyle(() => {
-        return {
-            backgroundColor: interpolateColor(
-                isSearching.value,
-                [0, 1],
-                [palette.searchBackground, 'transparent']
-            ) as string,
-            borderRadius: 999,
-            borderColor: interpolateColor(
-                isSearching.value,
-                [0, 1],
-                [palette.searchBorder, 'transparent']
-            ) as string,
-            borderWidth: interpolate(isSearching.value, [0, 1], [1, 0]),
-            transform: [
-                { scale: interpolate(isSearching.value, [0, 1], [1, 1.15]) },
-                { translateY: interpolate(isSearching.value, [0, 1], [0, 15]) }
-            ],
-            marginBottom: interpolate(isSearching.value, [0, 1], [0, 10]),
-        };
-    });
-
-    const bentoAnimatedStyle = useAnimatedStyle(() => {
-        return {
-            opacity: interpolate(isSearching.value, [0.5, 1], [0, 1]),
-            transform: [
-                { translateY: interpolate(isSearching.value, [0, 1], [-20, 0]) },
-                { scale: interpolate(isSearching.value, [0, 1], [0.95, 1]) },
-            ],
-        };
-    });
+    }, []);
 
     const handleMirrorChange = (mirror: string) => {
         setTidalMirror(mirror);
@@ -371,35 +358,69 @@ export default function TidalScreen() {
     } = useTidalDownload();
 
     const play = usePlayerStore(s => s.play);
+    const currentPlayerTrack = usePlayerStore(s => s.currentTrack);
+    const pendingTrackPreview = usePlayerStore(s => s.pendingTrackPreview);
+    const isPlayerPlaying = usePlayerStore(s => s.isPlaying);
+    const setPendingTrackPreview = usePlayerStore(s => s.setPendingTrackPreview);
+    const activeTidalTrackId = useMemo(() => {
+        const sourceTrack = pendingTrackPreview ?? currentPlayerTrack;
+        if (!sourceTrack) return null;
+        if (typeof sourceTrack.tidalId === 'number') return sourceTrack.tidalId;
 
-    useEffect(() => {
-        const timeout = setTimeout(() => {
-            setDebouncedQuery(query);
-        }, 320);
+        const match = sourceTrack.id?.match(/tidal(?:_stream)?_(\d+)/);
+        return match ? Number(match[1]) : null;
+    }, [currentPlayerTrack, pendingTrackPreview]);
 
-        return () => clearTimeout(timeout);
-    }, [query]);
+    const triggerSearch = useCallback((nextQuery: string) => {
+        const trimmed = nextQuery.trim();
+
+        setActiveTab('all');
+        setCommittedQuery(trimmed);
+        setSearchRunId(prev => prev + 1);
+        setHasResolvedSearch(false);
+        setError(null);
+        setIsLoading(Boolean(trimmed));
+
+        if (trimmed) {
+            setRecentSearches(prev => {
+                const nextRecent = [trimmed, ...prev.filter(item => item.toLowerCase() !== trimmed.toLowerCase())]
+                    .slice(0, MAX_RECENT_SEARCHES);
+                void FileSystemStorage.setItem(RECENT_SEARCHES_STORAGE_KEY, JSON.stringify(nextRecent));
+                return nextRecent;
+            });
+        }
+    }, []);
 
     useEffect(() => {
         if (!query.trim()) {
-            setUiDebouncedQuery('');
+            setCommittedQuery('');
+            setSearchRunId(prev => prev + 1);
+            setHasResolvedSearch(false);
+            setError(null);
+            setIsLoading(false);
             return;
         }
 
         const timeout = setTimeout(() => {
-            setUiDebouncedQuery(query);
-        }, 1400);
+            triggerSearch(query);
+        }, SEARCH_COMMIT_DELAY_MS);
 
         return () => clearTimeout(timeout);
-    }, [query]);
+    }, [query, triggerSearch]);
+
+    const handleSubmitSearch = useCallback(() => {
+        Keyboard.dismiss();
+        triggerSearch(query);
+    }, [query, triggerSearch]);
 
     useEffect(() => {
-        const currentQuery = debouncedQuery.trim();
+        const currentQuery = committedQuery.trim();
         if (!currentQuery) {
             setTracks([]);
             setArtists([]);
             setArtistArtworkOverrides(new Map());
             artistArtworkAttempted.current.clear();
+            setHasResolvedSearch(false);
             setError(null);
             setIsLoading(false);
             return;
@@ -432,6 +453,7 @@ export default function TidalScreen() {
             })
             .finally(() => {
                 if (!cancelled) {
+                    setHasResolvedSearch(true);
                     setIsLoading(false);
                 }
             });
@@ -439,11 +461,19 @@ export default function TidalScreen() {
         return () => {
             cancelled = true;
         };
-    }, [debouncedQuery]);
+    }, [committedQuery, searchRunId]);
 
     const albums = useMemo(() => extractAlbumsFromTracks(tracks), [tracks]);
 
     const handleTidalPlay = useCallback(async (track: TidalTrack) => {
+        setPendingTrackPreview({
+            id: `tidal_pending_${track.id}`,
+            title: track.title,
+            artist: track.artist,
+            artwork: track.artworkUrl,
+            tidalId: track.id,
+        });
+
         try {
             const downloadedTrack = getDownloadedTrack(track.id);
             if (downloadedTrack) {
@@ -488,10 +518,11 @@ export default function TidalScreen() {
                 await play(localTrack, [localTrack]);
             }
         } catch (playError) {
+            setPendingTrackPreview(null);
             const message = playError instanceof Error ? playError.message : 'No se pudo reproducir esta pista';
             Alert.alert('Error de reproduccion', message);
         }
-    }, [download, forgetDownloadedTrack, getDownloadedTrack, play]);
+    }, [download, forgetDownloadedTrack, getDownloadedTrack, play, setPendingTrackPreview]);
 
     const handleTidalDownload = useCallback(async (track: TidalTrack) => {
         try {
@@ -501,14 +532,45 @@ export default function TidalScreen() {
                 return;
             }
 
+            let resolvedTrack = track;
+            try {
+                let candidates: TidalTrack[] = [];
+
+                if (track.albumId) {
+                    const albumDetail = await getTidalAlbumDetail(track.albumId);
+                    candidates = albumDetail.tracks;
+                }
+
+                if (candidates.length === 0) {
+                    candidates = await searchTidal(`${track.artist} ${track.title}`.trim());
+                }
+
+                if (candidates.length > 0) {
+                    const bestMatch = [...candidates]
+                        .map(candidate => ({ candidate, score: scoreDownloadCandidate(track, candidate) }))
+                        .sort((a, b) => b.score - a.score)[0];
+
+                    if (bestMatch && bestMatch.score >= 55) {
+                        resolvedTrack = {
+                            ...bestMatch.candidate,
+                            artworkUrl: bestMatch.candidate.artworkUrl ?? track.artworkUrl,
+                            albumId: bestMatch.candidate.albumId ?? track.albumId,
+                            artistId: bestMatch.candidate.artistId ?? track.artistId,
+                        };
+                    }
+                }
+            } catch {
+                resolvedTrack = track;
+            }
+
             const currentMirror = useSettingsStore.getState().tidalMirror;
             if (currentMirror !== 'auto') {
                 showNotification(`Bajando desde: ${TIDAL_MIRROR_NAMES[currentMirror] || 'Servidor Manual'}`, 'info');
             } else {
-                showNotification(`Iniciando descarga de "${track.title}"`, 'info');
+                showNotification(`Iniciando descarga de "${resolvedTrack.title}"`, 'info');
             }
 
-            await download(track);
+            await download(resolvedTrack);
         } catch (downloadError) {
             const message = downloadError instanceof Error ? downloadError.message : 'Error en descarga';
             showNotification(message, 'error');
@@ -569,23 +631,39 @@ export default function TidalScreen() {
         const isDownloadingItem = state?.status === 'downloading';
         const isError = state?.status === 'error';
         const progressLabel = `${Math.round((state?.progress ?? 0) * 100)}%`;
-        const buttonLabel = downloaded ? 'Saved' : isDownloadingItem ? progressLabel : isError ? 'Retry' : 'Save';
+        const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
 
         return (
-            <View
+            <Pressable
                 key={track.id}
+                onPress={() => handleTidalPlay(track)}
                 style={[
                     styles.trackRow,
-                    { backgroundColor: palette.cardBackground, borderColor: palette.cardBorder },
+                    {
+                        backgroundColor: isTrackActive ? withAlpha(theme.colors.primaryContainer, 'E8') : palette.cardBackground,
+                        borderColor: isTrackActive ? withAlpha(theme.colors.primary, '8C') : palette.cardBorder,
+                    },
                 ]}
             >
+                {isTrackActive ? (
+                    <Animated.View
+                        entering={FadeIn.duration(180)}
+                        exiting={FadeOut.duration(180)}
+                        pointerEvents="none"
+                        style={[
+                            StyleSheet.absoluteFillObject,
+                            styles.trackRowActiveOverlay,
+                            { backgroundColor: withAlpha(theme.colors.primary, '12') },
+                        ]}
+                    />
+                ) : null}
                 <Image
                     source={track.artworkUrl ? { uri: track.artworkUrl } : undefined}
                     style={styles.artwork}
                     contentFit="cover"
                     transition={120}
                 />
-                <Pressable style={styles.trackContent} onPress={() => handleTidalPlay(track)}>
+                <View style={styles.trackContent}>
                     <Text numberOfLines={1} style={[styles.trackTitle, { color: theme.colors.onSurface }]}>
                         {track.title}
                     </Text>
@@ -595,50 +673,104 @@ export default function TidalScreen() {
                     <View style={styles.metaRow}>
                         <Text style={{ color: theme.colors.onSurfaceVariant }}>{formatTrackDuration(track.durationMs)}</Text>
                         <Text style={{ color: theme.colors.onSurfaceVariant }}>•</Text>
-                        <View style={[styles.qualityPill, { backgroundColor: theme.colors.secondaryContainer }]}>
-                            <Text style={{ color: theme.colors.onSecondaryContainer, fontWeight: '800', fontSize: 10 }}>
+                        <View style={[styles.qualityPill, { backgroundColor: withAlpha(theme.colors.primary, '12') }]}>
+                            <Text style={[typeScale.micro, { color: theme.colors.primary }]}>
                                 {track.isHiRes ? 'HI-RES' : 'LOSSLESS'}
                             </Text>
                         </View>
                     </View>
-                </Pressable>
-                <IconButton icon={() => <CustomIcon name="Play" size={18} color={theme.colors.onPrimary} />} mode="contained" containerColor={theme.colors.primary} size={18} onPress={() => handleTidalPlay(track)} style={styles.playButton} />
+                </View>
                 <Button
                     compact
-                    mode={downloaded ? 'contained' : 'outlined'}
-                    onPress={() => handleTidalDownload(track)}
-                    style={{ minWidth: 80 }}
+                    mode={downloaded ? 'contained-tonal' : 'outlined'}
+                    onPress={(event) => {
+                        event.stopPropagation();
+                        void handleTidalDownload(track);
+                    }}
+                    style={styles.downloadButton}
+                    labelStyle={styles.downloadButtonLabel}
                     icon={downloaded ? undefined : () => <CustomIcon name="Descargar" size={14} color={theme.colors.primary} />}
                 >
                     {downloaded ? 'Guardado' : isDownloadingItem ? progressLabel : isError ? 'Reintentar' : 'Descargar'}
                 </Button>
-            </View>
+            </Pressable>
         );
-    }, [downloads, handleTidalDownload, handleTidalPlay, isDownloaded, theme.colors]);
+    }, [activeTidalTrackId, downloads, handleTidalDownload, handleTidalPlay, isDownloaded, isPlayerPlaying, palette.cardBackground, palette.cardBorder, pendingTrackPreview, theme.colors]);
 
     // MasonryGrid and MasonryGridCard are defined at module level above
 
     const hasQuery = query.trim().length > 0;
-    const hasSettledQuery = uiDebouncedQuery.trim().length > 0;
-    const isSearchPending = hasQuery && query.trim() !== debouncedQuery.trim();
+    const hasCommittedQuery = committedQuery.trim().length > 0;
+    const availableMirrors = useMemo(
+        () => [
+            'https://dabmusic.xyz/api',
+            'https://beta.dabmusic.xyz',
+            ...TIDAL_API_BASES,
+        ].filter((mirror, index, all) => all.indexOf(mirror) === index),
+        [],
+    );
+    const recommendedMirrors = useMemo(
+        () => availableMirrors.filter(mirror => [
+            'https://hifi.geeked.wtf',
+            'https://beta.dabmusic.xyz',
+            'https://dabmusic.xyz/api',
+        ].includes(mirror)),
+        [availableMirrors],
+    );
+    const legacyMirrors = useMemo(
+        () => availableMirrors.filter(mirror => !recommendedMirrors.includes(mirror)),
+        [availableMirrors, recommendedMirrors],
+    );
+    const qualityModalOptions = useMemo(
+        () => ['LOSSLESS', 'MP3', 'HI_RES_LOSSLESS', 'LOW'] as const,
+        [],
+    );
+    const refreshMirrorAvailability = useCallback(async (force = false) => {
+        setIsRefreshingMirrors(true);
+        try {
+            const nextAvailability = await getTidalMirrorAvailability(availableMirrors, { force });
+            setMirrorAvailability(nextAvailability);
+        } finally {
+            setIsRefreshingMirrors(false);
+        }
+    }, [availableMirrors]);
+
+    useEffect(() => {
+        void refreshMirrorAvailability(false);
+    }, [refreshMirrorAvailability]);
+
+    useEffect(() => {
+        if (!showMirrorModal) return;
+        void refreshMirrorAvailability(true);
+    }, [refreshMirrorAvailability, showMirrorModal]);
 
     const applySuggestion = useCallback((nextQuery: string) => {
         setQuery(nextQuery);
-    }, []);
+        triggerSearch(nextQuery);
+    }, [triggerSearch]);
 
+    const resultTabs = useMemo(() => ([
+        { key: 'all' as const, label: 'Todo' },
+        { key: 'artists' as const, label: 'Artistas' },
+        { key: 'albums' as const, label: 'Álbumes' },
+        { key: 'playlists' as const, label: 'Playlists' },
+        { key: 'tracks' as const, label: 'Canciones' },
+    ]), []);
     return (
         <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
-            <LinearGradient
-                colors={[withAlpha(theme.colors.primaryContainer, '7D'), theme.colors.background, theme.colors.background]}
-                style={StyleSheet.absoluteFill}
-            />
-
-            <ScrollView contentContainerStyle={[styles.pageContent, { paddingBottom: styles.pageContent.paddingBottom + insets.bottom }]} showsVerticalScrollIndicator={false}>
-                <Animated.View style={[styles.header, { gap: 0 }, headStyle]}>
-                    <Animated.View style={[styles.headerTitleRow, titleRowAnimatedStyle]}>
-                        <Animated.View style={[styles.headerTitleBlock, titleAnimatedStyle]}>
-                            <Text variant="headlineMedium" style={styles.headerTitle}>Explorar</Text>
-                        </Animated.View>
+            <ScrollView
+                contentContainerStyle={[styles.pageContent, { paddingBottom: styles.pageContent.paddingBottom + insets.bottom }]}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="on-drag"
+            >
+                <Animated.View style={styles.header}>
+                    <View pointerEvents="none" style={[styles.headerOrbit, { borderColor: withAlpha(theme.colors.primary, '24') }]} />
+                    <View pointerEvents="none" style={[styles.headerOrbitSecondary, { borderColor: withAlpha(theme.colors.tertiary ?? theme.colors.primary, '18') }]} />
+                    <View style={styles.headerTitleRow}>
+                        <View style={styles.headerTitleBlock}>
+                            <Text variant="headlineMedium" style={[styles.headerTitle, { color: theme.colors.onBackground }]}>Buscar</Text>
+                        </View>
                         <Menu
                             visible={showSettingsMenu}
                             onDismiss={() => setShowSettingsMenu(false)}
@@ -649,139 +781,120 @@ export default function TidalScreen() {
                                     size={20}
                                     onPress={() => setShowSettingsMenu(true)}
                                     style={styles.settingsButton}
-                                    containerColor={withAlpha(theme.colors.surface, 'F2')}
+                                    containerColor={withAlpha(theme.colors.surfaceVariant, 'B8')}
                                 />
                             }
-                            contentStyle={{ backgroundColor: palette.cardBackground, borderRadius: 16 }}
+                            contentStyle={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}
                         >
                             <Menu.Item
                                 onPress={() => { setShowSettingsMenu(false); setShowQualityModal(true); }}
-                                title="Calidad de Audio"
+                                title="Calidad de audio"
                                 leadingIcon="tune-variant"
                             />
                             <Divider style={{ opacity: 0.1 }} />
                             <Menu.Item
                                 onPress={() => { setShowSettingsMenu(false); setShowMirrorModal(true); }}
-                                title="Cambiar Servidor"
+                                title="Servidor"
                                 leadingIcon="server-network"
                             />
                         </Menu>
-                    </Animated.View>
+                    </View>
 
-                    <Animated.View style={[styles.searchShell, searchAnimatedStyle]}>
+                    <View
+                        style={[
+                            styles.searchShell,
+                            {
+                                borderColor: palette.searchBorder,
+                            },
+                        ]}
+                    >
                         <Searchbar
                             placeholder="Busca artistas, álbumes, canciones..."
                             value={query}
                             onChangeText={setQuery}
+                            onSubmitEditing={handleSubmitSearch}
+                            returnKeyType="search"
+                            submitBehavior="submit"
                             style={[
                                 styles.searchbar,
                                 {
                                     backgroundColor: 'transparent',
-                                    minHeight: hasSettledQuery ? 88 : 52,
+                                    minHeight: 52,
                                 }
                             ]}
-                            iconColor={hasSettledQuery ? 'transparent' : theme.colors.primary}
-                            inputStyle={[styles.searchInput, {
-                                fontWeight: hasSettledQuery ? '900' : 'normal',
-                                textAlign: hasSettledQuery ? 'left' : 'left',
-                                fontSize: hasSettledQuery ? 56 : 15,
-                                lineHeight: hasSettledQuery ? 58 : 20,
-                                letterSpacing: hasSettledQuery ? -1.2 : 0,
-                                paddingVertical: hasSettledQuery ? 0 : undefined,
-                            }]}
+                            iconColor={theme.colors.primary}
+                            inputStyle={[styles.searchInput, { color: theme.colors.onSurface }]}
                             placeholderTextColor={withAlpha(theme.colors.onSurfaceVariant, '40')}
                         />
-                    </Animated.View>
+                    </View>
                 </Animated.View>
 
-                {debouncedQuery.trim() ? (
-                    <Animated.View style={[styles.bentoContainer, bentoAnimatedStyle]}>
-                        {/* Columna Izquierda: Todo (Alta) */}
-                        <Pressable
-                            onPress={() => setActiveTab('all')}
-                            style={[
-                                styles.bentoItem,
-                                styles.bentoTall,
-                                {
-                                    backgroundColor: activeTab === 'all' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
-                                    borderColor: activeTab === 'all' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
-                                },
-                                activeTab === 'all' && styles.bentoActive
-                            ]}
-                        >
-                            <Text style={[styles.bentoLabel, styles.bentoTallLabel, { color: activeTab === 'all' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'all' && styles.bentoActiveLabel]}>Todo</Text>
-                        </Pressable>
+                {hasCommittedQuery ? (
+                    <Animated.ScrollView
+                        horizontal
+                        showsHorizontalScrollIndicator={false}
+                        contentContainerStyle={styles.filterRow}
+                        style={styles.filterScroller}
+                    >
+                        {resultTabs.map((tab) => {
+                            const selected = activeTab === tab.key;
+                            return (
+                                <Pressable
+                                    key={tab.key}
+                                    onPress={() => setActiveTab(tab.key)}
+                                    style={styles.filterChip}
+                                >
+                                    <View style={styles.filterChipInner}>
+                                        <Text style={[styles.filterChipLabel, { color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
+                                            {tab.label}
+                                        </Text>
+                                        <View
+                                            style={[
+                                                styles.filterChipUnderline,
+                                                { backgroundColor: selected ? theme.colors.primary : 'transparent' },
+                                            ]}
+                                        />
+                                    </View>
+                                </Pressable>
+                            );
+                        })}
+                    </Animated.ScrollView>
+                ) : null}
 
-                        <View style={styles.bentoRightCol}>
-                            {/* Fila Superior: Artistas, Álbumes, Playlists */}
-                            <View style={styles.bentoRow}>
+                {!hasQuery && recentSearches.length > 0 ? (
+                    <Animated.View entering={FadeInDown.duration(300)} style={styles.recentSection}>
+                        <View style={styles.sectionHeader}>
+                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Busquedas recientes</Text>
+                        </View>
+                        <View style={styles.recentSearchList}>
+                            {recentSearches.map((item, index) => (
                                 <Pressable
-                                    onPress={() => setActiveTab('artists')}
+                                    key={item}
+                                    onPress={() => applySuggestion(item)}
                                     style={[
-                                        styles.bentoItem,
-                                        styles.bentoSmall,
+                                        styles.recentSearchCard,
                                         {
-                                            backgroundColor: activeTab === 'artists' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
-                                            borderColor: activeTab === 'artists' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
+                                            borderBottomColor: palette.cardBorder,
                                         },
-                                        activeTab === 'artists' && styles.bentoActive
                                     ]}
                                 >
-                                    <Text style={[styles.bentoLabel, { color: activeTab === 'artists' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'artists' && styles.bentoActiveLabel]}>Artistas</Text>
+                                    <Text style={[styles.recentSearchIndex, { color: withAlpha(theme.colors.onSurfaceVariant, 'CC') }]}>
+                                        {String(index + 1).padStart(2, '0')}
+                                    </Text>
+                                    <View style={styles.recentSearchContent}>
+                                        <Text numberOfLines={1} style={[styles.recentSearchTitle, { color: theme.colors.onSurface }]}>
+                                            {formatRecentSearchTitle(item)}
+                                        </Text>
+                                    </View>
+                                    <CustomIcon name="Next" size={16} color={theme.colors.onSurfaceVariant} />
                                 </Pressable>
-                                <Pressable
-                                    onPress={() => setActiveTab('albums')}
-                                    style={[
-                                        styles.bentoItem,
-                                        styles.bentoSmall,
-                                        {
-                                            backgroundColor: activeTab === 'albums' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
-                                            borderColor: activeTab === 'albums' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
-                                        },
-                                        activeTab === 'albums' && styles.bentoActive
-                                    ]}
-                                >
-                                    <Text style={[styles.bentoLabel, { color: activeTab === 'albums' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'albums' && styles.bentoActiveLabel]}>Álbumes</Text>
-                                </Pressable>
-                                <Pressable
-                                    onPress={() => setActiveTab('playlists')}
-                                    style={[
-                                        styles.bentoItem,
-                                        styles.bentoSmall,
-                                        {
-                                            backgroundColor: activeTab === 'playlists' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
-                                            borderColor: activeTab === 'playlists' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
-                                        },
-                                        activeTab === 'playlists' && styles.bentoActive
-                                    ]}
-                                >
-                                    <Text style={[styles.bentoLabel, { color: activeTab === 'playlists' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'playlists' && styles.bentoActiveLabel]}>Playlists</Text>
-                                </Pressable>
-                            </View>
-
-                            {/* Fila Inferior: Canciones (Ancha) */}
-                            <View style={styles.bentoRow}>
-                                <Pressable
-                                    onPress={() => setActiveTab('tracks')}
-                                    style={[
-                                        styles.bentoItem,
-                                        styles.bentoWide,
-                                        {
-                                            backgroundColor: activeTab === 'tracks' ? withAlpha(theme.colors.primary, '2B') : withAlpha(theme.colors.surfaceVariant, '99'),
-                                            borderColor: activeTab === 'tracks' ? theme.colors.primary : withAlpha(theme.colors.outline, '66'),
-                                        },
-                                        activeTab === 'tracks' && styles.bentoActive
-                                    ]}
-                                >
-                                    <Text style={[styles.bentoLabel, { color: activeTab === 'tracks' ? theme.colors.primary : theme.colors.onSurfaceVariant }, activeTab === 'tracks' && styles.bentoActiveLabel]}>Canciones</Text>
-                                </Pressable>
-                            </View>
+                            ))}
                         </View>
                     </Animated.View>
                 ) : null}
 
-                {isLoading || isSearchPending ? (
-                    <View style={styles.resultsContent}>
+                {isLoading ? (
+                    <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(220)} style={styles.resultsContent}>
                         {(activeTab === 'all' || activeTab === 'artists') && (
                             <View style={styles.section}>
                                 <View style={styles.sectionHeader}>
@@ -841,55 +954,57 @@ export default function TidalScreen() {
                                 ))}
                             </View>
                         )}
-                    </View>
+                    </Animated.View>
                 ) : error ? (
                     <View style={styles.centered}>
-                        <EmptyState icon="⚠️" title="TIDAL unavailable" description={error} />
+                        <EmptyState title="No se pudo cargar Tidal" description={error} />
                     </View>
                 ) : !hasQuery ? (
-                    <Animated.View entering={FadeInDown.duration(450)} exiting={FadeOut.duration(280)} style={styles.discoveryContainer}>
-
-
-
-                        <View style={styles.gridContainer}>
-                            <View style={styles.gridColumn}>
-                                {EXPLORE_MASONRY_CARDS.filter((_, i) => i % 2 === 0).map((card) => (
-                                    <View key={card.title} style={{ height: card.height, borderRadius: 22, overflow: 'hidden' }}>
-                                        <Pressable
-                                            onPress={() => applySuggestion(card.query)}
-                                            style={StyleSheet.absoluteFill}
-                                        >
-                                            <LinearGradient colors={card.colors} style={[styles.discoveryCard, { flex: 1, height: undefined, minHeight: undefined }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                                                <Text style={styles.discoveryCardTitle}>{card.title}</Text>
-                                                <Text style={styles.discoveryCardSubtitle}>{card.subtitle}</Text>
-                                            </LinearGradient>
-                                        </Pressable>
-                                    </View>
-                                ))}
-                            </View>
-                            <View style={styles.gridColumn}>
-                                {EXPLORE_MASONRY_CARDS.filter((_, i) => i % 2 !== 0).map((card) => (
-                                    <View key={card.title} style={{ height: card.height, borderRadius: 22, overflow: 'hidden' }}>
-                                        <Pressable
-                                            onPress={() => applySuggestion(card.query)}
-                                            style={StyleSheet.absoluteFill}
-                                        >
-                                            <LinearGradient colors={card.colors} style={[styles.discoveryCard, { flex: 1, height: undefined, minHeight: undefined }]} start={{ x: 0, y: 0 }} end={{ x: 1, y: 1 }}>
-                                                <Text style={styles.discoveryCardTitle}>{card.title}</Text>
-                                                <Text style={styles.discoveryCardSubtitle}>{card.subtitle}</Text>
-                                            </LinearGradient>
-                                        </Pressable>
-                                    </View>
+                    <Animated.View entering={FadeInDown.duration(320)} style={styles.discoveryContainer}>
+                        <View
+                            style={[
+                                styles.discoveryPanel,
+                                {
+                                    backgroundColor: withAlpha(theme.colors.surface, 'F2'),
+                                    borderColor: withAlpha(theme.colors.outline, '20'),
+                                },
+                            ]}
+                        >
+                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Géneros</Text>
+                            <View style={[styles.discoveryAccent, { backgroundColor: withAlpha(theme.colors.primary, '88') }]} />
+                            <View style={styles.genreCloud}>
+                                {DISCOVERY_GENRES.map((genre, index) => (
+                                    <Pressable
+                                        key={genre.label}
+                                        onPress={() => applySuggestion(genre.query)}
+                                        style={[
+                                            styles.genreChip,
+                                            {
+                                                backgroundColor: index % 3 === 0
+                                                    ? withAlpha(theme.colors.primaryContainer, '82')
+                                                    : index % 3 === 1
+                                                        ? withAlpha(theme.colors.secondaryContainer ?? theme.colors.surfaceVariant, '8A')
+                                                        : withAlpha(theme.colors.surfaceVariant, 'A8'),
+                                                borderColor: index % 3 === 0
+                                                    ? withAlpha(theme.colors.primary, '28')
+                                                    : withAlpha(theme.colors.outline, '22'),
+                                            },
+                                        ]}
+                                    >
+                                        <Text style={[styles.genreChipLabel, { color: theme.colors.onSurface }]}>
+                                            {genre.label}
+                                        </Text>
+                                    </Pressable>
                                 ))}
                             </View>
                         </View>
                     </Animated.View>
-                ) : !tracks.length && !albums.length && !artists.length && !playlists.length ? (
+                ) : hasResolvedSearch && !tracks.length && !albums.length && !artists.length && !playlists.length ? (
                     <View style={styles.centered}>
-                        <EmptyState icon="🫧" title="No matches" description={`No encontramos resultados para "${debouncedQuery.trim()}"`} />
+                        <EmptyState title="Sin resultados" description={`No encontramos resultados para "${committedQuery.trim()}"`} />
                     </View>
                 ) : (
-                    <Animated.View entering={FadeIn.duration(400)} style={styles.resultsContent}>
+                    <Animated.View key={`results-${committedQuery}-${searchRunId}`} entering={FadeInDown.duration(260)} exiting={FadeOut.duration(180)} style={styles.resultsContent}>
                         {(activeTab === 'all' || activeTab === 'artists') && artists.length > 0 ? (
                             <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.section}>
                                 <View style={styles.sectionHeader}>
@@ -937,15 +1052,11 @@ export default function TidalScreen() {
                 onRequestClose={() => setShowMirrorModal(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
                     <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
                         <View style={styles.modalHeader}>
                             <View>
-                                <Text variant="titleLarge" style={{ color: theme.colors.onSurface, fontWeight: '900' }}>
+                                <Text variant="titleLarge" style={[typeScale.titleLarge, { color: theme.colors.onSurface }]}>
                                     Servidores
-                                </Text>
-                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                    Selecciona tu fuente de datos
                                 </Text>
                             </View>
                             <IconButton icon="close" mode="contained-tonal" onPress={() => setShowMirrorModal(false)} />
@@ -967,10 +1078,7 @@ export default function TidalScreen() {
                                     <IconButton icon="auto-fix" size={20} iconColor={tidalMirror === 'auto' ? theme.colors.onPrimary : theme.colors.onSurface} style={{ margin: 0 }} />
                                 </View>
                                 <View style={{ flex: 1 }}>
-                                    <Text variant="titleMedium" style={{
-                                        color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface,
-                                        fontWeight: '800'
-                                    }}>
+                                    <Text variant="titleMedium" style={[typeScale.title, { color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface }]}>
                                         Enrutamiento Automático
                                     </Text>
                                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
@@ -984,45 +1092,120 @@ export default function TidalScreen() {
                                 )}
                             </Pressable>
 
-                            {TIDAL_API_BASES.map((mirror) => (
-                                <Pressable
-                                    key={mirror}
-                                    onPress={() => handleMirrorChange(mirror)}
-                                    style={({ pressed }) => [
-                                        styles.premiumOption,
-                                        {
-                                            backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
-                                            borderColor: tidalMirror === mirror ? theme.colors.primary : 'transparent',
-                                            opacity: pressed ? 0.7 : 1
-                                        }
-                                    ]}
-                                >
-                                    <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
-                                        <IconButton
-                                            icon="server"
-                                            size={20}
-                                            iconColor={tidalMirror === mirror ? theme.colors.onPrimary : theme.colors.onSurface}
-                                            style={{ margin: 0 }}
-                                        />
-                                    </View>
-                                    <View style={{ flex: 1 }}>
-                                        <Text variant="titleMedium" style={{
-                                            color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface,
-                                            fontWeight: '800'
-                                        }}>
-                                            {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                        </Text>
-                                        <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>
-                                            {mirror.replace('https://', '')}
-                                        </Text>
-                                    </View>
-                                    {tidalMirror === mirror && (
-                                        <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
-                                            <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
+                            {recommendedMirrors.map((mirror) => {
+                                const availability = mirrorAvailability[mirror];
+                                const isUnavailable = availability?.status === 'unavailable';
+                                const isSlow = availability?.status === 'slow';
+                                const titleColor = isUnavailable
+                                    ? theme.colors.onSurfaceVariant
+                                    : tidalMirror === mirror
+                                        ? theme.colors.primary
+                                        : theme.colors.onSurface;
+                                const statusColor = isUnavailable
+                                    ? theme.colors.error
+                                    : isSlow
+                                        ? '#F59E0B'
+                                        : '#10B981';
+
+                                return (
+                                    <Pressable
+                                        key={mirror}
+                                        disabled={isUnavailable}
+                                        onPress={() => handleMirrorChange(mirror)}
+                                        style={({ pressed }) => [
+                                            styles.premiumOption,
+                                            {
+                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
+                                                borderColor: tidalMirror === mirror ? theme.colors.primary : (isUnavailable ? withAlpha(theme.colors.error, '7D') : 'transparent'),
+                                                opacity: isUnavailable ? 0.5 : (pressed ? 0.7 : 1)
+                                            }
+                                        ]}
+                                    >
+                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
+                                            <IconButton
+                                                icon="server"
+                                                size={20}
+                                                iconColor={tidalMirror === mirror ? theme.colors.onPrimary : theme.colors.onSurface}
+                                                style={{ margin: 0 }}
+                                            />
                                         </View>
-                                    )}
-                                </Pressable>
-                            ))}
+                                        <View style={{ flex: 1 }}>
+                                            <Text variant="titleMedium" style={[typeScale.title, { color: titleColor }]}>
+                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                                            </Text>
+                                            <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>
+                                                {mirror.replace('https://', '')}
+                                            </Text>
+                                            <Text variant="labelSmall" style={{ color: statusColor, marginTop: 4 }}>
+                                                {formatMirrorStatus(availability)}
+                                            </Text>
+                                        </View>
+                                        {tidalMirror === mirror && (
+                                            <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
+                                                <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
+                                            </View>
+                                        )}
+                                    </Pressable>
+                                );
+                            })}
+
+                            <Button
+                                mode="text"
+                                compact
+                                onPress={() => setShowLegacyMirrors(value => !value)}
+                                textColor={theme.colors.primary}
+                                style={{ alignSelf: 'flex-start', marginTop: 2 }}
+                            >
+                                {showLegacyMirrors ? 'Ocultar otros servidores' : 'Mostrar otros servidores'}
+                            </Button>
+
+                            {showLegacyMirrors ? legacyMirrors.map((mirror) => {
+                                const availability = mirrorAvailability[mirror];
+                                const isUnavailable = availability?.status === 'unavailable';
+                                const titleColor = isUnavailable
+                                    ? theme.colors.onSurfaceVariant
+                                    : tidalMirror === mirror
+                                        ? theme.colors.primary
+                                        : theme.colors.onSurface;
+
+                                return (
+                                    <Pressable
+                                        key={mirror}
+                                        disabled={isUnavailable}
+                                        onPress={() => handleMirrorChange(mirror)}
+                                        style={({ pressed }) => [
+                                            styles.premiumOption,
+                                            {
+                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
+                                                borderColor: tidalMirror === mirror ? theme.colors.primary : 'transparent',
+                                                opacity: isUnavailable ? 0.45 : (pressed ? 0.7 : 0.88),
+                                            }
+                                        ]}
+                                    >
+                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
+                                            <IconButton
+                                                icon="server-outline"
+                                                size={20}
+                                                iconColor={tidalMirror === mirror ? theme.colors.onPrimary : theme.colors.onSurface}
+                                                style={{ margin: 0 }}
+                                            />
+                                        </View>
+                                        <View style={{ flex: 1 }}>
+                                            <Text variant="titleMedium" style={[typeScale.title, { color: titleColor }]}>
+                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                                            </Text>
+                                            <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>
+                                                {mirror.replace('https://', '')}
+                                            </Text>
+                                        </View>
+                                        {tidalMirror === mirror && (
+                                            <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
+                                                <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
+                                            </View>
+                                        )}
+                                    </Pressable>
+                                );
+                            }) : null}
                         </ScrollView>
                     </View>
                 </View>
@@ -1036,11 +1219,10 @@ export default function TidalScreen() {
                 onRequestClose={() => setShowQualityModal(false)}
             >
                 <View style={styles.modalOverlay}>
-                    <BlurView intensity={30} tint="dark" style={StyleSheet.absoluteFill} />
                     <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
                         <View style={styles.modalHeader}>
                             <View>
-                                <Text variant="titleLarge" style={{ color: theme.colors.onSurface, fontWeight: '900' }}>
+                                <Text variant="titleLarge" style={[typeScale.titleLarge, { color: theme.colors.onSurface }]}>
                                     Fidelidad
                                 </Text>
                                 <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
@@ -1055,7 +1237,7 @@ export default function TidalScreen() {
                                 Selecciona el formato preferido para tus descargas de Tidal.
                             </Text>
 
-                            {(['HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'] as TidalQuality[]).map((q) => {
+                            {qualityModalOptions.map((q) => {
                                 const details = {
                                     HI_RES_LOSSLESS: {
                                         title: 'Hi-Res Lossless (FLAC)',
@@ -1069,11 +1251,11 @@ export default function TidalScreen() {
                                         adv: '✓ Alta fidelidad / ✗ Archivos grandes (~30-50MB)',
                                         icon: 'disc'
                                     },
-                                    HIGH: {
-                                        title: 'Alta (AAC/MP3)',
-                                        desc: 'Excelente calidad comprimida (320kbps).',
-                                        adv: '✓ Ahorro de espacio / ✓ Muy buena calidad',
-                                        icon: 'check-circle'
+                                    MP3: {
+                                        title: 'MP3 (320kbps)',
+                                        desc: 'Compatibilidad amplia y buen balance entre tamaño y calidad.',
+                                        adv: '✓ Más compatible / ✓ Tamaño moderado',
+                                        icon: 'file-music-outline'
                                     },
                                     LOW: {
                                         title: 'Básica (AAC)',
@@ -1081,47 +1263,46 @@ export default function TidalScreen() {
                                         adv: '✓ Ahorro máximo / ✓ Ideal para poco espacio',
                                         icon: 'leaf'
                                     }
-                                }[q];
+                                } as const;
+                                const selectedQuality = q as keyof typeof details;
+                                const optionDetails = details[selectedQuality];
 
                                 return (
                                     <Pressable
-                                        key={q}
+                                        key={selectedQuality}
                                         onPress={() => {
-                                            setTidalDownloadQuality(q);
+                                            setTidalDownloadQuality(selectedQuality);
                                             setShowQualityModal(false);
                                         }}
                                         style={({ pressed }) => [
                                             styles.premiumOption,
                                             {
-                                                backgroundColor: tidalDownloadQuality === q ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
-                                                borderColor: tidalDownloadQuality === q ? theme.colors.primary : 'transparent',
+                                                backgroundColor: tidalDownloadQuality === selectedQuality ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
+                                                borderColor: tidalDownloadQuality === selectedQuality ? theme.colors.primary : 'transparent',
                                                 opacity: pressed ? 0.7 : 1
                                             }
                                         ]}
                                     >
-                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
+                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalDownloadQuality === selectedQuality ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
                                             <IconButton
-                                                icon={details.icon}
+                                                icon={optionDetails.icon}
                                                 size={22}
-                                                iconColor={tidalDownloadQuality === q ? theme.colors.onPrimary : theme.colors.onSurface}
+                                                iconColor={tidalDownloadQuality === selectedQuality ? theme.colors.onPrimary : theme.colors.onSurface}
                                                 style={{ margin: 0 }}
                                             />
                                         </View>
                                         <View style={{ flex: 1 }}>
-                                            <Text variant="titleMedium" style={{
-                                                color: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurface,
-                                                fontWeight: '800'
-                                            }}>
-                                                {details.title}
+                                            <Text variant="titleMedium" style={[typeScale.title, { color: tidalDownloadQuality === selectedQuality ? theme.colors.primary : theme.colors.onSurface }]}>
+                                                {optionDetails.title}
                                             </Text>
-                                            <Text variant="labelSmall" style={{ color: theme.colors.primary, fontWeight: 'bold', marginBottom: 2 }}>
-                                                {details.adv.split(' / ')[0]}
+                                            <Text variant="labelSmall" style={[typeScale.micro, { color: theme.colors.primary, marginBottom: 2 }]}>
+                                                {optionDetails.adv.split(' / ')[0]}
                                             </Text>
                                             <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                {details.desc}
+                                                {optionDetails.desc}
                                             </Text>
                                         </View>
-                                        {tidalDownloadQuality === q && (
+                                        {tidalDownloadQuality === selectedQuality && (
                                             <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
                                                 <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
                                             </View>
@@ -1156,17 +1337,40 @@ const styles = StyleSheet.create({
     header: {
         marginHorizontal: 16,
         marginTop: 10,
-        marginBottom: 10,
+        marginBottom: 12,
         paddingHorizontal: 0,
-        paddingTop: 12,
+        paddingTop: 10,
         paddingBottom: 10,
         gap: 12,
         elevation: 0,
+        overflow: 'hidden',
+    },
+    headerOrbit: {
+        position: 'absolute',
+        width: 220,
+        height: 220,
+        borderRadius: 220,
+        borderWidth: 1.5,
+        top: -126,
+        right: -104,
+        transform: [{ rotate: '18deg' }],
+    },
+    headerOrbitSecondary: {
+        position: 'absolute',
+        width: 140,
+        height: 140,
+        borderRadius: 140,
+        borderWidth: 1,
+        top: -38,
+        right: 54,
+        transform: [{ rotate: '-12deg' }],
     },
     headerTitleRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'center',
+        alignItems: 'flex-start',
+        zIndex: 4,
+        elevation: 4,
     },
     headerTitleBlock: {
         flex: 1,
@@ -1174,86 +1378,98 @@ const styles = StyleSheet.create({
         justifyContent: 'center',
     },
     headerTitle: {
-        fontWeight: '900',
-        letterSpacing: -1.2,
-        fontSize: 56,
-        lineHeight: 58,
+        ...typeScale.screenTitle,
+        letterSpacing: -0.6,
     },
     settingsButton: {
         margin: 0,
-        width: 36,
-        height: 36,
-        borderRadius: 12,
+        width: 40,
+        height: 40,
+        borderRadius: 14,
+        zIndex: 5,
+        elevation: 5,
     },
     title: {
-        fontWeight: '800',
+        ...typeScale.titleLarge,
     },
     searchShell: {
-        borderRadius: 999,
-        paddingHorizontal: 4,
+        borderRadius: 0,
+        borderBottomWidth: 1,
+        paddingHorizontal: 0,
+        paddingVertical: 0,
+        zIndex: 1,
     },
     searchbar: {
-        borderRadius: 999,
+        borderRadius: 0,
         minHeight: 52,
         elevation: 0,
     },
     searchInput: {
-        fontSize: 15,
-        paddingLeft: 2,
+        ...typeScale.bodyStrong,
+        paddingLeft: 0,
+        fontSize: 20,
+        lineHeight: 28,
+        letterSpacing: -0.2,
     },
-    bentoContainer: {
-        flexDirection: 'row',
+    filterScroller: {
         paddingHorizontal: 16,
-        paddingBottom: 24,
-        gap: 10,
-        height: 140,
+        marginBottom: 18,
     },
-    bentoItem: {
-        borderRadius: 24,
-        borderWidth: 1.5,
+    filterRow: {
+        gap: 10,
+        paddingRight: 16,
+    },
+    filterChip: {
+        borderRadius: 0,
+        borderWidth: 0,
+        paddingHorizontal: 0,
+        paddingVertical: 4,
         justifyContent: 'center',
         alignItems: 'center',
     },
-    bentoTall: {
-        width: 75,
-        height: '100%',
-        justifyContent: 'flex-end',
-        paddingBottom: 16,
+    filterChipInner: {
+        alignItems: 'center',
     },
-    bentoWide: {
-        flex: 2,
-        height: '100%',
-        alignItems: 'flex-start',
-        paddingLeft: 16,
-    },
-    bentoSmall: {
-        flex: 1,
-        height: '100%',
-    },
-    bentoRightCol: {
-        flex: 1,
-        gap: 10,
-    },
-    bentoRow: {
-        flex: 1,
-        flexDirection: 'row',
-        gap: 10,
-    },
-    bentoLabel: {
-        fontSize: 13,
+    filterChipLabel: {
+        ...typeScale.caption,
         fontWeight: '600',
+        letterSpacing: 0.15,
+        textTransform: 'uppercase',
     },
-    bentoTallLabel: {
-        fontSize: 14,
+    filterChipUnderline: {
+        width: 26,
+        height: 2,
+        borderRadius: 999,
+        marginTop: 8,
     },
-    bentoActive: {
-        transform: [{ scale: 1.02 }],
+    recentSection: {
+        paddingHorizontal: 16,
+        marginBottom: 12,
     },
-    bentoActiveLabel: {
-        fontWeight: '800',
+    recentSearchList: {
+        gap: 0,
     },
-    bentoIconBox: {
-        opacity: 0.8,
+    recentSearchCard: {
+        borderRadius: 0,
+        borderWidth: 0,
+        borderBottomWidth: 1,
+        paddingVertical: 14,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 12,
+    },
+    recentSearchIndex: {
+        ...typeScale.micro,
+        width: 26,
+        letterSpacing: 0.8,
+        fontWeight: '700',
+    },
+    recentSearchContent: {
+        flex: 1,
+    },
+    recentSearchTitle: {
+        ...typeScale.body,
+        fontWeight: '600',
     },
     centered: {
         minHeight: 320,
@@ -1265,40 +1481,34 @@ const styles = StyleSheet.create({
     discoveryContainer: {
         paddingHorizontal: 16,
         paddingBottom: 24,
-        gap: 10,
+        gap: 14,
     },
-    discoveryTitle: {
-        fontSize: 22,
-        fontWeight: '900',
-        letterSpacing: -0.4,
+    discoveryPanel: {
+        borderRadius: 28,
+        borderWidth: 1,
+        paddingHorizontal: 16,
+        paddingVertical: 16,
+        gap: 12,
     },
-    discoverySubtitle: {
-        fontSize: 14,
-        marginBottom: 4,
+    discoveryAccent: {
+        width: 36,
+        height: 3,
+        borderRadius: 999,
     },
-    discoveryCardsRow: {
+    genreCloud: {
         flexDirection: 'row',
+        flexWrap: 'wrap',
         gap: 10,
     },
-    discoveryCardPressable: {
-        flex: 1,
+    genreChip: {
+        borderRadius: 999,
+        borderWidth: 1,
+        paddingHorizontal: 12,
+        paddingVertical: 8,
     },
-    discoveryCard: {
-        minHeight: 132,
-        borderRadius: 22,
-        padding: 14,
-        justifyContent: 'flex-end',
-    },
-    discoveryCardTitle: {
-        color: '#FFFFFF',
-        fontSize: 16,
-        fontWeight: '900',
-        letterSpacing: -0.3,
-    },
-    discoveryCardSubtitle: {
-        color: 'rgba(255,255,255,0.88)',
-        fontSize: 12,
-        marginTop: 5,
+    genreChipLabel: {
+        ...typeScale.label,
+        fontWeight: '700',
     },
     suggestionWrap: {
         flexDirection: 'row',
@@ -1313,8 +1523,7 @@ const styles = StyleSheet.create({
         paddingVertical: 7,
     },
     suggestionChipLabel: {
-        fontSize: 12,
-        fontWeight: '700',
+        ...typeScale.label,
     },
     resultsContent: {
         paddingBottom: 8,
@@ -1330,7 +1539,7 @@ const styles = StyleSheet.create({
         marginBottom: 10,
     },
     sectionTitle: {
-        fontWeight: '800',
+        ...typeScale.title,
     },
     trackRow: {
         borderRadius: 18,
@@ -1340,6 +1549,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
+    },
+    trackRowActiveOverlay: {
+        borderRadius: 18,
     },
     artwork: {
         width: 62,
@@ -1357,7 +1569,7 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     trackTitle: {
-        fontWeight: '700',
+        ...typeScale.title,
         marginBottom: 2,
     },
     metaRow: {
@@ -1368,8 +1580,14 @@ const styles = StyleSheet.create({
     },
     qualityPill: {
         borderRadius: 999,
-        paddingHorizontal: 10,
-        paddingVertical: 3,
+        paddingHorizontal: 9,
+        paddingVertical: 4,
+    },
+    downloadButton: {
+        minWidth: 92,
+    },
+    downloadButtonLabel: {
+        ...typeScale.label,
     },
     entityRow: {
         borderRadius: 18,
@@ -1384,41 +1602,38 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     entityTitle: {
-        fontWeight: '700',
-    },
-    playButton: {
-        margin: 0,
-        marginRight: 2,
+        ...typeScale.title,
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.4)',
+        backgroundColor: 'rgba(0,0,0,0.22)',
         justifyContent: 'flex-end',
     },
     modalContent: {
-        borderTopLeftRadius: 36,
-        borderTopRightRadius: 36,
+        borderTopLeftRadius: 28,
+        borderTopRightRadius: 28,
         padding: 24,
         paddingBottom: 40,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
+        borderColor: 'rgba(255,255,255,0.06)',
         shadowColor: '#000',
-        shadowOffset: { width: 0, height: -10 },
-        shadowOpacity: 0.2,
-        shadowRadius: 20,
-        elevation: 24,
+        shadowOffset: { width: 0, height: -6 },
+        shadowOpacity: 0.12,
+        shadowRadius: 14,
+        elevation: 12,
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'flex-start',
-        marginBottom: 24,
+        marginBottom: 18,
     },
     premiumOption: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 16,
-        borderRadius: 20,
+        paddingVertical: 14,
+        paddingHorizontal: 12,
+        borderRadius: 18,
         borderWidth: 1,
         gap: 16,
     },
@@ -1454,33 +1669,32 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
-        minHeight: 80,
+        minHeight: 72,
         justifyContent: 'flex-end',
         overflow: 'hidden',
     },
     gridCardContent: {
-        padding: 16,
-        paddingBottom: 20,
+        padding: 14,
+        paddingBottom: 16,
         zIndex: 2,
     },
     gridCardTitle: {
+        ...typeScale.titleLarge,
         color: '#fff',
-        fontWeight: '900',
         fontSize: 18,
-        letterSpacing: -0.5,
-        textShadowColor: 'rgba(0,0,0,0.4)',
-        textShadowOffset: { width: 0, height: 1 },
-        textShadowRadius: 6,
         lineHeight: 22,
-    },
-    gridCardSubtitle: {
-        color: 'rgba(255,255,255,0.8)',
-        fontWeight: '700',
-        fontSize: 13,
-        marginTop: 4,
-        textShadowColor: 'rgba(0,0,0,0.3)',
+        letterSpacing: -0.5,
+        textShadowColor: 'rgba(0,0,0,0.24)',
         textShadowOffset: { width: 0, height: 1 },
         textShadowRadius: 4,
+    },
+    gridCardSubtitle: {
+        ...typeScale.caption,
+        color: 'rgba(255,255,255,0.8)',
+        marginTop: 4,
+        textShadowColor: 'rgba(0,0,0,0.18)',
+        textShadowOffset: { width: 0, height: 1 },
+        textShadowRadius: 3,
     },
     gridIconPlaceholder: {
         position: 'absolute',

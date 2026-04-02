@@ -5,6 +5,7 @@
  */
 
 import { getColors, ImageColorsResult } from 'react-native-image-colors';
+import { FileSystemStorage } from './storage';
 
 export interface AlbumColors {
     primary: string;
@@ -214,27 +215,96 @@ function generateCacheKey(uri: string): string {
 }
 
 const colorCache = new Map<string, AlbumColors>();
+const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors';
+const MAX_PERSISTED_COLOR_CACHE = 120;
+let persistedColorCacheLoaded = false;
+let persistedColorCachePromise: Promise<void> | null = null;
+let persistColorCacheTimer: ReturnType<typeof setTimeout> | null = null;
+
+function serializeColorCacheEntries(entries: Map<string, AlbumColors>) {
+    return JSON.stringify(Array.from(entries.entries()));
+}
+
+async function ensurePersistedColorCacheLoaded() {
+    if (persistedColorCacheLoaded) return;
+    if (persistedColorCachePromise) return persistedColorCachePromise;
+
+    persistedColorCachePromise = FileSystemStorage.getItem(PERSISTED_COLOR_CACHE_KEY)
+        .then((raw) => {
+            if (!raw) return;
+
+            try {
+                const parsed = JSON.parse(raw) as Array<[string, AlbumColors]>;
+                if (!Array.isArray(parsed)) return;
+
+                parsed.forEach((entry) => {
+                    if (!Array.isArray(entry) || entry.length !== 2) return;
+                    const [key, value] = entry;
+                    if (typeof key !== 'string' || !value) return;
+                    colorCache.set(key, value);
+                });
+            } catch (error) {
+                console.warn('[ColorExtractor] Failed to parse persisted color cache:', error);
+            }
+        })
+        .finally(() => {
+            persistedColorCacheLoaded = true;
+            persistedColorCachePromise = null;
+        });
+
+    return persistedColorCachePromise;
+}
+
+function trimColorCache() {
+    while (colorCache.size > MAX_PERSISTED_COLOR_CACHE) {
+        const oldestKey = colorCache.keys().next().value;
+        if (!oldestKey) break;
+        colorCache.delete(oldestKey);
+    }
+}
+
+function schedulePersistedColorCacheWrite() {
+    if (persistColorCacheTimer !== null) {
+        clearTimeout(persistColorCacheTimer);
+    }
+
+    persistColorCacheTimer = setTimeout(() => {
+        persistColorCacheTimer = null;
+        trimColorCache();
+        void FileSystemStorage.setItem(PERSISTED_COLOR_CACHE_KEY, serializeColorCacheEntries(colorCache));
+    }, 250);
+}
 
 export async function getImageColors(imageUri: string): Promise<AlbumColors> {
     if (!imageUri) {
         return DEFAULT_COLORS;
     }
 
+    await ensurePersistedColorCacheLoaded();
+
     const cacheKey = generateCacheKey(imageUri);
     const cached = colorCache.get(cacheKey);
-    if (cached) return cached;
+    if (cached) {
+        // Refresh recency so frequently used palettes stay persisted.
+        colorCache.delete(cacheKey);
+        colorCache.set(cacheKey, cached);
+        return cached;
+    }
 
     const colors = await extractColorsFromImage(imageUri);
     colorCache.set(cacheKey, colors);
-
-    if (colorCache.size > 50) {
-        const firstKey = colorCache.keys().next().value;
-        if (firstKey) colorCache.delete(firstKey);
-    }
+    trimColorCache();
+    schedulePersistedColorCacheWrite();
 
     return colors;
 }
 
 export function clearColorCache(): void {
     colorCache.clear();
+    persistedColorCacheLoaded = true;
+    if (persistColorCacheTimer !== null) {
+        clearTimeout(persistColorCacheTimer);
+        persistColorCacheTimer = null;
+    }
+    void FileSystemStorage.removeItem(PERSISTED_COLOR_CACHE_KEY);
 }

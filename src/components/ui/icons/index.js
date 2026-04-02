@@ -1,9 +1,10 @@
-export { default as Ajustes } from "./Ajustes";
+﻿export { default as Ajustes } from "./Ajustes";
 export { default as Album } from "./Album";
 export { default as Artista } from "./Artista";
-export { default as Canción } from "./Canción";
+export { default as Cancion } from "./Canci\u00f3n";
 export { default as Cola } from "./Cola";
 export { default as Descargar } from "./Descargar";
+export { default as Heart } from "./Heart";
 export { default as Home } from "./Home";
 export { default as Library } from "./Library";
 export { default as Lyrics } from "./Lyrics";

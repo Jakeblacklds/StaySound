@@ -42,6 +42,7 @@ const metadataSidecarCache = new Map<string, Promise<TidalMetadataSidecar | null
 const tidalHydrationCache = new Map<string, Promise<TidalMetadataSidecar | null>>();
 let activeHydrationCount = 0;
 const pendingHydrationResolvers: Array<() => void> = [];
+const MAX_BACKGROUND_HYDRATION_BATCH = 24;
 
 function getNativeApi(): NativeLibraryIndexerApi | null {
     if (nativeApi) return nativeApi;
@@ -337,11 +338,64 @@ async function hydrateMetadataFromTidal(title: string, artist: string, album: st
     return await tidalHydrationCache.get(cacheKey)!;
 }
 
+function normalizeFolderPattern(folderPattern?: unknown): string | undefined {
+    if (typeof folderPattern !== 'string') return undefined;
+    const trimmed = folderPattern.trim();
+    return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function shouldHydrateTrackFromApi(track: Pick<Track, 'title' | 'artist' | 'album' | 'artwork' | 'relativePath'>): boolean {
+    return isLikelyTidalDownload(track.relativePath)
+        && (!isKnownAlbumValue(track.album) || !track.artwork);
+}
+
+function mergeHydratedTrack(track: Track, apiMetadata: TidalMetadataSidecar | null): Track {
+    if (!apiMetadata) return track;
+
+    return {
+        ...track,
+        title: apiMetadata.title || track.title,
+        artist: apiMetadata.artist || track.artist,
+        album: isKnownAlbumValue(track.album) ? track.album : (apiMetadata.album || track.album),
+        artwork: apiMetadata.artwork || track.artwork,
+        trackNumber: track.trackNumber || apiMetadata.trackNumber,
+        year: track.year || apiMetadata.year,
+        quality: track.quality || apiMetadata.quality,
+        codec: track.codec || apiMetadata.codec,
+        sampleRate: track.sampleRate || apiMetadata.sampleRate,
+        bitDepth: track.bitDepth || apiMetadata.bitDepth,
+        source: track.source || apiMetadata.source,
+        tidalId: track.tidalId || apiMetadata.tidalId,
+        tidalAlbumId: track.tidalAlbumId || apiMetadata.tidalAlbumId,
+    };
+}
+
+async function mapConcurrent<T, R>(
+    items: T[],
+    limit: number,
+    worker: (item: T, index: number) => Promise<R | null>
+): Promise<R[]> {
+    const results: R[] = [];
+    let currentIndex = 0;
+
+    async function runWorker() {
+        while (currentIndex < items.length) {
+            const itemIndex = currentIndex++;
+            const result = await worker(items[itemIndex], itemIndex);
+            if (result) results.push(result);
+        }
+    }
+
+    const workers = Array.from({ length: Math.min(limit, items.length) }, () => runWorker());
+    await Promise.all(workers);
+    return results;
+}
+
 export async function scanMusicNative(folderPattern?: string): Promise<Track[]> {
     const api = getNativeApi();
     if (!api) return [];
 
-    const nativeTracks = await api.scanTracksNative(folderPattern);
+    const nativeTracks = await api.scanTracksNative(normalizeFolderPattern(folderPattern));
     return await Promise.all(nativeTracks.map(async (track) => {
         const sidecarMetadata = await readMetadataSidecar(track.relativePath, track.displayName);
         const parsed = parseFilename(track.displayName || track.uri);
@@ -357,20 +411,14 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
         const resolvedTitle = sidecarMetadata?.title
             || (shouldUseParsedTitle(track.title, track.displayName || track.uri) ? parsed.title : track.title);
         const sidecarArtwork = await findSidecarArtwork(track.relativePath, resolvedArtist, resolvedAlbum);
-        const shouldHydrateFromApi = isLikelyTidalDownload(track.relativePath)
-            && (!isKnownAlbumValue(resolvedAlbum) || !(sidecarArtwork || sidecarMetadata?.artwork));
-        const apiMetadata = shouldHydrateFromApi
-            ? await hydrateMetadataFromTidal(resolvedTitle, resolvedArtist, resolvedAlbum, track.relativePath)
-            : null;
 
-        const finalTitle = sidecarMetadata?.title || apiMetadata?.title || resolvedTitle;
-        const finalArtist = sidecarMetadata?.artist || apiMetadata?.artist || resolvedArtist;
+        const finalTitle = sidecarMetadata?.title || resolvedTitle;
+        const finalArtist = sidecarMetadata?.artist || resolvedArtist;
         const finalAlbum = isKnownAlbumValue(resolvedAlbum)
             ? resolvedAlbum
-            : (sidecarMetadata?.album || apiMetadata?.album || resolvedAlbum);
+            : (sidecarMetadata?.album || resolvedAlbum);
         const finalArtwork = sidecarArtwork
             || sidecarMetadata?.artwork
-            || apiMetadata?.artwork
             || track.artwork;
 
         return {
@@ -382,20 +430,59 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
             duration: track.durationMs || 0,
             artwork: finalArtwork,
             albumId: track.albumId,
-            trackNumber: sidecarMetadata?.trackNumber || apiMetadata?.trackNumber,
-            year: sidecarMetadata?.year || apiMetadata?.year,
-            quality: sidecarMetadata?.quality || apiMetadata?.quality,
+            trackNumber: sidecarMetadata?.trackNumber,
+            year: sidecarMetadata?.year,
+            quality: sidecarMetadata?.quality,
             codec: sidecarMetadata?.codec,
             sampleRate: sidecarMetadata?.sampleRate,
             bitDepth: sidecarMetadata?.bitDepth,
-            source: sidecarMetadata?.source || apiMetadata?.source || (isLikelyTidalDownload(track.relativePath) ? 'tidal' : undefined),
-            tidalId: sidecarMetadata?.tidalId || apiMetadata?.tidalId,
-            tidalAlbumId: sidecarMetadata?.tidalAlbumId || apiMetadata?.tidalAlbumId,
+            source: sidecarMetadata?.source || (isLikelyTidalDownload(track.relativePath) ? 'tidal' : undefined),
+            tidalId: sidecarMetadata?.tidalId,
+            tidalAlbumId: sidecarMetadata?.tidalAlbumId,
             dateAdded: track.dateAddedMs || Date.now(),
             format: getFormatFromValue(track.displayName || track.uri),
+            relativePath: track.relativePath,
             _filename: track.displayName || undefined,
         };
     }));
+}
+
+export async function hydrateDeferredTidalMetadata(
+    tracks: Track[],
+    onBatchResolved: (updates: Track[]) => void
+): Promise<void> {
+    const candidates = tracks
+        .filter(track => shouldHydrateTrackFromApi(track))
+        .slice(0, MAX_BACKGROUND_HYDRATION_BATCH);
+
+    if (candidates.length === 0) return;
+
+    const updates = await mapConcurrent(candidates, 2, async (track) => {
+        try {
+            const apiMetadata = await hydrateMetadataFromTidal(track.title, track.artist, track.album, track.relativePath);
+            if (!apiMetadata) return null;
+
+            const merged = mergeHydratedTrack(track, apiMetadata);
+            const changed = merged.title !== track.title
+                || merged.artist !== track.artist
+                || merged.album !== track.album
+                || merged.artwork !== track.artwork
+                || merged.trackNumber !== track.trackNumber
+                || merged.year !== track.year
+                || merged.quality !== track.quality
+                || merged.source !== track.source
+                || merged.tidalId !== track.tidalId
+                || merged.tidalAlbumId !== track.tidalAlbumId;
+
+            return changed ? merged : null;
+        } catch {
+            return null;
+        }
+    });
+
+    if (updates.length > 0) {
+        onBatchResolved(updates);
+    }
 }
 
 function getFormatFromValue(value: string): string | undefined {

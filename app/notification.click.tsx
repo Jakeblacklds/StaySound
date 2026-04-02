@@ -1,9 +1,15 @@
 import { usePlayerStore } from '@/src/stores';
-import { router } from 'expo-router';
+import { router, useRootNavigationState } from 'expo-router';
 import { useEffect } from 'react';
 
 export default function NotificationClickScreen() {
+  const rootNavigationState = useRootNavigationState();
+
   useEffect(() => {
+    if (!rootNavigationState?.key) {
+      return;
+    }
+
     const { currentTrack, setPlayerVisible } = usePlayerStore.getState();
 
     if (currentTrack != null) {
@@ -11,7 +17,7 @@ export default function NotificationClickScreen() {
     }
 
     router.replace('/');
-  }, []);
+  }, [rootNavigationState?.key]);
 
   return null;
 }

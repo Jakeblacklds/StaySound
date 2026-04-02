@@ -1,12 +1,15 @@
-import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
-import { useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
+﻿import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
+import { useAuthStore, useDabAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
+import { useUIStore } from '@/src/stores/uiStore';
+import { useI18n } from '@/src/i18n';
 import { useTheme } from '@/src/theme';
-import { generateM3Palette, SchemeVariant } from '@/src/theme/utils';
+import { generateManualAccentPalette, SchemeVariant } from '@/src/theme/utils';
 import { TidalQuality } from '@/src/types/audio';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
+import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { ActivityIndicator, Button, Divider, List, Switch, Text, TextInput } from 'react-native-paper';
@@ -14,7 +17,7 @@ import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ColorPicker, { HueSlider, Panel1, Swatches } from 'reanimated-color-picker';
 
-// ─── Worklet-safe bridge ─────────────────────────────────────────────────────
+// â”€â”€â”€ Worklet-safe bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // reanimated-color-picker calls onChange/onComplete on the UI thread.
 // We must use runOnJS to dispatch state updates back to the JS thread.
 
@@ -22,25 +25,35 @@ export default function SettingsScreen() {
     const {
         theme,
         config,
-        setThemeStyle,
         setThemeMode,
         setAccentColor,
         toggleDynamicColors,
+        toggleLightweightMode,
         isDark
     } = useTheme();
+    const { t, locale } = useI18n();
     const insets = useSafeAreaInsets();
     const { isScanning, scanLibrary, getAllTracks, lastScanDate } = useLibraryStore();
-    const isMaterial3 = config.style === 'material3';
+    const appSession = useAuthStore(state => state.session);
+    const signOut = useAuthStore(state => state.signOut);
+    const dabSession = useDabAuthStore(state => state.session);
+    const dabStatus = useDabAuthStore(state => state.status);
+    const signOutDab = useDabAuthStore(state => state.signOut);
+    const openConfirmModal = useUIStore(state => state.openConfirmModal);
 
     const [hexInput, setHexInput] = useState(config.accentColor);
     const [tempColor, setTempColor] = useState(config.accentColor);
     const [showPicker, setShowPicker] = useState(false);
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showMirrorModal, setShowMirrorModal] = useState(false);
+    const [showLegacyMirrors, setShowLegacyMirrors] = useState(false);
 
     const {
+        language, setLanguage,
         tidalDownloadQuality, setTidalDownloadQuality,
-        tidalMirror, setTidalMirror
+        tidalMirror, setTidalMirror,
+        equalizer,
+        equalizerCapabilities
     } = useSettingsStore();
 
     const { userName, userAvatarUri, setUserName, setUserAvatarUri } = useOnboardingStore();
@@ -72,9 +85,9 @@ export default function SettingsScreen() {
         setShowMirrorModal(false);
 
         if (mirror !== 'auto') {
-            showNotification(`Fuente seleccionada: ${TIDAL_MIRROR_NAMES[mirror]}`, 'success');
+            showNotification(t('settings.notification.mirrorSelected', { name: TIDAL_MIRROR_NAMES[mirror] }), 'success');
         } else {
-            showNotification('Modo automático activado', 'info');
+            showNotification(t('settings.notification.autoMirror'), 'info');
         }
     };
 
@@ -85,16 +98,39 @@ export default function SettingsScreen() {
 
     const trackCount = getAllTracks().length;
     const lastScan = lastScanDate
-        ? new Date(lastScanDate).toLocaleDateString()
-        : 'Never';
+        ? new Date(lastScanDate).toLocaleDateString(locale)
+        : t('common.never');
 
     const handleScan = async () => {
         try {
             await scanLibrary();
-            Alert.alert('Scan Complete', `Found ${getAllTracks().length} tracks!`);
+            Alert.alert(t('settings.alert.scanCompleteTitle'), t('settings.alert.scanCompleteBody', { count: getAllTracks().length }));
         } catch (error) {
-            Alert.alert('Scan Error', 'Failed to scan music library');
+            Alert.alert(t('settings.alert.scanErrorTitle'), t('settings.alert.scanErrorBody'));
         }
+    };
+
+    const handleOpenDabAuth = () => {
+        router.push('/dab-auth' as any);
+    };
+
+    const handleMainSignOut = () => {
+        openConfirmModal({
+            title: 'Cerrar sesion',
+            message: 'Se cerrara la sesion de StaySound en este dispositivo y volveras a la pantalla de acceso.',
+            confirmLabel: 'Cerrar sesion',
+            cancelLabel: 'Cancelar',
+            isDestructive: true,
+            onConfirm: () => {
+                void signOut();
+                showNotification('La sesion de StaySound se cerro en este dispositivo.', 'info');
+            },
+        });
+    };
+
+    const handleDabSignOut = async () => {
+        await signOutDab();
+        showNotification('La cuenta de DAB se cerro en este dispositivo.', 'info');
     };
 
 
@@ -128,18 +164,18 @@ export default function SettingsScreen() {
         runOnJS(_jsSetTempColor)(hex);
     };
 
-    // tempColor is the single source of truth — always up-to-date on JS thread.
+    // tempColor is the single source of truth â€” always up-to-date on JS thread.
     const applyColor = () => {
         setAccentColor(tempColor);
         setShowPicker(false);
     };
 
-    // Live palette preview — regenerated whenever tempColor changes
+    // Live palette preview â€” regenerated whenever tempColor changes
     const previewPalette = useMemo(() => {
         const color = tempColor.startsWith('#') ? tempColor : `#${tempColor}`;
         if (color.length !== 7) return null;
         try {
-            return generateM3Palette(
+            return generateManualAccentPalette(
                 color,
                 isDark,
                 (config.schemeVariant as SchemeVariant) ?? 'expressive'
@@ -148,21 +184,94 @@ export default function SettingsScreen() {
             return null;
         }
     }, [tempColor, isDark, config.schemeVariant]);
+    const currentLanguageLabel = language === 'es'
+        ? t('settings.language.spanish')
+        : t('settings.language.english');
+
+    const qualityDescription = {
+        HI_RES_LOSSLESS: t('settings.downloads.quality.hires.short'),
+        LOSSLESS: t('settings.downloads.quality.lossless.short'),
+        MP3: t('settings.downloads.quality.mp3.short'),
+        HIGH: t('settings.downloads.quality.high.short'),
+        LOW: t('settings.downloads.quality.low.short'),
+    } satisfies Record<TidalQuality, string>;
+
+    const qualityDetails = {
+        HI_RES_LOSSLESS: {
+            title: t('settings.downloads.quality.hires.title'),
+            desc: t('settings.downloads.quality.hires.desc'),
+            adv: t('settings.downloads.quality.hires.adv'),
+            icon: 'high-definition',
+        },
+        LOSSLESS: {
+            title: t('settings.downloads.quality.lossless.title'),
+            desc: t('settings.downloads.quality.lossless.desc'),
+            adv: t('settings.downloads.quality.lossless.adv'),
+            icon: 'disc',
+        },
+        MP3: {
+            title: t('settings.downloads.quality.mp3.title'),
+            desc: t('settings.downloads.quality.mp3.desc'),
+            adv: t('settings.downloads.quality.mp3.adv'),
+            icon: 'file-music-outline',
+        },
+        HIGH: {
+            title: t('settings.downloads.quality.high.title'),
+            desc: t('settings.downloads.quality.high.desc'),
+            adv: t('settings.downloads.quality.high.adv'),
+            icon: 'music-note-outline',
+        },
+        LOW: {
+            title: t('settings.downloads.quality.low.title'),
+            desc: t('settings.downloads.quality.low.desc'),
+            adv: t('settings.downloads.quality.low.adv'),
+            icon: 'leaf',
+        },
+    } satisfies Record<TidalQuality, { title: string; desc: string; adv: string; icon: string }>;
+
+    const recommendedMirrors = useMemo(
+        () => [
+            'https://hifi.geeked.wtf',
+            'https://beta.dabmusic.xyz',
+            'https://dabmusic.xyz/api',
+        ],
+        [],
+    );
+    const legacyMirrors = useMemo(
+        () => TIDAL_API_BASES.filter(mirror => !recommendedMirrors.includes(mirror)),
+        [recommendedMirrors],
+    );
+    const qualityModalOptions = useMemo(
+        () => ['LOSSLESS', 'MP3', 'HI_RES_LOSSLESS', 'LOW'] as TidalQuality[],
+        [],
+    );
+
+    const sectionSurfaceStyle = {
+        backgroundColor: 'transparent' as const,
+        borderColor: 'transparent',
+        borderWidth: 0,
+    };
 
     return (
         <ScrollView
             style={[styles.container, { backgroundColor: theme.colors.background }]}
             contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
         >
+            <View style={styles.heroCard}>
+                <Text variant="headlineMedium" style={{ color: theme.colors.onBackground, fontWeight: '800' }}>
+                    {t('settings.section.appearance')}
+                </Text>
+            </View>
+
             {/* Profile Section */}
             <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                PERFIL
+                {t('settings.section.profile')}
             </Text>
 
-            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
+            <View style={[styles.section, sectionSurfaceStyle]}>
                 <View style={styles.profileItem}>
                     <Pressable onPress={handlePickImage} style={styles.avatarWrapper}>
-                        <View style={[styles.avatarCircle, { borderColor: theme.colors.primary }]}>
+                        <View style={[styles.avatarCircle, { borderColor: theme.colors.outline + '30', backgroundColor: theme.colors.surfaceVariant }]}>
                             {userAvatarUri ? (
                                 <Image source={{ uri: userAvatarUri }} style={styles.avatarImage} />
                             ) : (
@@ -172,7 +281,7 @@ export default function SettingsScreen() {
                                     </Text>
                                 </View>
                             )}
-                            <View style={[styles.editBadge, { backgroundColor: theme.colors.primary }]}>
+                            <View style={[styles.editBadge, { backgroundColor: theme.colors.primary, borderColor: theme.colors.surface }]}>
                                 <MaterialCommunityIcons name="pencil" size={12} color={theme.colors.onPrimary} />
                             </View>
                         </View>
@@ -188,10 +297,10 @@ export default function SettingsScreen() {
                                     dense
                                     autoFocus
                                     style={{ flex: 1, backgroundColor: 'transparent' }}
-                                    placeholder="Tu nombre"
+                                    placeholder={t('settings.profile.namePlaceholder')}
                                 />
                                 <Button onPress={handleSaveName} mode="contained" compact style={{ marginLeft: 8 }}>
-                                    ✓
+                                    âœ“
                                 </Button>
                             </View>
                         ) : (
@@ -203,21 +312,121 @@ export default function SettingsScreen() {
                             </Pressable>
                         )}
                         <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                            Toca para editar tu información
+                            {t('settings.profile.tapToEdit')}
                         </Text>
                     </View>
                 </View>
             </View>
 
-            {/* Appearance Section */}
             <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                APARIENCIA
+                Cuenta
             </Text>
 
-            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
+            <View style={[styles.section, sectionSurfaceStyle]}>
                 <List.Item
-                    title="Modo Oscuro"
-                    description={config.mode === 'system' ? 'Siguiendo sistema' : isDark ? 'Encendido' : 'Apagado'}
+                    title={appSession?.email || 'Cuenta principal'}
+                    description={appSession
+                        ? 'Sesion activa en StaySound.'
+                        : 'No hay una sesion principal activa.'}
+                    titleStyle={{ color: theme.colors.onSurface }}
+                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+                    left={(props) => <MaterialCommunityIcons name="account-circle-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                />
+                {appSession ? (
+                    <>
+                        <Divider />
+                        <List.Item
+                            title="Cerrar sesion de StaySound"
+                            description="Cierra la cuenta principal de esta app en el dispositivo."
+                            titleStyle={{ color: theme.colors.onSurface }}
+                            descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+                            left={(props) => <MaterialCommunityIcons name="logout-variant" size={24} color={theme.colors.error} style={props.style} />}
+                            onPress={handleMainSignOut}
+                        />
+                    </>
+                ) : null}
+            </View>
+
+            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
+                DAB
+            </Text>
+
+            <View style={[styles.section, sectionSurfaceStyle]}>
+                <List.Item
+                    title={dabSession ? (dabSession.username || dabSession.email) : 'Cuenta no conectada'}
+                    description={dabSession
+                        ? `Sesion activa con ${dabSession.email}`
+                        : dabStatus === 'loading'
+                            ? 'Validando sesion de DAB...'
+                            : 'Conecta o crea una cuenta personal para usar DAB.'}
+                    titleStyle={{ color: theme.colors.onSurface }}
+                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+                    left={(props) => <MaterialCommunityIcons name="account-music-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={() => (
+                        <Button mode={dabSession ? 'outlined' : 'contained'} compact onPress={handleOpenDabAuth}>
+                            {dabSession ? 'Gestionar' : 'Conectar'}
+                        </Button>
+                    )}
+                />
+                {dabSession ? (
+                    <>
+                        <Divider />
+                        <List.Item
+                            title="Cerrar sesion de DAB"
+                            description="Borra la sesion local y deja de usar esta cuenta en el dispositivo."
+                            titleStyle={{ color: theme.colors.onSurface }}
+                            descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+                            left={(props) => <MaterialCommunityIcons name="logout" size={24} color={theme.colors.error} style={props.style} />}
+                            onPress={() => { void handleDabSignOut(); }}
+                        />
+                    </>
+                ) : null}
+            </View>
+
+            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
+                {t('settings.section.language')}
+            </Text>
+
+            <View style={[styles.section, styles.sectionLoose, sectionSurfaceStyle]}>
+                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
+                    {t('settings.language.desc', { language: currentLanguageLabel })}
+                </Text>
+                <View style={styles.languageRow}>
+                    {([
+                        { value: 'es', label: t('settings.language.spanish') },
+                        { value: 'en', label: t('settings.language.english') },
+                    ] as const).map((option) => {
+                        const selected = language === option.value;
+                        return (
+                            <Pressable
+                                key={option.value}
+                                onPress={() => setLanguage(option.value)}
+                                style={[
+                                    styles.languageButton,
+                                    {
+                                        backgroundColor: selected ? `${theme.colors.primary}15` : 'transparent',
+                                        borderColor: selected ? theme.colors.primary : `${theme.colors.outline}55`,
+                                    },
+                                ]}
+                            >
+                                <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurface, fontWeight: selected ? '700' : '500' }}>
+                                    {option.label}
+                                </Text>
+                            </Pressable>
+                        );
+                    })}
+                </View>
+            </View>
+
+            {/* Appearance Section */}
+            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
+                {t('settings.section.appearance')}
+            </Text>
+
+            <View style={[styles.section, sectionSurfaceStyle]}>
+                <List.Item
+                    title={t('settings.appearance.darkMode')}
+                    description={config.mode === 'system' ? t('settings.appearance.followSystem') : isDark ? t('settings.appearance.on') : t('settings.appearance.off')}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="brightness-4" size={24} color={theme.colors.primary} style={props.style} />}
@@ -230,8 +439,8 @@ export default function SettingsScreen() {
                 />
                 <Divider />
                 <List.Item
-                    title="Colores Dinámicos"
-                    description="Extraer colores de la portada"
+                    title={t('settings.appearance.dynamicColors')}
+                    description={t('settings.appearance.dynamicColorsDesc')}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="palette-swatch-outline" size={24} color={theme.colors.primary} style={props.style} />}
@@ -242,21 +451,35 @@ export default function SettingsScreen() {
                         />
                     )}
                 />
+                <Divider />
+                <List.Item
+                    title={t('settings.appearance.lightweightMode')}
+                    description={t('settings.appearance.lightweightModeDesc')}
+                    titleStyle={{ color: theme.colors.onSurface }}
+                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+                    left={(props) => <MaterialCommunityIcons name="speedometer-slow" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={() => (
+                        <Switch
+                            value={config.lightweightMode}
+                            onValueChange={toggleLightweightMode}
+                        />
+                    )}
+                />
             </View>
 
             {/* Theme Style section removed as only Material 3 is supported */}
 
             {/* Color Selection - Only for Material 3 without Dynamic Colors */}
-            {isMaterial3 && !config.dynamicColors && (
+            {config.style === 'material3' && !config.dynamicColors && (
                 <>
                     <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                        COLORES DEL TEMA (M3)
+                        {t('settings.section.themeColors')}
                     </Text>
 
-                    <View style={[styles.section, { padding: 16, backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
+                    <View style={[styles.section, styles.sectionLoose, sectionSurfaceStyle]}>
 
                         <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
-                            Sugerencias:
+                            {t('settings.theme.suggestions')}
                         </Text>
 
                         <View style={styles.colorPresetsRow}>
@@ -280,7 +503,7 @@ export default function SettingsScreen() {
                         <Divider style={{ marginVertical: 20 }} />
 
                         <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
-                            Color personalizado:
+                            {t('settings.theme.customColor')}
                         </Text>
 
                         <Pressable
@@ -312,7 +535,7 @@ export default function SettingsScreen() {
                                     {/* Fixed header */}
                                     <View style={styles.modalHeader}>
                                         <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
-                                            Elige un Color
+                                            {t('settings.theme.chooseColor')}
                                         </Text>
                                         <Pressable onPress={() => setShowPicker(false)} hitSlop={12}>
                                             <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
@@ -341,37 +564,37 @@ export default function SettingsScreen() {
                                             />
                                         </ColorPicker>
 
-                                        {/* ── Palette Preview ─────────────────── */}
+                                        {/* â”€â”€ Palette Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                                         {previewPalette && (
                                             <View style={styles.palettePreview}>
                                                 <Text variant="labelSmall" style={[styles.paletteLabel, { color: theme.colors.onSurfaceVariant }]}>
-                                                    PALETA GENERADA
+                                                    {t('settings.theme.generatedPalette')}
                                                 </Text>
 
                                                 {([
                                                     {
-                                                        label: 'Primario',
+                                                        label: t('settings.theme.palette.primary'),
                                                         chips: [
                                                             { name: 'Primary', bg: previewPalette.primary, fg: previewPalette.onPrimary },
                                                             { name: 'Container', bg: previewPalette.primaryContainer, fg: previewPalette.onPrimaryContainer },
                                                         ],
                                                     },
                                                     {
-                                                        label: 'Secundario',
+                                                        label: t('settings.theme.palette.secondary'),
                                                         chips: [
                                                             { name: 'Secondary', bg: previewPalette.secondary, fg: previewPalette.onSecondary },
                                                             { name: 'Container', bg: previewPalette.secondaryContainer, fg: previewPalette.onSecondaryContainer },
                                                         ],
                                                     },
                                                     {
-                                                        label: 'Terciario',
+                                                        label: t('settings.theme.palette.tertiary'),
                                                         chips: [
                                                             { name: 'Tertiary', bg: previewPalette.tertiary, fg: previewPalette.onTertiary },
                                                             { name: 'Container', bg: previewPalette.tertiaryContainer, fg: previewPalette.onTertiaryContainer },
                                                         ],
                                                     },
                                                     {
-                                                        label: 'Superficies',
+                                                        label: t('settings.theme.palette.surfaces'),
                                                         chips: [
                                                             { name: 'Background', bg: previewPalette.background, fg: previewPalette.onBackground },
                                                             { name: 'Surface', bg: previewPalette.surface, fg: previewPalette.onSurface },
@@ -379,10 +602,10 @@ export default function SettingsScreen() {
                                                         ],
                                                     },
                                                     {
-                                                        label: 'Contornos & Error',
+                                                        label: t('settings.theme.palette.outlineError'),
                                                         chips: [
                                                             { name: 'Outline', bg: previewPalette.outline, fg: previewPalette.onBackground },
-                                                            { name: 'Var.', bg: previewPalette.outlineVariant ?? previewPalette.outline, fg: previewPalette.onBackground },
+                                                            { name: t('settings.theme.palette.variant'), bg: previewPalette.outlineVariant ?? previewPalette.outline, fg: previewPalette.onBackground },
                                                             { name: 'Error', bg: previewPalette.error, fg: previewPalette.onError },
                                                         ],
                                                     },
@@ -433,7 +656,7 @@ export default function SettingsScreen() {
                                                 onPress={applyColor}
                                                 style={styles.applyBtn}
                                             >
-                                                Aplicar
+                                                {t('common.apply')}
                                             </Button>
                                         </View>
                                     </ScrollView>
@@ -442,7 +665,7 @@ export default function SettingsScreen() {
                         </Modal>
 
                         <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 12 }}>
-                            La interfaz completa se adapta cuando tocas Aplicar.
+                            {t('settings.theme.interfaceAdapts')}
                         </Text>
                     </View>
                 </>
@@ -450,22 +673,31 @@ export default function SettingsScreen() {
 
             {/* Playback Section */}
             <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                REPRODUCCIÓN
+                {t('settings.section.playback')}
             </Text>
 
-            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
+            <View style={[styles.section, sectionSurfaceStyle]}>
                 <List.Item
-                    title="Ecualizador"
-                    description="Ajustar frecuencias de audio"
+                    title={t('settings.playback.equalizer')}
+                    description={
+                        equalizer.mode === 'system'
+                            ? t('equalizer.status.deviceControlled')
+                            : equalizer.mode === 'app'
+                                ? (equalizerCapabilities?.attached
+                                    ? t('equalizer.status.staysoundReady')
+                                    : t('equalizer.status.waitingForPlayback'))
+                                : t('settings.playback.equalizerDesc')
+                    }
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="tune" size={24} color={theme.colors.primary} style={props.style} />}
                     right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
+                    onPress={() => router.push('/equalizer')}
                 />
                 <Divider />
                 <List.Item
-                    title="Temporizador"
-                    description="Desactivado"
+                    title={t('settings.playback.timer')}
+                    description={t('common.disabled')}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="timer-outline" size={24} color={theme.colors.primary} style={props.style} />}
@@ -475,13 +707,13 @@ export default function SettingsScreen() {
 
             {/* Library Section */}
             <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                BIBLIOTECA
+                {t('settings.section.library')}
             </Text>
 
-            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
+            <View style={[styles.section, sectionSurfaceStyle]}>
                 <List.Item
-                    title="Escanear Música"
-                    description={isScanning ? 'Escaneando...' : `${trackCount} canciones • Último: ${lastScan}`}
+                    title={t('settings.library.scanMusic')}
+                    description={isScanning ? t('settings.library.scanning') : t('settings.library.scanSummary', { count: trackCount, lastScan })}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="magnify-scan" size={24} color={theme.colors.primary} style={props.style} />}
@@ -496,17 +728,13 @@ export default function SettingsScreen() {
 
             {/* Tidal Section */}
             <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                TIDAL & DESCARGAS
+                {t('settings.section.downloads')}
             </Text>
 
-            <View style={[styles.section, { backgroundColor: isMaterial3 ? `${theme.colors.surface}F0` : theme.colors.surface, borderColor: isMaterial3 ? `${theme.colors.outline}4D` : 'transparent', borderWidth: isMaterial3 ? 1 : 0 }]}>
+            <View style={[styles.section, sectionSurfaceStyle]}>
                 <List.Item
-                    title="Calidad de Descarga"
-                    description={
-                        tidalDownloadQuality === 'HI_RES_LOSSLESS' ? 'Máxima (Hi-Res FLAC)' :
-                            tidalDownloadQuality === 'LOSSLESS' ? 'Alta (CD FLAC)' :
-                                tidalDownloadQuality === 'HIGH' ? 'Buena (AAC/MP3)' : 'Básica (AAC Bajos Datos)'
-                    }
+                    title={t('settings.downloads.quality')}
+                    description={qualityDescription[tidalDownloadQuality]}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="download-circle-outline" size={24} color={theme.colors.primary} style={props.style} />}
@@ -515,8 +743,8 @@ export default function SettingsScreen() {
                 />
                 <Divider />
                 <List.Item
-                    title="Servidor de Descarga (Mirror)"
-                    description={TIDAL_MIRROR_NAMES[tidalMirror] || 'Personalizado'}
+                    title={t('settings.downloads.server')}
+                    description={TIDAL_MIRROR_NAMES[tidalMirror] || t('common.custom')}
                     titleStyle={{ color: theme.colors.onSurface }}
                     descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="server-network" size={24} color={theme.colors.primary} style={props.style} />}
@@ -536,7 +764,7 @@ export default function SettingsScreen() {
                     <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, maxHeight: '80%' }]}>
                         <View style={styles.modalHeader}>
                             <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
-                                Servidor de Tidal
+                                {t('settings.downloads.serverTitle')}
                             </Text>
                             <Pressable onPress={() => setShowMirrorModal(false)} hitSlop={12}>
                                 <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
@@ -545,7 +773,7 @@ export default function SettingsScreen() {
 
                         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
                             <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
-                                Elige un servidor específico o deja en automático para rotar si uno falla.
+                                {t('settings.downloads.serverHint')}
                             </Text>
 
                             <Pressable
@@ -565,16 +793,16 @@ export default function SettingsScreen() {
                                     <MaterialCommunityIcons name="auto-fix" size={24} color={tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurfaceVariant} />
                                     <View style={{ flex: 1 }}>
                                         <Text variant="titleMedium" style={{ color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface }}>
-                                            Automático (Recomendado)
+                                            {t('settings.downloads.autoRecommended')}
                                         </Text>
                                         <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                            Prueba todos los servidores disponibles hasta encontrar uno que funcione.
+                                            {t('settings.downloads.autoDescription')}
                                         </Text>
                                     </View>
                                 </View>
                             </Pressable>
 
-                            {TIDAL_API_BASES.map((mirror) => (
+                            {recommendedMirrors.map((mirror) => (
                                 <Pressable
                                     key={mirror}
                                     onPress={() => handleMirrorChange(mirror)}
@@ -605,6 +833,49 @@ export default function SettingsScreen() {
                                     </View>
                                 </Pressable>
                             ))}
+
+                            <Button
+                                mode="text"
+                                compact
+                                onPress={() => setShowLegacyMirrors(value => !value)}
+                                textColor={theme.colors.primary}
+                                style={{ alignSelf: 'flex-start', marginTop: 4 }}
+                            >
+                                {showLegacyMirrors ? 'Ocultar otros servidores' : 'Mostrar otros servidores'}
+                            </Button>
+
+                            {showLegacyMirrors ? legacyMirrors.map((mirror) => (
+                                <Pressable
+                                    key={mirror}
+                                    onPress={() => handleMirrorChange(mirror)}
+                                    style={[
+                                        styles.qualityOption,
+                                        {
+                                            backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
+                                            borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
+                                            borderWidth: 1,
+                                            borderRadius: 12,
+                                            padding: 16,
+                                            opacity: 0.88,
+                                        }
+                                    ]}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                        <MaterialCommunityIcons name="server-outline" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
+                                        <View style={{ flex: 1 }}>
+                                            <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
+                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                                            </Text>
+                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                                {mirror.replace('https://', '')}
+                                            </Text>
+                                        </View>
+                                        {tidalMirror === mirror && (
+                                            <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
+                                        )}
+                                    </View>
+                                </Pressable>
+                            )) : null}
                         </ScrollView>
                     </View>
                 </View>
@@ -621,7 +892,7 @@ export default function SettingsScreen() {
                     <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, maxHeight: '80%' }]}>
                         <View style={styles.modalHeader}>
                             <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
-                                Calidad de Audio
+                                {t('settings.downloads.audioQualityTitle')}
                             </Text>
                             <Pressable onPress={() => setShowQualityModal(false)} hitSlop={12}>
                                 <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
@@ -630,36 +901,11 @@ export default function SettingsScreen() {
 
                         <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
                             <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
-                                Selecciona el formato preferido para tus descargas de Tidal.
+                                {t('settings.downloads.audioQualityHint')}
                             </Text>
 
-                            {(['HI_RES_LOSSLESS', 'LOSSLESS', 'HIGH', 'LOW'] as TidalQuality[]).map((q) => {
-                                const details = {
-                                    HI_RES_LOSSLESS: {
-                                        title: 'Hi-Res Lossless (FLAC)',
-                                        desc: 'Calidad de estudio (24-bit). El mejor sonido posible.',
-                                        adv: '✓ Máximo detalle / ✗ Archivos gigantes (~100MB)',
-                                        icon: 'high-definition'
-                                    },
-                                    LOSSLESS: {
-                                        title: 'Lossless (FLAC)',
-                                        desc: 'Calidad de CD (16-bit). Sonido puro sin pérdida.',
-                                        adv: '✓ Alta fidelidad / ✗ Archivos grandes (~30-50MB)',
-                                        icon: 'disc'
-                                    },
-                                    HIGH: {
-                                        title: 'Alta (AAC/MP3)',
-                                        desc: 'Excelente calidad comprimida (320kbps).',
-                                        adv: '✓ Ahorro de espacio / ✓ Muy buena calidad',
-                                        icon: 'music-note-outline'
-                                    },
-                                    LOW: {
-                                        title: 'Básica (AAC)',
-                                        desc: 'Calidad estándar eficiente (96kbps).',
-                                        adv: '✓ Ahorro máximo / ✓ Ideal para poco espacio',
-                                        icon: 'leaf'
-                                    }
-                                }[q];
+                            {qualityModalOptions.map((q) => {
+                                const details = qualityDetails[q];
 
                                 return (
                                     <Pressable
@@ -710,7 +956,7 @@ export default function SettingsScreen() {
                     StaySound v1.0.0
                 </Text>
                 <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', marginTop: 4 }}>
-                    Hecho con ❤️ usando Expo SDK 54
+                    {t('settings.about.madeWith')}
                 </Text>
             </View>
         </ScrollView>
@@ -720,15 +966,39 @@ export default function SettingsScreen() {
 const styles = StyleSheet.create({
     container: { flex: 1 },
     content: { padding: 16, paddingBottom: 120 },
+    heroCard: {
+        paddingHorizontal: 2,
+        paddingTop: 8,
+        paddingBottom: 4,
+        marginBottom: 12,
+    },
     sectionHeader: {
         marginTop: 24,
-        marginBottom: 8,
-        marginLeft: 8,
-        fontWeight: '600',
+        marginBottom: 10,
+        marginLeft: 0,
+        fontWeight: '700',
+        textTransform: 'uppercase',
+        letterSpacing: 0.8,
+        opacity: 0.92,
     },
     section: {
-        borderRadius: 16,
-        overflow: 'hidden',
+        borderRadius: 0,
+        overflow: 'visible',
+    },
+    sectionLoose: {
+        paddingVertical: 4,
+    },
+    languageRow: {
+        flexDirection: 'row',
+        gap: 12,
+    },
+    languageButton: {
+        flex: 1,
+        borderWidth: 1,
+        borderRadius: 12,
+        paddingVertical: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     colorPresetsRow: {
         flexDirection: 'row',
@@ -745,8 +1015,8 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 16,
-        paddingVertical: 12,
-        borderRadius: 16,
+        paddingVertical: 14,
+        borderRadius: 12,
         borderWidth: 1,
     },
     colorBoxLeft: {
@@ -763,7 +1033,7 @@ const styles = StyleSheet.create({
     },
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.65)',
+        backgroundColor: 'rgba(0,0,0,0.72)',
         justifyContent: 'flex-end',
     },
     modalContent: {
@@ -773,6 +1043,8 @@ const styles = StyleSheet.create({
         paddingBottom: 48,
         maxHeight: '90%',
         gap: 12,
+        borderWidth: 1,
+        borderColor: 'rgba(255,255,255,0.08)',
     },
     modalHeader: {
         flexDirection: 'row',
@@ -850,7 +1122,7 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
     applyBtn: {
-        borderRadius: 12,
+        borderRadius: 14,
     },
     qualityOption: {
         marginVertical: 4,
@@ -870,8 +1142,8 @@ const styles = StyleSheet.create({
     avatarCircle: {
         width: 80,
         height: 80,
-        borderRadius: 40,
-        borderWidth: 2,
+        borderRadius: 24,
+        borderWidth: 1,
         overflow: 'hidden',
         position: 'relative',
     },
@@ -891,11 +1163,10 @@ const styles = StyleSheet.create({
         right: 0,
         width: 24,
         height: 24,
-        borderRadius: 12,
+        borderRadius: 10,
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
-        borderColor: 'white',
     },
     profileInfo: {
         flex: 1,
@@ -911,3 +1182,10 @@ const styles = StyleSheet.create({
         marginBottom: 4,
     },
 });
+
+
+
+
+
+
+

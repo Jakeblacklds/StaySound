@@ -1,4 +1,4 @@
-import { useAnimatedColors, useTheme } from '@/src/theme';
+import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { Playlist } from '@/src/types';
 import { BlurView } from 'expo-blur';
 import { Image as ExpoImage } from 'expo-image';
@@ -35,6 +35,7 @@ export function PlaylistCard({
     onOptionsPress
 }: PlaylistCardProps) {
     const { theme } = useTheme();
+    const performanceProfile = usePerformanceProfile();
     const aC = useAnimatedColors();
     const scale = useSharedValue(1);
 
@@ -65,19 +66,21 @@ export function PlaylistCard({
                     style={styles.gridArtworkImage}
                     contentFit="cover"
                     recyclingKey={playlist.id}
-                    cachePolicy="memory-disk"
+                    cachePolicy={performanceProfile.imageCachePolicyList}
                     transition={0}
                 />
             ) : (
                 <CustomIcon
-                    name={playlist.id === 'playlist_liked' ? 'Play' : 'Playlist'}
+                    name={playlist.id === 'playlist_liked' ? 'Heart' : 'Playlist'}
                     size={60}
                     color={theme.colors.primary}
                 />
             )}
 
             <View style={styles.gridInfoOverlay}>
-                <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+                {performanceProfile.enableBlurEffects ? (
+                    <BlurView intensity={20} tint="dark" style={StyleSheet.absoluteFill} />
+                ) : null}
                 <LinearGradient
                     colors={['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
                     style={StyleSheet.absoluteFill}
@@ -114,13 +117,13 @@ export function PlaylistCard({
                         style={styles.rowArtworkImage}
                         contentFit="cover"
                         recyclingKey={playlist.id}
-                        cachePolicy="memory-disk"
+                        cachePolicy={performanceProfile.imageCachePolicyList}
                         transition={0}
                     />
                 ) : (
                     <View style={styles.rowPlaceholderArtwork}>
                         <CustomIcon
-                            name={playlist.id === 'playlist_liked' ? 'Play' : 'Playlist'}
+                            name={playlist.id === 'playlist_liked' ? 'Heart' : 'Playlist'}
                             size={32}
                             color={theme.colors.primary}
                         />
@@ -194,7 +197,7 @@ const styles = StyleSheet.create({
         marginLeft: 12,
     },
     rowName: {
-        fontWeight: '600',
+        ...typeScale.title,
     },
     gridArtwork: {
         alignItems: 'center',
@@ -211,19 +214,18 @@ const styles = StyleSheet.create({
         left: 0,
         right: 0,
         paddingBottom: 4,
-        paddingTop: 30, // Gradients stretch further up
+        paddingTop: 30,
     },
     gridInfo: {
         paddingVertical: 8,
         paddingHorizontal: 12,
     },
     gridName: {
-        fontSize: 14,
-        fontWeight: 'bold',
+        ...typeScale.bodyStrong,
         color: '#FFFFFF',
     },
     gridSubtitle: {
-        fontSize: 12,
+        ...typeScale.micro,
         color: 'rgba(255,255,255,0.7)',
         marginTop: 2,
     },

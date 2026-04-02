@@ -1,1121 +1,454 @@
 import { useDynamicColors } from '@/src/hooks/useDynamicColors';
-import { useOnboardingStore } from '@/src/stores/onboardingStore';
-import { useTheme } from '@/src/theme';
+import { useI18n } from '@/src/i18n';
+import {
+    applyOnboardingMirrorPlaylist,
+    buildOnboardingMirrorPlaylist,
+    ONBOARDING_TASTE_PROFILE_VERSION,
+} from '@/src/services/onboardingTasteService';
+import { getArtistInfo } from '@/src/services/artistApi';
+import { getTidalArtistInfo, searchTidalArtists } from '@/src/services/tidalService';
+import { useAuthStore } from '@/src/stores';
+import { OnboardingTasteArtist, useOnboardingStore } from '@/src/stores/onboardingStore';
+import { typeScale, useTheme } from '@/src/theme';
+import { TidalTrack } from '@/src/types/audio';
 import { Ionicons } from '@expo/vector-icons';
-import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import * as MediaLibrary from 'expo-media-library';
-import { router } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import {
-    Keyboard,
-    KeyboardAvoidingView,
-    Platform,
-    Pressable,
-    StyleSheet,
-    Text,
-    TextInput,
-    View,
-} from 'react-native';
-import Animated, {
-    Easing,
-    FadeIn,
-    FadeInDown,
-    FadeInUp,
-    runOnJS,
-    useAnimatedStyle,
-    useSharedValue,
-    withDelay,
-    withRepeat,
-    withSequence,
-    withSpring,
-    withTiming,
-    ZoomIn
-} from 'react-native-reanimated';
+import { router, useRootNavigationState } from 'expo-router';
+import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { Keyboard, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import Animated, { Easing, FadeInDown, FadeOut, LinearTransition, runOnJS, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const APP_LOGO = require('@/assets/images/appicon.png');
+const MIN_ARTISTS = 3;
+const MAX_ARTISTS = 8;
+const QUICK_SEEDS = ['Bad Bunny', 'Taylor Swift', 'The Weeknd', 'Drake', 'Kendrick Lamar', 'Karol G', 'Feid', 'SZA', 'Rosalia', 'Arctic Monkeys'];
+const QUICK_DYNAMIC_LIMIT = 8;
+type OnboardingStep = 'welcome' | 'profile' | 'tasteArtists' | 'permissions' | 'ready';
+type TrackRow = { id: number; title: string; artist: string; artworkUrl?: string };
+type QuickSuggestion = { id?: number; name: string; artworkUrl: string; seed: string };
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-type OnboardingStep = 'welcome' | 'profile' | 'permissions' | 'ready';
-
-interface PermissionItem {
-    id: string;
-    icon: keyof typeof Ionicons.glyphMap;
-    title: string;
-    description: string;
-    granted: boolean | null; // null = not asked yet
-    required: boolean;
+function sanitizeSeedName(name: string): string {
+    return name
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .trim()
+        .toLowerCase();
 }
 
-// ─── Particle component for welcome screen ────────────────────────────────────
+async function fetchQuickSuggestionArtwork(seed: string): Promise<string | null> {
+    try {
+        const info = await getArtistInfo(seed, { includeBiography: false });
+        if (info?.photo_url) return info.photo_url;
+    } catch {
+        // Fallback below.
+    }
 
-function FloatingNote({ delay, x, size, color }: { delay: number; x: number; size: number; color: string }) {
-    const translateY = useSharedValue(0);
-    const opacity = useSharedValue(0);
-
-    useEffect(() => {
-        translateY.value = withDelay(
-            delay,
-            withRepeat(
-                withSequence(
-                    withTiming(-220, { duration: 3500 + Math.random() * 1500, easing: Easing.inOut(Easing.sin) }),
-                    withTiming(0, { duration: 0 }),
-                ),
-                -1,
-                false,
-            ),
-        );
-        opacity.value = withDelay(
-            delay,
-            withRepeat(
-                withSequence(
-                    withTiming(0.6, { duration: 800 }),
-                    withTiming(0.6, { duration: 2000 }),
-                    withTiming(0, { duration: 700 }),
-                ),
-                -1,
-                false,
-            ),
-        );
-    }, []);
-
-    const style = useAnimatedStyle(() => ({
-        transform: [{ translateY: translateY.value }],
-        opacity: opacity.value,
-        position: 'absolute',
-        left: x,
-        bottom: 60,
-    }));
-
-    const notes = ['♪', '♫', '♩', '♬', '♭', '♮'];
-    const note = notes[Math.floor(Math.random() * notes.length)];
-
-    return (
-        <Animated.Text style={[style, { fontSize: size, color }]}>
-            {note}
-        </Animated.Text>
-    );
+    try {
+        const response = await fetch(`https://api.deezer.com/search/artist?q=${encodeURIComponent(seed)}`);
+        const data = await response.json();
+        const normalizedSeed = sanitizeSeedName(seed);
+        const candidates = Array.isArray(data?.data) ? data.data : [];
+        const exactMatch = candidates.find((candidate: any) => sanitizeSeedName(candidate?.name ?? '') === normalizedSeed);
+        const best = exactMatch ?? candidates[0];
+        const artworkUrl = best?.picture_big ?? best?.picture_xl ?? best?.picture_medium ?? best?.picture ?? null;
+        return typeof artworkUrl === 'string' ? artworkUrl : null;
+    } catch {
+        return null;
+    }
 }
 
-// ─── Step: Welcome ────────────────────────────────────────────────────────────
-
-function WelcomeStep({ onNext, colors }: { onNext: () => void; colors: any }) {
-    const logoScale = useSharedValue(0);
-    const logoPulse = useSharedValue(1);
-
-    useEffect(() => {
-        logoScale.value = withSpring(1, { damping: 12, stiffness: 120 });
-        // subtle heartbeat pulse
-        setTimeout(() => {
-            logoPulse.value = withRepeat(
-                withSequence(
-                    withTiming(1.06, { duration: 900, easing: Easing.inOut(Easing.ease) }),
-                    withTiming(1, { duration: 900, easing: Easing.inOut(Easing.ease) }),
-                ),
-                -1,
-                true,
-            );
-        }, 800);
-    }, []);
-
-    const logoStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: logoScale.value * logoPulse.value }],
-    }));
-
-    const floatingNotes = [
-        { delay: 0, x: 30, size: 28 },
-        { delay: 700, x: 90, size: 20 },
-        { delay: 400, x: 160, size: 24 },
-        { delay: 200, x: 230, size: 18 },
-        { delay: 900, x: 290, size: 26 },
-        { delay: 500, x: 350, size: 22 },
-    ];
-
-    return (
-        <View style={styles.stepContainer}>
-            {/* Floating notes background */}
-            <View style={StyleSheet.absoluteFillObject}>
-                {floatingNotes.map((n, i) => (
-                    <FloatingNote key={i} {...n} color={colors.primary} />
-                ))}
-            </View>
-
-            {/* Logo */}
-            <Animated.View style={[styles.logoContainer, logoStyle]}>
-                <View style={[styles.logoCircle, { backgroundColor: colors.primaryContainer, overflow: 'hidden' }]}>
-                    <Image
-                        source={APP_LOGO}
-                        style={{ width: 120, height: 120 }}
-                        contentFit="cover"
-                    />
-                </View>
-            </Animated.View>
-
-            {/* Title */}
-            <Animated.View entering={FadeInDown.delay(400).duration(600)}>
-                <Text style={[styles.welcomeTitle, { color: colors.onBackground }]}>
-                    StaySound
-                </Text>
-                <Text style={[styles.welcomeSubtitle, { color: colors.onSurfaceVariant }]}>
-                    Tu música. Siempre contigo.
-                </Text>
-            </Animated.View>
-
-            {/* Features */}
-            <Animated.View
-                entering={FadeInUp.delay(700).duration(600)}
-                style={[styles.featureList, { backgroundColor: colors.surfaceVariant }]}
-            >
-                {[
-                    { icon: 'library' as const, text: 'Biblioteca local sin límites' },
-                    { icon: 'stats-chart' as const, text: 'Audio de alta calidad y lossless' },
-                    { icon: 'cloud-download' as const, text: 'Streaming de Tidal integrado' },
-                ].map(({ icon, text }) => (
-                    <View key={text} style={styles.featureRow}>
-                        <View style={[styles.featureIconBg, { backgroundColor: colors.primaryContainer }]}>
-                            <Ionicons name={icon as any} size={18} color={colors.primary} />
-                        </View>
-                        <Text style={[styles.featureText, { color: colors.onSurface }]}>{text}</Text>
-                    </View>
-                ))}
-            </Animated.View>
-
-            {/* CTA */}
-            <Animated.View entering={FadeInUp.delay(1000).duration(500)}>
-                <Pressable
-                    style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-                    onPress={onNext}
-                    onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                >
-                    <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>
-                        Comenzar
-                    </Text>
-                    <Ionicons name="arrow-forward" size={20} color={colors.onPrimary} />
-                </Pressable>
-            </Animated.View>
-        </View>
-    );
+async function buildSeedSuggestion(seed: string): Promise<QuickSuggestion | null> {
+    const artworkUrl = await fetchQuickSuggestionArtwork(seed);
+    return artworkUrl ? { name: seed, artworkUrl, seed } : null;
 }
 
-// ─── Step: Profile ────────────────────────────────────────────────────────────
+function shuffle<T>(list: T[]): T[] {
+    const copy = [...list];
+    for (let i = copy.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [copy[i], copy[j]] = [copy[j], copy[i]];
+    }
+    return copy;
+}
 
-function ProfileStep({
-    onNext,
-    colors,
-    name,
-    setName,
-    avatarUri,
-    setAvatarUri,
-}: {
-    onNext: () => void;
-    colors: any;
-    name: string;
-    setName: (n: string) => void;
-    avatarUri: string | null;
-    setAvatarUri: (u: string | null) => void;
-}) {
-    const [pickingImage, setPickingImage] = useState(false);
-    const avatarScale = useSharedValue(1);
-
-    const handlePickImage = async () => {
-        setPickingImage(true);
-        try {
-            const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-            if (status !== 'granted') {
-                setPickingImage(false);
-                return;
-            }
-            const result = await ImagePicker.launchImageLibraryAsync({
-                mediaTypes: ['images'],
-                allowsEditing: true,
-                aspect: [1, 1],
-                quality: 0.85,
-            });
-            if (!result.canceled && result.assets[0]) {
-                setAvatarUri(result.assets[0].uri);
-                avatarScale.value = withSequence(
-                    withSpring(1.15, { damping: 8 }),
-                    withSpring(1, { damping: 12 }),
-                );
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            }
-        } finally {
-            setPickingImage(false);
+function mapTrackRows(map: Map<number, TidalTrack[]>): TrackRow[] {
+    const buckets = Array.from(map.values()).map(list => [...list].sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0)));
+    const seen = new Set<number>();
+    const idx = buckets.map(() => 0);
+    const out: TrackRow[] = [];
+    let moved = true;
+    while (moved) {
+        moved = false;
+        for (let i = 0; i < buckets.length; i++) {
+            if (idx[i] >= buckets[i].length) continue;
+            moved = true;
+            const t = buckets[i][idx[i]++];
+            if (seen.has(t.id)) continue;
+            seen.add(t.id);
+            out.push({ id: t.id, title: t.title, artist: t.artist, artworkUrl: t.artworkUrl });
         }
-    };
-
-    const handleTakePhoto = async () => {
-        setPickingImage(true);
-        try {
-            const { status } = await ImagePicker.requestCameraPermissionsAsync();
-            if (status !== 'granted') {
-                setPickingImage(false);
-                return;
-            }
-            const result = await ImagePicker.launchCameraAsync({
-                allowsEditing: true,
-                aspect: [1, 1],
-                quality: 0.85,
-            });
-            if (!result.canceled && result.assets[0]) {
-                setAvatarUri(result.assets[0].uri);
-                avatarScale.value = withSequence(
-                    withSpring(1.15, { damping: 8 }),
-                    withSpring(1, { damping: 12 }),
-                );
-                Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-            }
-        } finally {
-            setPickingImage(false);
-        }
-    };
-
-    const avatarStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: avatarScale.value }],
-    }));
-
-    const canContinue = name.trim().length > 0;
-
-    return (
-        <KeyboardAvoidingView
-            style={{ flex: 1 }}
-            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        >
-            <Pressable style={styles.stepContainer} onPress={Keyboard.dismiss}>
-                {/* Avatar */}
-                <Animated.View entering={ZoomIn.duration(500)} style={avatarStyle}>
-                    <Pressable
-                        onPress={handlePickImage}
-                        style={[styles.avatarWrapper, { borderColor: colors.primary }]}
-                    >
-                        {avatarUri ? (
-                            <Image
-                                source={{ uri: avatarUri }}
-                                style={styles.avatarImage}
-                                contentFit="cover"
-                            />
-                        ) : (
-                            <View style={[styles.avatarPlaceholder, { backgroundColor: colors.surfaceVariant }]}>
-                                <Ionicons name="person" size={52} color={colors.onSurfaceVariant} />
-                            </View>
-                        )}
-                        <View style={[styles.avatarEditBadge, { backgroundColor: colors.primary }]}>
-                            <Ionicons name="camera" size={14} color={colors.onPrimary} />
-                        </View>
-                    </Pressable>
-                </Animated.View>
-
-                <Animated.View entering={FadeInDown.delay(200).duration(500)} style={styles.avatarActionRow}>
-                    <Pressable
-                        onPress={handlePickImage}
-                        style={[styles.avatarActionBtn, { backgroundColor: colors.surfaceVariant }]}
-                    >
-                        <Ionicons name="images-outline" size={18} color={colors.primary} />
-                        <Text style={[styles.avatarActionText, { color: colors.onSurface }]}>Galería</Text>
-                    </Pressable>
-                    <Pressable
-                        onPress={handleTakePhoto}
-                        style={[styles.avatarActionBtn, { backgroundColor: colors.surfaceVariant }]}
-                    >
-                        <Ionicons name="camera-outline" size={18} color={colors.primary} />
-                        <Text style={[styles.avatarActionText, { color: colors.onSurface }]}>Cámara</Text>
-                    </Pressable>
-                </Animated.View>
-
-                {/* Name input */}
-                <Animated.View entering={FadeInDown.delay(350).duration(500)} style={styles.inputSection}>
-                    <Text style={[styles.inputLabel, { color: colors.onSurfaceVariant }]}>
-                        ¿Cómo te llamamos?
-                    </Text>
-                    <View style={[styles.inputContainer, { backgroundColor: colors.surfaceVariant, borderColor: name.trim() ? colors.primary : 'transparent' }]}>
-                        <Ionicons name="person-outline" size={20} color={colors.onSurfaceVariant} style={{ marginLeft: 16 }} />
-                        <TextInput
-                            style={[styles.textInput, { color: colors.onSurface }]}
-                            placeholder="Tu nombre"
-                            placeholderTextColor={colors.onSurfaceVariant}
-                            value={name}
-                            onChangeText={setName}
-                            maxLength={32}
-                            returnKeyType="done"
-                            onSubmitEditing={Keyboard.dismiss}
-                            autoCapitalize="words"
-                        />
-                    </View>
-                </Animated.View>
-
-                <Animated.View entering={FadeInUp.delay(500).duration(500)}>
-                    <Pressable
-                        style={[
-                            styles.primaryButton,
-                            { backgroundColor: canContinue ? colors.primary : colors.surfaceVariant },
-                        ]}
-                        onPress={canContinue ? onNext : undefined}
-                        onPressIn={() => canContinue && Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                    >
-                        <Text style={[styles.primaryButtonText, { color: canContinue ? colors.onPrimary : colors.onSurfaceVariant }]}>
-                            {name.trim() ? `¡Hola, ${name.split(' ')[0]}!` : 'Continuar'}
-                        </Text>
-                        <Ionicons name="arrow-forward" size={20} color={canContinue ? colors.onPrimary : colors.onSurfaceVariant} />
-                    </Pressable>
-                    <Pressable onPress={onNext} style={styles.skipButton}>
-                        <Text style={[styles.skipText, { color: colors.onSurfaceVariant }]}>Omitir por ahora</Text>
-                    </Pressable>
-                </Animated.View>
-            </Pressable>
-        </KeyboardAvoidingView>
-    );
+    }
+    return out;
 }
 
-// ─── Step: Permissions ────────────────────────────────────────────────────────
-
-function PermissionsStep({ onNext, colors }: { onNext: () => void; colors: any }) {
-    const [permissions, setPermissions] = useState<PermissionItem[]>([
-        {
-            id: 'media',
-            icon: 'musical-notes',
-            title: 'Biblioteca musical',
-            description: 'Acceder a tus archivos de música y álbumes de fotos',
-            granted: null,
-            required: true,
-        },
-        {
-            id: 'notifications',
-            icon: 'notifications',
-            title: 'Notificaciones',
-            description: 'Controles en la barra de notificaciones (se activan automáticamente al reproducir)',
-            granted: true,  // RNTP handles this automatically
-            required: false,
-        },
-    ]);
-
-    const [allAsked, setAllAsked] = useState(false);
-
-    const updatePermission = (id: string, granted: boolean) => {
-        setPermissions(prev => {
-            const updated = prev.map(p => p.id === id ? { ...p, granted } : p);
-            if (updated.every(p => p.granted !== null)) {
-                setAllAsked(true);
-            }
-            return updated;
-        });
-    };
-
-    const handleRequestAll = async () => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-
-        // Media Library
-        try {
-            const { status } = await MediaLibrary.requestPermissionsAsync();
-            updatePermission('media', status === 'granted');
-        } catch {
-            updatePermission('media', false);
-        }
-
-        Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-    };
-
-    const handleSinglePermission = async (id: string) => {
-        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
-        if (id === 'media') {
-            const { status } = await MediaLibrary.requestPermissionsAsync();
-            updatePermission('media', status === 'granted');
-        }
-        // notifications are handled automatically by react-native-track-player
-    };
-
-    const allRequiredGranted = permissions
-        .filter(p => p.required)
-        .every(p => p.granted === true);
-
-    return (
-        <View style={styles.stepContainer}>
-            <Animated.View entering={FadeInDown.delay(100).duration(500)}>
-                <Text style={[styles.permissionsHint, { color: colors.onSurfaceVariant }]}>
-                    Para darte la mejor experiencia, StaySound necesita algunos permisos. Puedes otorgarlos todos de una vez o uno por uno.
-                </Text>
-            </Animated.View>
-
-            <View style={styles.permissionsList}>
-                {permissions.map((perm, index) => (
-                    <Animated.View
-                        key={perm.id}
-                        entering={FadeInDown.delay(200 + index * 120).duration(500)}
-                    >
-                        <PermissionCard
-                            item={perm}
-                            colors={colors}
-                            onRequest={() => handleSinglePermission(perm.id)}
-                        />
-                    </Animated.View>
-                ))}
-            </View>
-
-            <Animated.View entering={FadeInUp.delay(600).duration(500)}>
-                {!allAsked && (
-                    <Pressable
-                        style={[styles.primaryButton, { backgroundColor: colors.primary }]}
-                        onPress={handleRequestAll}
-                        onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                    >
-                        <Ionicons name="shield-checkmark" size={20} color={colors.onPrimary} />
-                        <Text style={[styles.primaryButtonText, { color: colors.onPrimary }]}>
-                            Otorgar permisos
-                        </Text>
-                    </Pressable>
-                )}
-
-                {allAsked && (
-                    <Pressable
-                        style={[styles.primaryButton, { backgroundColor: allRequiredGranted ? colors.primary : colors.surfaceVariant }]}
-                        onPress={onNext}
-                        onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light)}
-                    >
-                        <Text style={[styles.primaryButtonText, { color: allRequiredGranted ? colors.onPrimary : colors.onSurface }]}>
-                            {allRequiredGranted ? '¡Perfecto! Continuar' : 'Continuar de todas formas'}
-                        </Text>
-                        <Ionicons name="arrow-forward" size={20} color={allRequiredGranted ? colors.onPrimary : colors.onSurface} />
-                    </Pressable>
-                )}
-
-                {!allAsked && (
-                    <Pressable onPress={onNext} style={styles.skipButton}>
-                        <Text style={[styles.skipText, { color: colors.onSurfaceVariant }]}>Configurar más tarde</Text>
-                    </Pressable>
-                )}
-            </Animated.View>
-        </View>
-    );
+function Progress({ total, current, colors }: { total: number; current: number; colors: any }) {
+    return <View style={styles.progress}>{Array.from({ length: total }).map((_, i) => <View key={i} style={[styles.dot, { width: i === current ? 20 : 8, backgroundColor: i <= current ? colors.primary : `${colors.outline}44` }]} />)}</View>;
 }
-
-function PermissionCard({
-    item,
-    colors,
-    onRequest,
-}: {
-    item: PermissionItem;
-    colors: any;
-    onRequest: () => void;
-}) {
-    const scale = useSharedValue(1);
-    const checkScale = useSharedValue(item.granted === true ? 1 : 0);
-
-    useEffect(() => {
-        if (item.granted === true) {
-            checkScale.value = withSpring(1, { damping: 10, stiffness: 200 });
-        } else {
-            checkScale.value = withTiming(0, { duration: 200 });
-        }
-    }, [item.granted]);
-
-    const checkStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: checkScale.value }],
-    }));
-
-    const cardBg = item.granted === true
-        ? colors.primaryContainer + '55'
-        : item.granted === false
-            ? colors.surfaceVariant
-            : colors.surfaceVariant;
-
-    const borderColor = item.granted === true
-        ? colors.primary + '88'
-        : 'transparent';
-
-    return (
-        <Pressable
-            style={[styles.permissionCard, { backgroundColor: cardBg, borderColor }]}
-            onPress={onRequest}
-            onPressIn={() => { scale.value = withSpring(0.97, { damping: 15 }); }}
-            onPressOut={() => { scale.value = withSpring(1, { damping: 15 }); }}
-        >
-            <View style={[styles.permissionIconBg, { backgroundColor: colors.primaryContainer }]}>
-                <Ionicons name={item.icon} size={22} color={colors.primary} />
-            </View>
-            <View style={styles.permissionTextBlock}>
-                <View style={styles.permissionTitleRow}>
-                    <Text style={[styles.permissionTitle, { color: colors.onSurface }]}>{item.title}</Text>
-                    {item.required && (
-                        <View style={[styles.requiredBadge, { backgroundColor: colors.primary + '33' }]}>
-                            <Text style={[styles.requiredText, { color: colors.primary }]}>Req.</Text>
-                        </View>
-                    )}
-                </View>
-                <Text style={[styles.permissionDesc, { color: colors.onSurfaceVariant }]}>{item.description}</Text>
-            </View>
-
-            {/* Status indicator */}
-            <View style={styles.permissionStatus}>
-                {item.granted === null && (
-                    <Ionicons name="chevron-forward" size={18} color={colors.onSurfaceVariant} />
-                )}
-                {item.granted === false && (
-                    <Ionicons name="close-circle" size={22} color={colors.error} />
-                )}
-                {item.granted === true && (
-                    <Animated.View style={checkStyle}>
-                        <Ionicons name="checkmark-circle" size={24} color={colors.primary} />
-                    </Animated.View>
-                )}
-            </View>
-        </Pressable>
-    );
-}
-
-// ─── Step: Ready ──────────────────────────────────────────────────────────────
-
-// ─── Confetti Star ────────────────────────────────────────────────────────────
-
-const STAR_COLORS = ['#FFD700', '#FF9500', '#FF6B6B', '#4ECDC4', '#8AB4FF', '#C77DFF'];
-
-function ConfettiStar({
-    top,
-    left,
-    right,
-    rotation,
-    size,
-    color,
-    entryDelay,
-}: {
-    top: number;
-    left?: number;
-    right?: number;
-    rotation: string;
-    size: number;
-    color: string;
-    entryDelay: number;
-}) {
-    const scale = useSharedValue(0);
-
-    useEffect(() => {
-        scale.value = withDelay(entryDelay, withSpring(1, { damping: 8, stiffness: 180 }));
-    }, []);
-
-    const style = useAnimatedStyle(() => ({
-        transform: [{ scale: scale.value }, { rotate: rotation }],
-        position: 'absolute',
-        top,
-        left,
-        right,
-    }));
-
-    return (
-        <Animated.View style={style}>
-            <Ionicons name="star" size={size} color={color} />
-        </Animated.View>
-    );
-}
-
-// ─── Step: Ready ──────────────────────────────────────────────────────────────
-
-function ReadyStep({ userName, avatarUri, onFinish, colors }: {
-    userName: string;
-    avatarUri: string | null;
-    onFinish: () => void;
-    colors: any;
-}) {
-    const buttonScale = useSharedValue(0);
-
-    useEffect(() => {
-        buttonScale.value = withDelay(1000, withSpring(1, { damping: 12, stiffness: 120 }));
-    }, []);
-
-    const buttonStyle = useAnimatedStyle(() => ({
-        transform: [{ scale: buttonScale.value }],
-    }));
-
-    const displayName = userName.trim() || 'Oyente';
-
-    // confetti stars positions
-    const stars = [
-        { top: -20, left: 40, rotation: '15deg', size: 20 },
-        { top: -10, left: 260, rotation: '-20deg', size: 16 },
-        { top: 30, left: 10, rotation: '5deg', size: 14 },
-        { top: 30, right: 10, rotation: '-10deg', size: 18 },
-        { top: 80, left: 280, rotation: '30deg', size: 12 },
-        { top: 80, left: 48, rotation: '-5deg', size: 22 },
-    ];
-
-    return (
-        <View style={styles.stepContainer}>
-            {/* Avatar */}
-            <Animated.View entering={ZoomIn.duration(600)}>
-                <View style={[styles.readyAvatarRing, { borderColor: colors.primary }]}>
-                    {avatarUri ? (
-                        <Image source={{ uri: avatarUri }} style={styles.readyAvatar} contentFit="cover" />
-                    ) : (
-                        <View style={[styles.avatarPlaceholder, styles.readyAvatar, { backgroundColor: colors.primaryContainer }]}>
-                            <Ionicons name="person" size={48} color={colors.primary} />
-                        </View>
-                    )}
-                </View>
-            </Animated.View>
-
-            {/* Confetti stars */}
-            <View style={styles.confettiContainer} pointerEvents="none">
-                {stars.map((s, i) => (
-                    <ConfettiStar
-                        key={i}
-                        top={s.top}
-                        left={(s as any).left}
-                        right={(s as any).right}
-                        rotation={s.rotation}
-                        size={s.size}
-                        color={STAR_COLORS[i]}
-                        entryDelay={300 + i * 100}
-                    />
-                ))}
-            </View>
-
-            <Animated.View entering={FadeInDown.delay(400).duration(600)}>
-                <Text style={[styles.readyTitle, { color: colors.onBackground }]}>
-                    ¡Todo listo, {displayName}!
-                </Text>
-                <Text style={[styles.readySubtitle, { color: colors.onSurfaceVariant }]}>
-                    Tu biblioteca musical te espera.{'\n'}¡A disfrutar!
-                </Text>
-            </Animated.View>
-
-            <Animated.View style={[buttonStyle, { alignSelf: 'stretch' }]}>
-                <Pressable
-                    style={[styles.primaryButton, styles.readyButton, { backgroundColor: colors.primary }]}
-                    onPress={onFinish}
-                    onPressIn={() => Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium)}
-                >
-                    <Ionicons name="musical-notes" size={22} color={colors.onPrimary} />
-                    <Text style={[styles.primaryButtonText, { color: colors.onPrimary, fontSize: 17 }]}>
-                        Explorar StaySound
-                    </Text>
-                </Pressable>
-            </Animated.View>
-        </View>
-    );
-}
-
-// ─── Progress Dots ────────────────────────────────────────────────────────────
-
-function ProgressDots({ current, total, colors }: { current: number; total: number; colors: any }) {
-    return (
-        <View style={styles.dotsRow}>
-            {Array.from({ length: total }).map((_, i) => {
-                const isActive = i === current;
-                const isPast = i < current;
-                const width = isActive ? 24 : 8;
-                return (
-                    <Animated.View
-                        key={i}
-                        style={[
-                            styles.dot,
-                            {
-                                width,
-                                backgroundColor: isActive || isPast ? colors.primary : colors.surfaceVariant,
-                            },
-                        ]}
-                    />
-                );
-            })}
-        </View>
-    );
-}
-
-// ─── Step Header ──────────────────────────────────────────────────────────────
-
-const STEP_HEADERS: Record<OnboardingStep, { title: string; subtitle: string }> = {
-    welcome: { title: 'Bienvenido', subtitle: '' },
-    profile: { title: 'Tu perfil', subtitle: 'Personaliza cómo te verás en la app' },
-    permissions: { title: 'Permisos', subtitle: 'Necesitamos tu permiso para acceder a tu música' },
-    ready: { title: '¡Listo!', subtitle: '' },
-};
-
-// ─── Main Screen ──────────────────────────────────────────────────────────────
-
-const STEPS: OnboardingStep[] = ['welcome', 'profile', 'permissions', 'ready'];
 
 export default function OnboardingScreen() {
-    const { theme, isDark } = useTheme();
+    const rootNavigationState = useRootNavigationState();
     const insets = useSafeAreaInsets();
-
-    const { completeOnboarding, setUserName, setUserAvatarUri } = useOnboardingStore();
+    const { theme } = useTheme();
+    const { t } = useI18n();
+    const { session } = useAuthStore();
+    const {
+        completeOnboarding,
+        setUserName,
+        setUserAvatarUri,
+        tasteArtists,
+        tasteTrackIds,
+        setTasteArtists,
+        setTasteTrackIds,
+        setTastePlaylistStatus,
+        setTasteProfileVersion,
+        markTastePlaylistGenerated,
+    } = useOnboardingStore();
 
     const [step, setStep] = useState<OnboardingStep>('welcome');
-    const [name, setNameLocal] = useState('');
-    const [avatarUri, setAvatarUriLocal] = useState<string | null>(null);
+    const [name, setName] = useState('');
+    const [avatarUri, setAvatarUri] = useState<string | null>(null);
+    const [artists, setArtists] = useState<OnboardingTasteArtist[]>(tasteArtists);
+    const [isFinishing, setIsFinishing] = useState(false);
+    const [query, setQuery] = useState('');
+    const deferredQuery = useDeferredValue(query.trim());
+    const [artistSearch, setArtistSearch] = useState<OnboardingTasteArtist[]>([]);
+    const [artistLoading, setArtistLoading] = useState(false);
+    const [artistError, setArtistError] = useState('');
+    const [artistArtworkOverrides, setArtistArtworkOverrides] = useState<Map<number, string>>(new Map());
+    const [quickSuggestions, setQuickSuggestions] = useState<QuickSuggestion[]>([]);
+    const [quickLoading, setQuickLoading] = useState(false);
+    const artistArtworkAttempted = useRef<Set<number>>(new Set());
+    const quickSuggestionsAttempted = useRef(false);
+    const searchRequestId = useRef(0);
 
-    // Dynamic Colors based on avatar!
-    const { colors: dynamicColors, animated: anim } = useDynamicColors(avatarUri || undefined);
+    useEffect(() => {
+        if (!name && session?.email) {
+            const p = session.email.split('@')[0] ?? '';
+            if (p) setName(p.charAt(0).toUpperCase() + p.slice(1));
+        }
+    }, [name, session?.email]);
 
-    // Merge dynamic colors with theme colors to avoid missing Material 3 properties
-    const colors = useMemo(() => {
-        if (!avatarUri) return theme.colors;
-        return {
-            ...theme.colors,
-            ...dynamicColors,
-            onBackground: dynamicColors.text,
-            onSurfaceVolume: dynamicColors.text, // Just in case
-            onSurfaceVariant: dynamicColors.onSurface,
-            surfaceVariant: dynamicColors.background,
-            primaryContainer: dynamicColors.primary + '20',
-        } as any;
-    }, [avatarUri, dynamicColors, theme.colors]);
+    useEffect(() => {
+        if (deferredQuery.length < 2) {
+            setArtistSearch([]);
+            setArtistError('');
+            return;
+        }
+        let cancelled = false;
+        const requestId = ++searchRequestId.current;
+        const timer = setTimeout(() => {
+            setArtistLoading(true);
+            setArtistError('');
+            searchTidalArtists(deferredQuery)
+                .then(res => {
+                    if (cancelled || requestId !== searchRequestId.current) return;
+                    startTransition(() => setArtistSearch(res.slice(0, 24).map(a => ({ id: a.id, name: a.name, artworkUrl: a.artworkUrl }))));
+                })
+                .catch(() => !cancelled && setArtistError(t('onboarding.tasteArtists.error')))
+                .finally(() => !cancelled && setArtistLoading(false));
+        }, 120);
+        return () => {
+            cancelled = true;
+            clearTimeout(timer);
+        };
+    }, [deferredQuery, t]);
 
-    const stepIndex = STEPS.indexOf(step);
-
-    // Slide animation
-    const slideX = useSharedValue(0);
-    const contentOpacity = useSharedValue(1);
-
-    const rootStyle = useAnimatedStyle(() => ({
-        backgroundColor: avatarUri ? anim.background.value : theme.colors.background,
-        flex: 1,
-        paddingTop: insets.top,
-        paddingBottom: insets.bottom,
-    }));
-
-    const goToStep = useCallback((next: OnboardingStep) => {
-        contentOpacity.value = withTiming(0, { duration: 200 }, () => {
-            slideX.value = 30;
-            runOnJS(setStep)(next);
-            slideX.value = withSpring(0, { damping: 20, stiffness: 200 });
-            contentOpacity.value = withTiming(1, { duration: 300 });
-        });
+    const refreshQuickSuggestions = useCallback(async (selectedArtists: OnboardingTasteArtist[]) => {
+        const selectedNames = new Set(selectedArtists.map(artist => sanitizeSeedName(artist.name)));
+        const fallbackSeeds = shuffle(QUICK_SEEDS)
+            .filter(seed => !selectedNames.has(sanitizeSeedName(seed)))
+            .slice(0, QUICK_DYNAMIC_LIMIT);
+        const fallbackResults = await Promise.allSettled(fallbackSeeds.map(buildSeedSuggestion));
+        return fallbackResults
+            .map(result => result.status === 'fulfilled' ? result.value : null)
+            .filter((value): value is QuickSuggestion => Boolean(value))
+            .slice(0, QUICK_DYNAMIC_LIMIT);
     }, []);
 
-    const contentStyle = useAnimatedStyle(() => ({
-        opacity: contentOpacity.value,
-        transform: [{ translateX: slideX.value }],
-        flex: 1,
-    }));
+    useEffect(() => {
+        if (step !== 'tasteArtists') return;
+        let cancelled = false;
+        if (quickSuggestionsAttempted.current) return;
 
-    const handleNext = () => {
-        const nextIndex = stepIndex + 1;
-        if (nextIndex < STEPS.length) {
-            goToStep(STEPS[nextIndex]);
+        quickSuggestionsAttempted.current = true;
+        setQuickLoading(true);
+
+        void refreshQuickSuggestions(artists)
+            .then(suggestions => {
+                if (cancelled) return;
+                startTransition(() => setQuickSuggestions(suggestions));
+            })
+            .catch(() => {
+                if (!cancelled) setArtistError(prev => prev || t('onboarding.tasteArtists.error'));
+            })
+            .finally(() => {
+                if (!cancelled) setQuickLoading(false);
+            });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [artists, refreshQuickSuggestions, step, t]);
+
+    const resolveArtistArtwork = useCallback(async (artist: OnboardingTasteArtist) => {
+        if (artist.artworkUrl) return;
+        if (artistArtworkAttempted.current.has(artist.id)) return;
+        artistArtworkAttempted.current.add(artist.id);
+        try {
+            const info = await getTidalArtistInfo(artist.id);
+            const nextArtwork = info.artworkUrl ?? await fetchQuickSuggestionArtwork(artist.name);
+            if (!nextArtwork) return;
+            setArtistArtworkOverrides(prev => {
+                const next = new Map(prev);
+                next.set(artist.id, nextArtwork);
+                return next;
+            });
+        } catch {
+            const fallbackArtwork = await fetchQuickSuggestionArtwork(artist.name);
+            if (!fallbackArtwork) return;
+            setArtistArtworkOverrides(prev => {
+                const next = new Map(prev);
+                next.set(artist.id, fallbackArtwork);
+                return next;
+            });
         }
-    };
+    }, []);
 
-    const handleFinish = () => {
-        // Persist profile to store
-        if (name.trim()) setUserName(name.trim());
-        if (avatarUri) setUserAvatarUri(avatarUri);
-        completeOnboarding();
-        router.replace('/');
-    };
+    useEffect(() => {
+        if (artists.length === 0 && artistSearch.length === 0) return;
+        const merged = [...artists, ...artistSearch];
+        for (const artist of merged) {
+            if (!artist.artworkUrl) void resolveArtistArtwork(artist);
+        }
+    }, [artistSearch, artists, quickSuggestions, resolveArtistArtwork]);
 
-    const header = STEP_HEADERS[step];
+    const getArtistArtworkUrl = useCallback((artist: OnboardingTasteArtist) => artistArtworkOverrides.get(artist.id) ?? artist.artworkUrl, [artistArtworkOverrides]);
+
+    const { colors: dyn, animated } = useDynamicColors(avatarUri || undefined);
+    const colors = useMemo(() => avatarUri ? ({ ...theme.colors, ...dyn, onBackground: dyn.text, onSurfaceVariant: dyn.onSurface } as any) : theme.colors, [avatarUri, dyn, theme.colors]);
+    const steps: OnboardingStep[] = ['welcome', 'profile', 'tasteArtists', 'permissions', 'ready'];
+    const stepIndex = steps.indexOf(step);
+    const slideX = useSharedValue(0);
+    const contentOpacity = useSharedValue(1);
+    const rootStyle = useAnimatedStyle(() => ({ flex: 1, paddingTop: insets.top, paddingBottom: insets.bottom, backgroundColor: avatarUri ? animated.background.value : theme.colors.background }));
+    const contentStyle = useAnimatedStyle(() => ({ flex: 1, opacity: contentOpacity.value, transform: [{ translateX: slideX.value }] }));
+
+    const goTo = useCallback((next: OnboardingStep) => {
+        contentOpacity.value = withTiming(0, { duration: 160, easing: Easing.inOut(Easing.ease) }, () => {
+            slideX.value = 20;
+            runOnJS(setStep)(next);
+            slideX.value = withSpring(0, { damping: 18, stiffness: 220 });
+            contentOpacity.value = withTiming(1, { duration: 220 });
+        });
+    }, [contentOpacity, slideX]);
+    const next = useCallback(() => { const n = stepIndex + 1; if (n < steps.length) goTo(steps[n]); }, [goTo, stepIndex, steps]);
+
+    const toggleArtist = useCallback((a: OnboardingTasteArtist) => {
+        setArtists(prev => {
+            const has = prev.some(x => x.id === a.id);
+            if (has) return prev.filter(x => x.id !== a.id);
+            if (prev.length >= MAX_ARTISTS) return prev;
+            return [...prev, a];
+        });
+    }, []);
+    const addSeed = useCallback(async (seed: string) => {
+        if (artists.length >= MAX_ARTISTS) return;
+        try {
+            const res = await searchTidalArtists(seed);
+            const match = res.find(x => x.name.toLowerCase() === seed.toLowerCase()) ?? res[0];
+                if (match) {
+                    toggleArtist({ id: match.id, name: match.name, artworkUrl: match.artworkUrl });
+                    setArtistSearch(current => current.filter(artist => artist.id !== match.id));
+                }
+        } catch {
+            setArtistError(t('onboarding.tasteArtists.error'));
+        }
+    }, [artists.length, t, toggleArtist]);
+
+    const pickAvatar = useCallback(async (camera = false) => {
+        const perm = camera ? await ImagePicker.requestCameraPermissionsAsync() : await ImagePicker.requestMediaLibraryPermissionsAsync();
+        if (perm.status !== 'granted') return;
+        const result = camera
+            ? await ImagePicker.launchCameraAsync({ allowsEditing: true, aspect: [1, 1], quality: 0.9 })
+            : await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.9 });
+        if (!result.canceled && result.assets[0]?.uri) setAvatarUri(result.assets[0].uri);
+    }, []);
+
+    const askMedia = useCallback(async () => { try { await MediaLibrary.requestPermissionsAsync(); } catch { } }, []);
+
+    const finish = useCallback(async () => {
+        if (isFinishing) return;
+        setIsFinishing(true);
+        try {
+            if (name.trim()) setUserName(name.trim());
+            if (avatarUri) setUserAvatarUri(avatarUri);
+            setTasteProfileVersion(ONBOARDING_TASTE_PROFILE_VERSION);
+            setTasteArtists(artists);
+            setTasteTrackIds([]);
+            if (artists.length >= MIN_ARTISTS) {
+                setTastePlaylistStatus('pending');
+                completeOnboarding();
+                if (rootNavigationState?.key) router.replace('/');
+                void buildOnboardingMirrorPlaylist({ artists })
+                    .then(payload => {
+                        applyOnboardingMirrorPlaylist(payload);
+                        markTastePlaylistGenerated(Date.now());
+                    })
+                    .catch(() => {
+                        setTastePlaylistStatus('failed');
+                    });
+            } else {
+                setTastePlaylistStatus('idle');
+                completeOnboarding();
+                if (rootNavigationState?.key) router.replace('/');
+            }
+        } finally {
+            setIsFinishing(false);
+        }
+    }, [artists, avatarUri, completeOnboarding, isFinishing, markTastePlaylistGenerated, name, rootNavigationState?.key, setTasteArtists, setTastePlaylistStatus, setTasteProfileVersion, setTasteTrackIds, setUserAvatarUri, setUserName]);
+
+    const subtitle = step === 'profile' ? 'Ajusta lo basico en segundos.'
+        : step === 'tasteArtists' ? t('onboarding.tasteArtists.subtitle')
+            : step === 'permissions' ? 'Solo lo necesario.'
+                : '';
+    const title = step === 'profile' ? 'Tu perfil'
+        : step === 'tasteArtists' ? t('onboarding.tasteArtists.title')
+            : step === 'permissions' ? 'Permisos'
+                : step === 'ready' ? 'Listo' : '';
 
     return (
         <Animated.View style={rootStyle}>
-            {/* Header */}
-            {step !== 'welcome' && (
-                <Animated.View entering={FadeIn.duration(300)} style={styles.header}>
-                    <ProgressDots current={stepIndex} total={STEPS.length} colors={colors} />
-                    {header.title ? (
-                        <Text style={[styles.stepTitle, { color: colors.onBackground }]}>{header.title}</Text>
-                    ) : null}
-                    {header.subtitle ? (
-                        <Text style={[styles.stepSubtitle, { color: colors.onSurfaceVariant }]}>{header.subtitle}</Text>
-                    ) : null}
-                </Animated.View>
-            )}
+            {step !== 'welcome' ? (
+                <View style={styles.header}>
+                    <Progress total={steps.length} current={stepIndex} colors={colors} />
+                    <Text style={[styles.headerTitle, { color: colors.onBackground }]}>{title}</Text>
+                    {subtitle ? <Text style={[styles.headerSubtitle, { color: colors.onSurfaceVariant }]}>{subtitle}</Text> : null}
+                </View>
+            ) : null}
 
-            {/* Step content */}
-            <Animated.View style={contentStyle}>
-                {step === 'welcome' && (
-                    <WelcomeStep onNext={handleNext} colors={colors} />
-                )}
-                {step === 'profile' && (
-                    <ProfileStep
-                        onNext={handleNext}
-                        colors={colors}
-                        name={name}
-                        setName={setNameLocal}
-                        avatarUri={avatarUri}
-                        setAvatarUri={setAvatarUriLocal}
-                    />
-                )}
-                {step === 'permissions' && (
-                    <PermissionsStep onNext={handleNext} colors={colors} />
-                )}
-                {step === 'ready' && (
-                    <ReadyStep
-                        userName={name}
-                        avatarUri={avatarUri}
-                        onFinish={handleFinish}
-                        colors={colors}
-                    />
-                )}
+            <Animated.View style={[styles.body, contentStyle]}>
+                {step === 'welcome' ? (
+                    <View style={styles.center}>
+                        <View style={[styles.logo, { backgroundColor: colors.primaryContainer }]}><Image source={APP_LOGO} style={styles.logoImg} /></View>
+                        <Text style={[styles.hero, { color: colors.onBackground }]}>StaySound</Text>
+                        <Text style={[styles.sub, { color: colors.onSurfaceVariant }]}>Tu musica. Tu ritmo.</Text>
+                        <Pressable style={[styles.btn, { backgroundColor: colors.primary }]} onPress={next}><Text style={[styles.btnText, { color: colors.onPrimary }]}>Comenzar</Text></Pressable>
+                    </View>
+                ) : null}
+
+                {step === 'profile' ? (
+                    <Pressable onPress={Keyboard.dismiss} style={styles.full}>
+                        <View style={styles.center}>
+                            <Pressable onPress={() => void pickAvatar(false)} style={[styles.avatar, { borderColor: colors.primary }]}>{avatarUri ? <Image source={{ uri: avatarUri }} style={styles.avatarImg} /> : <Ionicons name="person-outline" size={40} color={colors.onSurfaceVariant} />}</Pressable>
+                            <View style={styles.row}>
+                                <Pressable onPress={() => void pickAvatar(false)}><Text style={[styles.link, { color: colors.primary }]}>Galeria</Text></Pressable>
+                                <Pressable onPress={() => void pickAvatar(true)}><Text style={[styles.link, { color: colors.primary }]}>Camara</Text></Pressable>
+                            </View>
+                        </View>
+                        <View style={[styles.input, { borderColor: `${colors.outline}55` }]}><Ionicons name="person-outline" size={18} color={colors.onSurfaceVariant} /><TextInput value={name} onChangeText={setName} style={[styles.inputText, { color: colors.onSurface }]} placeholder="Tu nombre" placeholderTextColor={colors.onSurfaceVariant} /></View>
+                        <Pressable style={[styles.btn, { backgroundColor: name.trim() ? colors.primary : colors.surfaceVariant }]} onPress={name.trim() ? next : undefined}><Text style={[styles.btnText, { color: name.trim() ? colors.onPrimary : colors.onSurfaceVariant }]}>Continuar</Text></Pressable>
+                        <Pressable onPress={next}><Text style={[styles.skip, { color: colors.onSurfaceVariant }]}>Saltar por ahora</Text></Pressable>
+                    </Pressable>
+                ) : null}
+
+                {step === 'tasteArtists' ? (
+                    <View style={styles.full}>
+                        <Text style={[styles.meta, { color: colors.onSurfaceVariant }]}>{t('onboarding.tasteArtists.selectedCount', { count: artists.length, max: MAX_ARTISTS })}</Text>
+                        <View style={[styles.input, { borderColor: `${colors.outline}55` }]}><Ionicons name="search-outline" size={18} color={colors.onSurfaceVariant} /><TextInput value={query} onChangeText={setQuery} style={[styles.inputText, { color: colors.onSurface }]} placeholder={t('onboarding.tasteArtists.searchPlaceholder')} placeholderTextColor={colors.onSurfaceVariant} /></View>
+                        <ScrollView style={styles.list} contentContainerStyle={styles.artistScroller}>
+                            {artists.length > 0 ? <View style={styles.wrap}>{artists.map(a => <Animated.View key={a.id} entering={FadeInDown.duration(220)} exiting={FadeOut.duration(160)} layout={LinearTransition.springify().damping(20).stiffness(230)}><Pressable onPress={() => toggleArtist(a)} style={[styles.pill, { borderColor: `${colors.primary}55` }]}><View style={[styles.pillAvatar, { backgroundColor: colors.surfaceVariant }]}>{getArtistArtworkUrl(a) ? <Image source={{ uri: getArtistArtworkUrl(a) }} style={styles.pillAvatarImg} /> : <Ionicons name="person-outline" size={12} color={colors.onSurfaceVariant} />}</View><Text style={[styles.pillText, { color: colors.onSurface }]} numberOfLines={1}>{a.name}</Text><Ionicons name="close" size={14} color={colors.onSurfaceVariant} /></Pressable></Animated.View>)}</View> : null}
+
+                            {!query.trim() ? <Text style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>{t('onboarding.tasteArtists.quickTitle')}</Text> : null}
+                            {!query.trim() ? <View style={styles.artistGrid}>{quickSuggestions.map((artist, index) => { const selected = artists.some(a => a.id === artist.id || a.name.toLowerCase() === artist.name.toLowerCase()); return <Animated.View key={`${artist.seed}-${artist.id ?? artist.name}`} entering={FadeInDown.delay(index * 40).duration(280)} exiting={FadeOut.duration(140)} layout={LinearTransition.springify().damping(20).stiffness(240)} style={styles.artistCell}><Pressable onPress={() => artist.id ? toggleArtist({ id: artist.id, name: artist.name, artworkUrl: artist.artworkUrl }) : void addSeed(artist.name)} style={styles.artistPoster}><View style={[styles.artistPortrait, { borderColor: selected ? colors.primary : 'transparent', backgroundColor: colors.surfaceVariant }]}>{artist.artworkUrl ? <Image source={{ uri: artist.artworkUrl }} style={styles.artistPortraitImg} /> : <Ionicons name="person-outline" size={28} color={colors.onSurfaceVariant} />}{selected ? <View style={[styles.quickCheck, { backgroundColor: colors.primary }]}><Ionicons name="checkmark" size={12} color={colors.onPrimary} /></View> : null}</View><Text style={[styles.artistPosterName, { color: colors.onSurface }]} numberOfLines={2}>{artist.name}</Text></Pressable></Animated.View>; })}</View> : null}
+
+                            {query.trim().length >= 2 ? <Text style={[styles.sectionLabel, { color: colors.onSurfaceVariant }]}>{t('onboarding.tasteArtists.resultsTitle')}</Text> : null}
+                            {artistError ? <Text style={[styles.meta, { color: colors.error }]}>{artistError}</Text> : null}
+                            {query.trim().length >= 2 ? <View style={styles.artistGrid}>{artistSearch.map((artist, index) => { const selected = artists.some(a => a.id === artist.id); const artwork = getArtistArtworkUrl(artist); return <Animated.View key={artist.id} entering={FadeInDown.delay(index * 20).duration(220)} layout={LinearTransition.springify().damping(22).stiffness(250)} style={styles.artistCell}><Pressable onPress={() => toggleArtist(artist)} style={styles.artistPoster}><View style={[styles.artistPortrait, { borderColor: selected ? colors.primary : 'transparent', backgroundColor: colors.surfaceVariant }]}>{artwork ? <Image source={{ uri: artwork }} style={styles.artistPortraitImg} /> : <Ionicons name="person-outline" size={28} color={colors.onSurfaceVariant} />}{selected ? <View style={[styles.quickCheck, { backgroundColor: colors.primary }]}><Ionicons name="checkmark" size={12} color={colors.onPrimary} /></View> : null}</View><Text style={[styles.artistPosterName, { color: colors.onSurface }]} numberOfLines={2}>{artist.name}</Text></Pressable></Animated.View>; })}</View> : null}
+                        </ScrollView>
+                        <Pressable style={[styles.btn, { backgroundColor: artists.length >= MIN_ARTISTS ? colors.primary : colors.surfaceVariant }]} onPress={artists.length >= MIN_ARTISTS ? next : undefined}><Text style={[styles.btnText, { color: artists.length >= MIN_ARTISTS ? colors.onPrimary : colors.onSurfaceVariant }]}>{t('onboarding.tasteArtists.continue')}</Text></Pressable>
+                        <Pressable onPress={next}><Text style={[styles.skip, { color: colors.onSurfaceVariant }]}>{t('onboarding.tasteArtists.skip')}</Text></Pressable>
+                    </View>
+                ) : null}
+
+                {step === 'permissions' ? (
+                    <View style={styles.full}>
+                        <View style={[styles.item, { borderBottomColor: `${colors.outline}22` }]}><Ionicons name="musical-notes-outline" size={20} color={colors.onSurfaceVariant} /><Text style={[styles.itemTitle, { color: colors.onSurface }]}>Biblioteca local</Text></View>
+                        <View style={[styles.item, { borderBottomColor: `${colors.outline}22` }]}><Ionicons name="notifications-outline" size={20} color={colors.onSurfaceVariant} /><Text style={[styles.itemTitle, { color: colors.onSurface }]}>Notificaciones</Text></View>
+                        <Pressable style={[styles.btn, { backgroundColor: colors.primary }]} onPress={() => void askMedia()}><Text style={[styles.btnText, { color: colors.onPrimary }]}>Pedir permisos</Text></Pressable>
+                        <Pressable style={[styles.btn, { backgroundColor: colors.surfaceVariant }]} onPress={next}><Text style={[styles.btnText, { color: colors.onSurfaceVariant }]}>Continuar</Text></Pressable>
+                    </View>
+                ) : null}
+
+                {step === 'ready' ? (
+                    <View style={styles.center}>
+                        <View style={[styles.avatar, { borderColor: colors.primary }]}>{avatarUri ? <Image source={{ uri: avatarUri }} style={styles.avatarImg} /> : <Ionicons name="person-outline" size={40} color={colors.onSurfaceVariant} />}</View>
+                        <Text style={[styles.heroSmall, { color: colors.onBackground }]}>Todo listo, {name.trim() || 'Oyente'}</Text>
+                        <Pressable style={[styles.btn, { backgroundColor: colors.primary }]} onPress={() => void finish()} disabled={isFinishing}><Text style={[styles.btnText, { color: colors.onPrimary }]}>{isFinishing ? t('onboarding.finish.processing') : 'Entrar a StaySound'}</Text></Pressable>
+                    </View>
+                ) : null}
             </Animated.View>
         </Animated.View>
     );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
-    root: {
-        flex: 1,
-    },
-    header: {
-        paddingHorizontal: 24,
-        paddingTop: 16,
-        paddingBottom: 8,
-        gap: 6,
-    },
-    dotsRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 6,
-        marginBottom: 12,
-    },
-    dot: {
-        height: 8,
-        borderRadius: 4,
-    },
-    stepTitle: {
-        fontSize: 28,
-        fontWeight: '700',
-        letterSpacing: -0.5,
-    },
-    stepSubtitle: {
-        fontSize: 15,
-        lineHeight: 22,
-    },
-    stepContainer: {
-        flex: 1,
-        paddingHorizontal: 24,
-        justifyContent: 'center',
-        alignItems: 'center',
-        gap: 24,
-    },
-
-    // Welcome
-    logoContainer: {
-        alignItems: 'center',
-    },
-    logoCircle: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    welcomeTitle: {
-        fontSize: 38,
-        fontWeight: '800',
-        textAlign: 'center',
-        letterSpacing: -1,
-    },
-    welcomeSubtitle: {
-        fontSize: 16,
-        textAlign: 'center',
-        marginTop: 6,
-    },
-    featureList: {
-        width: '100%',
-        borderRadius: 20,
-        padding: 16,
-        gap: 12,
-    },
-    featureRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 14,
-    },
-    featureIconBg: {
-        width: 36,
-        height: 36,
-        borderRadius: 10,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    featureText: {
-        fontSize: 15,
-        fontWeight: '500',
-        flex: 1,
-    },
-
-    // Buttons
-    primaryButton: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 10,
-        paddingVertical: 16,
-        paddingHorizontal: 32,
-        borderRadius: 50,
-        alignSelf: 'stretch',
-        minHeight: 56,
-    },
-    primaryButtonText: {
-        fontSize: 16,
-        fontWeight: '700',
-    },
-    skipButton: {
-        alignItems: 'center',
-        paddingVertical: 12,
-    },
-    skipText: {
-        fontSize: 14,
-    },
-
-    // Profile
-    avatarWrapper: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        borderWidth: 3,
-        overflow: 'hidden',
-        position: 'relative',
-    },
-    avatarImage: {
-        width: '100%',
-        height: '100%',
-    },
-    avatarPlaceholder: {
-        width: '100%',
-        height: '100%',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    avatarEditBadge: {
-        position: 'absolute',
-        bottom: 4,
-        right: 4,
-        width: 28,
-        height: 28,
-        borderRadius: 14,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    avatarActionRow: {
-        flexDirection: 'row',
-        gap: 12,
-    },
-    avatarActionBtn: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-        paddingVertical: 10,
-        paddingHorizontal: 18,
-        borderRadius: 50,
-    },
-    avatarActionText: {
-        fontSize: 14,
-        fontWeight: '600',
-    },
-    inputSection: {
-        width: '100%',
-        gap: 8,
-    },
-    inputLabel: {
-        fontSize: 14,
-        fontWeight: '600',
-        marginLeft: 4,
-    },
-    inputContainer: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        borderRadius: 16,
-        borderWidth: 2,
-        overflow: 'hidden',
-    },
-    textInput: {
-        flex: 1,
-        fontSize: 16,
-        paddingVertical: 16,
-        paddingHorizontal: 12,
-        fontWeight: '500',
-    },
-
-    // Permissions
-    permissionsHint: {
-        fontSize: 14,
-        lineHeight: 22,
-        textAlign: 'center',
-    },
-    permissionsList: {
-        width: '100%',
-        gap: 12,
-    },
-    permissionCard: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        padding: 16,
-        borderRadius: 20,
-        gap: 14,
-        borderWidth: 1.5,
-    },
-    permissionIconBg: {
-        width: 44,
-        height: 44,
-        borderRadius: 12,
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    permissionTextBlock: {
-        flex: 1,
-        gap: 4,
-    },
-    permissionTitleRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 8,
-    },
-    permissionTitle: {
-        fontSize: 15,
-        fontWeight: '700',
-    },
-    requiredBadge: {
-        paddingHorizontal: 6,
-        paddingVertical: 2,
-        borderRadius: 6,
-    },
-    requiredText: {
-        fontSize: 10,
-        fontWeight: '700',
-    },
-    permissionDesc: {
-        fontSize: 13,
-        lineHeight: 18,
-    },
-    permissionStatus: {
-        width: 28,
-        alignItems: 'center',
-    },
-
-    // Ready
-    confettiContainer: {
-        ...StyleSheet.absoluteFillObject,
-        pointerEvents: 'none',
-    },
-    readyAvatarRing: {
-        width: 120,
-        height: 120,
-        borderRadius: 60,
-        borderWidth: 4,
-        overflow: 'hidden',
-    },
-    readyAvatar: {
-        width: 112,
-        height: 112,
-        borderRadius: 56,
-    },
-    readyTitle: {
-        fontSize: 30,
-        fontWeight: '800',
-        textAlign: 'center',
-        letterSpacing: -0.5,
-    },
-    readySubtitle: {
-        fontSize: 16,
-        textAlign: 'center',
-        lineHeight: 24,
-        marginTop: 8,
-    },
-    readyButton: {
-        marginTop: 12,
-    },
+    header: { paddingHorizontal: 22, paddingTop: 14, gap: 6 },
+    progress: { flexDirection: 'row', gap: 6 },
+    dot: { height: 8, borderRadius: 999 },
+    headerTitle: { ...typeScale.headline, letterSpacing: -0.4 },
+    headerSubtitle: { ...typeScale.bodyStrong, lineHeight: 20 },
+    body: { flex: 1, paddingHorizontal: 22, paddingTop: 8, paddingBottom: 6 },
+    full: { flex: 1, gap: 10 },
+    center: { flex: 1, justifyContent: 'center', alignItems: 'center', gap: 12 },
+    logo: { width: 110, height: 110, borderRadius: 55, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    logoImg: { width: 110, height: 110 },
+    hero: { ...typeScale.hero, letterSpacing: -1 },
+    heroSmall: { ...typeScale.headline, textAlign: 'center' },
+    sub: { ...typeScale.bodyStrong },
+    avatar: { width: 108, height: 108, borderRadius: 54, borderWidth: 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+    avatarImg: { width: '100%', height: '100%' },
+    row: { flexDirection: 'row', gap: 16 },
+    link: { ...typeScale.bodyStrong, fontSize: 14 },
+    input: { minHeight: 50, borderRadius: 14, borderWidth: 1.3, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 },
+    inputText: { ...typeScale.bodyStrong, flex: 1, paddingVertical: 12 },
+    btn: { minHeight: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+    btnText: { ...typeScale.title, fontSize: 16, textAlign: 'center' },
+    skip: { ...typeScale.bodyStrong, fontSize: 14, textAlign: 'center', paddingVertical: 4 },
+    wrap: { flexDirection: 'row', flexWrap: 'wrap', gap: 8 },
+    pill: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7, flexDirection: 'row', alignItems: 'center', gap: 6, maxWidth: '100%' },
+    pillAvatar: { width: 20, height: 20, borderRadius: 999, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+    pillAvatarImg: { width: '100%', height: '100%' },
+    pillText: { ...typeScale.body, maxWidth: 160 },
+    seed: { borderWidth: 1, borderRadius: 999, paddingHorizontal: 10, paddingVertical: 7 },
+    seedText: { ...typeScale.body, fontSize: 13 },
+    artistScroller: { paddingBottom: 18, gap: 14 },
+    sectionLabel: { ...typeScale.caption, fontSize: 12, letterSpacing: 0.7, textTransform: 'uppercase', marginTop: 4 },
+    artistGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -6 },
+    artistCell: { width: '33.333%', paddingHorizontal: 6, marginBottom: 16 },
+    artistPoster: { gap: 9 },
+    artistPortrait: { width: '100%', aspectRatio: 1, borderRadius: 999, borderWidth: 2, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+    artistPortraitImg: { width: '100%', height: '100%' },
+    quickCheck: { position: 'absolute', right: 5, bottom: 5, width: 20, height: 20, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
+    artistPosterName: { ...typeScale.bodyStrong, fontSize: 13, textAlign: 'center', lineHeight: 17 },
+    list: { flex: 1, minHeight: 160 },
+    item: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: StyleSheet.hairlineWidth },
+    thumb: { width: 36, height: 36, borderRadius: 8, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+    thumbImg: { width: '100%', height: '100%' },
+    itemText: { flex: 1 },
+    itemTitle: { ...typeScale.bodyStrong, flex: 1 },
+    itemSub: { ...typeScale.caption, marginTop: 2 },
+    meta: { ...typeScale.body, lineHeight: 20 },
 });

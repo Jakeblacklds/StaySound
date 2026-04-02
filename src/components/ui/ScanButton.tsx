@@ -1,11 +1,11 @@
-/**
+﻿/**
  * ScanButton - Button with folder selection for library scan
- * Integrated with radical Super Themes
  */
 
+import { useI18n } from '@/src/i18n';
 import { useTheme } from '@/src/theme';
 import { ScanProgress } from '@/src/types';
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Button, Chip, ProgressBar, Surface, Text } from 'react-native-paper';
 import Animated, {
@@ -24,33 +24,49 @@ interface ScanButtonProps {
     onScan: (folderPath?: string) => void;
 }
 
-const FOLDER_OPTIONS = [
-    { id: 'download', label: '📥 Download', path: '/storage/emulated/0/Download/' },
-    { id: 'music', label: '🎵 Music', path: '/storage/emulated/0/Music/' },
-    { id: 'all', label: '📱 All Folders', path: '' },
-];
-
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
     const { theme } = useTheme();
+    const { t, language } = useI18n();
     const [showFolders, setShowFolders] = useState(false);
-    const [selectedFolder, setSelectedFolder] = useState(FOLDER_OPTIONS[0]);
     const rotation = useSharedValue(0);
 
+    const folderOptions = useMemo(() => ([
+        {
+            id: 'download',
+            label: language === 'es' ? 'Descargas' : 'Download',
+            emoji: '📥',
+            path: '/storage/emulated/0/Download/',
+        },
+        {
+            id: 'music',
+            label: 'Music',
+            emoji: '🎵',
+            path: '/storage/emulated/0/Music/',
+        },
+        {
+            id: 'all',
+            label: language === 'es' ? 'Todas las carpetas' : 'All folders',
+            emoji: '📱',
+            path: '',
+        },
+    ]), [language]);
+
+    const [selectedFolder, setSelectedFolder] = useState(folderOptions[0]);
     const globalStyles = theme.components.global;
 
     React.useEffect(() => {
         if (isScanning) {
-            rotation.value = withRepeat(
-                withTiming(360, { duration: 1500 }),
-                -1,
-                false
-            );
+            rotation.value = withRepeat(withTiming(360, { duration: 1500 }), -1, false);
         } else {
             rotation.value = 0;
         }
-    }, [isScanning]);
+    }, [isScanning, rotation]);
+
+    React.useEffect(() => {
+        setSelectedFolder((current) => folderOptions.find((option) => option.id === current.id) ?? folderOptions[0]);
+    }, [folderOptions]);
 
     const handleStartScan = () => {
         setShowFolders(false);
@@ -59,7 +75,6 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
 
     const progressValue = progress?.total ? progress.scanned / progress.total : 0;
 
-    // Compact mode
     if (!showFolders && !isScanning) {
         return (
             <View style={styles.container}>
@@ -85,7 +100,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                             fontFamily: theme.typography.fontFamily.bold
                         }}
                     >
-                        Scan for Music
+                        {t('scan.button')}
                     </Text>
                 </AnimatedPressable>
             </View>
@@ -116,11 +131,11 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                                 fontFamily: theme.typography.fontFamily.bold
                             }}
                         >
-                            Where's your music?
+                            {t('scan.where')}
                         </Text>
 
                         <View style={styles.folderChips}>
-                            {FOLDER_OPTIONS.map((folder) => (
+                            {folderOptions.map((folder) => (
                                 <Chip
                                     key={folder.id}
                                     mode={selectedFolder.id === folder.id ? 'flat' : 'outlined'}
@@ -139,7 +154,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                                         fontFamily: theme.typography.fontFamily.medium
                                     }}
                                 >
-                                    {folder.label}
+                                    {`${folder.emoji} ${folder.label}`}
                                 </Chip>
                             ))}
                         </View>
@@ -151,7 +166,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                                 textColor={theme.colors.onSurfaceVariant}
                                 labelStyle={{ fontFamily: theme.typography.fontFamily.medium }}
                             >
-                                Cancel
+                                {t('scan.cancel')}
                             </Button>
                             <Button
                                 mode="contained"
@@ -165,7 +180,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                                 icon={() => <CustomIcon name="Next" size={18} color={theme.colors.onPrimary} />}
                                 labelStyle={{ fontFamily: theme.typography.fontFamily.bold }}
                             >
-                                Scan Now
+                                {t('scan.now')}
                             </Button>
                         </View>
                     </Surface>
@@ -175,7 +190,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
             {isScanning && progress && (
                 <Animated.View entering={FadeIn} style={styles.progressContainer}>
                     <View style={styles.scanningHeader}>
-                        <CustomIcon name="Canción" size={32} color={theme.colors.primary} />
+                        <CustomIcon name="Cancion" size={32} color={theme.colors.primary} />
                         <Text
                             variant="titleMedium"
                             style={{
@@ -184,15 +199,11 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                                 fontFamily: theme.typography.fontFamily.bold
                             }}
                         >
-                            Finding your music...
+                            {t('scan.finding')}
                         </Text>
                     </View>
 
-                    <ProgressBar
-                        progress={progressValue}
-                        color={theme.colors.primary}
-                        style={styles.progressBar}
-                    />
+                    <ProgressBar progress={progressValue} color={theme.colors.primary} style={styles.progressBar} />
 
                     <Text
                         variant="bodySmall"
@@ -202,7 +213,7 @@ export function ScanButton({ isScanning, progress, onScan }: ScanButtonProps) {
                             fontFamily: theme.typography.fontFamily.regular
                         }}
                     >
-                        {progress.currentPath || `${progress.scanned} tracks found`}
+                        {progress.currentPath || t('scan.tracksFound', { count: progress.scanned })}
                     </Text>
                 </Animated.View>
             )}
@@ -252,3 +263,4 @@ const styles = StyleSheet.create({
         borderRadius: 4,
     },
 });
+

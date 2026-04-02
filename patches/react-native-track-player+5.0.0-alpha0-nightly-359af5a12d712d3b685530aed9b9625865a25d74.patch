@@ -1,0 +1,479 @@
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
+index b495b5a..e114508 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
+@@ -3,6 +3,7 @@ package com.doublesymmetry.trackplayer.service
+ import android.annotation.SuppressLint
+ import android.app.*
+ import android.content.Intent
++import android.content.SharedPreferences
+ import android.graphics.Bitmap
+ import android.net.Uri
+ import android.os.Binder
+@@ -28,6 +29,8 @@ import androidx.media3.session.MediaSession
+ import androidx.media3.session.SessionCommand
+ import androidx.media3.session.SessionCommands
+ import androidx.media3.session.SessionResult
++import androidx.media3.session.MediaLibraryService.LibraryParams
++import androidx.media3.session.MediaLibraryService.MediaLibrarySession
+ import com.doublesymmetry.kotlinaudio.models.*
+ import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
+ import com.doublesymmetry.trackplayer.HeadlessJsMediaService
+@@ -51,6 +54,7 @@ import com.google.common.util.concurrent.Futures
+ import com.google.common.util.concurrent.ListenableFuture
+ import kotlinx.coroutines.*
+ import kotlinx.coroutines.flow.flow
++import org.json.JSONObject
+ import timber.log.Timber
+ import java.util.concurrent.TimeUnit
+ import kotlin.system.exitProcess
+@@ -70,6 +74,31 @@ class MusicService : HeadlessJsMediaService() {
+     private var lastWake: Long = 0
+     var onStartCommandIntentValid: Boolean = true
+ 
++    private data class AutoCatalogTrack(
++        val id: String,
++        val uri: String,
++        val title: String,
++        val artist: String,
++        val album: String,
++        val artwork: String?,
++        val durationMs: Long?
++    )
++
++    private data class AutoCatalogSection(
++        val id: String,
++        val name: String,
++        val subtitle: String?,
++        val artwork: String?,
++        val trackIds: List<String>
++    )
++
++    private data class AutoCatalogSnapshot(
++        val tracksById: Map<String, AutoCatalogTrack>,
++        val albums: List<AutoCatalogSection>,
++        val artists: List<AutoCatalogSection>,
++        val playlists: List<AutoCatalogSection>
++    )
++
+     fun acquireWakeLock() {
+         acquireWakeLockNow(this)
+     }
+@@ -139,6 +168,14 @@ class MusicService : HeadlessJsMediaService() {
+             return (player.currentItem as TrackAudioItem?)?.track
+         }
+ 
++    fun getAudioSessionId(): Int {
++        if (!::player.isInitialized) {
++            return C.AUDIO_SESSION_ID_UNSET
++        }
++
++        return player.exoPlayer.audioSessionId
++    }
++
+     val state
+         get() = player.playerState
+ 
+@@ -857,6 +894,277 @@ class MusicService : HeadlessJsMediaService() {
+         return null
+     }
+ 
++    private fun getCatalogPreferences(): SharedPreferences {
++        return getSharedPreferences(AUTO_CATALOG_PREFS_NAME, MODE_PRIVATE)
++    }
++
++    private fun loadAutoCatalogSnapshot(): AutoCatalogSnapshot {
++        val rawJson = getCatalogPreferences().getString(AUTO_CATALOG_KEY, null)
++        if (rawJson.isNullOrBlank()) {
++            return AutoCatalogSnapshot(emptyMap(), emptyList(), emptyList(), emptyList())
++        }
++
++        return try {
++            val root = JSONObject(rawJson)
++            val tracks = root.optJSONArray("tracks")
++            val albums = root.optJSONArray("albums")
++            val artists = root.optJSONArray("artists")
++            val playlists = root.optJSONArray("playlists")
++
++            val tracksById = buildMap {
++                if (tracks != null) {
++                    for (index in 0 until tracks.length()) {
++                        val item = tracks.optJSONObject(index) ?: continue
++                        val id = item.optString("id")
++                        if (id.isBlank()) continue
++
++                        put(
++                            id,
++                            AutoCatalogTrack(
++                                id = id,
++                                uri = item.optString("uri"),
++                                title = item.optString("title", "Unknown Title"),
++                                artist = item.optString("artist", "Unknown Artist"),
++                                album = item.optString("album", "Unknown Album"),
++                                artwork = item.optString("artwork").takeIf { it.isNotBlank() },
++                                durationMs = item.optLong("duration").takeIf { it > 0 }
++                            )
++                        )
++                    }
++                }
++            }
++
++            AutoCatalogSnapshot(
++                tracksById = tracksById,
++                albums = parseCatalogSections(albums),
++                artists = parseCatalogSections(artists),
++                playlists = parseCatalogSections(playlists)
++            )
++        } catch (error: Exception) {
++            Timber.w(error, "Failed to parse Android Auto catalog")
++            AutoCatalogSnapshot(emptyMap(), emptyList(), emptyList(), emptyList())
++        }
++    }
++
++    private fun parseCatalogSections(array: org.json.JSONArray?): List<AutoCatalogSection> {
++        if (array == null) return emptyList()
++
++        return buildList {
++            for (index in 0 until array.length()) {
++                val item = array.optJSONObject(index) ?: continue
++                val id = item.optString("id")
++                val name = item.optString("name")
++                if (id.isBlank() || name.isBlank()) continue
++
++                val trackIdsJson = item.optJSONArray("trackIds")
++                val trackIds = buildList {
++                    if (trackIdsJson != null) {
++                        for (trackIndex in 0 until trackIdsJson.length()) {
++                            val trackId = trackIdsJson.optString(trackIndex)
++                            if (trackId.isNotBlank()) add(trackId)
++                        }
++                    }
++                }
++
++                add(
++                    AutoCatalogSection(
++                        id = id,
++                        name = name,
++                        subtitle = item.optString("subtitle").takeIf { it.isNotBlank() },
++                        artwork = item.optString("artwork").takeIf { it.isNotBlank() },
++                        trackIds = trackIds
++                    )
++                )
++            }
++        }
++    }
++
++    private fun buildBrowsableItem(
++        mediaId: String,
++        title: String,
++        subtitle: String? = null,
++        artwork: String? = null
++    ): MediaItem {
++        return MediaItem.Builder()
++            .setMediaId(mediaId)
++            .setMediaMetadata(
++                androidx.media3.common.MediaMetadata.Builder()
++                    .setIsBrowsable(true)
++                    .setIsPlayable(false)
++                    .setTitle(title)
++                    .setArtist(subtitle)
++                    .setArtworkUri(artwork?.let(Uri::parse))
++                    .build()
++            )
++            .build()
++    }
++
++    private fun buildPlayableCatalogItem(track: AutoCatalogTrack): MediaItem {
++        return MediaItem.Builder()
++            .setMediaId(track.id)
++            .setMediaMetadata(
++                androidx.media3.common.MediaMetadata.Builder()
++                    .setIsBrowsable(false)
++                    .setIsPlayable(true)
++                    .setTitle(track.title)
++                    .setArtist(track.artist)
++                    .setAlbumTitle(track.album)
++                    .setArtworkUri(track.artwork?.let(Uri::parse))
++                    .build()
++            )
++            .build()
++    }
++
++    private fun buildResolvedPlayableItem(track: AutoCatalogTrack): MediaItem {
++        return MediaItem.Builder()
++            .setMediaId(track.id)
++            .setUri(track.uri)
++            .setMediaMetadata(
++                androidx.media3.common.MediaMetadata.Builder()
++                    .setIsBrowsable(false)
++                    .setIsPlayable(true)
++                    .setTitle(track.title)
++                    .setArtist(track.artist)
++                    .setAlbumTitle(track.album)
++                    .setArtworkUri(track.artwork?.let(Uri::parse))
++                    .setDurationMs(track.durationMs ?: C.TIME_UNSET)
++                    .build()
++            )
++            .build()
++    }
++
++    private fun resolveRequestedMediaItems(mediaItems: List<MediaItem>): List<MediaItem> {
++        val snapshot = loadAutoCatalogSnapshot()
++        return mediaItems.mapNotNull { item ->
++            val mediaId = item.mediaId
++            if (!mediaId.isNullOrBlank()) {
++                snapshot.tracksById[mediaId]?.let(::buildResolvedPlayableItem)
++            } else {
++                item.localConfiguration?.uri?.let { item }
++            }
++        }
++    }
++
++    private fun resolveCatalogTracks(mediaItems: List<MediaItem>): List<AutoCatalogTrack> {
++        val snapshot = loadAutoCatalogSnapshot()
++        return mediaItems.mapNotNull { item ->
++            val mediaId = item.mediaId
++            if (mediaId.isNullOrBlank()) {
++                null
++            } else {
++                snapshot.tracksById[mediaId]
++            }
++        }
++    }
++
++    private fun ensurePlayerInitializedForCatalogPlayback() {
++        if (!this::player.isInitialized) {
++            setupPlayer(null)
++            latestOptions?.let(::updateOptions)
++        }
++    }
++
++    private fun buildNativeTrack(track: AutoCatalogTrack): Track {
++        val bundle = Bundle().apply {
++            putString("url", track.uri)
++            putString("title", track.title)
++            putString("artist", track.artist)
++            putString("album", track.album)
++            putString("mediaId", track.id)
++            track.artwork?.let { putString("artwork", it) }
++            track.durationMs?.let { putDouble("duration", it.toDouble() / 1000.0) }
++        }
++
++        return Track(this, bundle, ratingType)
++    }
++
++    private fun playCatalogSelection(tracks: List<AutoCatalogTrack>, startIndex: Int) {
++        if (tracks.isEmpty()) return
++
++        ensurePlayerInitializedForCatalogPlayback()
++
++        val audioItems = tracks.map(::buildNativeTrack).map { it.toAudioItem() }
++        val safeIndex = startIndex.coerceIn(0, audioItems.lastIndex)
++
++        player.clear()
++        player.add(audioItems)
++        if (safeIndex > 0) {
++            player.jumpToItem(safeIndex)
++        }
++        player.play()
++    }
++
++    private fun buildTrackChildren(
++        trackIds: List<String>,
++        snapshot: AutoCatalogSnapshot
++    ): List<MediaItem> {
++        return trackIds.mapNotNull { trackId ->
++            snapshot.tracksById[trackId]?.let(::buildPlayableCatalogItem)
++        }
++    }
++
++    private fun getCatalogChildren(parentId: String): List<MediaItem> {
++        val snapshot = loadAutoCatalogSnapshot()
++
++        return when {
++            parentId == AUTO_ROOT_ID -> buildList {
++                if (snapshot.tracksById.isNotEmpty()) add(buildBrowsableItem(AUTO_SONGS_ID, "Canciones"))
++                if (snapshot.albums.isNotEmpty()) add(buildBrowsableItem(AUTO_ALBUMS_ID, "Albumes"))
++                if (snapshot.artists.isNotEmpty()) add(buildBrowsableItem(AUTO_ARTISTS_ID, "Artistas"))
++                if (snapshot.playlists.isNotEmpty()) add(buildBrowsableItem(AUTO_PLAYLISTS_ID, "Playlists"))
++            }
++
++            parentId == AUTO_SONGS_ID -> snapshot.tracksById.values.map(::buildPlayableCatalogItem)
++
++            parentId == AUTO_ALBUMS_ID -> snapshot.albums.map { album ->
++                buildBrowsableItem(
++                    mediaId = "$AUTO_ALBUM_PREFIX${album.id}",
++                    title = album.name,
++                    subtitle = album.subtitle,
++                    artwork = album.artwork
++                )
++            }
++
++            parentId == AUTO_ARTISTS_ID -> snapshot.artists.map { artist ->
++                buildBrowsableItem(
++                    mediaId = "$AUTO_ARTIST_PREFIX${artist.id}",
++                    title = artist.name,
++                    subtitle = artist.subtitle,
++                    artwork = artist.artwork
++                )
++            }
++
++            parentId == AUTO_PLAYLISTS_ID -> snapshot.playlists.map { playlist ->
++                buildBrowsableItem(
++                    mediaId = "$AUTO_PLAYLIST_PREFIX${playlist.id}",
++                    title = playlist.name,
++                    subtitle = playlist.subtitle,
++                    artwork = playlist.artwork
++                )
++            }
++
++            parentId.startsWith(AUTO_ALBUM_PREFIX) -> {
++                val albumId = parentId.removePrefix(AUTO_ALBUM_PREFIX)
++                val album = snapshot.albums.find { it.id == albumId }
++                buildTrackChildren(album?.trackIds ?: emptyList(), snapshot)
++            }
++
++            parentId.startsWith(AUTO_ARTIST_PREFIX) -> {
++                val artistId = parentId.removePrefix(AUTO_ARTIST_PREFIX)
++                val artist = snapshot.artists.find { it.id == artistId }
++                buildTrackChildren(artist?.trackIds ?: emptyList(), snapshot)
++            }
++
++            parentId.startsWith(AUTO_PLAYLIST_PREFIX) -> {
++                val playlistId = parentId.removePrefix(AUTO_PLAYLIST_PREFIX)
++                val playlist = snapshot.playlists.find { it.id == playlistId }
++                buildTrackChildren(playlist?.trackIds ?: emptyList(), snapshot)
++            }
++
++            else -> emptyList()
++        }
++    }
++
+     @MainThread
+     inner class MusicBinder : Binder() {
+         val service = this@MusicService
+@@ -900,10 +1208,13 @@ class MusicService : HeadlessJsMediaService() {
+                     "com.google.android.projection.gearhead"
+                 )
+             ) {
+-                // HACK: attempt to wake up activity (for legacy APM). if not, start headless.
+-                if (!selfWake(controller.packageName)) {
+-                    onStartCommand(null, 0, 0)
+-                }
++                // Always start the headless service for transport commands.
++                // Waking the activity alone can make the first Android Auto selection
++                // act as a warm-up tap instead of an actual playback request.
++                onStartCommand(null, 0, 0)
++
++                // Best-effort wake for legacy flows, but playback should not depend on it.
++                selfWake(controller.packageName)
+             }
+             return if (
+                 isMediaNotificationController ||
+@@ -965,6 +1276,45 @@ class MusicService : HeadlessJsMediaService() {
+             return super.onPlaybackResumption(mediaSession, controller)
+         }
+ 
++        override fun onAddMediaItems(
++            session: MediaSession,
++            controller: MediaSession.ControllerInfo,
++            mediaItems: List<MediaItem>
++        ): ListenableFuture<List<MediaItem>> {
++            val resolvedItems = resolveRequestedMediaItems(mediaItems)
++            return if (resolvedItems.isNotEmpty()) {
++                Futures.immediateFuture(resolvedItems)
++            } else {
++                super.onAddMediaItems(session, controller, mediaItems)
++            }
++        }
++
++        override fun onSetMediaItems(
++            session: MediaSession,
++            controller: MediaSession.ControllerInfo,
++            mediaItems: List<MediaItem>,
++            startIndex: Int,
++            startPositionMs: Long
++        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
++            val resolvedItems = resolveRequestedMediaItems(mediaItems)
++            if (resolvedItems.isEmpty()) {
++                return super.onSetMediaItems(session, controller, mediaItems, startIndex, startPositionMs)
++            }
++
++            val safeIndex = startIndex.coerceIn(0, resolvedItems.lastIndex)
++            val safePosition = if (startPositionMs >= 0) startPositionMs else C.TIME_UNSET
++            val resolvedTracks = resolveCatalogTracks(mediaItems)
++            playCatalogSelection(resolvedTracks, safeIndex)
++
++            return Futures.immediateFuture(
++                MediaSession.MediaItemsWithStartPosition(
++                    resolvedItems,
++                    safeIndex,
++                    safePosition
++                )
++            )
++        }
++
+         override fun onSetRating(
+             session: MediaSession,
+             controller: MediaSession.ControllerInfo,
+@@ -976,6 +1326,44 @@ class MusicService : HeadlessJsMediaService() {
+             }
+             return super.onSetRating(session, controller, rating)
+         }
++
++        // ── Android Auto / Media Browsing ────────────────────────────────────
++        // Android Auto calls onGetLibraryRoot first, then onGetChildren for the
++        // returned root ID.  We expose a flat list of the current queue tracks
++        // so the car UI can show them and let the driver pick one.
++
++        override fun onGetLibraryRoot(
++            session: MediaLibrarySession,
++            browser: MediaSession.ControllerInfo,
++            params: LibraryParams?
++        ): ListenableFuture<LibraryResult<MediaItem>> {
++            val rootItem = MediaItem.Builder()
++                .setMediaId(AUTO_ROOT_ID)
++                .setMediaMetadata(
++                    androidx.media3.common.MediaMetadata.Builder()
++                        .setIsBrowsable(true)
++                        .setIsPlayable(false)
++                        .setTitle("StaySound")
++                        .build()
++                )
++                .build()
++            return Futures.immediateFuture(LibraryResult.ofItem(rootItem, params))
++        }
++
++        override fun onGetChildren(
++            session: MediaLibrarySession,
++            browser: MediaSession.ControllerInfo,
++            parentId: String,
++            page: Int,
++            pageSize: Int,
++            params: LibraryParams?
++        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
++            val children = getCatalogChildren(parentId)
++            return Futures.immediateFuture(
++                LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
++            )
++        }
++        // ────────────────────────────────────────────────────────────────────
+     }
+ 
+     private fun getPendingIntentFlags(): Int {
+@@ -1029,5 +1417,15 @@ class MusicService : HeadlessJsMediaService() {
+ 
+         const val DEFAULT_JUMP_INTERVAL = 15.0
+         const val DEFAULT_STOP_FOREGROUND_GRACE_PERIOD = 5
++        const val AUTO_CATALOG_PREFS_NAME = "staysound_android_auto"
++        const val AUTO_CATALOG_KEY = "catalog_json"
++        const val AUTO_ROOT_ID = "root"
++        const val AUTO_SONGS_ID = "songs"
++        const val AUTO_ALBUMS_ID = "albums"
++        const val AUTO_ARTISTS_ID = "artists"
++        const val AUTO_PLAYLISTS_ID = "playlists"
++        const val AUTO_ALBUM_PREFIX = "album::"
++        const val AUTO_ARTIST_PREFIX = "artist::"
++        const val AUTO_PLAYLIST_PREFIX = "playlist::"
+     }
+ }

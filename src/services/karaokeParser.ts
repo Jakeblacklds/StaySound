@@ -21,6 +21,10 @@ export function parseKaraokeLyrics(json: KaraokeLyricsJSON): KaraokeData {
     let lineEnd = 0;
 
     json.lyrics.forEach((raw, index) => {
+        if (raw.bg) {
+            return;
+        }
+
         const word: KaraokeWord = {
             text: raw.w,
             startSec: raw.s,

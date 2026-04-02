@@ -1,3 +1,4 @@
+import { typeScale } from '@/src/theme';
 import { Dimensions, StyleSheet } from 'react-native';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -34,14 +35,36 @@ export const playerStyles = StyleSheet.create({
     miniShellArtist: {
         fontSize: 11,
         marginTop: 1,
+        opacity: 0.7,
+    },
+    miniShellArtworkWrap: {
+        position: 'absolute',
+        left: 10,
+        top: 9,
+        width: 48,
+        height: 48,
+        borderRadius: 16,
+        overflow: 'hidden',
+        zIndex: 3,
+    },
+    miniShellArtwork: {
+        width: '100%',
+        height: '100%',
     },
     miniShellPlayBtn: {
-        width: 44,
-        height: 44,
-        borderRadius: 22,
-        borderWidth: 1,
+        position: 'absolute',
+        right: 10,
+        top: 13,
+        width: 40,
+        height: 40,
+        borderRadius: 20,
+        borderWidth: 1.4,
         alignItems: 'center',
         justifyContent: 'center',
+        zIndex: 3,
+    },
+    miniShellPlayIconOffset: {
+        marginLeft: 2,
     },
     miniShellAuraLayer: {
         ...StyleSheet.absoluteFillObject,
@@ -85,9 +108,8 @@ export const playerStyles = StyleSheet.create({
         height: 60,
     },
     albumLabel: {
-        fontSize: 12,
-        fontWeight: '900',
-        letterSpacing: 2,
+        ...typeScale.micro,
+        letterSpacing: 1.6,
         textTransform: 'uppercase',
         opacity: 0.6,
     },
@@ -103,7 +125,6 @@ export const playerStyles = StyleSheet.create({
     contentImmersive: {
         flex: 1,
         paddingHorizontal: 24,
-        paddingTop: 16,
         paddingBottom: 40,
     },
     headerImmersive: {
@@ -111,7 +132,7 @@ export const playerStyles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         height: 56,
-        marginBottom: 8,
+        marginBottom: 14,
     },
     headerBtnImmersive: {
         width: 48,
@@ -120,20 +141,22 @@ export const playerStyles = StyleSheet.create({
         justifyContent: 'center',
         alignItems: 'center',
     },
+    headerSpacerImmersive: {
+        width: 48,
+        height: 48,
+    },
     headerCenterImmersive: {
         flex: 1,
         alignItems: 'center',
     },
     playingFromLabel: {
-        fontSize: 10,
-        fontWeight: '600',
-        letterSpacing: 1.5,
+        ...typeScale.micro,
+        letterSpacing: 1.2,
         opacity: 0.5,
     },
     albumLabelImmersive: {
-        fontSize: 13,
-        fontWeight: '700',
-        marginTop: 2,
+        ...typeScale.caption,
+        marginTop: 4,
     },
     artworkSectionImmersive: {
         flex: 1,
@@ -185,16 +208,37 @@ export const playerStyles = StyleSheet.create({
         backgroundColor: 'transparent',
     },
     lyricsFallbackTitle: {
+        ...typeScale.titleLarge,
         color: '#FFFFFF',
-        fontSize: 18,
-        fontWeight: '700',
         textAlign: 'center',
     },
     lyricsFallbackSubtitle: {
+        ...typeScale.body,
         color: 'rgba(255,255,255,0.74)',
-        fontSize: 14,
         marginTop: 10,
         textAlign: 'center',
+    },
+    lyricsFrostBlob: {
+        position: 'absolute',
+        borderRadius: 999,
+    },
+    lyricsFrostBlobTop: {
+        width: 380,
+        height: 380,
+        top: -70,
+        left: -110,
+    },
+    lyricsFrostBlobMid: {
+        width: 420,
+        height: 420,
+        top: '26%',
+        right: -150,
+    },
+    lyricsFrostBlobBottom: {
+        width: 360,
+        height: 360,
+        bottom: -120,
+        left: '10%',
     },
     trackInfoSectionImmersive: {
         marginBottom: 16,
@@ -209,20 +253,20 @@ export const playerStyles = StyleSheet.create({
         marginRight: 16,
     },
     titleImmersiveNew: {
-        fontSize: 24,
-        fontWeight: '800',
-        letterSpacing: -0.3,
+        ...typeScale.headline,
+        letterSpacing: -0.35,
     },
     artistImmersive: {
+        ...typeScale.bodyStrong,
         fontSize: 16,
-        fontWeight: '500',
+        lineHeight: 22,
         opacity: 0.8,
         marginTop: 4,
     },
     techMetaImmersive: {
-        fontSize: 10,
+        ...typeScale.micro,
         opacity: 0.7,
-        letterSpacing: 0.4,
+        letterSpacing: 0.3,
         flexShrink: 1,
     },
     techMetaRow: {
@@ -239,8 +283,8 @@ export const playerStyles = StyleSheet.create({
         justifyContent: 'center',
     },
     qualityBadgeText: {
-        fontSize: 9,
-        fontWeight: '900',
+        ...typeScale.micro,
+        fontSize: 10,
         letterSpacing: 0.5,
     },
     trackActionsImmersive: {
@@ -295,7 +339,6 @@ export const playerStyles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'center',
-        gap: 32,
     },
     bottomBtnImmersive: {
         width: 44,
@@ -345,9 +388,8 @@ export const playerStyles = StyleSheet.create({
         backgroundColor: 'rgba(255,255,255,0.25)',
     },
     modeTabText: {
+        ...typeScale.micro,
         color: '#FFFFFF',
-        fontSize: 10,
-        fontWeight: '900',
-        letterSpacing: 1,
+        letterSpacing: 0.8,
     },
 });

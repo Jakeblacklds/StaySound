@@ -1,4 +1,4 @@
-/**
+﻿/**
  * LibraryStore - Zustand store for music library
  */
 
@@ -8,12 +8,27 @@ import { getArtistInfo } from '../services/artistApi';
 import { getArtworkThumbUri } from '../services/artworkThumbnails';
 import { MUSIC_FOLDERS, runConcurrent, scanMusicLibraryFast, withTimeout } from '../services/fileScanner';
 import { enrichTrackFromUri, generateAlbumId, organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
+import { hydrateDeferredTidalMetadata } from '../services/nativeLibraryIndexer';
 import { FileSystemStorage } from '../services/storage';
 import { Album, Artist, LibraryState, Playlist, ScanProgress, Track } from '../types/audio';
 
 const MAX_RECENT_SEARCHES = 12;
 let isRefreshingArtistPhotos = false;
 let isHydratingArtworkThumbs = false;
+
+function rebuildDerivedLibraryCollections(tracksMap: Map<string, Track>) {
+    const trackList = Array.from(tracksMap.values());
+    const albums = organizeIntoAlbums(trackList);
+    const artists = organizeIntoArtists(trackList, albums);
+
+    return { albums, artists };
+}
+
+function queuePlaylistSync() {
+    void import('../services/playlistSyncService')
+        .then(module => module.queuePlaylistCloudSync())
+        .catch(error => console.warn('[LibraryStore] Playlist sync queue failed:', error));
+}
 
 const isRemoteArtworkUri = (uri?: string) =>
     typeof uri === 'string' && (uri.startsWith('http://') || uri.startsWith('https://'));
@@ -25,6 +40,11 @@ const hasMeaningfulLibraryValue = (value?: string) => {
     return !!normalized && !GENERIC_LIBRARY_VALUES.has(normalized);
 };
 
+const normalizeRequestedScanPath = (value?: unknown) =>
+    typeof value === 'string' && value.trim().length > 0
+        ? value.trim()
+        : MUSIC_FOLDERS.download;
+
 const isMediaStoreAlbumArtUri = (uri?: string) =>
     typeof uri === 'string' && uri.startsWith('content://media/external/audio/albumart/');
 
@@ -35,6 +55,81 @@ const resolveArtworkFromScan = (scannedArtwork?: string, existingArtwork?: strin
         return existingArtwork;
     }
     return scannedArtwork;
+};
+
+const normalizeTrackMatchValue = (value?: string) =>
+    (value ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/\((feat|ft)\.?.*?\)/g, ' ')
+        .replace(/\[(feat|ft)\.?.*?\]/g, ' ')
+        .replace(/[^\w\s]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+const valuesLooselyMatch = (left?: string, right?: string) => {
+    const normalizedLeft = normalizeTrackMatchValue(left);
+    const normalizedRight = normalizeTrackMatchValue(right);
+
+    if (!normalizedLeft || !normalizedRight) return false;
+    if (normalizedLeft === normalizedRight) return true;
+
+    return normalizedLeft.includes(normalizedRight) || normalizedRight.includes(normalizedLeft);
+};
+
+const getLocalTrackMatchScore = (remoteTrack: Track, localTrack: Track) => {
+    if (localTrack.cloudOnly) return -1;
+
+    let score = 0;
+
+    if (remoteTrack.isrc && localTrack.isrc && remoteTrack.isrc === localTrack.isrc) {
+        score += 100;
+    }
+
+    if (valuesLooselyMatch(remoteTrack.title, localTrack.title)) {
+        score += 6;
+    } else {
+        return -1;
+    }
+
+    if (valuesLooselyMatch(remoteTrack.artist, localTrack.artist)) {
+        score += 5;
+    } else {
+        return -1;
+    }
+
+    if (remoteTrack.album && localTrack.album && valuesLooselyMatch(remoteTrack.album, localTrack.album)) {
+        score += 2;
+    }
+
+    if (remoteTrack.duration > 0 && localTrack.duration > 0) {
+        const durationDelta = Math.abs(remoteTrack.duration - localTrack.duration);
+        if (durationDelta <= 2500) {
+            score += 4;
+        } else if (durationDelta <= 6000) {
+            score += 2;
+        } else if (durationDelta > 15000) {
+            return -1;
+        }
+    }
+
+    return score;
+};
+
+const findBestLocalTrackMatch = (remoteTrack: Track, tracksMap: Map<string, Track>) => {
+    let bestMatch: Track | undefined;
+    let bestScore = -1;
+
+    tracksMap.forEach(localTrack => {
+        const score = getLocalTrackMatchScore(remoteTrack, localTrack);
+        if (score > bestScore) {
+            bestScore = score;
+            bestMatch = localTrack;
+        }
+    });
+
+    return bestScore >= 11 ? bestMatch : undefined;
 };
 
 interface LibraryActions {
@@ -70,7 +165,7 @@ interface LibraryActions {
     getAlbumsByArtist: (id: string) => Album[];
 
     // Playlist operations
-    createPlaylist: (name: string, description?: string) => string;
+    createPlaylist: (name: string, description?: string, artwork?: string) => string;
     updatePlaylist: (id: string, updates: { name?: string; description?: string; artwork?: string }) => void;
     deletePlaylist: (id: string) => void;
     addToPlaylist: (playlistId: string, trackId: string) => void;
@@ -93,6 +188,7 @@ interface LibraryActions {
 
     // Hydration
     setHasHydrated: (state: boolean) => void;
+    bumpCatalogRevision: () => void;
 }
 
 export type LibraryStore = LibraryState & LibraryActions;
@@ -102,6 +198,8 @@ const initialState: LibraryState = {
     albums: new Map(),
     artists: new Map(),
     playlists: new Map(),
+    cloudPlaylistTracks: new Map(),
+    catalogRevision: 0,
     recentSearches: [],
     isScanning: false,
     scanProgress: null,
@@ -113,24 +211,27 @@ export const useLibraryStore = create<LibraryStore>()(
     persist(
         (set, get) => ({
             ...initialState,
+            bumpCatalogRevision: () => {
+                set(state => ({ catalogRevision: state.catalogRevision + 1 }));
+            },
 
             scanLibrary: async (folderPath?: string) => {
                 const startTime = Date.now();
                 set({ isScanning: true, scanProgress: { total: 0, scanned: 0, currentPath: 'Scanning...' } });
 
                 try {
-                    // PHASE 1: Fast scan — collect ALL tracks from MediaStore instantly
-                    const scanPath = folderPath ?? MUSIC_FOLDERS.download;
+                    // PHASE 1: Fast scan â€” collect ALL tracks from MediaStore instantly
+                    const scanPath = normalizeRequestedScanPath(folderPath);
                     console.log(`[LibraryStore] FAST SCAN starting: ${scanPath || 'DOWNLOAD ONLY'}`);
 
                     const collectedTracks = new Map<string, Track>();
                     const currentTracks = get().tracks;
 
-                    // Build a filename → existing track lookup.
+                    // Build a filename â†’ existing track lookup.
                     // WHY: Downloaded tracks use SAF URIs (content://com.android.externalstorage.documents/...)
                     // but MediaStore gives the SAME file a completely different URI (content://media/external/...).
                     // So matching by URI never works. Matching by filename (without extension) is reliable.
-                    const existingByFilename = new Map<string, Track>(); // filename_no_ext (lowercase) → track
+                    const existingByFilename = new Map<string, Track>(); // filename_no_ext (lowercase) â†’ track
                     const { sanitizeFilename: sanitize } = require('../services/audioUtils');
 
                     currentTracks.forEach((t) => {
@@ -249,12 +350,45 @@ export const useLibraryStore = create<LibraryStore>()(
                         tracks: collectedTracks,
                         albums: initialAlbums,
                         artists: initialArtists,
+                        catalogRevision: get().catalogRevision + 1,
                         isScanning: false,
                         scanProgress: null,
                         lastScanDate: Date.now(),
                     });
 
                     void get().ensureArtworkThumbsForTracks();
+                    void hydrateDeferredTidalMetadata(finalTracks, (updates) => {
+                        if (updates.length === 0) return;
+
+                        set((state) => {
+                            if (state.tracks.size === 0) return state;
+
+                            let changed = false;
+                            const nextTracks = new Map(state.tracks);
+
+                            for (const updatedTrack of updates) {
+                                const currentTrack = nextTracks.get(updatedTrack.id);
+                                if (!currentTrack) continue;
+
+                                nextTracks.set(updatedTrack.id, {
+                                    ...currentTrack,
+                                    ...updatedTrack,
+                                    artwork: updatedTrack.artwork || currentTrack.artwork,
+                                    artworkThumb: currentTrack.artworkThumb,
+                                });
+                                changed = true;
+                            }
+
+                            if (!changed) return state;
+
+                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                            return {
+                                tracks: nextTracks,
+                                albums,
+                                artists,
+                            };
+                        });
+                    });
 
                     // Mantenimiento (DESACTIVADO TRAS EXPERIMENTO)
                     // const { syncInternalCacheHeaders } = require('../services/cacheHeadersProvider');
@@ -290,7 +424,10 @@ export const useLibraryStore = create<LibraryStore>()(
                     }
 
                     if (normalizedCount > 0) {
-                        set({ artists: new Map(normalizedArtists) });
+                        set(state => ({
+                            artists: new Map(normalizedArtists),
+                            catalogRevision: state.catalogRevision + 1,
+                        }));
                     }
 
                     const artistsWithoutArtwork = Array.from(normalizedArtists.values()).filter(
@@ -307,7 +444,7 @@ export const useLibraryStore = create<LibraryStore>()(
                     // Fetch 5 artist photos at the same time instead of one-by-one
                     await runConcurrent(artistsWithoutArtwork, 5, async (artist: Artist) => {
                         try {
-                            const info = await withTimeout(getArtistInfo(artist.name), 5000);
+                            const info = await withTimeout(getArtistInfo(artist.name, { includeBiography: false }), 5000);
                             if (!info?.photo_url) return;
 
                             const currentArtist = updatedArtists.get(artist.id);
@@ -326,7 +463,10 @@ export const useLibraryStore = create<LibraryStore>()(
                     });
 
                     if (apiPhotosFound > 0) {
-                        set({ artists: new Map(updatedArtists) });
+                        set(state => ({
+                            artists: new Map(updatedArtists),
+                            catalogRevision: state.catalogRevision + 1,
+                        }));
                         console.log(`[LibraryStore] Artist photos updated: ${apiPhotosFound}`);
                     }
                 } finally {
@@ -338,7 +478,10 @@ export const useLibraryStore = create<LibraryStore>()(
                 const { tracks } = get();
                 const newTracks = new Map(tracks);
                 newTracks.set(track.id, track);
-                set({ tracks: newTracks });
+                set(state => ({
+                    tracks: newTracks,
+                    catalogRevision: state.catalogRevision + 1,
+                }));
             },
 
             updateTrack: (id: string, updates: Partial<Track>) => {
@@ -347,7 +490,10 @@ export const useLibraryStore = create<LibraryStore>()(
                 if (track) {
                     const newTracks = new Map(tracks);
                     newTracks.set(id, { ...track, ...updates });
-                    set({ tracks: newTracks });
+                    set(state => ({
+                        tracks: newTracks,
+                        catalogRevision: state.catalogRevision + 1,
+                    }));
                 }
             },
 
@@ -374,7 +520,11 @@ export const useLibraryStore = create<LibraryStore>()(
                 }
 
                 if (changed) {
-                    set({ tracks: updatedTracks, albums: updatedAlbums });
+                    set(state => ({
+                        tracks: updatedTracks,
+                        albums: updatedAlbums,
+                        catalogRevision: state.catalogRevision + 1,
+                    }));
                 }
 
                 void (async () => {
@@ -401,7 +551,11 @@ export const useLibraryStore = create<LibraryStore>()(
                     }
 
                     if (thumbChanged) {
-                        set({ tracks: nextTracks, albums: nextAlbums });
+                        set(state => ({
+                            tracks: nextTracks,
+                            albums: nextAlbums,
+                            catalogRevision: state.catalogRevision + 1,
+                        }));
                     }
                 })();
             },
@@ -449,7 +603,11 @@ export const useLibraryStore = create<LibraryStore>()(
                     });
 
                     if (changes > 0) {
-                        set({ tracks: new Map(nextTracks), albums: new Map(nextAlbums) });
+                        set(state => ({
+                            tracks: new Map(nextTracks),
+                            albums: new Map(nextAlbums),
+                            catalogRevision: state.catalogRevision + 1,
+                        }));
                     }
                 } finally {
                     isHydratingArtworkThumbs = false;
@@ -472,6 +630,7 @@ export const useLibraryStore = create<LibraryStore>()(
                     tracks: newTracks,
                     albums: nextAlbums,
                     artists: nextArtists,
+                    catalogRevision: get().catalogRevision + 1,
                 });
             },
 
@@ -525,8 +684,10 @@ export const useLibraryStore = create<LibraryStore>()(
                     tracks: nextTracks,
                     albums: nextAlbums,
                     artists: nextArtists,
+                    catalogRevision: get().catalogRevision + 1,
                     ...(playlistsChanged ? { playlists: nextPlaylists } : {}),
                 });
+                if (playlistsChanged) queuePlaylistSync();
             },
 
             getTrack: (id: string) => {
@@ -611,27 +772,32 @@ export const useLibraryStore = create<LibraryStore>()(
                     .filter((a): a is Album => a !== undefined);
             },
 
-            createPlaylist: (name: string, description?: string) => {
+            createPlaylist: (name: string, description?: string, artwork?: string) => {
                 const { playlists } = get();
-                const id = `playlist_${Date.now()} `;
+                const id = `playlist_${Date.now()}`;
                 const newPlaylist: Playlist = {
                     id,
                     name,
                     description,
+                    artwork: artwork?.trim() || undefined,
                     trackIds: [],
                     createdAt: Date.now(),
                     updatedAt: Date.now(),
                 };
                 const newPlaylists = new Map(playlists);
                 newPlaylists.set(id, newPlaylist);
-                set({ playlists: newPlaylists });
+                set(state => ({
+                    playlists: newPlaylists,
+                    catalogRevision: state.catalogRevision + 1,
+                }));
+                queuePlaylistSync();
                 return id;
             },
 
             updatePlaylist: (id: string, updates: { name?: string; description?: string; artwork?: string }) => {
                 const { playlists } = get();
                 const playlist = playlists.get(id);
-                if (!playlist) return;
+                if (!playlist || playlist.readonly) return;
 
                 const nextName = updates.name?.trim();
                 const nextDescription = updates.description?.trim();
@@ -649,41 +815,59 @@ export const useLibraryStore = create<LibraryStore>()(
                         : playlist.artwork,
                     updatedAt: Date.now(),
                 });
-                set({ playlists: newPlaylists });
+                set(state => ({
+                    playlists: newPlaylists,
+                    catalogRevision: state.catalogRevision + 1,
+                }));
+                queuePlaylistSync();
             },
 
             deletePlaylist: (id: string) => {
                 const { playlists } = get();
+                const playlist = playlists.get(id);
+                if (playlist?.readonly) return;
                 const newPlaylists = new Map(playlists);
                 newPlaylists.delete(id);
-                set({ playlists: newPlaylists });
+                set(state => ({
+                    playlists: newPlaylists,
+                    catalogRevision: state.catalogRevision + 1,
+                }));
+                queuePlaylistSync();
             },
 
             addToPlaylist: (playlistId: string, trackId: string) => {
                 const { playlists } = get();
                 const playlist = playlists.get(playlistId);
-                if (playlist && !playlist.trackIds.includes(trackId)) {
+                if (playlist && !playlist.readonly && !playlist.trackIds.includes(trackId)) {
                     const newPlaylists = new Map(playlists);
                     newPlaylists.set(playlistId, {
                         ...playlist,
                         trackIds: [...playlist.trackIds, trackId],
                         updatedAt: Date.now(),
                     });
-                    set({ playlists: newPlaylists });
+                    set(state => ({
+                        playlists: newPlaylists,
+                        catalogRevision: state.catalogRevision + 1,
+                    }));
+                    queuePlaylistSync();
                 }
             },
 
             removeFromPlaylist: (playlistId: string, trackId: string) => {
                 const { playlists } = get();
                 const playlist = playlists.get(playlistId);
-                if (playlist) {
+                if (playlist && !playlist.readonly) {
                     const newPlaylists = new Map(playlists);
                     newPlaylists.set(playlistId, {
                         ...playlist,
                         trackIds: playlist.trackIds.filter(id => id !== trackId),
                         updatedAt: Date.now(),
                     });
-                    set({ playlists: newPlaylists });
+                    set(state => ({
+                        playlists: newPlaylists,
+                        catalogRevision: state.catalogRevision + 1,
+                    }));
+                    queuePlaylistSync();
                 }
             },
 
@@ -699,8 +883,17 @@ export const useLibraryStore = create<LibraryStore>()(
                 const playlist = get().playlists.get(id);
                 if (!playlist) return [];
                 const { tracks: tracksMap } = get();
+                const cloudTracks = get().cloudPlaylistTracks.get(id);
                 return playlist.trackIds
-                    .map(trackId => tracksMap.get(trackId))
+                    .map(trackId => {
+                        const localTrack = tracksMap.get(trackId);
+                        if (localTrack) return localTrack;
+
+                        const cloudTrack = cloudTracks?.get(trackId);
+                        if (!cloudTrack) return undefined;
+
+                        return findBestLocalTrackMatch(cloudTrack, tracksMap) ?? cloudTrack;
+                    })
                     .filter((t): t is Track => t !== undefined);
             },
 
@@ -746,7 +939,12 @@ export const useLibraryStore = create<LibraryStore>()(
                 }
 
                 newPlaylists.set(LIKED_PLAYLIST_ID, likedPlaylist);
-                set({ tracks: newTracks, playlists: newPlaylists });
+                set(state => ({
+                    tracks: newTracks,
+                    playlists: newPlaylists,
+                    catalogRevision: state.catalogRevision + 1,
+                }));
+                queuePlaylistSync();
             },
 
             search: (query: string) => {
@@ -798,6 +996,7 @@ export const useLibraryStore = create<LibraryStore>()(
                     tracks: new Map(),
                     albums: new Map(),
                     artists: new Map(),
+                    catalogRevision: get().catalogRevision + 1,
                     lastScanDate: null,
                 });
             },
@@ -812,9 +1011,8 @@ export const useLibraryStore = create<LibraryStore>()(
             // Custom serialization for Maps
             partialize: (state: LibraryStore) => ({
                 tracks: state.isScanning ? [] : Array.from(state.tracks.entries()),
-                albums: state.isScanning ? [] : Array.from(state.albums.entries()),
-                artists: state.isScanning ? [] : Array.from(state.artists.entries()),
                 playlists: Array.from(state.playlists.entries()),
+                cloudPlaylistTracks: Array.from(state.cloudPlaylistTracks.entries()).map(([playlistId, tracks]) => [playlistId, Array.from(tracks.entries())]),
                 recentSearches: state.recentSearches,
                 lastScanDate: state.lastScanDate,
             } as any),
@@ -822,9 +1020,21 @@ export const useLibraryStore = create<LibraryStore>()(
             onRehydrateStorage: () => (state) => {
                 if (state) {
                     if (Array.isArray(state.tracks)) (state as any).tracks = new Map(state.tracks as any);
-                    if (Array.isArray(state.albums)) (state as any).albums = new Map(state.albums as any);
-                    if (Array.isArray(state.artists)) (state as any).artists = new Map(state.artists as any);
+                    const hydratedTracks = (state as any).tracks instanceof Map
+                        ? (state as any).tracks as Map<string, Track>
+                        : new Map<string, Track>();
+                    const { albums, artists } = rebuildDerivedLibraryCollections(hydratedTracks);
+                    console.log('[LibraryStore] Hydrated library snapshot:', {
+                        tracks: hydratedTracks.size,
+                        albums: albums.size,
+                        artists: artists.size,
+                    });
+                    (state as any).albums = albums;
+                    (state as any).artists = artists;
                     if (Array.isArray(state.playlists)) (state as any).playlists = new Map(state.playlists as any);
+                    if (Array.isArray((state as any).cloudPlaylistTracks)) {
+                        (state as any).cloudPlaylistTracks = new Map(((state as any).cloudPlaylistTracks as any[]).map(([playlistId, tracks]) => [playlistId, new Map(tracks)]));
+                    }
                     // Force hydrated flag AFTER Map conversion
                     state.setHasHydrated(true);
                 } else {
@@ -837,6 +1047,11 @@ export const useLibraryStore = create<LibraryStore>()(
         }
     )
 );
+
+
+
+
+
 
 
 

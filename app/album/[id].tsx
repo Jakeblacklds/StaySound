@@ -1,7 +1,6 @@
 import { CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
 import { useDynamicColors } from '@/src/hooks';
 import { formatDuration } from '@/src/services';
-import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Track } from '@/src/types';
@@ -11,12 +10,11 @@ import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
-import { Dimensions, StatusBar, StyleSheet, View } from 'react-native';
+import { StatusBar, StyleSheet, View } from 'react-native';
 import { IconButton, Text } from 'react-native-paper';
 import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HEADER_HEIGHT = 300;
 const ARTWORK_SIZE = 200;
 const HERO_TOP_OFFSET = 56;
@@ -33,14 +31,7 @@ export default function AlbumDetailScreen() {
 
     const getAlbumById = useLibraryStore(state => state.getAlbumById);
     const getTracksByAlbum = useLibraryStore(state => state.getTracksByAlbum);
-    const getAllPlaylists = useLibraryStore(state => state.getAllPlaylists);
-    const createPlaylist = useLibraryStore(state => state.createPlaylist);
-    const addToPlaylist = useLibraryStore(state => state.addToPlaylist);
-    const deleteTrack = useLibraryStore(state => state.deleteTrack);
     const play = usePlayerStore(state => state.play);
-    const addToQueue = usePlayerStore(state => state.addToQueue);
-    const toggleShuffle = usePlayerStore(state => state.toggleShuffle);
-    const shuffleEnabled = usePlayerStore(state => state.shuffleEnabled);
     const currentTrackId = usePlayerStore(state => state.currentTrack?.id);
 
     const album = getAlbumById(id);
@@ -78,31 +69,6 @@ export default function AlbumDetailScreen() {
         play(track, tracks);
     }, [tracks, play]);
 
-    const handleAddToQueue = useCallback((track: Track) => {
-        openTrackActionsMenu({
-            track,
-            playlists: getAllPlaylists(),
-            addToQueue,
-            addToPlaylist,
-            createPlaylist,
-            deleteTrack,
-        });
-    }, [addToPlaylist, addToQueue, createPlaylist, deleteTrack, getAllPlaylists]);
-
-    const handlePlayAll = useCallback(() => {
-        if (tracks.length > 0) {
-            play(tracks[0], tracks);
-        }
-    }, [tracks, play]);
-
-    const handleShuffle = useCallback(() => {
-        if (tracks.length > 0) {
-            if (!shuffleEnabled) toggleShuffle();
-            const randomIndex = Math.floor(Math.random() * tracks.length);
-            play(tracks[randomIndex], tracks);
-        }
-    }, [tracks, play, toggleShuffle, shuffleEnabled]);
-
     const keyExtractor = useCallback((item: Track) => item.id, []);
 
     const renderTrackItem = useCallback(({ item, index }: { item: Track; index: number }) => (
@@ -113,9 +79,8 @@ export default function AlbumDetailScreen() {
             showArtwork={false}
             isPlaying={currentTrackId === item.id}
             onPress={handleTrackPress}
-            onOptionsPress={handleAddToQueue}
         />
-    ), [currentTrackId, handleTrackPress, handleAddToQueue]);
+    ), [currentTrackId, handleTrackPress]);
 
     // Early return MUST happen after all hooks but before any callbacks defined with useCallback
     // The issue is that FlatList's ListHeaderComponent needs a stable reference
@@ -149,39 +114,6 @@ export default function AlbumDetailScreen() {
                     </Text>
                 </View>
 
-                {/* Action Buttons */}
-                <View style={styles.actions}>
-                    <IconButton
-                        icon={() => <CustomIcon name="Play" size={28} color={albumColors.isDark ? '#000000' : '#FFFFFF'} />}
-                        mode="contained"
-                        size={56}
-                        containerColor={albumColors.primary}
-                        onPress={handlePlayAll}
-                        style={{ margin: 0 }}
-                    />
-                    <IconButton
-                        icon={() => <CustomIcon name="Shuffle" size={20} color={albumColors.primary} />}
-                        mode="contained-tonal"
-                        size={32}
-                        containerColor={albumColors.primary + '20'}
-                        onPress={handleShuffle}
-                    />
-                    <IconButton
-                        icon={() => <CustomIcon name="Play" size={18} color={albumColors.text} />}
-                        mode="contained-tonal"
-                        size={32}
-                        containerColor={albumColors.text + '20'}
-                        onPress={() => { }}
-                    />
-                    <IconButton
-                        icon={() => <CustomIcon name="Cola" size={18} color={albumColors.text} />}
-                        mode="contained-tonal"
-                        size={32}
-                        containerColor={albumColors.text + '20'}
-                        onPress={() => { }}
-                    />
-                </View>
-
                 {/* Track list header */}
                 <Text
                     variant="titleSmall"
@@ -191,7 +123,7 @@ export default function AlbumDetailScreen() {
                 </Text>
             </View>
         );
-    }, [album, albumColors, tracks.length, totalDuration, handlePlayAll, handleShuffle]);
+    }, [album, albumColors, tracks.length, totalDuration]);
 
     if (!album) {
         return (
@@ -324,13 +256,6 @@ const styles = StyleSheet.create({
         fontWeight: 'bold',
         textAlign: 'center',
         marginBottom: 4,
-    },
-    actions: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'center',
-        gap: 12,
-        marginBottom: 32,
     },
     trackListTitle: {
         letterSpacing: 1,

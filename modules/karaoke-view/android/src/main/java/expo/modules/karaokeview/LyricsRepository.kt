@@ -31,36 +31,19 @@ class LyricsRepository(
     private val localStore: LocalLyricsStore,
     private val remoteDataSource: RemoteLyricsDataSource,
 ) {
-    fun getLyrics(songTitle: String, artist: String): LyricsPayload? {
-        val canonicalKey = canonicalKey(songTitle, artist)
-        localStore.read(canonicalKey)?.let { return it }
-
+    private fun hasWords(record: LyricsPayload?): Boolean {
+        if (record == null) return false
         return try {
-            val remote = remoteDataSource.fetchLyrics(songTitle, artist, canonicalKey) ?: return null
-            localStore.write(remote)
-            remote
+            val payload = JSONObject(record.payloadJson)
+            val lyrics = payload.optJSONArray("lyrics")
+            lyrics != null && lyrics.length() > 0
         } catch (_: Exception) {
-            null
-        }
-    }
-
-    fun forceRefreshLyrics(songTitle: String, artist: String): LyricsPayload? {
-        val canonicalKey = canonicalKey(songTitle, artist)
-
-        return try {
-            val remote = remoteDataSource.fetchLyrics(songTitle, artist, canonicalKey)
-            if (remote != null) {
-                localStore.write(remote)
-                remote
-            } else {
-                localStore.read(canonicalKey)
-            }
-        } catch (_: Exception) {
-            localStore.read(canonicalKey)
+            false
         }
     }
 
     companion object {
+        private const val TAG = "LyricsRepository"
         private val DIACRITICS = Regex("\\p{M}+")
         private val PUNCTUATION = Regex("[^\\p{Alnum}\\s]")
         private val MULTI_SPACE = Regex("\\s+")
@@ -75,6 +58,96 @@ class LyricsRepository(
         fun canonicalKey(songTitle: String, artist: String): String {
             return "${normalizeKeyPart(artist)}::${normalizeKeyPart(songTitle)}"
         }
+
+        fun cleanLookupValue(rawValue: String): String {
+            return rawValue.trim()
+                .split("(")[0]
+                .split("[")[0]
+                .split("-")[0]
+                .trim()
+        }
+
+        fun primaryArtistValue(rawValue: String): String {
+            return rawValue.trim()
+                .replace(Regex("(?i)\\b(feat\\.?|ft\\.?|featuring|with)\\b.*$"), "")
+                .split(",", "&", ";", "/", "|")
+                .firstOrNull()
+                ?.trim()
+                .orEmpty()
+        }
+
+        fun candidateCanonicalKeys(songTitle: String, artist: String): List<String> {
+            val titleCandidates = listOf(songTitle, cleanLookupValue(songTitle))
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+            val artistCandidates = listOf(artist, cleanLookupValue(artist))
+                .map { it.trim() }
+                .filter { it.isNotEmpty() }
+                .distinct()
+
+            return titleCandidates.flatMap { titleCandidate ->
+                artistCandidates.map { artistCandidate ->
+                    canonicalKey(titleCandidate, artistCandidate)
+                }
+            }.distinct()
+        }
+    }
+
+    fun getLyrics(songTitle: String, artist: String): LyricsPayload? {
+        val canonicalKey = canonicalKey(songTitle, artist)
+        android.util.Log.d(TAG, "getLyrics request title='$songTitle' artist='$artist' canonical='$canonicalKey'")
+        readCachedLyrics(songTitle, artist)?.let {
+            if (hasWords(it)) {
+                return it
+            }
+            android.util.Log.w(TAG, "Ignoring cached synced lyrics without words for canonical='${it.canonicalKey}'")
+        }
+
+        return try {
+            val remote = remoteDataSource.fetchLyrics(songTitle, artist, canonicalKey) ?: return null
+            localStore.write(remote)
+            android.util.Log.d(TAG, "getLyrics remote hit canonical='${remote.canonicalKey}' updatedAt='${remote.updatedAt}'")
+            remote
+        } catch (_: Exception) {
+            android.util.Log.w(TAG, "getLyrics remote failed title='$songTitle' artist='$artist'")
+            null
+        }
+    }
+
+    fun forceRefreshLyrics(songTitle: String, artist: String): LyricsPayload? {
+        val canonicalKey = canonicalKey(songTitle, artist)
+
+        return try {
+            val remote = remoteDataSource.fetchLyrics(songTitle, artist, canonicalKey)
+            if (remote != null) {
+                localStore.write(remote)
+                remote
+            } else {
+                readCachedLyrics(songTitle, artist)
+            }
+        } catch (_: Exception) {
+            readCachedLyrics(songTitle, artist)
+        }
+    }
+
+    private fun readCachedLyrics(songTitle: String, artist: String): LyricsPayload? {
+        val requestedKey = canonicalKey(songTitle, artist)
+
+        for (candidate in candidateCanonicalKeys(songTitle, artist)) {
+            android.util.Log.d(TAG, "readCachedLyrics trying candidate='$candidate' requested='$requestedKey'")
+            val cached = localStore.read(candidate) ?: continue
+            if (candidate != requestedKey) {
+                localStore.write(
+                    cached.copy(canonicalKey = requestedKey)
+                )
+            }
+            android.util.Log.d(TAG, "readCachedLyrics hit candidate='$candidate' updatedAt='${cached.updatedAt}'")
+            return cached
+        }
+
+        android.util.Log.d(TAG, "readCachedLyrics miss for requested='$requestedKey'")
+        return null
     }
 }
 
@@ -121,6 +194,10 @@ class FileLyricsStore(private val context: Context) : LocalLyricsStore {
 }
 
 class SupabaseLyricsDataSource : RemoteLyricsDataSource {
+    companion object {
+        private const val TAG = "SupabaseLyrics"
+    }
+
     @Volatile
     private var supabaseUrl: String? = null
 
@@ -137,13 +214,26 @@ class SupabaseLyricsDataSource : RemoteLyricsDataSource {
         val key = supabaseSecretKey
         if (url.isNullOrBlank() || key.isNullOrBlank()) return null
 
-        val exactQuery = "song=eq.${Uri.encode(songTitle.trim())}&artist=eq.${Uri.encode(artist.trim())}&limit=1"
-        val exactRows = queryRows(url, key, exactQuery)
-        parseRow(exactRows, canonicalKey)?.let { return it }
+        val titleCandidates = searchVariants(songTitle)
+        val artistCandidates = searchVariants(artist)
+        android.util.Log.d(TAG, "fetchLyrics titleCandidates=$titleCandidates artistCandidates=$artistCandidates canonical='$canonicalKey'")
 
-        val songLike = "%${escapeLike(songTitle)}%"
-        val artistLike = "%${escapeLike(artist)}%"
+        for (titleCandidate in titleCandidates) {
+            for (artistCandidate in artistCandidates) {
+                val exactQuery = "song=eq.${Uri.encode(titleCandidate)}&artist=eq.${Uri.encode(artistCandidate)}&limit=1"
+                android.util.Log.d(TAG, "fetchLyrics exactQuery title='$titleCandidate' artist='$artistCandidate'")
+                val exactRows = queryRows(url, key, exactQuery)
+                parseRow(exactRows, canonicalKey)?.let {
+                    android.util.Log.d(TAG, "Exact lyrics match: $artistCandidate - $titleCandidate")
+                    return it
+                }
+            }
+        }
+
+        val songLike = "%${escapeLike(titleCandidates.first())}%"
+        val artistLike = "%${escapeLike(artistCandidates.first())}%"
         val fallbackQuery = "song=ilike.${Uri.encode(songLike)}&artist=ilike.${Uri.encode(artistLike)}&limit=25"
+        android.util.Log.d(TAG, "fetchLyrics fallbackQuery songLike='$songLike' artistLike='$artistLike'")
         val fallbackRows = queryRows(url, key, fallbackQuery)
 
         for (index in 0 until fallbackRows.length()) {
@@ -154,6 +244,7 @@ class SupabaseLyricsDataSource : RemoteLyricsDataSource {
             // Lenient matching: canonical keys match OR (normalized song matches AND artist starts with artist)
             val rowCanonical = LyricsRepository.canonicalKey(rowSong, rowArtist)
             if (rowCanonical == canonicalKey) {
+                android.util.Log.d(TAG, "Canonical fallback match: $rowArtist - $rowSong")
                 parseRecord(row, canonicalKey)?.let { return it }
             } else {
                 val normRowSong = LyricsRepository.normalizeKeyPart(rowSong)
@@ -162,6 +253,7 @@ class SupabaseLyricsDataSource : RemoteLyricsDataSource {
                     val normRowArtist = LyricsRepository.normalizeKeyPart(rowArtist)
                     val normTargetArtist = LyricsRepository.normalizeKeyPart(artist)
                     if (normRowArtist.contains(normTargetArtist) || normTargetArtist.contains(normRowArtist)) {
+                        android.util.Log.d(TAG, "Lenient fallback match: $rowArtist - $rowSong")
                         parseRecord(row, canonicalKey)?.let { return it }
                     }
                 }
@@ -174,6 +266,7 @@ class SupabaseLyricsDataSource : RemoteLyricsDataSource {
     private fun parseRow(rows: JSONArray, canonicalKey: String): LyricsPayload? {
         if (rows.length() <= 0) return null
         val row = rows.optJSONObject(0) ?: return null
+        android.util.Log.d(TAG, "parseRow found candidate song='${row.optString("song")}' artist='${row.optString("artist")}'")
         return parseRecord(row, canonicalKey)
     }
 
@@ -199,7 +292,11 @@ class SupabaseLyricsDataSource : RemoteLyricsDataSource {
 
         return try {
             val code = connection.responseCode
-            if (code !in 200..299) throw IOException("Supabase request failed with HTTP $code")
+            if (code !in 200..299) {
+                val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
+                android.util.Log.w(TAG, "Supabase request failed ($code): $endpoint :: $errorBody")
+                throw IOException("Supabase request failed with HTTP $code")
+            }
             val response = connection.inputStream.bufferedReader().use { it.readText() }
             JSONArray(response)
         } finally {
@@ -208,13 +305,19 @@ class SupabaseLyricsDataSource : RemoteLyricsDataSource {
     }
 
     private fun escapeLike(value: String): String {
-        return value.trim()
-            .split("(")[0]
-            .split("[")[0]
-            .split("-")[0]
-            .trim()
+        return LyricsRepository.cleanLookupValue(value)
             .replace("%", "")
             .replace("_", "")
+    }
+
+    private fun searchVariants(value: String): List<String> {
+        val trimmed = value.trim()
+        val cleaned = escapeLike(trimmed)
+        val primaryArtist = escapeLike(LyricsRepository.primaryArtistValue(trimmed))
+        return listOf(primaryArtist, cleaned, trimmed)
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .distinct()
     }
 }
 

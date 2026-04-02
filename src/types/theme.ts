@@ -184,6 +184,7 @@ export interface ThemeConfig {
     mode: ThemeMode;
     accentColor: string;
     dynamicColors: boolean;
+    lightweightMode: boolean;
     schemeVariant?: string;
     customTheme?: Theme;
 }

@@ -31,6 +31,7 @@ const LETTER_COUNT = LETTERS.length;
 
 interface AlphabetScrubberProps {
     onLetterChange: (letter: string) => void;
+    onScrubStateChange?: (isActive: boolean) => void;
 }
 
 const fireHaptic = () => {
@@ -70,7 +71,7 @@ function CursorHighlight({ activeIndex, isActive, containerHeight, color }: Curs
 }
 
 // ─── Main component ───────────────────────────────────────────────────────────
-export function AlphabetScrubber({ onLetterChange }: AlphabetScrubberProps) {
+export function AlphabetScrubber({ onLetterChange, onScrubStateChange }: AlphabetScrubberProps) {
     const { theme } = useTheme();
 
     const containerHeight = useSharedValue(0);
@@ -109,6 +110,9 @@ export function AlphabetScrubber({ onLetterChange }: AlphabetScrubberProps) {
             isActive.set(withSpring(1, { damping: 16, stiffness: 320, mass: 0.5 }));
             const h = containerHeight.get();
             if (h === 0) return;
+            if (onScrubStateChange) {
+                runOnJS(onScrubStateChange)(true);
+            }
             fingerY.set(e.y);
             const idx = Math.max(0, Math.min(LETTER_COUNT - 1, Math.floor(e.y / (h / LETTER_COUNT))));
             activeIndex.set(idx);
@@ -129,6 +133,9 @@ export function AlphabetScrubber({ onLetterChange }: AlphabetScrubberProps) {
             'worklet';
             isActive.set(withTiming(0, { duration: 200 }));
             activeIndex.set(-1);
+            if (onScrubStateChange) {
+                runOnJS(onScrubStateChange)(false);
+            }
             runOnJS(setBubbleLetter)(null);
         });
 
@@ -172,13 +179,20 @@ export function AlphabetScrubber({ onLetterChange }: AlphabetScrubberProps) {
         <View style={styles.wrapper}>
             <GestureDetector gesture={gesture}>
                 <Animated.View
-                    style={[styles.container, barStyle]}
+                    style={[
+                        styles.container,
+                        {
+                            backgroundColor: `${theme.colors.surfaceVariant}B8`,
+                            borderColor: `${theme.colors.outline}24`,
+                        },
+                        barStyle
+                    ]}
                     onLayout={handleLayout}
                 >
                     {/* Static letter labels — no animated styles per letter */}
                     {LETTERS.map((letter) => (
                         <View key={letter} style={styles.letterContainer}>
-                            <Text style={[styles.letter, { color: theme.colors.primary }]}>
+                            <Text style={[styles.letter, { color: theme.colors.onSurfaceVariant }]}>
                                 {letter}
                             </Text>
                         </View>
@@ -189,7 +203,7 @@ export function AlphabetScrubber({ onLetterChange }: AlphabetScrubberProps) {
                         activeIndex={activeIndex}
                         isActive={isActive}
                         containerHeight={containerHeight}
-                        color={theme.colors.primary + '30'}
+                        color={theme.colors.primaryContainer + 'B8'}
                     />
                 </Animated.View>
             </GestureDetector>
@@ -217,10 +231,10 @@ export function AlphabetScrubber({ onLetterChange }: AlphabetScrubberProps) {
 const styles = StyleSheet.create({
     wrapper: {
         position: 'absolute',
-        right: 0,
+        right: 6,
         top: 0,
-        bottom: 110,
-        width: 28,
+        bottom: 142,
+        width: 32,
         justifyContent: 'center',
         zIndex: 100,
     },
@@ -228,7 +242,9 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingVertical: 8,
+        paddingVertical: 10,
+        borderRadius: 16,
+        borderWidth: 1,
         position: 'relative',
     },
     letterContainer: {
@@ -238,22 +254,22 @@ const styles = StyleSheet.create({
         width: '100%',
     },
     letter: {
-        fontSize: 10,
-        fontWeight: '700',
-        lineHeight: 12,
-        opacity: 0.55,
+        fontSize: 9,
+        fontWeight: '600',
+        lineHeight: 11,
+        opacity: 0.72,
     },
     // Single animated cursor — replaces 27 per-letter animated views
     cursor: {
         position: 'absolute',
-        left: 0,
-        right: 0,
-        top: 8, // match paddingVertical
-        borderRadius: 4,
+        left: 2,
+        right: 2,
+        top: 10, // match paddingVertical
+        borderRadius: 8,
     },
     bubble: {
         position: 'absolute',
-        right: 40,
+        right: 46,
         top: 0,
         width: 64,
         height: 64,

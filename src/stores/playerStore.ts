@@ -1,6 +1,6 @@
 /**
  * PlayerStore - Zustand store for playback state
- * 
+ *
  * Manages player state synced with Track Player for background playback
  */
 
@@ -10,11 +10,13 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { AudioEngine } from '../services/audioEngine';
 import { extractMetadata, findArtworkInFolder, withTimeout } from '../services/fileScanner';
 import { FileSystemStorage } from '../services/storage';
-import { PlayerState, RepeatMode, Track } from '../types/audio';
+import { getPerformanceProfile } from '../theme/performanceProfile';
+import { RepeatMode, Track } from '../types/audio';
 import { useLibraryStore } from './libraryStore';
 
 const MAX_RECENT = 50;
 const MAX_QUEUE_ITEMS = 500;
+const LINEAR_CONTEXT_HISTORY_BUFFER = 50;
 const ENGINE_TRACK_GUARD_MS = 5000; // Increased significantly for slow Android JNI
 
 let expectedEngineTrackId: string | null = null;
@@ -29,6 +31,16 @@ function armExpectedEngineTrack(id: string) {
 function clearExpectedEngineTrack() {
     expectedEngineTrackId = null;
     expectedEngineTrackUntil = 0;
+}
+
+function getLinearContextLimit(): number {
+    try {
+        const { useSettingsStore } = require('./settingsStore');
+        const settings = useSettingsStore.getState();
+        return getPerformanceProfile(settings.lightweightMode, settings.dynamicColors).queueContextLimit;
+    } catch {
+        return 700;
+    }
 }
 
 
@@ -91,6 +103,26 @@ function normalizeQueueWindow(tracks: Track[], startIndex = 0): { queue: Track[]
 
     const rotated = [...tracks.slice(safeIndex), ...tracks.slice(0, safeIndex)];
     return { queue: rotated.slice(0, MAX_QUEUE_ITEMS), queueIndex: 0 };
+}
+
+function createBoundedLinearPlaybackContext(tracks: Track[], focusIndex = 0): { queue: Track[]; focusIndex: number } {
+    const maxLinearContextItems = getLinearContextLimit();
+
+    if (tracks.length <= maxLinearContextItems) {
+        const safeIndex = Math.max(0, Math.min(focusIndex, Math.max(0, tracks.length - 1)));
+        return { queue: [...tracks], focusIndex: safeIndex };
+    }
+
+    const safeFocusIndex = Math.max(0, Math.min(focusIndex, tracks.length - 1));
+    const preferredStart = Math.max(0, safeFocusIndex - LINEAR_CONTEXT_HISTORY_BUFFER);
+    const maxStart = Math.max(0, tracks.length - maxLinearContextItems);
+    const start = Math.min(preferredStart, maxStart);
+    const boundedQueue = tracks.slice(start, start + maxLinearContextItems);
+
+    return {
+        queue: boundedQueue,
+        focusIndex: safeFocusIndex - start,
+    };
 }
 
 function shouldAcceptEngineTrackId(nextTrackId: string | undefined, currentQueue: Track[]): boolean {
@@ -242,12 +274,43 @@ interface PlayerActions {
     positionShared: SharedValue<number>;
     setVolume: (volume: number) => Promise<void>;
     setLoading: (loading: boolean) => void;
+    setPendingTrackPreview: (track: {
+        id: string;
+        title: string;
+        artist: string;
+        artwork?: string;
+        tidalId?: number;
+    } | null) => void;
 }
 
-type PlayerStore = PlayerState & PlayerActions;
+type PendingTrackPreview = {
+    id: string;
+    title: string;
+    artist: string;
+    artwork?: string;
+    tidalId?: number;
+} | null;
 
-const initialState: PlayerState = {
+interface PlayerStoreState {
+    currentTrack: Track | null;
+    pendingTrackPreview: PendingTrackPreview;
+    queue: Track[];
+    queueIndex: number;
+    isPlaying: boolean;
+    isLoading: boolean;
+    position: number;
+    duration: number;
+    repeatMode: RepeatMode;
+    shuffleEnabled: boolean;
+    volume: number;
+    playerVariant: 'immersive';
+}
+
+type PlayerStore = PlayerStoreState & PlayerActions;
+
+const initialState: PlayerStoreState = {
     currentTrack: null,
+    pendingTrackPreview: null,
     queue: [],
     queueIndex: -1,
     isPlaying: false,
@@ -266,17 +329,24 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     play: async (track, queue) => {
         armExpectedEngineTrack(track.id);
         void hydrateAlbumArtworkOnDemand(track);
+        get().positionShared.value = 0;
 
         const selectedIndex = queue && queue.length > 0
             ? Math.max(0, queue.findIndex(t => t.id === track.id))
             : 0;
         const sourceQueue = queue && queue.length > 0 ? queue : [track];
-        linearPlaybackContextQueue = [...sourceQueue];
+        const boundedLinearContext = createBoundedLinearPlaybackContext(sourceQueue, selectedIndex);
+        linearPlaybackContextQueue = boundedLinearContext.queue;
+        console.log('[PlayerStore] Playback context prepared:', {
+            sourceQueueSize: sourceQueue.length,
+            boundedQueueSize: linearPlaybackContextQueue.length,
+            queueWindowSize: Math.min(linearPlaybackContextQueue.length, MAX_QUEUE_ITEMS),
+        });
 
-        const linearWindow = normalizeQueueWindow(linearPlaybackContextQueue, selectedIndex);
+        const linearWindow = normalizeQueueWindow(linearPlaybackContextQueue, boundedLinearContext.focusIndex);
         const shouldShuffleQueue = get().shuffleEnabled && linearPlaybackContextQueue.length > 1;
         const { queue: nextQueue, queueIndex } = shouldShuffleQueue
-            ? shuffleQueueKeepingCurrent(linearPlaybackContextQueue, selectedIndex)
+            ? shuffleQueueKeepingCurrent(linearPlaybackContextQueue, boundedLinearContext.focusIndex)
             : linearWindow;
 
         // Single atomic update to avoid multiple subscription flushes.
@@ -286,8 +356,9 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
             return {
                 currentTrack: track,
+                pendingTrackPreview: null,
                 isPlaying: true,
-                isLoading: false,
+                isLoading: true,
                 duration: track.duration,
                 position: 0,
                 queue: nextQueue,
@@ -301,12 +372,12 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
         if (queue && queue.length > 0) {
             AudioEngine.playQueue(nextQueue, queueIndex).catch(error => {
                 console.error('[PlayerStore] playQueue error:', error);
-                set({ isPlaying: false });
+                set({ isPlaying: false, isLoading: false, pendingTrackPreview: null });
             });
         } else {
             AudioEngine.play(track).catch(error => {
                 console.error('[PlayerStore] play error:', error);
-                set({ isPlaying: false });
+                set({ isPlaying: false, isLoading: false, pendingTrackPreview: null });
             });
         }
     },
@@ -333,9 +404,12 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     stop: async () => {
         clearExpectedEngineTrack();
         linearPlaybackContextQueue = [];
+        get().positionShared.value = 0;
         await AudioEngine.stop();
         set({
             isPlaying: false,
+            isLoading: false,
+            pendingTrackPreview: null,
             currentTrack: null,
             position: 0,
             queueIndex: -1,
@@ -348,14 +422,19 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     },
 
     setQueue: (tracks, startIndex = 0) => {
-        linearPlaybackContextQueue = [...tracks];
-        const { queue, queueIndex } = normalizeQueueWindow(tracks, startIndex);
+        const boundedLinearContext = createBoundedLinearPlaybackContext(tracks, startIndex);
+        linearPlaybackContextQueue = boundedLinearContext.queue;
+        const { queue, queueIndex } = normalizeQueueWindow(linearPlaybackContextQueue, boundedLinearContext.focusIndex);
         set({ queue, queueIndex });
     },
 
     addToQueue: (track) => {
         const { queue, queueIndex } = get();
+        const maxLinearContextItems = getLinearContextLimit();
         linearPlaybackContextQueue = [...linearPlaybackContextQueue, track];
+        if (linearPlaybackContextQueue.length > maxLinearContextItems) {
+            linearPlaybackContextQueue = linearPlaybackContextQueue.slice(linearPlaybackContextQueue.length - maxLinearContextItems);
+        }
 
         if (queue.length < MAX_QUEUE_ITEMS) {
             set({ queue: [...queue, track] });
@@ -412,8 +491,9 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
         const wasPlaying = get().isPlaying;
         const previousPosition = get().position;
-        linearPlaybackContextQueue = [...tracks];
-        const { queue: normalizedQueue, queueIndex: safeIndex } = normalizeQueueWindow(linearPlaybackContextQueue, startIndex);
+        const boundedLinearContext = createBoundedLinearPlaybackContext(tracks, startIndex);
+        linearPlaybackContextQueue = boundedLinearContext.queue;
+        const { queue: normalizedQueue, queueIndex: safeIndex } = normalizeQueueWindow(linearPlaybackContextQueue, boundedLinearContext.focusIndex);
         const targetTrack = normalizedQueue[safeIndex];
 
         if (targetTrack?.id) {
@@ -463,6 +543,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             armExpectedEngineTrack(targetTrack.id);
             void hydrateAlbumArtworkOnDemand(targetTrack);
         }
+        get().positionShared.value = 0;
 
         // Optimistic update BEFORE async engine call to prevent race conditions
         // with PlaybackActiveTrackChanged events resetting queueIndex
@@ -509,6 +590,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             armExpectedEngineTrack(targetTrack.id);
             void hydrateAlbumArtworkOnDemand(targetTrack);
         }
+        get().positionShared.value = 0;
 
         // Optimistic update BEFORE async engine call
         set({
@@ -538,6 +620,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                 armExpectedEngineTrack(targetTrack.id);
                 void hydrateAlbumArtworkOnDemand(targetTrack);
             }
+            get().positionShared.value = 0;
 
             // Optimistic update BEFORE async engine call
             set({
@@ -632,22 +715,31 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     },
 
     updateFromEngine: (engineState) => {
-        const nextState: Partial<PlayerState> = {};
+        const nextState: Partial<PlayerStoreState> = {};
+        const currentState = get();
 
-        if (engineState.isPlaying !== undefined) nextState.isPlaying = engineState.isPlaying;
-        if (engineState.isLoading !== undefined) nextState.isLoading = engineState.isLoading;
-        if (engineState.position !== undefined) nextState.position = engineState.position;
-        if (engineState.duration !== undefined) nextState.duration = engineState.duration;
+        if (engineState.isPlaying !== undefined && engineState.isPlaying !== currentState.isPlaying) {
+            nextState.isPlaying = engineState.isPlaying;
+        }
+        if (engineState.isLoading !== undefined && engineState.isLoading !== currentState.isLoading) {
+            nextState.isLoading = engineState.isLoading;
+        }
+        if (engineState.position !== undefined && engineState.position !== currentState.position) {
+            nextState.position = engineState.position;
+        }
+        if (engineState.duration !== undefined && engineState.duration !== currentState.duration) {
+            nextState.duration = engineState.duration;
+        }
         if (engineState.currentTrack !== undefined) {
-            const currentStoreTrack = get().currentTrack;
+            const currentStoreTrack = currentState.currentTrack;
             const nextTrack = engineState.currentTrack;
 
             // CRITICAL BUG FIX: Never let the engine "downgrade" our current track
             // if we already have one and the engine reports null or the same ID (avoid unnecessary re-renders).
             // Passing the current queue to help validate the incoming track.
-            if (shouldAcceptEngineTrackId(nextTrack?.id, get().queue)) {
+            if (shouldAcceptEngineTrackId(nextTrack?.id, currentState.queue)) {
                 // If we have a track in store, but engine says null, ignore it unless we are not playing.
-                if (currentStoreTrack && !nextTrack && get().isPlaying) {
+                if (currentStoreTrack && !nextTrack && currentState.isPlaying) {
                     // Ignore empty track report while playing (likely a brief transition state in native)
                 } else {
                     // Preserve enriched metadata (like lazily loaded artwork) when
@@ -673,18 +765,21 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                         if (hasChanges) {
                             nextState.currentTrack = mergedTrack;
                         }
+                        nextState.pendingTrackPreview = null;
                     } else if (nextTrack && (!currentStoreTrack || currentStoreTrack.id !== nextTrack.id)) {
                         // Engine auto-advanced to a different track (end of song, auto-next, or
                         // the user's manual skip was acknowledged by the engine).
-                        // Always accept this — we've already validated it via shouldAcceptEngineTrackId.
+                        // Always accept this Ã¢â‚¬â€ we've already validated it via shouldAcceptEngineTrackId.
                         // Clear the guard so the next auto-advance isn't blocked.
                         clearExpectedEngineTrack();
+                        get().positionShared.value = 0;
 
+                        nextState.pendingTrackPreview = null;
                         // Prefer the richer track object from our store queue (has artwork, metadata, etc.)
-                        const storeQueue = get().queue;
+                        const storeQueue = currentState.queue;
                         const storeQueueIndex = storeQueue.findIndex(t => t.id === nextTrack.id);
                         if (storeQueueIndex >= 0) {
-                            // Track found in our visual queue — use store's richer version
+                            // Track found in our visual queue Ã¢â‚¬â€ use store's richer version
                             const richTrack = {
                                 ...nextTrack,
                                 ...storeQueue[storeQueueIndex],
@@ -712,6 +807,9 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     },
 
     setPosition: (ms) => {
+        if (get().position === ms) {
+            return;
+        }
         set({ position: ms });
     },
 
@@ -722,6 +820,9 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
     setLoading: (loading) => {
         set({ isLoading: loading });
+    },
+    setPendingTrackPreview: (track) => {
+        set({ pendingTrackPreview: track, isLoading: Boolean(track) });
     },
 }), {
     name: 'staysound-player',

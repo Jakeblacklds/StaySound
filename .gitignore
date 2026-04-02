@@ -42,3 +42,9 @@ yarn-error.*
 modules/**/android/build/
 modules/**/android/.gradle/
 *.log
+*-release.apk
+beta_*.txt
+beta_*.html
+page-*.js
+[0-9]*-*.js
+src/theme/write_test.tmp

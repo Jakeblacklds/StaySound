@@ -11,7 +11,7 @@ class LyricsRepositoryTest {
         val remote = FakeRemoteDataSource(
             response = LyricsPayload(
                 canonicalKey = LyricsRepository.canonicalKey("Cancion", "Artista"),
-                payloadJson = "{\"meta\":{\"song\":\"Cancion\",\"artist\":\"Artista\",\"total_duration\":1},\"lyrics\":[]}",
+                payloadJson = "{\"meta\":{\"song\":\"Cancion\",\"artist\":\"Artista\",\"total_duration\":1},\"lyrics\":[{\"w\":\"Hola\",\"s\":0,\"e\":1,\"n\":true}]}",
                 updatedAt = "2026-01-01T00:00:00Z",
             ),
         )
@@ -29,7 +29,7 @@ class LyricsRepositoryTest {
         val canonicalKey = LyricsRepository.canonicalKey("Song", "Artist")
         val cached = LyricsPayload(
             canonicalKey = canonicalKey,
-            payloadJson = "{\"meta\":{\"song\":\"Song\",\"artist\":\"Artist\",\"total_duration\":1},\"lyrics\":[]}",
+            payloadJson = "{\"meta\":{\"song\":\"Song\",\"artist\":\"Artist\",\"total_duration\":1},\"lyrics\":[{\"w\":\"Hello\",\"s\":0,\"e\":1,\"n\":true}]}",
             updatedAt = "2026-01-01T00:00:00Z",
         )
         val store = InMemoryLocalStore().apply { seed(cached) }
@@ -47,7 +47,7 @@ class LyricsRepositoryTest {
         val canonicalKey = LyricsRepository.canonicalKey("Offline Song", "Offline Artist")
         val downloaded = LyricsPayload(
             canonicalKey = canonicalKey,
-            payloadJson = "{\"meta\":{\"song\":\"Offline Song\",\"artist\":\"Offline Artist\",\"total_duration\":1},\"lyrics\":[]}",
+            payloadJson = "{\"meta\":{\"song\":\"Offline Song\",\"artist\":\"Offline Artist\",\"total_duration\":1},\"lyrics\":[{\"w\":\"Offline\",\"s\":0,\"e\":1,\"n\":true}]}",
             updatedAt = "2026-01-01T00:00:00Z",
         )
         val store = InMemoryLocalStore()
@@ -79,7 +79,7 @@ class LyricsRepositoryTest {
         val canonicalKey = LyricsRepository.canonicalKey("Song", "Artist")
         val cached = LyricsPayload(
             canonicalKey = canonicalKey,
-            payloadJson = "{\"meta\":{\"song\":\"Song\",\"artist\":\"Artist\",\"total_duration\":1},\"lyrics\":[]}",
+            payloadJson = "{\"meta\":{\"song\":\"Song\",\"artist\":\"Artist\",\"total_duration\":1},\"lyrics\":[{\"w\":\"Hello\",\"s\":0,\"e\":1,\"n\":true}]}",
             updatedAt = "2026-01-01T00:00:00Z",
         )
         val store = InMemoryLocalStore().apply { seed(cached) }

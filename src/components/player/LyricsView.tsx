@@ -43,33 +43,40 @@ function buildLinesFromKaraokeJson(lyricsJson: KaraokeLyricsJSON | null | undefi
     if (!lyricsJson) return [];
 
     const lines: ParsedLine[] = [];
-    let currentWords: string[] = [];
+    let currentText = '';
     let currentStartMs: number | null = null;
 
     for (const word of lyricsJson.lyrics) {
+        if (word.bg) {
+            continue;
+        }
+
         if (currentStartMs === null) {
             currentStartMs = Math.max(0, Math.round(word.s * 1000));
         }
 
         if (word.w.trim().length > 0) {
-            currentWords.push(word.w);
+            currentText += word.w;
+            if (word.sp) {
+                currentText += ' ';
+            }
         }
 
         if (word.n) {
-            const text = currentWords.join(' ').trim();
+            const text = currentText.trim();
             if (text.length > 0 && currentStartMs !== null) {
                 lines.push({ time: currentStartMs, text });
             }
 
-            currentWords = [];
+            currentText = '';
             currentStartMs = null;
         }
     }
 
-    if (currentWords.length > 0 && currentStartMs !== null) {
+    if (currentText.trim().length > 0 && currentStartMs !== null) {
         lines.push({
             time: currentStartMs,
-            text: currentWords.join(' ').trim(),
+            text: currentText.trim(),
         });
     }
 

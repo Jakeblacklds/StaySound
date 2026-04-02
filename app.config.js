@@ -1,4 +1,4 @@
-const IS_DEV = process.env.APP_VARIANT === 'development';
+﻿const IS_DEV = process.env.APP_VARIANT === 'development';
 
 module.exports = {
     expo: {
@@ -10,11 +10,6 @@ module.exports = {
         scheme: "staysound",
         userInterfaceStyle: "automatic",
         newArchEnabled: true,
-        splash: {
-            image: "./assets/images/splash-icon.png",
-            resizeMode: "contain",
-            backgroundColor: "#0a0a0a"
-        },
         ios: {
             supportsTablet: true,
             bundleIdentifier: IS_DEV ? "com.staysound.app.dev" : "com.staysound.app.pro",
@@ -83,9 +78,29 @@ module.exports = {
         },
         extra: {
             router: {},
+            supabase: {
+                url: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
+                anonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+                allowedEmails: process.env.EXPO_PUBLIC_ALLOWED_LOGIN_EMAILS || '',
+            },
+            authSupabase: {
+                url: process.env.EXPO_PUBLIC_AUTH_SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL || '',
+                anonKey: process.env.EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+                allowedEmails: process.env.EXPO_PUBLIC_ALLOWED_LOGIN_EMAILS || '',
+            },
+            dabBeta: {
+                baseUrl: process.env.EXPO_PUBLIC_DAB_BETA_BASE_URL || 'https://dabmusic.xyz',
+            },
+            spotify: {
+                clientId: process.env.EXPO_PUBLIC_SPOTIFY_CLIENT_ID || '',
+                top50GlobalPlaylistId: process.env.EXPO_PUBLIC_SPOTIFY_TOP50_GLOBAL_PLAYLIST_ID || '37i9dQZEVXbMDoHDwVN2tF',
+            },
             eas: {
                 projectId: "f9cff190-672e-4832-add3-4a9cb3e68343"
             }
         }
     }
 };
+
+
+

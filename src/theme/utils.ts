@@ -13,6 +13,7 @@ import {
     SchemeTonalSpot,
     SchemeVibrant
 } from '@material/material-color-utilities';
+import { pickReadableColor } from '../utils/colorContrast';
 
 export type SchemeVariant =
     | 'expressive'
@@ -91,5 +92,36 @@ export function generateM3Palette(seedColor: string, isDark: boolean, variant: S
         inverseSurface: hexFromArgb(scheme.inverseSurface),
         inverseOnSurface: hexFromArgb(scheme.inverseOnSurface),
         inversePrimary: hexFromArgb(scheme.inversePrimary),
+    };
+}
+
+function normalizeSeedColor(seedColor: string) {
+    return seedColor.startsWith('#') ? seedColor : `#${seedColor}`;
+}
+
+export function generateManualAccentPalette(
+    seedColor: string,
+    isDark: boolean,
+    variant: SchemeVariant = 'expressive'
+) {
+    const normalizedSeed = normalizeSeedColor(seedColor);
+    const harmonizedPalette = generateM3Palette(normalizedSeed, isDark, variant);
+    const primaryFamily =
+        variant === 'fidelity'
+            ? harmonizedPalette
+            : generateM3Palette(normalizedSeed, isDark, 'fidelity');
+
+    return {
+        ...harmonizedPalette,
+        primary: normalizedSeed,
+        onPrimary: pickReadableColor(normalizedSeed, [
+            primaryFamily.onPrimary,
+            harmonizedPalette.onPrimary,
+            primaryFamily.onPrimaryContainer,
+            harmonizedPalette.onPrimaryContainer,
+        ]),
+        primaryContainer: primaryFamily.primaryContainer,
+        onPrimaryContainer: primaryFamily.onPrimaryContainer,
+        inversePrimary: primaryFamily.inversePrimary,
     };
 }

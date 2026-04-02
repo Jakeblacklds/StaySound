@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TrackPlayerService - Audio Playback with Background Support
  * 
  * Uses react-native-track-player as the primary audio engine for:
@@ -31,7 +31,7 @@ export async function initializeTrackPlayer(): Promise<boolean> {
 
     initializationPromise = (async () => {
         try {
-            // Setup the player — optimized for local file playback
+            // Setup the player â€” optimized for local file playback
             await TrackPlayer.setupPlayer({
                 // Buffer settings tuned for LOCAL files (not streaming)
                 // Local files read from disk instantly, so minimal buffering needed
@@ -47,10 +47,13 @@ export async function initializeTrackPlayer(): Promise<boolean> {
             await TrackPlayer.updateOptions({
                 capabilities: [
                     Capability.Play,
+                    Capability.PlayFromId,
+                    Capability.PlayFromSearch,
                     Capability.Pause,
                     Capability.SkipToNext,
                     Capability.SkipToPrevious,
                     Capability.SeekTo,
+                    Capability.Skip,
                     Capability.Stop,
                 ],
                 // Android specific options
@@ -64,6 +67,7 @@ export async function initializeTrackPlayer(): Promise<boolean> {
                     Capability.SkipToNext,
                     Capability.SkipToPrevious,
                     Capability.SeekTo,
+                    Capability.Skip,
                     Capability.Stop,
                 ],
                 // Progress bar update interval in seconds
@@ -92,7 +96,7 @@ export function isTrackPlayerReady(): boolean {
 }
 
 /**
- * Play a single track — optimized for near-instant start.
+ * Play a single track â€” optimized for near-instant start.
  * BUG FIX: Uses reset()+add() instead of load() for absolute queue reliability.
  */
 export async function playTrack(track: Track): Promise<void> {
@@ -110,12 +114,14 @@ export async function playTrack(track: Track): Promise<void> {
 
         const trackData: any = {
             id: track.id,
+            mediaId: track.id,
             url: track.uri,
             title: track.title || 'Unknown Title',
             artist: track.artist || 'Unknown Artist',
             album: track.album || 'Unknown Album',
             artwork: track.artwork || undefined,
             duration: track.duration ? track.duration / 1000 : undefined,
+            genre: track.genre,
             // Technical metadata preserved for UI
             format: track.format,
             sampleRate: track.sampleRate,
@@ -149,12 +155,14 @@ export async function playQueue(tracks: Track[], startIndex: number = 0): Promis
 
         const trackPlayerTracks = tracks.map(track => ({
             id: track.id,
+            mediaId: track.id,
             url: track.uri,
             title: track.title || 'Unknown Title',
             artist: track.artist || 'Unknown Artist',
             album: track.album || 'Unknown Album',
             artwork: track.artwork || undefined,
             duration: track.duration ? track.duration / 1000 : undefined,
+            genre: track.genre,
             // Technical metadata preserved for UI
             format: track.format,
             sampleRate: track.sampleRate,
@@ -453,4 +461,6 @@ export async function destroyTrackPlayer(): Promise<void> {
 
 // Re-export types and enums for convenience
 export { Event, RepeatMode, State };
+
+
 

@@ -15,7 +15,7 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useUIStore } from '../../stores/uiStore';
-import { useTheme } from '../../theme';
+import { usePerformanceProfile, useTheme } from '../../theme';
 import { CustomIcon, IconName } from './CustomIcon';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
@@ -23,6 +23,7 @@ const SHEET_HEIGHT = SCREEN_HEIGHT * 0.6;
 
 export function ActionSheet() {
     const { theme, isDark } = useTheme();
+    const performanceProfile = usePerformanceProfile();
     const paperTheme = usePaperTheme();
     const insets = useSafeAreaInsets();
 
@@ -109,7 +110,9 @@ export function ActionSheet() {
                     },
                     sheetStyle
                 ]}>
-                    <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+                    {performanceProfile.enableBlurEffects ? (
+                        <BlurView intensity={30} tint={isDark ? 'dark' : 'light'} style={StyleSheet.absoluteFill} />
+                    ) : null}
 
                     {/* Handle */}
                     <View style={styles.handleContainer}>
@@ -120,7 +123,9 @@ export function ActionSheet() {
                     <View style={styles.header}>
                         {track && (
                             <View style={styles.trackInfo}>
-                                <Image source={{ uri: track.artwork }} style={styles.artwork} />
+                                {track.artwork ? (
+                                    <Image source={{ uri: track.artwork }} style={styles.artwork} cachePolicy={performanceProfile.imageCachePolicyOverlay} transition={0} />
+                                ) : null}
                                 <View style={styles.trackMeta}>
                                     <Text variant="titleMedium" numberOfLines={1} style={{ color: theme.colors.onSurface }}>{title}</Text>
                                     <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{subtitle || track.artist}</Text>

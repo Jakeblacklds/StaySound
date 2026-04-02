@@ -185,7 +185,7 @@ export function TidalPlaylistScreen() {
             <>
                 <Stack.Screen options={{ headerShown: false }} />
                 <SafeAreaView style={[styles.centered, { backgroundColor: theme.colors.background }]}>
-                    <EmptyState icon="⚠️" title="Playlist unavailable" description={error ?? 'No se pudo cargar'} />
+                    <EmptyState title="Playlist no disponible" description={error ?? 'No se pudo cargar'} />
                     <Button onPress={() => router.back()}>Back</Button>
                 </SafeAreaView>
             </>

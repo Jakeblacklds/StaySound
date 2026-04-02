@@ -29,13 +29,16 @@ export {
 } from './karaokeParser';
 export { LyricsRepository } from './lyricsRepository';
 export { getActiveLyricIndex, LyricsData, parseLRC, SAMPLE_LRC } from './lyricsService';
+export { playResolvedRemoteTrack, resolveRemoteTrackForDownload, resolveRemoteTrackForPlayback } from './remotePlaybackService';
 export {
     formatDuration,
     formatDurationLong,
     organizeIntoAlbums,
-    organizeIntoArtists, parseFilename
+    organizeIntoArtists
 } from './metadataService';
+export { parseFilename } from './audioUtils';
 export { PlaybackService } from './playbackService';
+export { getSpotifyTop50PlaylistId, hydrateSpotifyTop50GlobalPlaylist, isSpotifyRemoteTrack } from './spotifyChartsService';
 export {
     destroyTrackPlayer, getCurrentTrack,
     getPlaybackState,

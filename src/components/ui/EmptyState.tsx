@@ -1,4 +1,4 @@
-/**
+﻿/**
  * EmptyState - Placeholder for empty content
  */
 
@@ -10,7 +10,7 @@ import Animated, { FadeIn } from 'react-native-reanimated';
 import { CustomIcon, IconName } from './CustomIcon';
 
 interface EmptyStateProps {
-    icon?: string | IconName;
+    icon?: string | IconName | null;
     title: string;
     description?: string;
     actionLabel?: string;
@@ -18,7 +18,7 @@ interface EmptyStateProps {
 }
 
 export function EmptyState({
-    icon = '🎵',
+    icon = null,
     title,
     description,
     actionLabel,
@@ -26,9 +26,10 @@ export function EmptyState({
 }: EmptyStateProps) {
     const { theme } = useTheme();
 
-    const isCustomIcon = (icon: string | IconName): icon is IconName => {
+    const isCustomIcon = (icon: string | IconName | null): icon is IconName => {
+        if (!icon) return false;
         const customIcons: IconName[] = [
-            'Ajustes', 'Album', 'Artista', 'Canción', 'Cola', 'Descargar',
+            'Ajustes', 'Album', 'Artista', 'Cancion', 'Cola', 'Descargar',
             'Home', 'Library', 'Lyrics', 'Next', 'Pause', 'Play',
             'Playlist', 'Previous', 'Reciente', 'Repetir 0', 'Repetir 1', 'Shuffle'
         ];
@@ -40,13 +41,15 @@ export function EmptyState({
             entering={FadeIn.delay(200)}
             style={styles.container}
         >
-            <View style={styles.iconContainer}>
-                {isCustomIcon(icon) ? (
-                    <CustomIcon name={icon} size={64} color={theme.colors.primary} />
-                ) : (
-                    <Text style={styles.icon}>{icon}</Text>
-                )}
-            </View>
+            {icon ? (
+                <View style={styles.iconContainer}>
+                    {isCustomIcon(icon) ? (
+                        <CustomIcon name={icon} size={64} color={theme.colors.primary} />
+                    ) : (
+                        <Text style={styles.icon}>{icon}</Text>
+                    )}
+                </View>
+            ) : null}
             <Text
                 variant="titleLarge"
                 style={[styles.title, { color: theme.colors.onBackground }]}
@@ -100,3 +103,5 @@ const styles = StyleSheet.create({
         borderRadius: 24,
     },
 });
+
+

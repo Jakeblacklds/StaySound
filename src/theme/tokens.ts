@@ -1,4 +1,6 @@
 
+import { fontFamilies } from './typography';
+
 // Shared spacing tokens
 export const spacing = {
     xs: 4,
@@ -11,24 +13,20 @@ export const spacing = {
 
 // Shared typography
 export const typography = {
-    fontFamily: {
-        regular: 'System',
-        medium: 'System',
-        bold: 'System',
-    },
+    fontFamily: fontFamilies,
     fontSize: {
-        xs: 10,
+        xs: 11,
         sm: 12,
         md: 14,
         lg: 16,
         xl: 20,
         xxl: 24,
-        display: 32,
+        display: 40,
     },
     lineHeight: {
         tight: 1.2,
-        normal: 1.5,
-        relaxed: 1.75,
+        normal: 1.45,
+        relaxed: 1.6,
     },
 };
 

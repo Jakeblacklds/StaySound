@@ -16,19 +16,35 @@ import {
     Track,
 } from '../types/audio';
 import { FileSystemStorage } from './storage';
+import {
+    getDabBetaAlbumDetail,
+    getDabBetaArtistDetail,
+    getDabBetaArtistInfo,
+    getDabBetaStreamInfo,
+    isDabConfigured,
+    searchDabBetaArtists,
+    searchDabBetaPlaylists,
+    searchDabBetaTracks,
+} from './dabService';
+import { getDabBaseUrl, isDabBaseUrl } from './dabAuthService';
 
 export const TIDAL_API_BASES = [
     'https://triton.squid.wtf',
+    'https://hifi.geeked.wtf',
     'https://dabmusic.xyz/api',
+    'https://beta.dabmusic.xyz',
     'https://dab.monochrome.tf',
     'https://hifi.monochrome.tf',
     'https://arran.monochrome.tf',
     'https://music.binimum.org',
 ];
+const GENERIC_TIDAL_API_BASES = TIDAL_API_BASES.filter(base => !base.includes('dabmusic.xyz'));
 
 export const TIDAL_MIRROR_NAMES: Record<string, string> = {
     'https://triton.squid.wtf': 'Fuente Principal (Alta Velocidad)',
-    'https://dabmusic.xyz/api': 'Fuente Alternativa (Estable)',
+    'https://hifi.geeked.wtf': 'Monochrome Worker (Nuevo)',
+    'https://beta.dabmusic.xyz': 'DAB Beta (Respaldo)',
+    'https://dabmusic.xyz/api': 'DAB Oficial',
     'https://dab.monochrome.tf': 'Servidor Espejo A',
     'https://hifi.monochrome.tf': 'Servidor Espejo B',
     'https://arran.monochrome.tf': 'Servidor Espejo C',
@@ -37,11 +53,24 @@ export const TIDAL_MIRROR_NAMES: Record<string, string> = {
 };
 
 let currentBaseIndex = 0;
+export type TidalMirrorAvailability = {
+    status: 'available' | 'slow' | 'unavailable';
+    latencyMs?: number;
+    checkedAt: number;
+    statusCode?: number;
+};
+
 const TIDAL_ARTWORK_BASE = 'https://resources.tidal.com/images';
 const TIDAL_TEMP_DOWNLOADS_DIR = `${FileSystem.cacheDirectory}StaySound/Downloads/`;
+const TIDAL_PRIVATE_DOWNLOADS_DIR = `${FileSystem.documentDirectory}StaySound/Downloads/`;
 const TIDAL_PUBLIC_FOLDER = 'StaySound';
 const TIDAL_PUBLIC_DOWNLOADS_PERMISSION_KEY = 'tidal-public-downloads-permission';
 const REQUEST_TIMEOUT_MS = 12000;
+const MIRROR_HEALTH_TIMEOUT_MS = 3500;
+const MIRROR_HEALTH_CACHE_TTL_MS = 5 * 60 * 1000;
+const DAB_OFFICIAL_BASE_URL = 'https://dabmusic.xyz';
+const mirrorAvailabilityCache = new Map<string, TidalMirrorAvailability>();
+const inflightMirrorChecks = new Map<string, Promise<TidalMirrorAvailability>>();
 
 interface TidalTrackApiResponse {
     id: number;
@@ -312,6 +341,23 @@ async function persistInPublicDownloads(tempUri: string, baseFilename: string, e
     return destinationUri;
 }
 
+async function persistInPrivateDownloads(tempUri: string, baseFilename: string, extension: string): Promise<string> {
+    await ensureDirectoryExists(TIDAL_PRIVATE_DOWNLOADS_DIR);
+    const destinationUri = `${TIDAL_PRIVATE_DOWNLOADS_DIR}${baseFilename}.${extension}`;
+
+    const existing = await FileSystem.getInfoAsync(destinationUri);
+    if (existing.exists) {
+        await FileSystem.deleteAsync(destinationUri, { idempotent: true });
+    }
+
+    await FileSystem.copyAsync({
+        from: tempUri,
+        to: destinationUri,
+    });
+
+    return destinationUri;
+}
+
 async function persistArtworkInPublicDownloads(artworkUrl: string, artist: string, album: string): Promise<void> {
     try {
         if (!artworkUrl) return;
@@ -394,14 +440,162 @@ function withTimeoutSignal(timeoutMs: number): { signal: AbortSignal; cleanup: (
     };
 }
 
-async function fetchJson<T>(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS): Promise<T> {
+function isReachableStatus(status: number): boolean {
+    return status < 500 || status === 401 || status === 403 || status === 404 || status === 405;
+}
+
+async function probeMirrorAvailability(baseUrl: string): Promise<TidalMirrorAvailability> {
+    const startedAt = Date.now();
+    const { signal, cleanup } = withTimeoutSignal(MIRROR_HEALTH_TIMEOUT_MS);
+
+    try {
+        const response = await fetch(baseUrl, {
+            method: 'HEAD',
+            signal,
+        });
+        const latencyMs = Date.now() - startedAt;
+
+        return {
+            status: isReachableStatus(response.status)
+                ? (latencyMs > 1800 ? 'slow' : 'available')
+                : 'unavailable',
+            latencyMs,
+            checkedAt: Date.now(),
+            statusCode: response.status,
+        };
+    } catch {
+        return {
+            status: 'unavailable',
+            latencyMs: Date.now() - startedAt,
+            checkedAt: Date.now(),
+        };
+    } finally {
+        cleanup();
+    }
+}
+
+export async function getTidalMirrorAvailability(
+    mirrors: string[],
+    options: { force?: boolean } = {},
+): Promise<Record<string, TidalMirrorAvailability>> {
+    const now = Date.now();
+    const uniqueMirrors = mirrors.filter((mirror, index, all) => all.indexOf(mirror) === index);
+    const results = await Promise.all(uniqueMirrors.map(async (mirror) => {
+        const cached = mirrorAvailabilityCache.get(mirror);
+        if (!options.force && cached && (now - cached.checkedAt) < MIRROR_HEALTH_CACHE_TTL_MS) {
+            return [mirror, cached] as const;
+        }
+
+        const inflight = inflightMirrorChecks.get(mirror);
+        if (inflight) {
+            return [mirror, await inflight] as const;
+        }
+
+        const request = probeMirrorAvailability(mirror)
+            .then(result => {
+                mirrorAvailabilityCache.set(mirror, result);
+                return result;
+            })
+            .finally(() => {
+                inflightMirrorChecks.delete(mirror);
+            });
+
+        inflightMirrorChecks.set(mirror, request);
+        return [mirror, await request] as const;
+    }));
+
+    return Object.fromEntries(results);
+}
+
+export function markTidalMirrorUnavailable(baseUrl: string, statusCode?: number): void {
+    mirrorAvailabilityCache.set(baseUrl, {
+        status: 'unavailable',
+        checkedAt: Date.now(),
+        statusCode,
+    });
+}
+
+function isDabMirror(base: string): boolean {
+    return base.includes('dabmusic.xyz') || base.includes('dab.yeet.su');
+}
+
+function isSelectedDabSource() {
     const { tidalMirror } = useSettingsStore.getState();
-    const showNotification = useNotificationStore.getState().showNotification;
+    return tidalMirror !== 'auto' && isDabBaseUrl(tidalMirror);
+}
+
+function shouldRescueWithDabBeta() {
+    const { tidalMirror } = useSettingsStore.getState();
+    return tidalMirror === 'auto' && isDabConfigured();
+}
+
+function activateDabBetaRescue(message: string) {
+    if (!shouldRescueWithDabBeta()) {
+        return false;
+    }
+
+    const { tidalMirror, setTidalMirror } = useSettingsStore.getState();
+    const rescueBaseUrl = getDabBaseUrl();
+    const rescueMirror = rescueBaseUrl === DAB_OFFICIAL_BASE_URL ? `${rescueBaseUrl}/api` : rescueBaseUrl;
+    if (tidalMirror !== rescueMirror) {
+        setTidalMirror(rescueMirror);
+        useNotificationStore.getState().showNotification(message, 'warning');
+    }
+
+    return true;
+}
+
+function shouldFallbackFromResponse(base: string, status: number, responseBody: string): boolean {
+    if (status >= 500 || (status === 404 && base.includes('music.binimum.org'))) {
+        return true;
+    }
+
+    if (!isDabMirror(base)) {
+        return false;
+    }
+
+    if (status === 401 || status === 403) {
+        return true;
+    }
+
+    const normalizedBody = responseBody.toLowerCase();
+    return normalizedBody.includes('requiresauth')
+        || normalizedBody.includes('logged-in users only')
+        || normalizedBody.includes('query parameter is required')
+        || normalizedBody.includes('internal server error');
+}
+
+function isHtmlResponse(contentType: string | null, body: string): boolean {
+    const normalizedType = (contentType ?? '').toLowerCase();
+    const trimmed = body.trimStart();
+    return normalizedType.includes('text/html') || trimmed.startsWith('<!doctype html') || trimmed.startsWith('<html');
+}
+
+async function parseJsonResponse<T>(response: Response, base: string): Promise<T> {
+    const rawBody = await response.text();
+    if (isHtmlResponse(response.headers.get('content-type'), rawBody)) {
+        throw new Error(`Mirror returned HTML instead of JSON: ${base}`);
+    }
+
+    try {
+        return JSON.parse(rawBody) as T;
+    } catch {
+        throw new Error(`Invalid JSON response from ${base}`);
+    }
+}
+
+async function fetchJson<T>(
+    path: string,
+    timeoutMs: number = REQUEST_TIMEOUT_MS,
+    options: { ignoreManualMirror?: boolean } = {},
+): Promise<T> {
+    const { tidalMirror } = useSettingsStore.getState();
     let lastError: Error | null = null;
-    const startBaseIndex = currentBaseIndex;
+    const fallbackBases = GENERIC_TIDAL_API_BASES;
+    const startBaseIndex = fallbackBases.length > 0 ? (currentBaseIndex % fallbackBases.length) : 0;
 
     // If user selected a specific mirror, try it first
-    if (tidalMirror && tidalMirror !== 'auto') {
+    if (!options.ignoreManualMirror && tidalMirror && tidalMirror !== 'auto') {
         const url = `${tidalMirror}${path}`;
         const { signal, cleanup } = withTimeoutSignal(timeoutMs);
         try {
@@ -409,19 +603,23 @@ async function fetchJson<T>(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS
             const response = await fetch(url, { signal });
             if (response.ok) {
                 cleanup();
-                return await response.json() as T;
+                return await parseJsonResponse<T>(response, tidalMirror);
             }
-            throw new Error(`Manual mirror issue: ${response.status}`);
+            const errorBody = await response.text().catch(() => 'No body');
+            if (shouldFallbackFromResponse(tidalMirror, response.status, errorBody)) {
+                throw new Error(`Manual mirror issue: ${response.status}`);
+            }
+            throw new Error(`Tidal request failed (${response.status}): ${errorBody}`);
         } catch (error: any) {
             cleanup();
-            console.warn(`[TidalService] Manual mirror ${tidalMirror} failed: ${error.message}. Falling back to auto...`);
-            showNotification('Conexión inestable con el servidor elegido. Buscando alternativa...', 'warning');
-            lastError = error;
+            markTidalMirrorUnavailable(tidalMirror);
+            console.warn(`[TidalService] Manual mirror ${tidalMirror} failed: ${error.message}.`);
+            throw error;
         }
     }
 
-    for (let i = 0; i < TIDAL_API_BASES.length; i++) {
-        const base = TIDAL_API_BASES[currentBaseIndex];
+    for (let i = 0; i < fallbackBases.length; i++) {
+        const base = fallbackBases[currentBaseIndex];
         const url = `${base}${path}`;
         const { signal, cleanup } = withTimeoutSignal(timeoutMs);
 
@@ -431,32 +629,22 @@ async function fetchJson<T>(path: string, timeoutMs: number = REQUEST_TIMEOUT_MS
 
             if (response.ok) {
                 cleanup();
-                return await response.json() as T;
+                return await parseJsonResponse<T>(response, base);
             }
-
-            // If it's a server error (5xx) or a possible proxy misconfiguration (404 on common paths)
-            if (response.status >= 500 || (response.status === 404 && base.includes('music.binimum.org'))) {
+            const errorBody = await response.text().catch(() => 'No body');
+            if (shouldFallbackFromResponse(base, response.status, errorBody)) {
                 throw new Error(`Mirror issue: ${response.status}`);
             }
-
-            // If we are at dabmusic.xyz, it might need /api/search instead of /search
-            // but our fetchJson prepends /search, so we adjust current path if needed or just skip
-            if (response.status === 404 && base.includes('dabmusic.xyz')) {
-                throw new Error(`Endpoint not found on this mirror: ${response.status}`);
-            }
-
-            const errorBody = await response.text().catch(() => 'No body');
             throw new Error(`Tidal request failed (${response.status}): ${errorBody}`);
         } catch (error: any) {
             cleanup();
             lastError = error;
+            markTidalMirrorUnavailable(base);
             console.warn(`[TidalService] Base ${base} failed: ${error.message}. Trying next...`);
 
             // Cycle to next base
-            currentBaseIndex = (currentBaseIndex + 1) % TIDAL_API_BASES.length;
+            currentBaseIndex = (currentBaseIndex + 1) % fallbackBases.length;
 
-            const nextBase = TIDAL_API_BASES[currentBaseIndex];
-            showNotification(`Cambiando a ${TIDAL_MIRROR_NAMES[nextBase] || 'otro servidor'} para mejor conexión`, 'info');
 
             // If we've circled back to the start, stop and throw
             if (currentBaseIndex === startBaseIndex) break;
@@ -772,35 +960,106 @@ export async function searchTidal(query: string): Promise<TidalSearchResult[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
-    const response = await fetchJson<TidalSearchApiResponse>(
-        `/search/?s=${encodeURIComponent(trimmed)}`,
-    );
+    if (isSelectedDabSource()) {
+        try {
+            return await searchDabBetaTracks(trimmed);
+        } catch (error) {
+            console.warn('[TidalService] DAB search failed, retrying via generic mirrors:', error);
+            const response = await fetchJson<TidalSearchApiResponse>(
+                `/search/?s=${encodeURIComponent(trimmed)}`,
+                REQUEST_TIMEOUT_MS,
+                { ignoreManualMirror: true },
+            );
 
-    return (response.data?.items ?? []).map(normalizeSearchItem);
+            return (response.data?.items ?? []).map(normalizeSearchItem);
+        }
+    }
+
+    try {
+        const response = await fetchJson<TidalSearchApiResponse>(
+            `/search/?s=${encodeURIComponent(trimmed)}`,
+        );
+
+        return (response.data?.items ?? []).map(normalizeSearchItem);
+    } catch (error) {
+        if (!activateDabBetaRescue('Los mirrors de Tidal fallaron. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        return await searchDabBetaTracks(trimmed);
+    }
 }
 
 export async function searchTidalArtists(query: string): Promise<TidalArtist[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
-    const response = await fetchJson<TidalArtistSearchApiResponse>(
-        `/search/?a=${encodeURIComponent(trimmed)}`,
-    );
+    if (isSelectedDabSource()) {
+        try {
+            return await searchDabBetaArtists(trimmed);
+        } catch (error) {
+            console.warn('[TidalService] DAB artist search failed, retrying via generic mirrors:', error);
+            const response = await fetchJson<TidalArtistSearchApiResponse>(
+                `/search/?a=${encodeURIComponent(trimmed)}`,
+                REQUEST_TIMEOUT_MS,
+                { ignoreManualMirror: true },
+            );
 
-    const artistItems = response.data?.artists?.items ?? response.data?.items ?? [];
-    return artistItems.map(normalizeArtistItem);
+            const artistItems = response.data?.artists?.items ?? response.data?.items ?? [];
+            return artistItems.map(normalizeArtistItem);
+        }
+    }
+
+    try {
+        const response = await fetchJson<TidalArtistSearchApiResponse>(
+            `/search/?a=${encodeURIComponent(trimmed)}`,
+        );
+
+        const artistItems = response.data?.artists?.items ?? response.data?.items ?? [];
+        return artistItems.map(normalizeArtistItem);
+    } catch (error) {
+        if (!activateDabBetaRescue('Los mirrors de Tidal fallaron. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        return await searchDabBetaArtists(trimmed);
+    }
 }
 
 export async function searchTidalPlaylists(query: string): Promise<TidalPlaylist[]> {
     const trimmed = query.trim();
     if (!trimmed) return [];
 
-    const response = await fetchJson<TidalPlaylistSearchApiResponse>(
-        `/search/?p=${encodeURIComponent(trimmed)}`,
-    );
+    if (isSelectedDabSource()) {
+        try {
+            return await searchDabBetaPlaylists();
+        } catch (error) {
+            console.warn('[TidalService] DAB playlist search failed, retrying via generic mirrors:', error);
+            const response = await fetchJson<TidalPlaylistSearchApiResponse>(
+                `/search/?p=${encodeURIComponent(trimmed)}`,
+                REQUEST_TIMEOUT_MS,
+                { ignoreManualMirror: true },
+            );
 
-    const playlistItems = response.data?.playlists?.items ?? response.data?.items ?? [];
-    return playlistItems.map(normalizePlaylistItem);
+            const playlistItems = response.data?.playlists?.items ?? response.data?.items ?? [];
+            return playlistItems.map(normalizePlaylistItem);
+        }
+    }
+
+    try {
+        const response = await fetchJson<TidalPlaylistSearchApiResponse>(
+            `/search/?p=${encodeURIComponent(trimmed)}`,
+        );
+
+        const playlistItems = response.data?.playlists?.items ?? response.data?.items ?? [];
+        return playlistItems.map(normalizePlaylistItem);
+    } catch (error) {
+        if (!activateDabBetaRescue('Los mirrors de Tidal fallaron. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        return [];
+    }
 }
 
 export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
@@ -823,22 +1082,33 @@ export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
     return Array.from(albumsMap.values());
 }
 export async function getTidalAlbumDetail(albumId: number): Promise<TidalAlbumDetail> {
-    const response = await fetchJson<TidalAlbumDetailApiResponse>(
-        `/album/?id=${albumId}`,
-    );
-
-    const albumData = response.data;
-    if (!albumData) {
-        throw new Error('No se pudo cargar el album de Tidal');
+    if (isSelectedDabSource()) {
+        return await getDabBetaAlbumDetail(albumId);
     }
+    try {
+        const response = await fetchJson<TidalAlbumDetailApiResponse>(
+            `/album/?id=${albumId}`,
+        );
 
-    const album = normalizeAlbumItem(albumData);
-    const tracks = (albumData.items ?? [])
-        .map(entry => entry.item)
-        .filter((item): item is TidalTrackApiResponse => !!item)
-        .map(item => normalizeArtistTrack(item, album.artistId ? { id: album.artistId, name: album.artistName } : undefined));
+        const albumData = response.data;
+        if (!albumData) {
+            throw new Error('No se pudo cargar el album de Tidal');
+        }
 
-    return { album, tracks };
+        const album = normalizeAlbumItem(albumData);
+        const tracks = (albumData.items ?? [])
+            .map(entry => entry.item)
+            .filter((item): item is TidalTrackApiResponse => !!item)
+            .map(item => normalizeArtistTrack(item, album.artistId ? { id: album.artistId, name: album.artistName } : undefined));
+
+        return { album, tracks };
+    } catch (error) {
+        if (!activateDabBetaRescue('No se pudo abrir el album desde Tidal. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        return await getDabBetaAlbumDetail(albumId);
+    }
 }
 
 export async function getTidalPlaylistDetail(playlistUuid: string): Promise<TidalPlaylistDetail> {
@@ -877,59 +1147,85 @@ export async function getTidalPlaylistDetail(playlistUuid: string): Promise<Tida
 }
 
 export async function getTidalArtistInfo(artistId: number): Promise<TidalArtist> {
-    const response = await fetchJson<TidalArtistDetailApiResponse>(
-        `/artist/?id=${artistId}`,
-    );
-
-    const apiArtist = response.artist;
-    if (!apiArtist) {
-        throw new Error('Artista no encontrado');
+    if (isSelectedDabSource()) {
+        return await getDabBetaArtistInfo(artistId);
     }
+    try {
+        const response = await fetchJson<TidalArtistDetailApiResponse>(
+            `/artist/?id=${artistId}`,
+        );
 
-    return {
-        ...normalizeArtistItem(apiArtist),
-        artworkUrl: response.cover?.['750'] || getArtworkUrl(apiArtist.picture ?? undefined),
-    };
+        const apiArtist = response.artist;
+        if (!apiArtist) {
+            throw new Error('Artista no encontrado');
+        }
+
+        return {
+            ...normalizeArtistItem(apiArtist),
+            artworkUrl: response.cover?.['750'] || getArtworkUrl(apiArtist.picture ?? undefined),
+        };
+    } catch (error) {
+        if (!activateDabBetaRescue('No se pudo cargar el artista desde Tidal. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        return await getDabBetaArtistInfo(artistId);
+    }
 }
 
 export async function getTidalArtistDetail(artistId: number, artistNameHint?: string): Promise<TidalArtistDetail> {
-    const artistResponse = await fetchJson<TidalArtistDetailApiResponse>(
-        `/artist/?id=${artistId}`,
-    );
-
-    const apiArtist = artistResponse.artist;
-    if (!apiArtist) {
-        throw new Error('No se pudo cargar el artista de Tidal');
+    if (isSelectedDabSource()) {
+        return await getDabBetaArtistDetail(artistId, artistNameHint);
     }
+    try {
+        const artistResponse = await fetchJson<TidalArtistDetailApiResponse>(
+            `/artist/?id=${artistId}`,
+        );
 
-    const artist: TidalArtist = {
-        ...normalizeArtistItem(apiArtist),
-        artworkUrl: artistResponse.cover?.['750'] ?? getArtworkUrl(apiArtist.picture ?? undefined),
-    };
+        const apiArtist = artistResponse.artist;
+        if (!apiArtist) {
+            throw new Error('No se pudo cargar el artista de Tidal');
+        }
 
-    const queryTerm = artistNameHint?.trim() || artist.name;
-    const tracksByName = await searchTidal(queryTerm);
+        const artist: TidalArtist = {
+            ...normalizeArtistItem(apiArtist),
+            artworkUrl: artistResponse.cover?.['750'] ?? getArtworkUrl(apiArtist.picture ?? undefined),
+        };
 
-    const mergedTracksMap = new Map<number, TidalTrack>();
-    tracksByName
-        .filter(track => track.artistId === artistId || track.artist.toLowerCase() === artist.name.toLowerCase())
-        .forEach(track => mergedTracksMap.set(track.id, track));
+        const queryTerm = artistNameHint?.trim() || artist.name;
+        const tracksByName = await searchTidal(queryTerm);
 
-    const mergedTracks = Array.from(mergedTracksMap.values());
-    mergedTracks.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
+        const mergedTracksMap = new Map<number, TidalTrack>();
+        tracksByName
+            .filter(track => track.artistId === artistId || track.artist.toLowerCase() === artist.name.toLowerCase())
+            .forEach(track => mergedTracksMap.set(track.id, track));
 
-    const albums = extractAlbumsFromTracks(mergedTracks);
-    const topTracks = mergedTracks.slice(0, 25);
+        const mergedTracks = Array.from(mergedTracksMap.values());
+        mergedTracks.sort((a, b) => (b.popularity ?? 0) - (a.popularity ?? 0));
 
-    return { artist, topTracks, albums };
+        const albums = extractAlbumsFromTracks(mergedTracks);
+        const topTracks = mergedTracks.slice(0, 25);
+
+        return { artist, topTracks, albums };
+    } catch (error) {
+        if (!activateDabBetaRescue('No se pudo cargar el artista desde Tidal. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        return await getDabBetaArtistDetail(artistId, artistNameHint);
+    }
 }
 
 export async function getTidalTrackManifest(
     tidalId: number,
     quality: TidalQuality = 'HI_RES_LOSSLESS',
+    options: { ignoreManualMirror?: boolean } = {},
 ): Promise<ParsedManifest> {
+    const manifestQuality = quality === 'MP3' ? 'HIGH' : quality;
     const response = await fetchJson<TidalManifestApiResponse>(
-        `/track/?id=${tidalId}&quality=${quality}`,
+        `/track/?id=${tidalId}&quality=${manifestQuality}`,
+        REQUEST_TIMEOUT_MS,
+        options,
     );
 
     const manifestBase64 = response.data?.manifest;
@@ -937,7 +1233,7 @@ export async function getTidalTrackManifest(
         throw new Error('Missing Tidal manifest payload');
     }
 
-    return parseManifestPayload(manifestBase64, response.data?.audioQuality ?? quality, {
+    return parseManifestPayload(manifestBase64, response.data?.audioQuality ?? manifestQuality, {
         sampleRate: response.data?.sampleRate,
         bitDepth: response.data?.bitDepth,
     });
@@ -948,19 +1244,88 @@ export async function downloadTidalTrack(
     targetQuality: TidalQuality = 'LOSSLESS',
     options: DownloadOptions = {},
 ): Promise<Track> {
+    const downloadFromDabBeta = async (): Promise<Track> => {
+        const baseFilename = getTrackBaseFilename(tidalTrack);
+        const streamInfo = await getDabBetaStreamInfo(tidalTrack, targetQuality);
+        const filename = `${baseFilename}.${streamInfo.extension}`;
+
+        const existingPublicUri = await findExistingPublicTrackUri(filename);
+        if (existingPublicUri) {
+            await persistMetadataInPublicDownloads(tidalTrack, baseFilename);
+            if (tidalTrack.artworkUrl) {
+                await persistArtworkInPublicDownloads(tidalTrack.artworkUrl, tidalTrack.artist, tidalTrack.album);
+            }
+            return toLibraryTrack({
+                ...tidalTrack,
+                quality: streamInfo.quality,
+                codec: streamInfo.codec,
+                sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+                bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+            }, existingPublicUri);
+        }
+
+        await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
+        const outputUri = getOutputUri(baseFilename, streamInfo.extension);
+        await downloadSegment(streamInfo.url, outputUri, options.onTask, options.onProgress);
+
+        const fileInfo = await FileSystem.getInfoAsync(outputUri);
+        if (!fileInfo.exists || !fileInfo.size || fileInfo.size <= 0) {
+            throw new Error('Download failed: File is empty or does not exist');
+        }
+
+        if (!(await isValidAudioFile(outputUri, streamInfo.extension))) {
+            throw new Error(`Download failed: The file received is not a valid ${streamInfo.extension.toUpperCase()}`);
+        }
+
+        let persistentUri = outputUri;
+        try {
+            persistentUri = await persistInPublicDownloads(outputUri, baseFilename, streamInfo.extension);
+            await FileSystem.deleteAsync(outputUri, { idempotent: true });
+        } catch (persistError) {
+            console.error('[TidalService] Failed to persist in public folder:', persistError);
+        }
+
+        const enrichedTrack: TidalTrack = {
+            ...tidalTrack,
+            quality: streamInfo.quality,
+            codec: streamInfo.codec,
+            sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+            bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+        };
+
+        await persistMetadataInPublicDownloads(enrichedTrack, baseFilename);
+        if (enrichedTrack.artworkUrl) {
+            await persistArtworkInPublicDownloads(enrichedTrack.artworkUrl, enrichedTrack.artist, enrichedTrack.album);
+        }
+
+        return toLibraryTrack(enrichedTrack, persistentUri);
+    };
+
+    if (isSelectedDabSource()) {
+        return await downloadFromDabBeta();
+    }
+
     const baseFilename = getTrackBaseFilename(tidalTrack);
 
     // 1. Get manifest for target quality
     let manifest: ParsedManifest;
     try {
-        manifest = await getTidalTrackManifest(tidalTrack.id, targetQuality);
-    } catch (error) {
-        console.warn(`[TidalService] Quality ${targetQuality} failed, falling back to LOSSLESS/HIGH`, error);
         try {
-            manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
-        } catch {
-            manifest = await getTidalTrackManifest(tidalTrack.id, 'HIGH');
+            manifest = await getTidalTrackManifest(tidalTrack.id, targetQuality);
+        } catch (error) {
+            console.warn(`[TidalService] Quality ${targetQuality} failed, falling back to LOSSLESS/HIGH`, error);
+            try {
+                manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+            } catch {
+                manifest = await getTidalTrackManifest(tidalTrack.id, 'HIGH');
+            }
         }
+    } catch (error) {
+        if (!activateDabBetaRescue('Tidal no pudo entregar el audio. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        return await downloadFromDabBeta();
     }
 
     const extension = getExtensionFromMime(manifest.mimeType, manifest.codecs);
@@ -999,6 +1364,15 @@ export async function downloadTidalTrack(
     }
 
     if (!sourceUrl) {
+        if (targetQuality === 'HI_RES_LOSSLESS') {
+            try {
+                console.log('[TidalService] Hi-Res direct download unavailable, retrying through DAB fallback.');
+                return await downloadFromDabBeta();
+            } catch (dabError) {
+                console.warn('[TidalService] DAB fallback for Hi-Res failed:', dabError);
+            }
+        }
+
         if (manifest.isSegmented) {
             throw new Error(`Este track utiliza segmentos (DASH) y no se puede descargar directamente como un solo archivo ${extension.toUpperCase()}.`);
         }
@@ -1022,6 +1396,16 @@ export async function downloadTidalTrack(
     }
 
     if (!(await isValidAudioFile(outputUri, extension))) {
+        if (targetQuality === 'HI_RES_LOSSLESS') {
+            try {
+                await FileSystem.deleteAsync(outputUri, { idempotent: true });
+                console.log('[TidalService] Invalid Hi-Res payload received, retrying through DAB fallback.');
+                return await downloadFromDabBeta();
+            } catch (dabError) {
+                console.warn('[TidalService] DAB fallback after invalid Hi-Res payload failed:', dabError);
+            }
+        }
+
         throw new Error(`Download failed: The file received is not a valid ${extension.toUpperCase()}`);
     }
 
@@ -1043,7 +1427,8 @@ export async function downloadTidalTrack(
             }
         } catch (persistError) {
             console.error('[TidalService] Failed to persist in public folder:', persistError);
-            throw new Error(`Failed to save track to public folder: ${persistError instanceof Error ? persistError.message : 'Unknown error'}`);
+            persistentUri = await persistInPrivateDownloads(outputUri, baseFilename, extension);
+            await FileSystem.deleteAsync(outputUri, { idempotent: true });
         }
     }
 
@@ -1051,13 +1436,145 @@ export async function downloadTidalTrack(
     return toLibraryTrack(enrichedTrack, persistentUri);
 }
 
+function buildCloudStreamTrackFromStreamInfo(tidalTrack: TidalTrack, streamInfo: {
+    url: string;
+    extension: 'flac' | 'mp3';
+    codec: string;
+    quality: string;
+    sampleRate?: number;
+    bitDepth?: number;
+}): Track {
+    return {
+        id: `tidal_stream_${tidalTrack.id}`,
+        uri: streamInfo.url,
+        title: tidalTrack.title,
+        artist: tidalTrack.artist,
+        album: tidalTrack.album,
+        duration: tidalTrack.durationMs,
+        artwork: tidalTrack.artworkUrl,
+        trackNumber: tidalTrack.trackNumber,
+        year: tidalTrack.year,
+        format: streamInfo.extension,
+        codec: streamInfo.codec,
+        sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+        bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+        quality: streamInfo.quality,
+        source: 'tidal_stream',
+        tidalId: tidalTrack.id,
+        tidalAlbumId: tidalTrack.albumId,
+        dateAdded: Date.now(),
+        cloudOnly: true,
+    };
+}
+
 export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Track> {
+    const preferredQuality = useSettingsStore.getState().tidalDownloadQuality;
+
+    if (isSelectedDabSource()) {
+        try {
+            const streamInfo = await getDabBetaStreamInfo(tidalTrack, preferredQuality);
+            return buildCloudStreamTrackFromStreamInfo(tidalTrack, streamInfo);
+        } catch (dabError) {
+            console.warn('[TidalService] DAB stream failed, retrying via generic mirrors:', dabError);
+
+            let manifest: ParsedManifest;
+            try {
+                try {
+                    manifest = await getTidalTrackManifest(tidalTrack.id, preferredQuality, { ignoreManualMirror: true });
+                } catch {
+                    manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS', { ignoreManualMirror: true });
+                }
+            } catch {
+                manifest = await getTidalTrackManifest(tidalTrack.id, 'HIGH', { ignoreManualMirror: true });
+            }
+
+            let streamUrl = getDirectUrl(manifest);
+            if (!streamUrl) {
+                const fallbackManifest = await getTidalTrackManifest(tidalTrack.id, 'HIGH', { ignoreManualMirror: true });
+                streamUrl = getDirectUrl(fallbackManifest);
+                manifest = fallbackManifest;
+            }
+
+            if (!streamUrl) {
+                throw dabError instanceof Error
+                    ? dabError
+                    : new Error('No direct stream URL available for this track');
+            }
+
+            const enrichedTrack: TidalTrack = {
+                ...tidalTrack,
+                quality: manifest.quality ?? tidalTrack.quality,
+                codec: manifest.codecs ?? tidalTrack.codec,
+                sampleRate: manifest.sampleRate ?? tidalTrack.sampleRate,
+                bitDepth: manifest.bitDepth ?? tidalTrack.bitDepth,
+            };
+
+            const extension = getExtensionFromMime(manifest.mimeType, manifest.codecs);
+            const formatMap: Record<string, string> = {
+                flac: 'FLAC',
+                m4a: 'AAC',
+                mp3: 'MP3',
+            };
+
+            return {
+                id: `tidal_stream_${tidalTrack.id}`,
+                uri: streamUrl,
+                title: enrichedTrack.title,
+                artist: enrichedTrack.artist,
+                album: enrichedTrack.album,
+                duration: enrichedTrack.durationMs,
+                artwork: enrichedTrack.artworkUrl,
+                trackNumber: enrichedTrack.trackNumber,
+                year: enrichedTrack.year,
+                format: formatMap[extension] || 'FLAC',
+                codec: enrichedTrack.codec ?? extension,
+                sampleRate: enrichedTrack.sampleRate,
+                bitDepth: enrichedTrack.bitDepth,
+                quality: enrichedTrack.quality,
+                source: 'tidal_stream',
+                tidalId: enrichedTrack.id,
+                tidalAlbumId: enrichedTrack.albumId,
+                dateAdded: Date.now(),
+                cloudOnly: true,
+            };
+        };
+    }
+
     let manifest: ParsedManifest;
     try {
-        manifest = await getTidalTrackManifest(tidalTrack.id, 'HI_RES_LOSSLESS');
+        try {
+            manifest = await getTidalTrackManifest(tidalTrack.id, 'HI_RES_LOSSLESS');
+        } catch (error) {
+            console.warn('[TidalService] Stream HI_RES_LOSSLESS failed, retrying LOSSLESS', error);
+            manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+        }
     } catch (error) {
-        console.warn('[TidalService] Stream HI_RES_LOSSLESS failed, retrying LOSSLESS', error);
-        manifest = await getTidalTrackManifest(tidalTrack.id, 'LOSSLESS');
+        if (!activateDabBetaRescue('Tidal no pudo abrir el stream. Cambiando a DAB de respaldo.')) {
+            throw error;
+        }
+
+        const streamInfo = await getDabBetaStreamInfo(tidalTrack, 'LOSSLESS');
+        return {
+            id: `tidal_stream_${tidalTrack.id}`,
+            uri: streamInfo.url,
+            title: tidalTrack.title,
+            artist: tidalTrack.artist,
+            album: tidalTrack.album,
+            duration: tidalTrack.durationMs,
+            artwork: tidalTrack.artworkUrl,
+            trackNumber: tidalTrack.trackNumber,
+            year: tidalTrack.year,
+            format: streamInfo.extension,
+            codec: streamInfo.codec,
+            sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+            bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+            quality: streamInfo.quality,
+            source: 'tidal_stream',
+            tidalId: tidalTrack.id,
+            tidalAlbumId: tidalTrack.albumId,
+            dateAdded: Date.now(),
+            cloudOnly: true,
+        };
     }
 
     let streamUrl = getDirectUrl(manifest);
@@ -1127,6 +1644,7 @@ export async function isValidAudioFile(uri: string, extension: string): Promise<
         return false;
     }
 }
+
 
 
 

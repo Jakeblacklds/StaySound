@@ -4,7 +4,6 @@
 
 import { AlbumCard, ArtistAbout, CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
 import { useArtistInfo, useDynamicColors } from '@/src/hooks';
-import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Album, Track } from '@/src/types';
@@ -12,12 +11,11 @@ import { BlurView } from 'expo-blur';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
-import { Dimensions, Image, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
-import { Button, IconButton, Text } from 'react-native-paper';
+import { Image, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { IconButton, Text } from 'react-native-paper';
 import Animated, { FadeIn, FadeInDown, FadeInRight, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
 const HEADER_HEIGHT = 300;
 const AVATAR_SIZE = 188;
 const HERO_TOP_OFFSET = 56;
@@ -35,15 +33,8 @@ export default function ArtistDetailScreen() {
     const getArtistById = useLibraryStore(state => state.getArtistById);
     const getTracksByArtist = useLibraryStore(state => state.getTracksByArtist);
     const getAlbumsByArtist = useLibraryStore(state => state.getAlbumsByArtist);
-    const getAllPlaylists = useLibraryStore(state => state.getAllPlaylists);
-    const createPlaylist = useLibraryStore(state => state.createPlaylist);
-    const addToPlaylist = useLibraryStore(state => state.addToPlaylist);
-    const deleteTrack = useLibraryStore(state => state.deleteTrack);
 
     const play = usePlayerStore(state => state.play);
-    const addToQueue = usePlayerStore(state => state.addToQueue);
-    const toggleShuffle = usePlayerStore(state => state.toggleShuffle);
-    const shuffleEnabled = usePlayerStore(state => state.shuffleEnabled);
     const currentTrackId = usePlayerStore(state => state.currentTrack?.id);
 
     const artist = getArtistById(id);
@@ -87,31 +78,6 @@ export default function ArtistDetailScreen() {
     const handleAlbumPress = useCallback((album: Album) => {
         router.push({ pathname: '/album/[id]', params: { id: album.id } });
     }, []);
-
-    const handleAddToQueue = useCallback((track: Track) => {
-        openTrackActionsMenu({
-            track,
-            playlists: getAllPlaylists(),
-            addToQueue,
-            addToPlaylist,
-            createPlaylist,
-            deleteTrack,
-        });
-    }, [addToPlaylist, addToQueue, createPlaylist, deleteTrack, getAllPlaylists]);
-
-    const handlePlayAll = useCallback(() => {
-        if (tracks.length > 0) {
-            play(tracks[0], tracks);
-        }
-    }, [tracks, play]);
-
-    const handleShuffle = useCallback(() => {
-        if (tracks.length > 0) {
-            if (!shuffleEnabled) toggleShuffle();
-            const randomIndex = Math.floor(Math.random() * tracks.length);
-            play(tracks[randomIndex], tracks);
-        }
-    }, [tracks, play, toggleShuffle, shuffleEnabled]);
 
     if (!artist) {
         return (
@@ -181,32 +147,9 @@ export default function ArtistDetailScreen() {
                     </Text>
                 </Animated.View>
 
-                {/* Action Buttons */}
-                <Animated.View entering={FadeIn.delay(300)} style={styles.actions}>
-                    <Button
-                        mode="contained"
-                        icon={() => <CustomIcon name="Play" size={20} color={artistColors.isDark ? '#000000' : '#FFFFFF'} />}
-                        onPress={handlePlayAll}
-                        style={[styles.playButton, { backgroundColor: artistColors.primary }]}
-                        labelStyle={{ color: artistColors.isDark ? '#000000' : '#FFFFFF' }}
-                        contentStyle={styles.playButtonContent}
-                    >
-                        Play All
-                    </Button>
-                    <Button
-                        mode="contained-tonal"
-                        icon={() => <CustomIcon name="Shuffle" size={20} color={artistColors.primary} />}
-                        onPress={handleShuffle}
-                        style={[styles.shuffleButton, { backgroundColor: artistColors.primary + '20' }]}
-                        labelStyle={{ color: artistColors.primary }}
-                    >
-                        Shuffle
-                    </Button>
-                </Animated.View>
-
                 {/* Top Songs */}
                 {topTracks.length > 0 && (
-                    <Animated.View entering={FadeInDown.delay(400)} style={styles.section}>
+                    <Animated.View entering={FadeInDown.delay(300)} style={styles.section}>
                         <View style={styles.sectionHeader}>
                             <Text
                                 variant="titleMedium"
@@ -214,20 +157,12 @@ export default function ArtistDetailScreen() {
                             >
                                 Top Songs
                             </Text>
-                            <Button
-                                mode="text"
-                                compact
-                                labelStyle={{ color: artistColors.primary }}
-                                onPress={() => { }}
-                            >
-                                See All
-                            </Button>
                         </View>
 
                         {topTracks.map((track, index) => (
                             <Animated.View
                                 key={track.id}
-                                entering={FadeInRight.delay(500 + index * 50)}
+                                entering={FadeInRight.delay(400 + index * 50)}
                             >
                                 <MemoizedTrackListItem
                                     track={track}
@@ -235,7 +170,6 @@ export default function ArtistDetailScreen() {
                                     showIndex={true}
                                     isPlaying={currentTrackId === track.id}
                                     onPress={handleTrackPress}
-                                    onOptionsPress={handleAddToQueue}
                                 />
                             </Animated.View>
                         ))}
@@ -244,7 +178,7 @@ export default function ArtistDetailScreen() {
 
                 {/* Albums */}
                 {albums.length > 0 && (
-                    <Animated.View entering={FadeInDown.delay(600)} style={styles.section}>
+                    <Animated.View entering={FadeInDown.delay(500)} style={styles.section}>
                         <View style={styles.sectionHeader}>
                             <Text
                                 variant="titleMedium"
@@ -262,7 +196,7 @@ export default function ArtistDetailScreen() {
                             {albums.map((album, index) => (
                                 <Animated.View
                                     key={album.id}
-                                    entering={FadeInRight.delay(700 + index * 100)}
+                                    entering={FadeInRight.delay(600 + index * 100)}
                                     style={styles.albumWrapper}
                                 >
                                     <AlbumCard
@@ -332,24 +266,6 @@ const styles = StyleSheet.create({
     artistName: {
         fontWeight: 'bold',
         textAlign: 'center',
-    },
-    actions: {
-        flexDirection: 'row',
-        justifyContent: 'center',
-        gap: 12,
-        paddingHorizontal: 24,
-        marginBottom: 32,
-    },
-    playButton: {
-        flex: 1,
-        borderRadius: 24,
-    },
-    playButtonContent: {
-        paddingVertical: 6,
-    },
-    shuffleButton: {
-        flex: 1,
-        borderRadius: 24,
     },
     section: {
         marginBottom: 32,

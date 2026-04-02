@@ -255,7 +255,9 @@ export async function scanMusicLibraryFast(
     const startTime = Date.now();
     const tracks: Track[] = [];
     const errors: string[] = [];
-    const folderPattern = options.folderPattern || MUSIC_FOLDERS.all;
+    const folderPattern = typeof options.folderPattern === 'string'
+        ? options.folderPattern
+        : MUSIC_FOLDERS.all;
 
     const hasPerms = await hasPermissions();
     if (!hasPerms) {
