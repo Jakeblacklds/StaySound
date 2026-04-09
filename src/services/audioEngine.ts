@@ -204,11 +204,40 @@ class AudioEngineClass {
         this.subscriptions.push(endSub);
 
         // Listen for errors
-        const errorSub = TrackPlayerService.addEventListener(Event.PlaybackError, (event) => {
+        const errorSub = TrackPlayerService.addEventListener(Event.PlaybackError, async (event) => {
             console.error('[AudioEngine] Playback error:', event);
+            const errorCode = String((event as { code?: string } | undefined)?.code ?? '').toLowerCase();
+
+            if (errorCode === 'android-parsing-container-unsupported') {
+                this.callbacks.onError?.(new Error('Unsupported audio container on Android'));
+                await this.recoverFromUnsupportedTrackError();
+                return;
+            }
+
             this.callbacks.onError?.(new Error(event.message || 'Playback error'));
         });
         this.subscriptions.push(errorSub);
+    }
+
+    private async recoverFromUnsupportedTrackError(): Promise<void> {
+        try {
+            await TrackPlayerService.skipToNext();
+            await TrackPlayerService.resume();
+            console.warn('[AudioEngine] Skipped unsupported track and resumed playback');
+            return;
+        } catch {
+            // No next track available or skip failed.
+        }
+
+        try {
+            await TrackPlayerService.stop();
+        } catch {
+            // Best-effort cleanup.
+        }
+
+        this.currentState.isPlaying = false;
+        this.currentState.isLoading = false;
+        this.callbacks.onStateChange?.(this.currentState);
     }
 
     private lastReactUpdate = 0;

@@ -1,5 +1,5 @@
 export { KaraokeView } from './KaraokeView';
-export type { KaraokeViewProps, LyricWordRaw, LyricsJSON } from './KaraokeView.types';
+export type { KaraokeMotionProfile, KaraokeViewProps, LyricWordRaw, LyricsJSON } from './KaraokeView.types';
 export {
   configureSupabase,
   createCanonicalLyricsKey,
@@ -8,4 +8,3 @@ export {
   getLyrics,
   normalizeLyricsKeyPart
 } from './LyricsRepositoryModule';
-

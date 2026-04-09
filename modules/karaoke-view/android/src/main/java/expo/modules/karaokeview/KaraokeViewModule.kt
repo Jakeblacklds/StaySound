@@ -110,6 +110,18 @@ class KaraokeViewModule : Module() {
                 view.setEnableSpectralParticles(value ?: true)
             }
 
+            Prop("motionProfile") { view: KaraokeView, value: String? ->
+                view.setMotionProfile(value)
+            }
+
+            Prop("introTitle") { view: KaraokeView, value: String? ->
+                view.setIntroTitle(value)
+            }
+
+            Prop("introSubtitle") { view: KaraokeView, value: String? ->
+                view.setIntroSubtitle(value)
+            }
+
             // Events emitted to JS
             Events("onLineChange", "onWordChange", "onSeek")
         }

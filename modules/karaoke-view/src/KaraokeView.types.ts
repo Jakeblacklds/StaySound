@@ -1,5 +1,7 @@
 import type { ViewProps } from 'react-native';
 
+export type KaraokeMotionProfile = 'ambient' | 'pulse' | 'fire' | 'velvet' | 'cosmic';
+
 /**
  * Raw lyric word format from JSON
  */
@@ -55,6 +57,15 @@ export interface KaraokeViewProps extends ViewProps {
 
     /** Enables the suspended shimmer particles around the active lyric sweep */
     enableSpectralParticles?: boolean;
+
+    /** Selects the visual ambience profile used around the lyric sweep */
+    motionProfile?: KaraokeMotionProfile;
+
+    /** Optional intro song title shown before first sung line */
+    introTitle?: string;
+
+    /** Optional intro artist/subtitle shown before first sung line */
+    introSubtitle?: string;
 
     /** Called when active line changes */
     onLineChange?: (event: { nativeEvent: { lineIndex: number } }) => void;

@@ -156,6 +156,42 @@ function isSameAlbumTrack(a: Track, b: Track): boolean {
     return a.album === b.album && a.artist === b.artist;
 }
 
+function mergeWithLibraryTrack(track: Track): Track {
+    const libraryTrack = useLibraryStore.getState().tracks.get(track.id);
+    if (!libraryTrack) return track;
+
+    return {
+        ...track,
+        ...libraryTrack,
+        id: track.id,
+        uri: track.uri || libraryTrack.uri,
+        artwork: libraryTrack.artwork || track.artwork,
+        artworkThumb: libraryTrack.artworkThumb || track.artworkThumb,
+    };
+}
+
+function mergeQueueWithLibraryTracks(queue: Track[]): Track[] {
+    return queue.map(mergeWithLibraryTrack);
+}
+
+function resolvePreferredArtworkForEngineMerge(nextTrack: Track, currentStoreTrack: Track): string | undefined {
+    const nextArtwork = nextTrack.artwork?.trim();
+    const currentArtwork = currentStoreTrack.artwork?.trim();
+    const currentArtworkThumb = currentStoreTrack.artworkThumb?.trim();
+
+    if (!nextArtwork) {
+        return currentArtwork || undefined;
+    }
+
+    // Prevent visual quality regressions: if the engine reports the thumbnail URI
+    // as artwork for the same track, keep the already-known full-res artwork.
+    if (currentArtwork && currentArtworkThumb && nextArtwork === currentArtworkThumb) {
+        return currentArtwork;
+    }
+
+    return nextArtwork;
+}
+
 async function hydrateAlbumArtworkOnDemand(track: Track): Promise<void> {
     if (!track || track.artwork) return;
 
@@ -327,14 +363,18 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     ...initialState,
 
     play: async (track, queue) => {
-        armExpectedEngineTrack(track.id);
-        void hydrateAlbumArtworkOnDemand(track);
+        const effectiveTrack = mergeWithLibraryTrack(track);
+        const sourceQueue = queue && queue.length > 0
+            ? mergeQueueWithLibraryTracks(queue)
+            : [effectiveTrack];
+
+        armExpectedEngineTrack(effectiveTrack.id);
+        void hydrateAlbumArtworkOnDemand(effectiveTrack);
         get().positionShared.value = 0;
 
-        const selectedIndex = queue && queue.length > 0
-            ? Math.max(0, queue.findIndex(t => t.id === track.id))
+        const selectedIndex = sourceQueue.length > 0
+            ? Math.max(0, sourceQueue.findIndex(t => t.id === effectiveTrack.id))
             : 0;
-        const sourceQueue = queue && queue.length > 0 ? queue : [track];
         const boundedLinearContext = createBoundedLinearPlaybackContext(sourceQueue, selectedIndex);
         linearPlaybackContextQueue = boundedLinearContext.queue;
         console.log('[PlayerStore] Playback context prepared:', {
@@ -351,15 +391,15 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
         // Single atomic update to avoid multiple subscription flushes.
         set(state => {
-            const filteredRecent = state.recentlyPlayed.filter(t => t.id !== track.id);
-            const nextRecent = [track, ...filteredRecent].slice(0, MAX_RECENT);
+            const filteredRecent = state.recentlyPlayed.filter(t => t.id !== effectiveTrack.id);
+            const nextRecent = [effectiveTrack, ...filteredRecent].slice(0, MAX_RECENT);
 
             return {
-                currentTrack: track,
+                currentTrack: effectiveTrack,
                 pendingTrackPreview: null,
                 isPlaying: true,
                 isLoading: true,
-                duration: track.duration,
+                duration: effectiveTrack.duration,
                 position: 0,
                 queue: nextQueue,
                 queueIndex,
@@ -369,13 +409,13 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
         // 2. Sync with native engine
         // If we have a queue, we must tell the engine about it so "Next" works
-        if (queue && queue.length > 0) {
+        if (sourceQueue.length > 0) {
             AudioEngine.playQueue(nextQueue, queueIndex).catch(error => {
                 console.error('[PlayerStore] playQueue error:', error);
                 set({ isPlaying: false, isLoading: false, pendingTrackPreview: null });
             });
         } else {
-            AudioEngine.play(track).catch(error => {
+            AudioEngine.play(effectiveTrack).catch(error => {
                 console.error('[PlayerStore] play error:', error);
                 set({ isPlaying: false, isLoading: false, pendingTrackPreview: null });
             });
@@ -750,7 +790,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                             title: nextTrack.title || currentStoreTrack.title,
                             artist: nextTrack.artist || currentStoreTrack.artist,
                             album: nextTrack.album || currentStoreTrack.album,
-                            artwork: nextTrack.artwork || currentStoreTrack.artwork,
+                            artwork: resolvePreferredArtworkForEngineMerge(nextTrack, currentStoreTrack),
                             duration: nextTrack.duration || currentStoreTrack.duration,
                             format: nextTrack.format || currentStoreTrack.format,
                             sampleRate: nextTrack.sampleRate || currentStoreTrack.sampleRate,

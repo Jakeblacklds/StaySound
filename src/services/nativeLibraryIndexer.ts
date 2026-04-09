@@ -73,6 +73,7 @@ const UNKNOWN_TITLES = new Set(['unknown', 'unknown title']);
 const UNKNOWN_ARTISTS = new Set(['unknown', 'unknown artist']);
 const GENERIC_ALBUMS = new Set(['unknown', 'unknown album', 'staysound', 'download', 'downloads', 'music']);
 const IMAGE_EXTENSIONS = ['.jpg', '.jpeg', '.png'];
+const SUPPORTED_AUDIO_EXTENSIONS = new Set(['mp3', 'm4a', 'aac', 'flac', 'wav', 'ogg', 'opus']);
 
 function normalizeValue(value?: string): string {
     return (value ?? '').trim().toLowerCase();
@@ -93,6 +94,23 @@ function ensureTrailingSlash(value: string): string {
 
 function stripExtension(value: string): string {
     return value.replace(/\.[^/.]+$/, '').trim();
+}
+
+function getAudioExtension(value?: string): string | null {
+    if (!value) return null;
+
+    const normalized = value.toLowerCase().split('?')[0];
+    const extensionMatch = normalized.match(/\.([a-z0-9]+)$/);
+    return extensionMatch?.[1] ?? null;
+}
+
+function isSupportedAudioContainer(displayName?: string, uri?: string): boolean {
+    const extension = getAudioExtension(displayName) ?? getAudioExtension(uri);
+    if (!extension) {
+        // Keep unknown-extension entries; some MediaStore rows expose content:// URIs without visible extension.
+        return true;
+    }
+    return SUPPORTED_AUDIO_EXTENSIONS.has(extension);
 }
 
 function getSafEntityName(uri: string): string {
@@ -396,7 +414,13 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
     if (!api) return [];
 
     const nativeTracks = await api.scanTracksNative(normalizeFolderPattern(folderPattern));
-    return await Promise.all(nativeTracks.map(async (track) => {
+    const playableTracks = nativeTracks.filter(track => isSupportedAudioContainer(track.displayName, track.uri));
+
+    if (playableTracks.length !== nativeTracks.length) {
+        console.log('[NativeLibraryIndexer] Skipping unsupported audio containers:', nativeTracks.length - playableTracks.length);
+    }
+
+    return await Promise.all(playableTracks.map(async (track) => {
         const sidecarMetadata = await readMetadataSidecar(track.relativePath, track.displayName);
         const parsed = parseFilename(track.displayName || track.uri);
         const resolvedArtist = sidecarMetadata?.artist

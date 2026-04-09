@@ -22,6 +22,33 @@ import { Track } from '../types/audio';
 let isInitialized = false;
 let initializationPromise: Promise<boolean> | null = null;
 
+function normalizeArtworkUri(value?: string | null): string | undefined {
+    const uri = value?.trim();
+    if (!uri) return undefined;
+
+    // Android Auto/Media3 frequently fails to render embedded data URIs.
+    if (uri.startsWith('data:')) return undefined;
+
+    if (
+        uri.startsWith('content://')
+        || uri.startsWith('file://')
+        || uri.startsWith('http://')
+        || uri.startsWith('https://')
+    ) {
+        return uri;
+    }
+
+    if (uri.startsWith('/')) {
+        return `file://${uri}`;
+    }
+
+    return undefined;
+}
+
+function resolveArtworkForNowPlaying(track: Track): string | undefined {
+    return normalizeArtworkUri(track.artwork) ?? normalizeArtworkUri(track.artworkThumb);
+}
+
 /**
  * Initialize Track Player with full configuration
  */
@@ -119,7 +146,7 @@ export async function playTrack(track: Track): Promise<void> {
             title: track.title || 'Unknown Title',
             artist: track.artist || 'Unknown Artist',
             album: track.album || 'Unknown Album',
-            artwork: track.artwork || undefined,
+            artwork: resolveArtworkForNowPlaying(track),
             duration: track.duration ? track.duration / 1000 : undefined,
             genre: track.genre,
             // Technical metadata preserved for UI
@@ -160,7 +187,7 @@ export async function playQueue(tracks: Track[], startIndex: number = 0): Promis
             title: track.title || 'Unknown Title',
             artist: track.artist || 'Unknown Artist',
             album: track.album || 'Unknown Album',
-            artwork: track.artwork || undefined,
+            artwork: resolveArtworkForNowPlaying(track),
             duration: track.duration ? track.duration / 1000 : undefined,
             genre: track.genre,
             // Technical metadata preserved for UI

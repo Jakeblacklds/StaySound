@@ -106,7 +106,7 @@ function AlbumCardInner({ album, size = 'medium', height: customHeight, presenta
             <Animated.View style={[artworkStyle, animatedArtworkStyle]}>
                 {album.artwork || album.artworkThumb ? (
                     <ExpoImage
-                        source={{ uri: album.artworkThumb || album.artwork }}
+                        source={{ uri: album.artwork || album.artworkThumb }}
                         style={styles.artworkImage}
                         contentFit="cover"
                         recyclingKey={album.id}

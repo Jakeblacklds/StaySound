@@ -20,7 +20,7 @@ import { extractFlacMetadata, isFlacFile } from './flacParser';
 import { canUseNativeLibraryIndexer, scanMusicNative } from './nativeLibraryIndexer';
 
 // Supported audio formats
-const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'opus', 'aac', 'wma'];
+const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'opus', 'aac'];
 
 export interface ScanResult {
     tracks: Track[];

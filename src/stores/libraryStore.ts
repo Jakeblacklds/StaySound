@@ -48,6 +48,31 @@ const normalizeRequestedScanPath = (value?: unknown) =>
 const isMediaStoreAlbumArtUri = (uri?: string) =>
     typeof uri === 'string' && uri.startsWith('content://media/external/audio/albumart/');
 
+const MEDIASTORE_AUDIO_URI_PATTERN = /content:\/\/media\/[^/]+\/audio\/media\/(\d+)/i;
+
+const resolveMediaLibraryAssetId = (trackId: string, trackUri?: string): string | null => {
+    const normalizedId = (trackId ?? '').trim();
+    if (/^\d+$/.test(normalizedId)) return normalizedId;
+
+    if (normalizedId.startsWith('ms_')) {
+        const msId = normalizedId.slice(3);
+        if (/^\d+$/.test(msId)) return msId;
+    }
+
+    if (normalizedId.startsWith('track_')) {
+        const trackHashOrId = normalizedId.slice(6);
+        if (/^\d+$/.test(trackHashOrId)) return trackHashOrId;
+    }
+
+    const uriMatch = trackUri?.match(MEDIASTORE_AUDIO_URI_PATTERN);
+    if (uriMatch?.[1]) return uriMatch[1];
+
+    return null;
+};
+
+const isDirectFileUri = (uri?: string) =>
+    typeof uri === 'string' && (uri.startsWith('file://') || uri.startsWith('/'));
+
 const resolveArtworkFromScan = (scannedArtwork?: string, existingArtwork?: string) => {
     if (!existingArtwork) return scannedArtwork;
     if (!scannedArtwork) return existingArtwork;
@@ -641,19 +666,35 @@ export const useLibraryStore = create<LibraryStore>()(
 
                 // 1. Delete from File System if requested
                 if (deleteFile) {
+                    let deletedFromDisk = false;
                     try {
+                        const FileSystem = require('expo-file-system/legacy');
                         if (id.startsWith('tidal_')) {
-                            const FileSystem = require('expo-file-system/legacy');
                             if (track.uri) {
                                 await FileSystem.deleteAsync(track.uri, { idempotent: true });
+                                deletedFromDisk = true;
                             }
                         } else {
                             const { deleteAssetsAsync } = require('expo-media-library');
-                            const assetId = id.startsWith('track_') ? id.replace('track_', '') : id;
-                            await deleteAssetsAsync([assetId]);
+                            const assetId = resolveMediaLibraryAssetId(id, track.uri);
+
+                            if (assetId) {
+                                await deleteAssetsAsync([assetId]);
+                                deletedFromDisk = true;
+                            } else if (isDirectFileUri(track.uri)) {
+                                await FileSystem.deleteAsync(track.uri, { idempotent: true });
+                                deletedFromDisk = true;
+                            }
                         }
                     } catch (e) {
                         console.warn('[LibraryStore] Failed to delete file from disk:', e);
+                    }
+
+                    if (!deletedFromDisk) {
+                        console.warn('[LibraryStore] Could not resolve file deletion target for track:', {
+                            id,
+                            uri: track.uri,
+                        });
                     }
                 }
 

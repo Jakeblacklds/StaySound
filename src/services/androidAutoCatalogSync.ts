@@ -41,6 +41,33 @@ function normalizeText(value?: string | null): string {
     return value?.trim() || '';
 }
 
+function normalizeArtworkUri(value?: string | null): string | undefined {
+    const uri = normalizeText(value);
+    if (!uri) return undefined;
+
+    // Android Auto/Media3 does not reliably render embedded data URIs.
+    if (uri.startsWith('data:')) return undefined;
+
+    if (
+        uri.startsWith('content://')
+        || uri.startsWith('file://')
+        || uri.startsWith('http://')
+        || uri.startsWith('https://')
+    ) {
+        return uri;
+    }
+
+    if (uri.startsWith('/')) {
+        return `file://${uri}`;
+    }
+
+    return undefined;
+}
+
+function resolveTrackArtwork(track: Track): string | undefined {
+    return normalizeArtworkUri(track.artworkThumb) ?? normalizeArtworkUri(track.artwork);
+}
+
 function compareByName<T extends { name: string }>(a: T, b: T): number {
     return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 }
@@ -62,7 +89,7 @@ function serializeTrack(track: Track): AndroidAutoTrack {
         title: normalizeText(track.title) || 'Unknown Title',
         artist: normalizeText(track.artist) || 'Unknown Artist',
         album: normalizeText(track.album) || 'Unknown Album',
-        artwork: normalizeText(track.artwork) || normalizeText(track.artworkThumb) || undefined,
+        artwork: resolveTrackArtwork(track),
         duration: track.duration,
     };
 }
@@ -72,7 +99,7 @@ function serializeAlbum(album: Album, tracksById: Map<string, AndroidAutoTrack>)
         id: album.id,
         name: normalizeText(album.name) || 'Unknown Album',
         subtitle: normalizeText(album.artist) || undefined,
-        artwork: normalizeText(album.artwork) || normalizeText(album.artworkThumb) || undefined,
+        artwork: normalizeArtworkUri(album.artworkThumb) ?? normalizeArtworkUri(album.artwork),
         trackIds: album.tracks.filter(trackId => tracksById.has(trackId)),
     };
 }
@@ -85,7 +112,7 @@ function serializeArtist(artist: Artist, sourceTracks: Track[]): AndroidAutoSect
     return {
         id: artist.id,
         name: normalizeText(artist.name) || 'Unknown Artist',
-        artwork: normalizeText(artist.artwork) || undefined,
+        artwork: normalizeArtworkUri(artist.artwork),
         trackIds,
     };
 }
@@ -95,7 +122,7 @@ function serializePlaylist(playlist: Playlist, tracksById: Map<string, AndroidAu
         id: playlist.id,
         name: normalizeText(playlist.name) || 'Playlist',
         subtitle: playlist.trackIds.length > 0 ? `${playlist.trackIds.length} tracks` : undefined,
-        artwork: normalizeText(playlist.artwork) || undefined,
+        artwork: normalizeArtworkUri(playlist.artwork),
         trackIds: playlist.trackIds.filter(trackId => tracksById.has(trackId)),
     };
 }

@@ -51,6 +51,20 @@ class AppleWordLyricsService {
         'https://lyricsplus-seven.vercel.app',
         'https://lyrics-plus-backend.vercel.app',
     ];
+    private readonly MIN_GAP_BETWEEN_REQUESTS_MS = 420;
+    private readonly BASE_HOST_COOLDOWN_MS = 25_000;
+    private readonly STORAGE_HOST_COOLDOWN_MS = 45_000;
+    private readonly MAX_COOLDOWN_EXPONENT = 3;
+    private readonly MAX_SINGLE_WAIT_MS = 3_500;
+    private readonly hostLastRequestAt = new Map<string, number>();
+    private readonly hostCooldownUntil = new Map<string, number>();
+    private readonly hostPenaltyStrikes = new Map<string, number>();
+
+    private isLikelyUnsyncedTimingType(timingType?: string | null): boolean {
+        const normalized = (timingType ?? '').trim().toLowerCase();
+        if (!normalized) return false;
+        return normalized === 'text' || normalized === 'plain' || normalized === 'unsynced' || normalized === 'static';
+    }
 
     private cleanMetadata(value?: string | null): string {
         return (value ?? '')
@@ -62,6 +76,115 @@ class AppleWordLyricsService {
 
     private async sleep(ms: number) {
         return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    private getHost(url: string): string {
+        try {
+            return new URL(url).host.toLowerCase();
+        } catch {
+            return '';
+        }
+    }
+
+    private isStorageHost(host: string): boolean {
+        return host === 'storage.lyrics-api.binimum.org';
+    }
+
+    private getBaseCooldownForHost(host: string): number {
+        return this.isStorageHost(host) ? this.STORAGE_HOST_COOLDOWN_MS : this.BASE_HOST_COOLDOWN_MS;
+    }
+
+    private extractHttpStatus(error: unknown): number | null {
+        if (error instanceof Error) {
+            const match = error.message.match(/HTTP\s+(\d{3})/i);
+            if (match) {
+                return Number(match[1]);
+            }
+        }
+        return null;
+    }
+
+    private isHostCooldownError(error: unknown): boolean {
+        return error instanceof Error && error.message.includes('HOST_COOLDOWN_ACTIVE');
+    }
+
+    private shouldFastFail(url: string, error: unknown): boolean {
+        if (this.isHostCooldownError(error)) return true;
+        const status = this.extractHttpStatus(error);
+        const host = this.getHost(url);
+        if (status === 429) return true;
+        if (status === 403 && this.isStorageHost(host)) return true;
+        return false;
+    }
+
+    private async waitForHostBudget(url: string): Promise<boolean> {
+        const host = this.getHost(url);
+        if (!host) return true;
+
+        const now = Date.now();
+        const cooldownUntil = this.hostCooldownUntil.get(host) ?? 0;
+        const sinceLast = now - (this.hostLastRequestAt.get(host) ?? 0);
+        const gapWait = Math.max(0, this.MIN_GAP_BETWEEN_REQUESTS_MS - sinceLast);
+        const cooldownWait = Math.max(0, cooldownUntil - now);
+        const waitMs = Math.max(gapWait, cooldownWait);
+        if (waitMs > this.MAX_SINGLE_WAIT_MS) {
+            console.log('[AppleWordLyrics] host cooldown active, skipping request:', host, `${waitMs}ms`);
+            return false;
+        }
+        if (waitMs > 0) {
+            await this.sleep(waitMs);
+        }
+        return true;
+    }
+
+    private registerHostRequest(url: string): void {
+        const host = this.getHost(url);
+        if (!host) return;
+        this.hostLastRequestAt.set(host, Date.now());
+    }
+
+    private registerHostSuccess(url: string): void {
+        const host = this.getHost(url);
+        if (!host) return;
+        this.hostPenaltyStrikes.set(host, 0);
+        this.hostCooldownUntil.delete(host);
+    }
+
+    private registerHostPenalty(url: string, status: number | null): void {
+        const host = this.getHost(url);
+        if (!host) return;
+
+        // 429 always cools down; 403 is treated as throttling only for the storage host.
+        const shouldPenalize = status === 429 || (status === 403 && this.isStorageHost(host));
+        if (!shouldPenalize) return;
+
+        const current = this.hostPenaltyStrikes.get(host) ?? 0;
+        const next = Math.min(current + 1, this.MAX_COOLDOWN_EXPONENT);
+        this.hostPenaltyStrikes.set(host, next);
+
+        const base = this.getBaseCooldownForHost(host);
+        const cooldownMs = base * Math.pow(2, Math.max(0, next - 1));
+        this.hostCooldownUntil.set(host, Date.now() + cooldownMs);
+    }
+
+    private async performRequestWithBudget(url: string, mode: 'fetch' | 'xhr'): Promise<string> {
+        const canProceed = await this.waitForHostBudget(url);
+        if (!canProceed) {
+            throw new Error('HOST_COOLDOWN_ACTIVE');
+        }
+        this.registerHostRequest(url);
+
+        try {
+            const responseText = mode === 'fetch'
+                ? await this.fetchGet(url)
+                : await this.xhrGet(url);
+            this.registerHostSuccess(url);
+            return responseText;
+        } catch (error) {
+            const status = this.extractHttpStatus(error);
+            this.registerHostPenalty(url, status);
+            throw error;
+        }
     }
 
     private xhrGet(url: string, timeoutMs = 15000): Promise<string> {
@@ -117,36 +240,52 @@ class AppleWordLyricsService {
             try {
                 if (attempt % 2 === 0) {
                     try {
-                        return await this.fetchGet(url);
+                        return await this.performRequestWithBudget(url, 'fetch');
                     } catch (error) {
                         lastError = error;
+                        if (this.shouldFastFail(url, error)) {
+                            break;
+                        }
                     }
                     try {
-                        return await this.xhrGet(url);
+                        return await this.performRequestWithBudget(url, 'xhr');
                     } catch (error) {
                         lastError = error;
+                        if (this.shouldFastFail(url, error)) {
+                            break;
+                        }
                     }
                 } else {
                     try {
-                        return await this.xhrGet(url);
+                        return await this.performRequestWithBudget(url, 'xhr');
                     } catch (error) {
                         lastError = error;
+                        if (this.shouldFastFail(url, error)) {
+                            break;
+                        }
                     }
                     try {
-                        return await this.fetchGet(url);
+                        return await this.performRequestWithBudget(url, 'fetch');
                     } catch (error) {
                         lastError = error;
+                        if (this.shouldFastFail(url, error)) {
+                            break;
+                        }
                     }
                 }
 
                 if (attempt < retries) {
-                    await this.sleep(1000 * (attempt + 1));
+                    const backoffMs = 1400 * (attempt + 1);
+                    await this.sleep(backoffMs);
                 }
             } catch (error) {
                 lastError = error;
             }
         }
 
+        if (lastError) {
+            console.warn('[AppleWordLyrics] request failed:', url, lastError);
+        }
         throw lastError ?? new Error('Request failed');
     }
 
@@ -163,6 +302,18 @@ class AppleWordLyricsService {
 
     private stripXmlTags(text: string): string {
         return text.replace(/<[^>]+>/g, ' ');
+    }
+
+    private nodeMatchesLocalName(nodeName: string | null | undefined, target: string): boolean {
+        if (!nodeName) return false;
+        const normalized = nodeName.toLowerCase();
+        const suffix = `:${target.toLowerCase()}`;
+        return normalized === target.toLowerCase() || normalized.endsWith(suffix);
+    }
+
+    private getElementsByLocalName(root: Document | Element, target: string): Element[] {
+        const all = Array.from(root.getElementsByTagName('*')) as Element[];
+        return all.filter(element => this.nodeMatchesLocalName(element.nodeName, target));
     }
 
     private readXmlAttribute(source: string, name: string): string | null {
@@ -267,7 +418,7 @@ class AppleWordLyricsService {
         try {
             const parser = new DOMParser();
             const xml = parser.parseFromString(ttmlText, 'text/xml');
-            const paragraphs = Array.from(xml.getElementsByTagName('p'));
+            const paragraphs = this.getElementsByLocalName(xml, 'p');
             const lyrics: KaraokeWordRaw[] = [];
 
             for (const paragraph of paragraphs) {
@@ -275,7 +426,7 @@ class AppleWordLyricsService {
                 const paragraphEnd = this.parseTtmlTimestamp(paragraph.getAttribute('end'));
                 const mainWords: KaraokeWordRaw[] = [];
                 const backgroundWords: KaraokeWordRaw[] = [];
-                const spans = Array.from(paragraph.getElementsByTagName('span'));
+                const spans = this.getElementsByLocalName(paragraph, 'span');
 
                 if (spans.length > 0) {
                     for (const span of spans) {
@@ -285,7 +436,7 @@ class AppleWordLyricsService {
                                 : null;
 
                         if (span.getAttribute('ttm:role') === 'x-bg') {
-                            const bgInnerSpans = Array.from(span.getElementsByTagName('span'));
+                            const bgInnerSpans = this.getElementsByLocalName(span, 'span');
                             for (const bgSpan of bgInnerSpans) {
                                 let bgText = bgSpan.textContent || '';
                                 const nextNode = bgSpan.nextSibling;
@@ -404,61 +555,87 @@ class AppleWordLyricsService {
     }
 
     private async fetchSearchResults(title: string, artist: string, album?: string, durationSec?: number): Promise<LyricsApiSearchResult[]> {
-        const params = new URLSearchParams({
-            track: title,
-            artist,
-        });
+        const roundedDuration = durationSec && durationSec > 0 ? Math.round(durationSec).toString() : null;
+        const attempts: Array<{ includeAlbum: boolean; includeDuration: boolean }> = [
+            { includeAlbum: true, includeDuration: Boolean(roundedDuration) },
+            { includeAlbum: false, includeDuration: Boolean(roundedDuration) },
+            { includeAlbum: true, includeDuration: false },
+            { includeAlbum: false, includeDuration: false },
+        ];
 
-        if (album) params.append('album', album);
-        if (durationSec && durationSec > 0) params.append('duration', Math.round(durationSec).toString());
+        for (const attempt of attempts) {
+            const params = new URLSearchParams({
+                track: title,
+                artist,
+            });
 
-        const rawResponse = await this.requestWithFallback(`${this.CACHE_API_URL}?${params.toString()}`, 1);
-        if (!rawResponse) return [];
+            if (attempt.includeAlbum && album) params.append('album', album);
+            if (attempt.includeDuration && roundedDuration) params.append('duration', roundedDuration);
 
-        try {
-            const payload = JSON.parse(rawResponse) as LyricsApiSearchResponse;
-            return Array.isArray(payload.results) ? payload.results : [];
-        } catch {
-            return [];
+            const rawResponse = await this.requestWithFallback(`${this.CACHE_API_URL}?${params.toString()}`, 1);
+            if (!rawResponse) continue;
+
+            try {
+                const payload = JSON.parse(rawResponse) as LyricsApiSearchResponse;
+                const results = Array.isArray(payload.results) ? payload.results : [];
+                if (results.length > 0) return results;
+            } catch {
+                continue;
+            }
         }
+
+        return [];
     }
 
     private async fetchTtmlLyrics(lyricsUrl: string, song: string, artist: string, fallbackDurationSec?: number): Promise<KaraokeLyricsJSON | null> {
         try {
+            console.log('[AppleWordLyrics] fetching TTML:', lyricsUrl);
             const rawResponse = await this.requestWithFallback(lyricsUrl, 1);
             const trimmed = rawResponse.trim();
             if (!trimmed.startsWith('<')) {
+                console.log('[AppleWordLyrics] TTML response is not XML');
                 return null;
             }
 
             return this.parseTTML(trimmed, song, artist, fallbackDurationSec);
-        } catch {
+        } catch (error) {
+            console.log('[AppleWordLyrics] TTML fetch failed:', error instanceof Error ? error.message : String(error));
             return null;
         }
     }
 
     private async fetchKpoeLyrics(title: string, artist: string, album?: string, durationSec?: number): Promise<KaraokeLyricsJSON | null> {
-        const params = new URLSearchParams({
-            title,
-            artist,
-            source: this.KPOE_SOURCE_ORDER,
-        });
+        const roundedDuration = durationSec && durationSec > 0 ? Math.round(durationSec).toString() : null;
+        const attempts: Array<{ includeAlbum: boolean; includeDuration: boolean }> = [
+            { includeAlbum: true, includeDuration: Boolean(roundedDuration) },
+            { includeAlbum: false, includeDuration: Boolean(roundedDuration) },
+            { includeAlbum: true, includeDuration: false },
+            { includeAlbum: false, includeDuration: false },
+        ];
 
-        if (album) params.append('album', album);
-        if (durationSec && durationSec > 0) params.append('duration', Math.round(durationSec).toString());
+        for (const attempt of attempts) {
+            const params = new URLSearchParams({
+                title,
+                artist,
+                source: this.KPOE_SOURCE_ORDER,
+            });
 
-        for (const baseUrl of this.KPOE_SERVERS) {
-            try {
-                const rawResponse = await this.requestWithFallback(`${baseUrl}/v2/lyrics/get?${params.toString()}`, 1);
-                if (!rawResponse) continue;
+            if (attempt.includeAlbum && album) params.append('album', album);
+            if (attempt.includeDuration && roundedDuration) params.append('duration', roundedDuration);
 
-                const payload = JSON.parse(rawResponse) as KpoePayload;
-                const lyrics = this.convertKpoeLyrics(payload, title, artist, durationSec);
-                if (lyrics?.lyrics?.length) {
-                    return lyrics;
+            for (const baseUrl of this.KPOE_SERVERS) {
+                try {
+                    const rawResponse = await this.requestWithFallback(`${baseUrl}/v2/lyrics/get?${params.toString()}`, 1);
+                    if (!rawResponse) continue;
+
+                    const payload = JSON.parse(rawResponse) as KpoePayload;
+                    const lyrics = this.convertKpoeLyrics(payload, title, artist, durationSec);
+                    if (lyrics?.lyrics?.length) {
+                        return lyrics;
+                    }
+                } catch {
+                    continue;
                 }
-            } catch {
-                continue;
             }
         }
 
@@ -473,14 +650,35 @@ class AppleWordLyricsService {
         if (!cleanTitle || !cleanArtist) return null;
 
         const searchResults = await this.fetchSearchResults(cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);
-        const wordResult = searchResults.find(result => result.timing_type?.toLowerCase() === 'word' && !!result.lyricsUrl);
+        if (searchResults.length > 0) {
+            console.log(
+                '[AppleWordLyrics] search candidates:',
+                searchResults.length,
+                searchResults
+                    .slice(0, 5)
+                    .map(result => `${result.timing_type ?? 'unknown'}|${result.track_name ?? '?'}|${result.artist_name ?? '?'}`)
+                    .join(' || ')
+            );
+        } else {
+            console.log('[AppleWordLyrics] search candidates: 0', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
+        }
+
+        const wordResult = searchResults.find(result => !!result.lyricsUrl && !this.isLikelyUnsyncedTimingType(result.timing_type));
 
         if (wordResult?.lyricsUrl) {
+            console.log(
+                '[AppleWordLyrics] selected candidate:',
+                `timing=${wordResult.timing_type ?? 'unknown'}`,
+                `track=${wordResult.track_name ?? '?'}`,
+                `artist=${wordResult.artist_name ?? '?'}`,
+                `url=${wordResult.lyricsUrl}`
+            );
             const ttmlLyrics = await this.fetchTtmlLyrics(wordResult.lyricsUrl, title, artist, wordResult.duration ?? durationSec);
             if (ttmlLyrics?.lyrics?.length) {
                 console.log('[AppleWordLyrics] TTML result:', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
                 return ttmlLyrics;
             }
+            console.log('[AppleWordLyrics] selected candidate returned no parseable TTML');
         }
 
         const kpoeLyrics = await this.fetchKpoeLyrics(cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);

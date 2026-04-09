@@ -114,7 +114,7 @@ const TrackCard = React.memo(({
       <View style={[styles.trackCardArt, artBgStyle]}>
         {track.artwork ? (
           <Image
-            source={{ uri: track.artworkThumb || track.artwork }}
+            source={{ uri: track.artwork || track.artworkThumb }}
             style={StyleSheet.absoluteFill}
             contentFit="cover"
             recyclingKey={track.id}
