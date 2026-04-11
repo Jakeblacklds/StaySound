@@ -12,7 +12,6 @@
  */
 
 import TrackPlayer, { Event } from 'react-native-track-player';
-// import { syncInternalCacheHeaders } from './cacheHeadersProvider';
 
 /**
  * The playback service that runs in the background
@@ -20,13 +19,11 @@ import TrackPlayer, { Event } from 'react-native-track-player';
  */
 export async function PlaybackService(): Promise<void> {
     // Sincronización desactivada
-    // syncInternalCacheHeaders();
 
     // Remote play button (notification/lock screen)
     TrackPlayer.addEventListener(Event.RemotePlay, async () => {
         console.log('[PlaybackService] Remote Play');
         // Gatillo silencioso desactivado
-        // syncInternalCacheHeaders();
         try {
             await TrackPlayer.play();
         } catch (error) {
@@ -58,7 +55,6 @@ export async function PlaybackService(): Promise<void> {
     // Remote next button
     TrackPlayer.addEventListener(Event.RemoteNext, async () => {
         console.log('[PlaybackService] Remote Next');
-        // syncInternalCacheHeaders();
         try {
             await TrackPlayer.skipToNext();
         } catch (error) {
@@ -69,7 +65,6 @@ export async function PlaybackService(): Promise<void> {
     // Remote previous button
     TrackPlayer.addEventListener(Event.RemotePrevious, async () => {
         console.log('[PlaybackService] Remote Previous');
-        // syncInternalCacheHeaders();
         // If more than 3 seconds in, restart current track
         try {
             const position = await TrackPlayer.getProgress();
@@ -137,7 +132,6 @@ export async function PlaybackService(): Promise<void> {
     TrackPlayer.addEventListener(Event.PlaybackActiveTrackChanged, (event) => {
         console.log('[PlaybackService] Active Track Changed:', event.track?.title);
         // Desactivado
-        // syncInternalCacheHeaders();
     });
 
     console.log('[PlaybackService] Initialized');

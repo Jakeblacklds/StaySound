@@ -6,6 +6,7 @@
 
 import { useDynamicColorsWithOptions } from '@/src/hooks';
 import type { AlbumColors } from '@/src/services/colorExtractor';
+import { generateArtistId } from '@/src/services/metadataService';
 import { LyricsRepository } from '@/src/services';
 import { FileSystemStorage } from '@/src/services/storage';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
@@ -15,7 +16,7 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { BlurView } from 'expo-blur';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { usePathname } from 'expo-router';
+import { usePathname, useRouter } from 'expo-router';
 import { KaraokeView } from 'karaoke-view';
 import React, { useCallback, useState } from 'react';
 import { BackHandler, Dimensions, Pressable, StyleSheet, View, processColor } from 'react-native';
@@ -1098,6 +1099,7 @@ export function FullPlayer() {
     const performanceProfile = usePerformanceProfile();
     const themeAnimatedColors = useAnimatedColors();
     const pathname = usePathname();
+    const router = useRouter();
     const insets = useSafeAreaInsets();
     const isVisible = usePlayerStore(state => state.playerVisible);
     const setPlayerVisible = usePlayerStore(state => state.setPlayerVisible);
@@ -1264,6 +1266,28 @@ export function FullPlayer() {
         }
     }, [lightweightMode, showLyrics]);
 
+    const handleArtistPress = useCallback(() => {
+        if (!currentTrack?.artist?.trim()) return;
+
+        const rawArtistId = currentTrack.artistId?.trim();
+        if ((currentTrack.source === 'tidal' || currentTrack.source === 'tidal_stream') && rawArtistId && /^\d+$/.test(rawArtistId)) {
+            router.push({
+                pathname: '/tidal-artist/[id]',
+                params: { id: rawArtistId, name: currentTrack.artist },
+            });
+            return;
+        }
+
+        const localArtistId = rawArtistId && !/^\d+$/.test(rawArtistId)
+            ? rawArtistId
+            : generateArtistId(currentTrack.artist);
+
+        router.push({
+            pathname: '/artist/[id]',
+            params: { id: localArtistId },
+        });
+    }, [currentTrack, router]);
+
     const handleCloseQueue = useCallback(() => {
         setShowQueue(false);
         queueAnimation.value = withTiming(0, { duration: 220, easing: M3_EMPHASIZED_ACCEL }, (finished) => {
@@ -1426,6 +1450,7 @@ export function FullPlayer() {
         track, isPlaying, shuffleEnabled, repeatMode, isFavorite, accentColor, textColor, onPrimaryColor,
         qualityBadge, qualityBadgeInk, trackTechLabel, shuffleIcon, repeatIcon, playIcon, pauseIcon, nextIcon, previousIcon,
         onClose: () => setPlayerVisible(false), onToggleLyrics: () => setShowLyrics(!showLyrics),
+        onArtistPress: handleArtistPress,
         onOpenQueue: handleOpenQueue, onToggleFavorite: () => toggleFavorite(track.id),
         onToggleShuffle: toggleShuffle, onCycleRepeatMode: cycleRepeatMode,
         onPlayPause: togglePlayPause, onNext: next, onPrevious: previous, onSeek: seek,

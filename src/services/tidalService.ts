@@ -1449,6 +1449,7 @@ function buildCloudStreamTrackFromStreamInfo(tidalTrack: TidalTrack, streamInfo:
         uri: streamInfo.url,
         title: tidalTrack.title,
         artist: tidalTrack.artist,
+        artistId: tidalTrack.artistId ? String(tidalTrack.artistId) : undefined,
         album: tidalTrack.album,
         duration: tidalTrack.durationMs,
         artwork: tidalTrack.artworkUrl,
@@ -1521,6 +1522,7 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
                 uri: streamUrl,
                 title: enrichedTrack.title,
                 artist: enrichedTrack.artist,
+                artistId: enrichedTrack.artistId ? String(enrichedTrack.artistId) : undefined,
                 album: enrichedTrack.album,
                 duration: enrichedTrack.durationMs,
                 artwork: enrichedTrack.artworkUrl,
@@ -1559,6 +1561,7 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
             uri: streamInfo.url,
             title: tidalTrack.title,
             artist: tidalTrack.artist,
+            artistId: tidalTrack.artistId ? String(tidalTrack.artistId) : undefined,
             album: tidalTrack.album,
             duration: tidalTrack.durationMs,
             artwork: tidalTrack.artworkUrl,
@@ -1608,6 +1611,7 @@ export async function createTidalStreamTrack(tidalTrack: TidalTrack): Promise<Tr
         uri: streamUrl,
         title: enrichedTrack.title,
         artist: enrichedTrack.artist,
+        artistId: enrichedTrack.artistId ? String(enrichedTrack.artistId) : undefined,
         album: enrichedTrack.album,
         duration: enrichedTrack.durationMs,
         artwork: enrichedTrack.artworkUrl,
@@ -1649,3 +1653,37 @@ export async function isValidAudioFile(uri: string, extension: string): Promise<
 
 
 
+export async function getTidalTrackRecommendations(trackId: number): Promise<TidalTrack[]> {
+    try {
+        const response = await fetchJson<TidalRecommendationsApiResponse>(`/recommendations/?id=${trackId}`, REQUEST_TIMEOUT_MS);
+        const items = response.items || response.data?.items || [];
+        return items.map(normalizeSearchItem);
+    } catch (error) {
+        console.warn(`[TidalService] Failed to fetch track recommendations for ${trackId}:`, error);
+        return [];
+    }
+}
+
+export async function getTidalSimilarArtists(artistId: number): Promise<TidalArtist[]> {
+    try {
+        const response = await fetchJson<TidalSimilarArtistsApiResponse>(`/artist/similar/?id=${artistId}`, REQUEST_TIMEOUT_MS);
+        const items = response.artists || response.data?.artists || response.items || [];
+        // Use normalizeArtistItem to ensure consistent artwork URL generation
+        return items.map(normalizeArtistItem);
+    } catch (error) {
+        console.warn(`[TidalService] Failed to fetch similar artists for ${artistId}:`, error);
+        return [];
+    }
+}
+
+export async function getTidalSimilarAlbums(albumId: number): Promise<TidalAlbum[]> {
+    try {
+        const response = await fetchJson<TidalSimilarAlbumsApiResponse>(`/album/similar/?id=${albumId}`, REQUEST_TIMEOUT_MS);
+        const items = response.albums || response.data?.albums || response.items || [];
+        // Use normalizeAlbumItem to ensure consistent artwork URL generation
+        return items.map(normalizeAlbumItem);
+    } catch (error) {
+        console.warn(`[TidalService] Failed to fetch similar albums for ${albumId}:`, error);
+        return [];
+    }
+}

@@ -8,16 +8,9 @@ import expo.modules.kotlin.modules.ModuleDefinition
  * Bridges JS <-> Kotlin with props and events
  */
 class KaraokeViewModule : Module() {
-    private val remoteDataSource = SupabaseLyricsDataSource()
+    private val remoteDataSource = NoopRemoteLyricsDataSource()
     private var lyricsRepository: LyricsRepository? = null
     private val lrcLibDataSource = LrcLibDataSource()
-
-    init {
-        remoteDataSource.configure(
-            BuildConfig.SUPABASE_URL,
-            BuildConfig.SUPABASE_ANON_KEY,
-        )
-    }
 
     private fun repository(): LyricsRepository? {
         val existing = lyricsRepository
@@ -43,10 +36,6 @@ class KaraokeViewModule : Module() {
     override fun definition() = ModuleDefinition {
         Name("KaraokeView")
 
-        Function("configureSupabase") { url: String?, secretKey: String? ->
-            remoteDataSource.configure(url, secretKey)
-        }
-
         Function("normalizeKeyPart") { value: String ->
             LyricsRepository.normalizeKeyPart(value)
         }
@@ -68,12 +57,10 @@ class KaraokeViewModule : Module() {
         }
 
         View(KaraokeView::class) {
-            // Lyrics data - sent once when lyrics change
             Prop("lyrics") { view: KaraokeView, lyrics: List<Map<String, Any>>? ->
                 lyrics?.let { view.setLyrics(it) }
             }
 
-            // Current time in ms - updated frequently from JS
             Prop("currentTimeMs") { view: KaraokeView, timeMs: Double? ->
                 timeMs?.let { view.updateTime(it.toLong()) }
             }
@@ -122,7 +109,6 @@ class KaraokeViewModule : Module() {
                 view.setIntroSubtitle(value)
             }
 
-            // Events emitted to JS
             Events("onLineChange", "onWordChange", "onSeek")
         }
     }

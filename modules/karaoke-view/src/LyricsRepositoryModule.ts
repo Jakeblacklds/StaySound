@@ -8,7 +8,6 @@ export interface NativeLyricsRecord {
 }
 
 interface NativeLyricsRepositoryModule {
-  configureSupabase(url?: string, secretKey?: string): void;
   normalizeKeyPart(value: string): string;
   canonicalKey(songTitle: string, artist: string): string;
   getLyrics(songTitle: string, artist: string): Promise<NativeLyricsRecord | null>;
@@ -17,10 +16,6 @@ interface NativeLyricsRepositoryModule {
 }
 
 const NativeModule = requireNativeModule<NativeLyricsRepositoryModule>('KaraokeView');
-
-export function configureSupabase(url?: string, secretKey?: string): void {
-  NativeModule.configureSupabase(url, secretKey);
-}
 
 export function normalizeLyricsKeyPart(value: string): string {
   return NativeModule.normalizeKeyPart(value);

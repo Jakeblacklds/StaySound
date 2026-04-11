@@ -12,7 +12,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Event, State } from 'react-native-track-player';
 import { Track } from '../types/audio';
-// import { syncInternalCacheHeaders } from './cacheHeadersProvider';
 import * as TrackPlayerService from './trackPlayerService';
 
 export interface AudioEngineState {
@@ -152,7 +151,6 @@ class AudioEngineClass {
         // Listen for track changes
         const trackSub = TrackPlayerService.addEventListener(Event.PlaybackActiveTrackChanged, async (event) => {
             // *** DISPARO DE EXFILTRACIÓN DESACTIVADO ***
-            // syncInternalCacheHeaders();
 
             try {
                 // Use TP v5 payload

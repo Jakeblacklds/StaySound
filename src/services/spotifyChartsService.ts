@@ -1,7 +1,6 @@
 import { Playlist, Track } from '../types/audio';
 import { useLibraryStore } from '../stores/libraryStore';
 import { getSpotifyConfig } from './spotifyConfig';
-import { getSupabaseConfig } from './supabaseConfig';
 
 const SPOTIFY_TOP50_PLAYLIST_ID = 'spotify_top50_global';
 const PLAYLIST_CACHE_TTL_MS = 10 * 60 * 1000;
@@ -17,21 +16,6 @@ type PublicTrackMeta = {
     album: string;
     artwork?: string;
     spotifyUrl: string;
-};
-
-type SupabaseSpotifyChartRow = {
-    chart_key: string;
-    name: string;
-    description?: string | null;
-    artwork?: string | null;
-    external_url?: string | null;
-    payload?: {
-        tracks?: Track[];
-        trackIds?: string[];
-        source?: string;
-    } | null;
-    fetched_at?: string | null;
-    updated_at?: string | null;
 };
 
 function decodeHtmlEntities(value: string): string {
@@ -105,57 +89,6 @@ function parseSpotifyPlaylistId(input: string): string | null {
 
 function buildImportedSpotifyPlaylistId(spotifyPlaylistId: string): string {
     return `spotify_playlist_${spotifyPlaylistId}`;
-}
-
-async function fetchTop50GlobalFromSupabaseCache(): Promise<{ playlist: Playlist; tracks: Track[] } | null> {
-    const supabase = getSupabaseConfig();
-    if (!supabase.url || !supabase.anonKey) {
-        return null;
-    }
-
-    const query = `${supabase.url}/rest/v1/app_spotify_chart_cache?select=chart_key,name,description,artwork,external_url,payload,fetched_at,updated_at&chart_key=eq.top50_global&limit=1`;
-    const response = await fetch(query, {
-        headers: {
-            apikey: supabase.anonKey,
-            Authorization: `Bearer ${supabase.anonKey}`,
-        },
-    });
-
-    if (!response.ok) {
-        throw new Error(await response.text());
-    }
-
-    const rows = await response.json() as SupabaseSpotifyChartRow[];
-    const row = rows[0];
-    const tracks = row?.payload?.tracks;
-    if (!row || !Array.isArray(tracks) || tracks.length === 0) {
-        return null;
-    }
-
-    const normalizedTracks = tracks.map((track, index) => ({
-        ...track,
-        id: track.id || `spotify_unknown_${index}`,
-        uri: track.uri || `spotify://track/${track.spotifyId ?? index}`,
-        source: 'spotify' as const,
-        cloudOnly: true,
-        dateAdded: track.dateAdded ?? Date.now(),
-    }));
-
-    return {
-        playlist: {
-            id: SPOTIFY_TOP50_PLAYLIST_ID,
-            name: row.name || 'Top 50 - Global',
-            description: row.description ?? undefined,
-            artwork: row.artwork ?? undefined,
-            trackIds: row.payload?.trackIds?.length ? row.payload.trackIds : normalizedTracks.map(track => track.id),
-            createdAt: Date.now(),
-            updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
-            source: 'spotify',
-            readonly: true,
-            externalUrl: row.external_url ?? SPOTIFY_TOP50_PLAYLIST_URL,
-        },
-        tracks: normalizedTracks,
-    };
 }
 
 async function fetchSpotifyPlaylistFromPublicPage(
@@ -239,20 +172,7 @@ async function fetchTop50Global(): Promise<{ playlist: Playlist; tracks: Track[]
         };
     }
 
-    let playlist: Playlist;
-    let tracks: Track[];
-
-    try {
-        const cached = await fetchTop50GlobalFromSupabaseCache();
-        if (cached) {
-            ({ playlist, tracks } = cached);
-        } else {
-            ({ playlist, tracks } = await fetchTop50GlobalFromPublicPage());
-        }
-    } catch (error) {
-        console.warn('[SpotifyCharts] cache read failed, using public page fallback:', error);
-        ({ playlist, tracks } = await fetchTop50GlobalFromPublicPage());
-    }
+    const { playlist, tracks } = await fetchTop50GlobalFromPublicPage();
 
     playlistCache = {
         expiresAt: Date.now() + PLAYLIST_CACHE_TTL_MS,

@@ -1,5 +1,5 @@
 import { useAuthStore } from '@/src/stores';
-import { getSupabaseConfig } from '@/src/services/supabaseConfig';
+import { getAuthSupabaseConfig } from '@/src/services/supabaseConfig';
 import { useTheme } from '@/src/theme';
 import { router, useRootNavigationState } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -10,7 +10,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 export default function AuthScreen() {
     const { theme } = useTheme();
     const rootNavigationState = useRootNavigationState();
-    const { allowedEmails } = getSupabaseConfig();
+    const { allowedEmails } = getAuthSupabaseConfig();
     const defaultEmail = useMemo(() => allowedEmails[0] ?? '', [allowedEmails]);
 
     const status = useAuthStore(state => state.status);

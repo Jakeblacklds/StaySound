@@ -1,5 +1,4 @@
 import {
-  configureSupabase,
   createCanonicalLyricsKey,
   forceRefreshLyrics as nativeForceRefreshLyrics,
   getLrcLibLyrics as nativeGetLrcLibLyrics,
@@ -14,46 +13,10 @@ import { FileSystemStorage } from './storage';
 export interface LyricsPayload extends KaraokeLyricsJSON { }
 
 class LyricsRepositoryService {
-  private isConfigured = false;
   private readonly APPLE_CACHE_PREFIX = 'apple-word-cache-v1';
   private readonly TRACK_APPLE_CACHE_PREFIX = 'apple-word-track-cache-v1';
   private readonly LRC_CACHE_PREFIX = 'lrc-lib-cache-v1';
   private readonly TRACK_LRC_CACHE_PREFIX = 'lrc-lib-track-cache-v1';
-
-  private resolveSupabaseConfig(): { url: string; key: string } | null {
-    const lyricsUrl =
-      process.env.EXPO_PUBLIC_LYRICS_SUPABASE_URL?.trim() ||
-      process.env.LYRICS_SUPABASE_URL?.trim() ||
-      '';
-    const defaultUrl =
-      process.env.EXPO_PUBLIC_SUPABASE_URL?.trim() ||
-      process.env.SUPABASE_URL?.trim() ||
-      '';
-    const url = lyricsUrl || defaultUrl;
-    if (!url) return null;
-
-    const dedicatedLyricsKey =
-      process.env.EXPO_PUBLIC_LYRICS_SUPABASE_ANON_KEY?.trim() ||
-      process.env.LYRICS_SUPABASE_ANON_KEY?.trim() ||
-      process.env.LYRICS_SUPABASE_PUBLISHABLE_KEY?.trim() ||
-      process.env.LYRICS_SUPABASE_SERVICE_ROLE_KEY?.trim() ||
-      '';
-    const defaultKey =
-      process.env.EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY?.trim() ||
-      process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY?.trim() ||
-      '';
-    const usesDedicatedLyricsProject = Boolean(lyricsUrl && lyricsUrl !== defaultUrl);
-    const key = usesDedicatedLyricsProject
-      ? dedicatedLyricsKey
-      : (dedicatedLyricsKey || defaultKey);
-
-    if (!key) {
-      console.warn('[LyricsRepository] Lyrics Supabase is configured without a matching access key.');
-      return null;
-    }
-
-    return { url, key };
-  }
 
   private cleanCacheMetadata(value: string): string {
     return value
@@ -213,18 +176,6 @@ class LyricsRepositoryService {
     }
   }
 
-  private configureIfNeeded(): void {
-    if (this.isConfigured) return;
-
-    const config = this.resolveSupabaseConfig();
-
-    if (config) {
-      configureSupabase(config.url, config.key);
-    }
-
-    this.isConfigured = true;
-  }
-
   canonicalKey(songTitle: string, artist: string): string {
     return createCanonicalLyricsKey(songTitle, artist);
   }
@@ -235,7 +186,6 @@ class LyricsRepositoryService {
 
   async getLyrics(songTitle: string, artist: string): Promise<LyricsPayload | null> {
     if (!songTitle.trim() || !artist.trim()) return null;
-    this.configureIfNeeded();
 
     try {
       const result = await nativeGetLyrics(songTitle, artist);
@@ -268,7 +218,6 @@ class LyricsRepositoryService {
 
   async forceRefreshLyrics(songTitle: string, artist: string): Promise<LyricsPayload | null> {
     if (!songTitle.trim() || !artist.trim()) return null;
-    this.configureIfNeeded();
 
     try {
       const result = await nativeForceRefreshLyrics(songTitle, artist);

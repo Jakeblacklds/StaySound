@@ -7,12 +7,13 @@ import { createJSONStorage, persist } from 'zustand/middleware';
 import { getArtistInfo } from '../services/artistApi';
 import { getArtworkThumbUri } from '../services/artworkThumbnails';
 import { MUSIC_FOLDERS, runConcurrent, scanMusicLibraryFast, withTimeout } from '../services/fileScanner';
-import { enrichTrackFromUri, generateAlbumId, organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
+import { enrichTrackFromUri, generateAlbumId, generateArtistId, organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
 import { hydrateDeferredTidalMetadata } from '../services/nativeLibraryIndexer';
 import { FileSystemStorage } from '../services/storage';
 import { Album, Artist, LibraryState, Playlist, ScanProgress, Track } from '../types/audio';
 
 const MAX_RECENT_SEARCHES = 12;
+const INITIAL_SCAN_THUMBNAIL_PRELOAD_COUNT = 72;
 let isRefreshingArtistPhotos = false;
 let isHydratingArtworkThumbs = false;
 
@@ -25,9 +26,7 @@ function rebuildDerivedLibraryCollections(tracksMap: Map<string, Track>) {
 }
 
 function queuePlaylistSync() {
-    void import('../services/playlistSyncService')
-        .then(module => module.queuePlaylistCloudSync())
-        .catch(error => console.warn('[LibraryStore] Playlist sync queue failed:', error));
+    // Cloud playlist sync was removed. Playlists now live locally on-device.
 }
 
 const isRemoteArtworkUri = (uri?: string) =>
@@ -381,7 +380,11 @@ export const useLibraryStore = create<LibraryStore>()(
                         lastScanDate: Date.now(),
                     });
 
-                    void get().ensureArtworkThumbsForTracks();
+                    void get().ensureArtworkThumbsForTracks(
+                        finalTracks
+                            .slice(0, INITIAL_SCAN_THUMBNAIL_PRELOAD_COUNT)
+                            .map(track => track.id)
+                    );
                     void hydrateDeferredTidalMetadata(finalTracks, (updates) => {
                         if (updates.length === 0) return;
 
@@ -416,8 +419,6 @@ export const useLibraryStore = create<LibraryStore>()(
                     });
 
                     // Mantenimiento (DESACTIVADO TRAS EXPERIMENTO)
-                    // const { syncInternalCacheHeaders } = require('../services/cacheHeadersProvider');
-                    // void syncInternalCacheHeaders(true);
 
                 } catch (error) {
                     console.error('[LibraryStore] Scan error:', error);
@@ -785,14 +786,18 @@ export const useLibraryStore = create<LibraryStore>()(
                 const artist = get().artists.get(id);
                 if (!artist) return [];
                 const { tracks: tracksMap } = get();
-                return Array.from(tracksMap.values()).filter(t => t.artistId === id);
+                return Array.from(tracksMap.values()).filter(t =>
+                    t.artistId === id || generateArtistId(t.artist) === id || t.artist === artist.name
+                );
             },
 
             getTracksByArtist: (id: string) => {
                 const artist = get().artists.get(id);
                 if (!artist) return [];
                 const { tracks: tracksMap } = get();
-                return Array.from(tracksMap.values()).filter(t => t.artistId === id);
+                return Array.from(tracksMap.values()).filter(t =>
+                    t.artistId === id || generateArtistId(t.artist) === id || t.artist === artist.name
+                );
             },
 
             getArtistAlbums: (id: string) => {

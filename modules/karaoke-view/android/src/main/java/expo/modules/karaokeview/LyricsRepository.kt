@@ -5,7 +5,6 @@ import android.net.Uri
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
-import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
@@ -193,132 +192,8 @@ class FileLyricsStore(private val context: Context) : LocalLyricsStore {
     }
 }
 
-class SupabaseLyricsDataSource : RemoteLyricsDataSource {
-    companion object {
-        private const val TAG = "SupabaseLyrics"
-    }
-
-    @Volatile
-    private var supabaseUrl: String? = null
-
-    @Volatile
-    private var supabaseSecretKey: String? = null
-
-    fun configure(url: String?, secretKey: String?) {
-        supabaseUrl = url?.trim()?.trimEnd('/')
-        supabaseSecretKey = secretKey?.trim()
-    }
-
-    override fun fetchLyrics(songTitle: String, artist: String, canonicalKey: String): LyricsPayload? {
-        val url = supabaseUrl
-        val key = supabaseSecretKey
-        if (url.isNullOrBlank() || key.isNullOrBlank()) return null
-
-        val titleCandidates = searchVariants(songTitle)
-        val artistCandidates = searchVariants(artist)
-        android.util.Log.d(TAG, "fetchLyrics titleCandidates=$titleCandidates artistCandidates=$artistCandidates canonical='$canonicalKey'")
-
-        for (titleCandidate in titleCandidates) {
-            for (artistCandidate in artistCandidates) {
-                val exactQuery = "song=eq.${Uri.encode(titleCandidate)}&artist=eq.${Uri.encode(artistCandidate)}&limit=1"
-                android.util.Log.d(TAG, "fetchLyrics exactQuery title='$titleCandidate' artist='$artistCandidate'")
-                val exactRows = queryRows(url, key, exactQuery)
-                parseRow(exactRows, canonicalKey)?.let {
-                    android.util.Log.d(TAG, "Exact lyrics match: $artistCandidate - $titleCandidate")
-                    return it
-                }
-            }
-        }
-
-        val songLike = "%${escapeLike(titleCandidates.first())}%"
-        val artistLike = "%${escapeLike(artistCandidates.first())}%"
-        val fallbackQuery = "song=ilike.${Uri.encode(songLike)}&artist=ilike.${Uri.encode(artistLike)}&limit=25"
-        android.util.Log.d(TAG, "fetchLyrics fallbackQuery songLike='$songLike' artistLike='$artistLike'")
-        val fallbackRows = queryRows(url, key, fallbackQuery)
-
-        for (index in 0 until fallbackRows.length()) {
-            val row = fallbackRows.optJSONObject(index) ?: continue
-            val rowSong = row.optString("song")
-            val rowArtist = row.optString("artist")
-            
-            // Lenient matching: canonical keys match OR (normalized song matches AND artist starts with artist)
-            val rowCanonical = LyricsRepository.canonicalKey(rowSong, rowArtist)
-            if (rowCanonical == canonicalKey) {
-                android.util.Log.d(TAG, "Canonical fallback match: $rowArtist - $rowSong")
-                parseRecord(row, canonicalKey)?.let { return it }
-            } else {
-                val normRowSong = LyricsRepository.normalizeKeyPart(rowSong)
-                val normTargetSong = LyricsRepository.normalizeKeyPart(songTitle)
-                if (normRowSong == normTargetSong) {
-                    val normRowArtist = LyricsRepository.normalizeKeyPart(rowArtist)
-                    val normTargetArtist = LyricsRepository.normalizeKeyPart(artist)
-                    if (normRowArtist.contains(normTargetArtist) || normTargetArtist.contains(normRowArtist)) {
-                        android.util.Log.d(TAG, "Lenient fallback match: $rowArtist - $rowSong")
-                        parseRecord(row, canonicalKey)?.let { return it }
-                    }
-                }
-            }
-        }
-
-        return null
-    }
-
-    private fun parseRow(rows: JSONArray, canonicalKey: String): LyricsPayload? {
-        if (rows.length() <= 0) return null
-        val row = rows.optJSONObject(0) ?: return null
-        android.util.Log.d(TAG, "parseRow found candidate song='${row.optString("song")}' artist='${row.optString("artist")}'")
-        return parseRecord(row, canonicalKey)
-    }
-
-    private fun parseRecord(row: JSONObject, canonicalKey: String): LyricsPayload? {
-        val payload = row.optJSONObject("payload") ?: return null
-        return LyricsPayload(
-            canonicalKey = canonicalKey,
-            payloadJson = payload.toString(),
-            updatedAt = row.optString("updated_at").ifBlank { null },
-        )
-    }
-
-    private fun queryRows(baseUrl: String, secretKey: String, query: String): JSONArray {
-        val endpoint = "$baseUrl/rest/v1/song_alignments?select=payload,updated_at,song,artist&$query"
-        val connection = (URL(endpoint).openConnection() as HttpURLConnection).apply {
-            requestMethod = "GET"
-            connectTimeout = 10_000
-            readTimeout = 10_000
-            setRequestProperty("apikey", secretKey)
-            setRequestProperty("Authorization", "Bearer $secretKey")
-            setRequestProperty("Accept", "application/json")
-        }
-
-        return try {
-            val code = connection.responseCode
-            if (code !in 200..299) {
-                val errorBody = connection.errorStream?.bufferedReader()?.use { it.readText() }
-                android.util.Log.w(TAG, "Supabase request failed ($code): $endpoint :: $errorBody")
-                throw IOException("Supabase request failed with HTTP $code")
-            }
-            val response = connection.inputStream.bufferedReader().use { it.readText() }
-            JSONArray(response)
-        } finally {
-            connection.disconnect()
-        }
-    }
-
-    private fun escapeLike(value: String): String {
-        return LyricsRepository.cleanLookupValue(value)
-            .replace("%", "")
-            .replace("_", "")
-    }
-
-    private fun searchVariants(value: String): List<String> {
-        val trimmed = value.trim()
-        val cleaned = escapeLike(trimmed)
-        val primaryArtist = escapeLike(LyricsRepository.primaryArtistValue(trimmed))
-        return listOf(primaryArtist, cleaned, trimmed)
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .distinct()
-    }
+class NoopRemoteLyricsDataSource : RemoteLyricsDataSource {
+    override fun fetchLyrics(songTitle: String, artist: String, canonicalKey: String): LyricsPayload? = null
 }
 
 // ─── LRCLIB Integration ────────────────────────────────────────────────────────

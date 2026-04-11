@@ -10,8 +10,6 @@
     "web": "expo start --web",
     "video:remotion": "remotion studio remotion/Root.tsx",
     "video:render": "remotion render remotion/Root.tsx StaySoundPromo out/staysound-feature-tour-vertical.mp4",
-    "spotify:sync-cache": "node ./scripts/sync_spotify_top50_cache.mjs",
-    "lyrics:upload": "node ./scripts/upload_song_alignment.mjs",
     "postinstall": "patch-package"
   },
   "dependencies": {

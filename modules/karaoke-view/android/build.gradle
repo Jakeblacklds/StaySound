@@ -1,56 +1,8 @@
 apply plugin: 'com.android.library'
 apply plugin: 'expo-module-gradle-plugin'
 
-import java.util.Properties
-
 group = 'expo.modules.karaokeview'
 version = '1.0.0'
-
-def readSecretProperty = { String... keys ->
-    def localProps = new Properties()
-    def localPropsFile = rootProject.file('local.properties')
-    if (localPropsFile.exists()) {
-        localPropsFile.withInputStream { stream -> localProps.load(stream) }
-    }
-
-    for (String key : keys) {
-        def prop = findProperty(key)
-        if (prop != null && prop.toString().trim()) {
-            return prop.toString().trim()
-        }
-
-        def localValue = localProps.getProperty(key)
-        if (localValue != null && localValue.trim()) {
-            return localValue.trim()
-        }
-
-        def envValue = System.getenv(key)
-        if (envValue != null && envValue.trim()) {
-            return envValue.trim()
-        }
-    }
-
-    return ''
-}
-
-def escapeForBuildConfig = { String value ->
-    value
-        .replace('\\', '\\\\')
-        .replace('"', '\\"')
-}
-
-def defaultSupabaseUrl = readSecretProperty('EXPO_PUBLIC_SUPABASE_URL', 'SUPABASE_URL')
-def lyricsSupabaseUrl = readSecretProperty('EXPO_PUBLIC_LYRICS_SUPABASE_URL', 'LYRICS_SUPABASE_URL')
-def usesDedicatedLyricsProject = lyricsSupabaseUrl && lyricsSupabaseUrl != defaultSupabaseUrl
-def supabaseUrl = lyricsSupabaseUrl ?: defaultSupabaseUrl
-def dedicatedLyricsKey = readSecretProperty(
-    'EXPO_PUBLIC_LYRICS_SUPABASE_ANON_KEY',
-    'LYRICS_SUPABASE_ANON_KEY',
-    'LYRICS_SUPABASE_PUBLISHABLE_KEY',
-    'LYRICS_SUPABASE_SERVICE_ROLE_KEY'
-)
-def defaultSupabaseAnonKey = readSecretProperty('EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY', 'EXPO_PUBLIC_SUPABASE_ANON_KEY')
-def supabaseAnonKey = usesDedicatedLyricsProject ? dedicatedLyricsKey : (dedicatedLyricsKey ?: defaultSupabaseAnonKey)
 
 android {
     namespace 'expo.modules.karaokeview'
@@ -62,9 +14,6 @@ android {
     defaultConfig {
         versionCode 1
         versionName '1.0.0'
-
-        buildConfigField 'String', 'SUPABASE_URL', "\"${escapeForBuildConfig(supabaseUrl)}\""
-        buildConfigField 'String', 'SUPABASE_ANON_KEY', "\"${escapeForBuildConfig(supabaseAnonKey)}\""
     }
 
     lintOptions {

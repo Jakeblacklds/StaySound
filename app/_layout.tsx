@@ -13,7 +13,6 @@ import { scheduleAndroidAutoCatalogSync } from '@/src/services/androidAutoCatalo
 import { refreshAndroidEqualizerCapabilities, syncAndroidEqualizerFromSettings } from '@/src/services/androidEqualizerService';
 import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
 import { ensureOnboardingMirrorPlaylist } from '@/src/services/onboardingTasteService';
-import { hydrateCloudPlaylists, syncPlaylistsNow } from '@/src/services/playlistSyncService';
 import { ensureSeededSpotifyTop50Playlist, hydrateSpotifyTop50GlobalPlaylist } from '@/src/services/spotifyChartsService';
 import { AudioEngine } from '@/src/services';
 import { useAuthStore, useDabAuthStore, useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
@@ -135,9 +134,7 @@ function SessionBootstrap() {
       return;
     }
 
-    void hydrateCloudPlaylists();
     void hydrateSpotifyTop50GlobalPlaylist({ force: true });
-    void syncPlaylistsNow();
     void heartbeat();
     void ensureOnboardingMirrorPlaylist();
 
@@ -148,7 +145,6 @@ function SessionBootstrap() {
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState === 'active') {
         void heartbeat();
-        void hydrateCloudPlaylists();
         void hydrateSpotifyTop50GlobalPlaylist({ force: true });
         void ensureOnboardingMirrorPlaylist();
       }
@@ -355,7 +351,6 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
               />
               <Stack.Screen name="equalizer" options={{ animation: 'slide_from_right' }} />
             </Stack>
-            {!isAppReady ? <View pointerEvents="none" style={styles.startupOverlay} /> : null}
             <ActionSheet />
             <ConfirmationModal />
             <GlobalNotification />
@@ -371,10 +366,6 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-  },
-  startupOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#000',
   },
 });
 

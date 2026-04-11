@@ -31,6 +31,7 @@ interface ImmersiveVariantProps {
     isLyricsExpanded: boolean;
     onClose: () => void;
     onToggleLyrics: () => void;
+    onArtistPress: () => void;
     onOpenQueue: () => void;
     onToggleFavorite: () => void;
     onToggleShuffle: () => void;
@@ -110,6 +111,7 @@ type TrackInfoSectionProps = {
     textStyle: any;
     accentTextStyle: any;
     onToggleLyrics: () => void;
+    onArtistPress: () => void;
     onToggleFavorite: () => void;
 };
 
@@ -127,6 +129,7 @@ const TrackInfoSection = React.memo(function TrackInfoSection({
     textStyle,
     accentTextStyle,
     onToggleLyrics,
+    onArtistPress,
     onToggleFavorite,
 }: TrackInfoSectionProps) {
     if (isLyricsExpanded) {
@@ -140,9 +143,11 @@ const TrackInfoSection = React.memo(function TrackInfoSection({
                     <Animated.Text style={[styles.titleImmersiveNew, textStyle]} numberOfLines={1}>
                         {title}
                     </Animated.Text>
-                    <Animated.Text style={[styles.artistImmersive, accentTextStyle]} numberOfLines={1}>
-                        {artist}
-                    </Animated.Text>
+                    <Pressable hitSlop={8} onPress={onArtistPress}>
+                        <Animated.Text style={[styles.artistImmersive, accentTextStyle]} numberOfLines={1}>
+                            {artist}
+                        </Animated.Text>
+                    </Pressable>
                     <View style={styles.techMetaRow}>
                         <View style={[styles.qualityBadge, { backgroundColor: qualityBadge.tone }]}>
                             <Text style={[styles.qualityBadgeText, { color: qualityBadgeInk }]}>{qualityBadge.label}</Text>
@@ -306,6 +311,7 @@ export function ImmersiveVariant({
     isLyricsExpanded,
     onClose,
     onToggleLyrics,
+    onArtistPress,
     onOpenQueue,
     onToggleFavorite,
     onToggleShuffle,
@@ -348,6 +354,7 @@ export function ImmersiveVariant({
                 textStyle={textStyle}
                 accentTextStyle={accentTextStyle}
                 onToggleLyrics={onToggleLyrics}
+                onArtistPress={onArtistPress}
                 onToggleFavorite={onToggleFavorite}
             />
 

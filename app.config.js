@@ -32,20 +32,12 @@ module.exports = {
             permissions: [
                 "READ_EXTERNAL_STORAGE",
                 "READ_MEDIA_AUDIO",
+                "READ_MEDIA_IMAGES",
+                "READ_MEDIA_VISUAL_USER_SELECTED",
                 "FOREGROUND_SERVICE",
                 "FOREGROUND_SERVICE_MEDIA_PLAYBACK",
                 "WAKE_LOCK",
-                "MODIFY_AUDIO_SETTINGS",
-                "ACCESS_MEDIA_LOCATION",
-                "android.permission.RECORD_AUDIO",
-                "android.permission.MODIFY_AUDIO_SETTINGS",
-                "android.permission.READ_EXTERNAL_STORAGE",
-                "android.permission.WRITE_EXTERNAL_STORAGE",
-                "android.permission.READ_MEDIA_VISUAL_USER_SELECTED",
-                "android.permission.ACCESS_MEDIA_LOCATION",
-                "android.permission.READ_MEDIA_IMAGES",
-                "android.permission.READ_MEDIA_VIDEO",
-                "android.permission.READ_MEDIA_AUDIO"
+                "MODIFY_AUDIO_SETTINGS"
             ]
         },
         web: {
@@ -56,6 +48,17 @@ module.exports = {
         plugins: [
             "expo-router",
             "expo-system-ui",
+            [
+                "expo-splash-screen",
+                {
+                    android: {
+                        backgroundColor: "#080B12",
+                        drawable: {
+                            icon: "./assets/splashscreen-transparent.xml"
+                        }
+                    }
+                }
+            ],
             [
                 "expo-audio",
                 {
@@ -68,7 +71,7 @@ module.exports = {
                 {
                     "photosPermission": "Allow StaySound to access album artwork",
                     "savePhotosPermission": false,
-                    "isAccessMediaLocationEnabled": true
+                    "isAccessMediaLocationEnabled": false
                 }
             ],
             "expo-asset"
@@ -78,14 +81,9 @@ module.exports = {
         },
         extra: {
             router: {},
-            supabase: {
-                url: process.env.EXPO_PUBLIC_SUPABASE_URL || '',
-                anonKey: process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
-                allowedEmails: process.env.EXPO_PUBLIC_ALLOWED_LOGIN_EMAILS || '',
-            },
             authSupabase: {
-                url: process.env.EXPO_PUBLIC_AUTH_SUPABASE_URL || process.env.EXPO_PUBLIC_SUPABASE_URL || '',
-                anonKey: process.env.EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '',
+                url: process.env.EXPO_PUBLIC_AUTH_SUPABASE_URL || '',
+                anonKey: process.env.EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY || '',
                 allowedEmails: process.env.EXPO_PUBLIC_ALLOWED_LOGIN_EMAILS || '',
             },
             dabBeta: {

@@ -18,23 +18,10 @@ function parseSupabaseConfig(rawConfig: Record<string, any>) {
     };
 }
 
-export function getSupabaseConfig() {
-    const extra = readExtraConfig();
-    return parseSupabaseConfig((extra.supabase ?? {}) as Record<string, any>);
-}
-
 export function getAuthSupabaseConfig() {
     const extra = readExtraConfig();
-    const authSupabase = (extra.authSupabase ?? extra.supabase ?? {}) as Record<string, any>;
+    const authSupabase = (extra.authSupabase ?? {}) as Record<string, any>;
     return parseSupabaseConfig(authSupabase);
-}
-
-export function assertSupabaseConfig() {
-    const config = getSupabaseConfig();
-    if (!config.url || !config.anonKey) {
-        throw new Error('Falta configurar EXPO_PUBLIC_SUPABASE_URL o EXPO_PUBLIC_SUPABASE_ANON_KEY.');
-    }
-    return config;
 }
 
 export function assertAuthSupabaseConfig() {
