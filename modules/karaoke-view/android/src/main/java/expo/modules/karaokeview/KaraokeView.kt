@@ -3,7 +3,6 @@ package expo.modules.karaokeview
 import android.content.Context
 import android.graphics.*
 import android.view.MotionEvent
-import android.view.VelocityTracker
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.views.ExpoView
 import expo.modules.kotlin.viewevent.EventDispatcher
@@ -23,6 +22,124 @@ import kotlin.math.sin
  * - 120FPS: Choreographer-synced animator for butter-smooth rendering
  */
 class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
+    private val lyricsParser = LyricsParser()
+    private val lyricsLayoutEngine = LyricsLayoutEngine()
+    private val touchController = KaraokeTouchController(resources.displayMetrics.density)
+    private val introRenderer = KaraokeIntroRenderer(resources.displayMetrics.density)
+    private val lineRenderer = KaraokeLineRenderer()
+    private val lineRenderCallbacks = object : KaraokeLineRenderCallbacks {
+        override fun smootherStep(value: Float): Float = this@KaraokeView.smootherStep(value)
+
+        override fun drawWord(canvas: Canvas, line: LyricLine, word: LyricWord, paint: Paint) {
+            this@KaraokeView.drawWord(canvas, line, word, paint)
+        }
+
+        override fun drawWordTail(
+            canvas: Canvas,
+            line: LyricLine,
+            word: LyricWord,
+            paint: Paint,
+            revealX: Float,
+            rowHeight: Float,
+        ) {
+            this@KaraokeView.drawWordTail(canvas, line, word, paint, revealX, rowHeight)
+        }
+
+        override fun drawWordTranslated(
+            canvas: Canvas,
+            line: LyricLine,
+            word: LyricWord,
+            paint: Paint,
+            translateY: Float,
+        ) {
+            this@KaraokeView.drawWordTranslated(canvas, line, word, paint, translateY)
+        }
+
+        override fun drawGrowableVisualWordWipeHighlight(
+            canvas: Canvas,
+            line: LyricLine,
+            words: List<LyricWord>,
+            progress: Float,
+            sweepX: Float,
+            paint: Paint,
+            rowHeight: Float,
+            finalLiftRatio: Float,
+            currentTimeMs: Long,
+        ) {
+            this@KaraokeView.drawGrowableVisualWordWipeHighlight(
+                canvas = canvas,
+                line = line,
+                words = words,
+                progress = progress,
+                sweepX = sweepX,
+                paint = paint,
+                rowHeight = rowHeight,
+                finalLiftRatio = finalLiftRatio,
+                currentTimeMs = currentTimeMs,
+            )
+        }
+
+        override fun drawWordWipeHighlight(
+            canvas: Canvas,
+            line: LyricLine,
+            word: LyricWord,
+            progress: Float,
+            paint: Paint,
+            rowHeight: Float,
+            finalLiftRatio: Float,
+            useCharacterLift: Boolean,
+            currentTimeMs: Long,
+        ) {
+            this@KaraokeView.drawWordWipeHighlight(
+                canvas = canvas,
+                line = line,
+                word = word,
+                progress = progress,
+                paint = paint,
+                rowHeight = rowHeight,
+                finalLiftRatio = finalLiftRatio,
+                useCharacterLift = useCharacterLift,
+                currentTimeMs = currentTimeMs,
+            )
+        }
+
+        override fun drawMotionAccent(
+            canvas: Canvas,
+            line: LyricLine,
+            words: List<LyricWord>,
+            currentTimeMs: Long,
+            rowHeight: Float,
+            translateY: Float,
+        ) {
+            when (motionProfile) {
+                MotionProfile.FIRE -> drawContinuousFireLine(
+                    canvas = canvas,
+                    line = line,
+                    words = words,
+                    currentTimeMs = currentTimeMs,
+                    rowHeight = rowHeight,
+                    translateY = translateY,
+                )
+                MotionProfile.VELVET -> drawContinuousWaterTrails(
+                    canvas = canvas,
+                    line = line,
+                    words = words,
+                    currentTimeMs = currentTimeMs,
+                    rowHeight = rowHeight,
+                    translateY = translateY,
+                )
+                MotionProfile.PULSE -> drawBouncingBallTrails(
+                    canvas = canvas,
+                    line = line,
+                    words = words,
+                    currentTimeMs = currentTimeMs,
+                    rowHeight = rowHeight,
+                    translateY = translateY,
+                )
+                else -> Unit
+            }
+        }
+    }
 
     // --- Layout ---
     private var lineHeight = 0f
@@ -66,36 +183,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private val particlePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
-    private val introCardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-    private val introCardStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-    }
-    private val introTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        textAlign = Paint.Align.CENTER
-    }
-    private val introSubtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-        textAlign = Paint.Align.CENTER
-    }
-    private val introCountdownPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        textAlign = Paint.Align.CENTER
-    }
-    private val introAuraBasePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-    }
-    private val introAuraTrailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-    }
-    private val introAuraOrbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-
     private var fadeShaderTop: Shader? = null
     private var fadeShaderBottom: Shader? = null
 
@@ -115,27 +202,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var isPlaying: Boolean = false
 
     // --- Scrolling ---
-    private var scrollY: Float = 0f
-    private var targetScrollY: Float = 0f
     private val scrollDampingDefault = 0.08f
     private val scrollDampingLineByLine = 0.16f
-
-    // --- Manual scroll ---
-    private var isManualScrolling = false
-    private var manualScrollTimeoutNanos: Long = 0
-    private val MANUAL_SCROLL_TIMEOUT_NS = 3_000_000_000L // 3 seconds
-    private var touchStartY = 0f
-    private var touchStartScrollY = 0f
-    private var lastTouchY = 0f
-    private var velocityTracker: VelocityTracker? = null
-    private var scrollVelocity = 0f
-    private val SCROLL_FRICTION = 0.95f
-
-    // --- Tap detection ---
-    private var touchStartX = 0f
-    private var isTap = true
-    private val TAP_SLOP = 10f * resources.displayMetrics.density
-    private var seekOnTapEnabled = false
 
     // --- Animator ---
     private var animator: LyricsAnimator? = null
@@ -174,13 +242,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         backgroundBasePaint.textSize = backgroundFontSize
         backgroundHighlightPaint.color = activeColor
         backgroundHighlightPaint.textSize = backgroundFontSize
-        introTitlePaint.textSize = 19f * density
-        introSubtitlePaint.textSize = 14f * density
-        introCountdownPaint.textSize = 11.5f * density
-        introCardStrokePaint.strokeWidth = 1.1f * density
-        introAuraBasePaint.strokeWidth = 1.1f * density
-        introAuraTrailPaint.strokeWidth = 2.4f * density
-
         spaceWidth = basePaint.measureText(" ")
         backgroundSpaceWidth = backgroundBasePaint.measureText(" ")
 
@@ -273,7 +334,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     fun setLyrics(lyricsData: List<Map<String, Any>>) {
-        val nextLines = parseLyrics(lyricsData)
+        val nextLines = lyricsParser.parse(lyricsData)
         val nextSignature = buildLyricsSignature(nextLines)
         val shouldTransitionLyrics =
             lines.isNotEmpty() &&
@@ -286,7 +347,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         if (shouldTransitionLyrics) {
             outgoingLines = lines
             outgoingLookupTable = lookupTable
-            outgoingScrollY = scrollY
+            outgoingScrollY = touchController.scrollY
             lyricsTransitionStartNanos = System.nanoTime()
         } else if (nextSignature != lyricsSignature) {
             outgoingLines = null
@@ -315,7 +376,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     fun setSeekOnTapEnabled(enabled: Boolean) {
-        seekOnTapEnabled = enabled
+        touchController.setSeekOnTapEnabled(enabled)
     }
 
     fun setIntroTitle(value: String?) {
@@ -337,22 +398,14 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private fun startAnimator() {
         animator?.stop()
         animator = LyricsAnimator {
-            // Handle manual scroll timeout
-            if (isManualScrolling) {
-                if (System.nanoTime() > manualScrollTimeoutNanos) {
-                    isManualScrolling = false
-                    scrollVelocity = 0f
-                }
-            }
-
-            // Apply fling velocity
-            if (!isManualScrolling && scrollVelocity != 0f) {
-                // This handles the fling after finger lift but before auto-scroll resumes
-            }
-
-            val diff = targetScrollY - scrollY
+            touchController.onFrame(System.nanoTime())
+            val diff = touchController.targetScrollY - touchController.scrollY
             val damping = getScrollDamping()
-            if (Math.abs(diff) > 0.01f) scrollY += diff * damping else scrollY = targetScrollY
+            if (Math.abs(diff) > 0.01f) {
+                touchController.scrollY += diff * damping
+            } else {
+                touchController.scrollY = touchController.targetScrollY
+            }
             invalidate()
         }.also { it.start() }
     }
@@ -362,125 +415,25 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     // ========================================================================
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean {
-        if (event.actionMasked == MotionEvent.ACTION_DOWN) {
-            parent?.requestDisallowInterceptTouchEvent(true)
-        }
+        touchController.dispatchTouchEvent(event, parent)
         return onTouchEvent(event) || super.dispatchTouchEvent(event)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
-        when (event.actionMasked) {
-            MotionEvent.ACTION_DOWN -> {
-                // Start tracking
-                touchStartX = event.x
-                touchStartY = event.y
-                touchStartScrollY = scrollY
-                lastTouchY = event.y
-                isTap = true
-                scrollVelocity = 0f
-
-                velocityTracker?.recycle()
-                velocityTracker = VelocityTracker.obtain()
-                velocityTracker?.addMovement(event)
-
-                parent?.requestDisallowInterceptTouchEvent(true)
-                return true
-            }
-
-            MotionEvent.ACTION_MOVE -> {
-                velocityTracker?.addMovement(event)
-                val dx = Math.abs(event.x - touchStartX)
-                val dy = Math.abs(event.y - touchStartY)
-
-                if (dx > TAP_SLOP || dy > TAP_SLOP) {
-                    isTap = false
-                }
-
-                if (!isTap) {
-                    // Manual scroll mode
-                    isManualScrolling = true
-                    val deltaY = event.y - lastTouchY
-                    scrollY += deltaY
-                    targetScrollY = scrollY
-                    lastTouchY = event.y
-                    invalidate()
-                }
-                return true
-            }
-
-            MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
-                if (seekOnTapEnabled && isTap && event.actionMasked == MotionEvent.ACTION_UP) {
-                    // TAP: Find which line was tapped and seek
-                    handleTap(event.x, event.y)
-                } else {
-                    // FLING: Set timeout for auto-scroll resume
-                    isManualScrolling = true
-                    manualScrollTimeoutNanos = System.nanoTime() + MANUAL_SCROLL_TIMEOUT_NS
-                }
-
-                velocityTracker?.recycle()
-                velocityTracker = null
-                parent?.requestDisallowInterceptTouchEvent(false)
-                return true
-            }
-        }
-        return super.onTouchEvent(event)
-    }
-
-    private fun handleTap(x: Float, y: Float) {
-        // Convert screen Y to content Y (accounting for scroll)
-        val contentY = y - scrollY
-
-        // Find which line was tapped
-        for (i in lines.indices) {
-            val line = lines[i]
-            val lineTop = line.y
-            val lineBottom = line.y + line.totalHeight
-
-            if (contentY >= lineTop && contentY <= lineBottom) {
-                // Prefer precise word seeking when a word is tapped.
-                var bestWord: LyricWord? = null
-                var bestDistance = Float.MAX_VALUE
-
-                fun evaluateWords(words: List<LyricWord>) {
-                    for (word in words) {
-                        val rowHeight = if (word.isBackground) backgroundLineHeight else lineHeight
-                        val left = marginLeft + word.xOffset
-                        val right = left + word.width
-                        val top = line.y + word.yOffset
-                        val bottom = top + rowHeight
-                        if (contentY < top - rowHeight * 0.35f || contentY > bottom + rowHeight * 0.35f) continue
-
-                        val dx = when {
-                            x < left -> left - x
-                            x > right -> x - right
-                            else -> 0f
-                        }
-                        val dy = when {
-                            contentY < top -> top - contentY
-                            contentY > bottom -> contentY - bottom
-                            else -> 0f
-                        }
-                        val distance = dx + dy * 0.9f
-                        if (distance < bestDistance) {
-                            bestDistance = distance
-                            bestWord = word
-                        }
-                    }
-                }
-
-                evaluateWords(line.words)
-                evaluateWords(line.backgroundWords)
-
-                val targetTime = if (bestWord != null && bestDistance <= 46f * density) {
-                    bestWord!!.startMs
-                } else {
-                    line.startMs
-                }
-                onSeek(mapOf("timeMs" to targetTime))
-                break
-            }
-        }
+        val handled = touchController.onTouchEvent(
+            event = event,
+            parent = parent,
+            lines = lines,
+            layout = KaraokeTouchLayout(
+                marginLeft = marginLeft,
+                lineHeight = lineHeight,
+                backgroundLineHeight = backgroundLineHeight,
+                density = density,
+            ),
+            invalidate = ::invalidate,
+            onSeek = { timeMs -> onSeek(mapOf("timeMs" to timeMs)) },
+        )
+        return handled || super.onTouchEvent(event)
     }
 
     // ========================================================================
@@ -496,10 +449,10 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val transitionProgress = getLyricsTransitionProgress()
 
         // Update auto-scroll target (only if not manually scrolling)
-        if (!isManualScrolling) {
+        if (!touchController.isManualScrolling) {
             if (activeLineIndex >= 0 && activeLineIndex < lines.size) {
                 val activeLine = lines[activeLineIndex]
-                targetScrollY = -(activeLine.y + activeLine.focusCenterYOffset) + height * scrollAnchorRatio
+                touchController.targetScrollY = -(activeLine.y + activeLine.focusCenterYOffset) + height * scrollAnchorRatio
                 emitLineChangeIfNeeded(activeLineIndex)
             }
         }
@@ -524,7 +477,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 layerLines = lines,
                 activeLineIndex = activeLineIndex,
                 currentTimeMs = currentTimeMs,
-                layerScrollY = scrollY + 14f * density * (1f - transitionProgress),
+                layerScrollY = touchController.scrollY + 14f * density * (1f - transitionProgress),
                 alpha = (transitionProgress * 255f).toInt().coerceIn(0, 255),
                 includeAccents = true,
             )
@@ -536,13 +489,27 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 layerLines = lines,
                 activeLineIndex = activeLineIndex,
                 currentTimeMs = currentTimeMs,
-                layerScrollY = scrollY,
+                layerScrollY = touchController.scrollY,
                 alpha = 255,
                 includeAccents = true,
             )
         }
 
-        drawIntroOverlay(canvas, currentTimeMs)
+        introRenderer.draw(
+            canvas = canvas,
+            currentTimeMs = currentTimeMs,
+            state = KaraokeIntroState(
+                title = introTitle,
+                subtitle = introSubtitle,
+                firstLineStartMs = firstLineStartMs,
+                activeColor = activeColor,
+            ),
+            layout = KaraokeIntroLayout(
+                width = width,
+                height = height,
+                density = density,
+            ),
+        )
         drawFades(canvas)
         canvas.restoreToCount(saveCount)
     }
@@ -568,7 +535,29 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             val line = layerLines[index]
             val screenY = line.y + layerScrollY
             if (screenY < -line.totalHeight * 2f || screenY > height + line.totalHeight * 2f) continue
-            drawLine(canvas, line, index, activeLineIndex, currentTimeMs)
+            lineRenderer.drawLine(
+                canvas = canvas,
+                line = line,
+                lineIndex = index,
+                activeLineIndex = activeLineIndex,
+                currentTimeMs = currentTimeMs,
+                config = KaraokeLineRenderConfig(
+                    density = density,
+                    marginLeft = marginLeft,
+                    lineHeight = lineHeight,
+                    backgroundLineHeight = backgroundLineHeight,
+                    hierarchyTransitionWindowMs = hierarchyTransitionWindowMs,
+                    backgroundRevealDurationMs = backgroundRevealDurationMs,
+                    backgroundFadeOutDurationMs = backgroundFadeOutDurationMs,
+                    featherPx = FEATHER_PX,
+                    isLineByLine = isLineByLine,
+                    basePaint = basePaint,
+                    highlightPaint = highlightPaint,
+                    backgroundBasePaint = backgroundBasePaint,
+                    backgroundHighlightPaint = backgroundHighlightPaint,
+                ),
+                callbacks = lineRenderCallbacks,
+            )
         }
         if (includeAccents) {
             drawSuspendedSpectralParticles(canvas, currentTimeMs)
@@ -587,7 +576,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             lyricsTransitionStartNanos = 0L
             return 1f
         }
-        return smoothStep(raw)
+        return smootherStep(raw)
     }
 
     private fun buildLyricsSignature(value: List<LyricLine>): String {
@@ -599,146 +588,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         return "${value.size}:${wordCount}:${first.startMs}:${first.endMs}:${last.startMs}:${last.endMs}"
     }
 
-    private fun drawIntroOverlay(canvas: Canvas, currentTimeMs: Long) {
-        if (firstLineStartMs < 700L) return
-
-        val introEndMs = (firstLineStartMs - 120L).coerceAtLeast(260L)
-        if (currentTimeMs >= introEndMs) return
-
-        val title = if (introTitle.isNotBlank()) introTitle else "Preparando intro"
-        val subtitle = if (introSubtitle.isNotBlank()) introSubtitle else "La primera estrofa viene en breve"
-
-        val progress = (currentTimeMs.toFloat() / firstLineStartMs.toFloat()).coerceIn(0f, 1f)
-        val reveal = smoothStep((currentTimeMs / 260f).coerceIn(0f, 1f))
-        val fadeOutStart = (introEndMs * 0.78f)
-        val fadeOut = if (currentTimeMs <= fadeOutStart) 1f else {
-            1f - ((currentTimeMs - fadeOutStart) / (introEndMs - fadeOutStart)).coerceIn(0f, 1f)
-        }
-        val visibility = (reveal * fadeOut).coerceIn(0f, 1f)
-        if (visibility <= 0.02f) return
-
-        val cardWidth = width * 0.78f
-        val cardHeight = 96f * density
-        val left = (width - cardWidth) * 0.5f
-        val top = height * 0.14f
-        val right = left + cardWidth
-        val bottom = top + cardHeight
-        val radius = 18f * density
-        val cardRect = RectF(left, top, right, bottom)
-
-        val cardAlpha = (156f * visibility).toInt().coerceIn(0, 196)
-        val strokeAlpha = (88f * visibility).toInt().coerceIn(0, 140)
-        introCardPaint.color = Color.argb(cardAlpha, 15, 17, 24)
-        introCardStrokePaint.color = Color.argb(strokeAlpha, 255, 255, 255)
-        canvas.drawRoundRect(cardRect, radius, radius, introCardPaint)
-        canvas.drawRoundRect(cardRect, radius, radius, introCardStrokePaint)
-
-        val titleY = top + 30f * density
-        val subtitleY = titleY + 20f * density
-        val centerX = cardRect.centerX()
-        introTitlePaint.color = Color.argb((236f * visibility).toInt().coerceIn(0, 255), 255, 255, 255)
-        introSubtitlePaint.color = Color.argb((170f * visibility).toInt().coerceIn(0, 255), 235, 239, 255)
-        introCountdownPaint.color = Color.argb((140f * visibility).toInt().coerceIn(0, 255), 206, 220, 255)
-
-        canvas.drawText(ellipsizeCenter(title, 34), centerX, titleY, introTitlePaint)
-        canvas.drawText(ellipsizeCenter(subtitle, 44), centerX, subtitleY, introSubtitlePaint)
-        drawIntroAuraProgress(
-            canvas = canvas,
-            cardRect = cardRect,
-            progress = smoothStep(progress),
-            visibility = visibility,
-            currentTimeMs = currentTimeMs
-        )
-    }
-
-    private fun drawIntroAuraProgress(
-        canvas: Canvas,
-        cardRect: RectF,
-        progress: Float,
-        visibility: Float,
-        currentTimeMs: Long,
-    ) {
-        val auraPadding = 8f * density
-        val auraRect = RectF(
-            cardRect.left - auraPadding,
-            cardRect.top - auraPadding,
-            cardRect.right + auraPadding,
-            cardRect.bottom + auraPadding,
-        )
-        val auraRadius = 20f * density
-        val baseAlpha = (58f * visibility).toInt().coerceIn(0, 120)
-        val trailAlpha = (214f * visibility).toInt().coerceIn(0, 255)
-        val accentR = Color.red(activeColor)
-        val accentG = Color.green(activeColor)
-        val accentB = Color.blue(activeColor)
-
-        introAuraBasePaint.color = Color.argb(baseAlpha, 255, 255, 255)
-        canvas.drawRoundRect(auraRect, auraRadius, auraRadius, introAuraBasePaint)
-
-        if (progress <= 0f) return
-
-        val perimeterPath = Path().apply {
-            addRoundRect(auraRect, auraRadius, auraRadius, Path.Direction.CW)
-        }
-        val measure = PathMeasure(perimeterPath, false)
-        val pathLength = measure.length
-        if (pathLength <= 0f) return
-
-        val cometHead = pathLength * progress.coerceIn(0f, 1f)
-        val tailRatio = (0.1f + 0.24f * progress).coerceIn(0.08f, 0.34f)
-        val cometTail = (cometHead - pathLength * tailRatio).coerceAtLeast(0f)
-
-        val trailPath = Path()
-        measure.getSegment(cometTail, cometHead, trailPath, true)
-        introAuraTrailPaint.color = Color.argb(trailAlpha, accentR, accentG, accentB)
-        canvas.drawPath(trailPath, introAuraTrailPaint)
-
-        val headPos = FloatArray(2)
-        val headTan = FloatArray(2)
-        if (measure.getPosTan(cometHead, headPos, headTan)) {
-            val pulse = 0.72f + 0.28f * ((sin(currentTimeMs / 190f) + 1f) * 0.5f)
-            val orbRadius = (3.8f + 2.6f * pulse) * density
-            introAuraOrbPaint.color = Color.argb((235f * visibility).toInt().coerceIn(0, 255), accentR, accentG, accentB)
-            canvas.drawCircle(headPos[0], headPos[1], orbRadius, introAuraOrbPaint)
-
-            for (trailIndex in 1..3) {
-                val backDistance = cometHead - (trailIndex * (10f * density))
-                if (backDistance <= 0f) break
-                val tailPos = FloatArray(2)
-                if (!measure.getPosTan(backDistance, tailPos, null)) continue
-                val sparkAlpha = ((140 - trailIndex * 32) * visibility).toInt().coerceIn(0, 180)
-                val sparkRadius = (1.9f - trailIndex * 0.3f).coerceAtLeast(0.9f) * density
-                introAuraOrbPaint.color = Color.argb(sparkAlpha, accentR, accentG, accentB)
-                canvas.drawCircle(tailPos[0], tailPos[1], sparkRadius, introAuraOrbPaint)
-            }
-        }
-
-        // Visual milestones: 4 subtle checkpoints that light up as intro progresses.
-        val checkpoints = floatArrayOf(0.18f, 0.38f, 0.62f, 0.86f)
-        for (checkpoint in checkpoints) {
-            val markerDistance = pathLength * checkpoint
-            val markerPos = FloatArray(2)
-            if (!measure.getPosTan(markerDistance, markerPos, null)) continue
-            val passed = progress >= checkpoint
-            val markerAlpha = if (passed) {
-                (188f * visibility).toInt().coerceIn(0, 220)
-            } else {
-                (58f * visibility).toInt().coerceIn(0, 110)
-            }
-            val markerRadius = if (passed) 2.8f * density else 1.8f * density
-            introAuraOrbPaint.color = if (passed) {
-                Color.argb(markerAlpha, accentR, accentG, accentB)
-            } else {
-                Color.argb(markerAlpha, 255, 255, 255)
-            }
-            canvas.drawCircle(markerPos[0], markerPos[1], markerRadius, introAuraOrbPaint)
-        }
-    }
-
-    private fun smoothStep(value: Float): Float {
-        val t = value.coerceIn(0f, 1f)
-        return t * t * (3f - 2f * t)
-    }
+    
 
     private fun smootherStep(value: Float): Float {
         val t = value.coerceIn(0f, 1f)
@@ -753,455 +603,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     // ========================================================================
     // GLOBAL LINE SWEEP (Apple Music style)
     // ========================================================================
-
-    private data class ActiveHighlightState(
-        val activeWordIndex: Int,
-        val completedLimit: Int,
-        val activeRange: IntRange,
-        val progress: Float,
-        val sweepX: Float,
-        val isGrowable: Boolean,
-    )
-
-    private fun drawLine(canvas: Canvas, line: LyricLine, lineIndex: Int, activeLineIndex: Int, currentTimeMs: Long) {
-        val timeSec = currentTimeMs / 1000f
-        val lineStartSec = line.startMs / 1000f
-        val lineEndSec = line.endMs / 1000f
-
-        val isActive = timeSec in lineStartSec..lineEndSec
-        val isPast = timeSec > lineEndSec
-        val relativeIndex = if (activeLineIndex >= 0) lineIndex - activeLineIndex else 0
-        val distance = abs(relativeIndex)
-        val isAboveActive = relativeIndex < 0
-        val isBelowActive = relativeIndex > 0
-        val transitionProgress = when {
-            lineIndex == activeLineIndex + 1 -> {
-                val timeUntilStart = (line.startMs - currentTimeMs).toFloat()
-                (1f - (timeUntilStart / hierarchyTransitionWindowMs)).coerceIn(0f, 1f)
-            }
-            lineIndex == activeLineIndex - 1 -> {
-                val timeSinceEnd = (currentTimeMs - line.endMs).toFloat()
-                (1f - (timeSinceEnd / hierarchyTransitionWindowMs)).coerceIn(0f, 1f)
-            }
-            else -> 0f
-        }
-        val transitionEase = transitionProgress * transitionProgress * (3f - 2f * transitionProgress)
-
-        val scale = when {
-            relativeIndex == 0 -> 1.001f
-            relativeIndex == 1 -> 0.93f + 0.071f * transitionEase
-            else -> 0.93f
-        }
-        val baseAlpha = when {
-            relativeIndex == 0 -> 204
-            // Next line: still readable, just a light blur
-            relativeIndex == 1 -> (172 + 34 * transitionEase).toInt()
-            // Lines below: progressively more blurred and less readable
-            isBelowActive && distance == 2 -> 126
-            isBelowActive -> 96
-            // Lines above (already sung): visible but clearly de-emphasized
-            isAboveActive && distance == 1 -> 108
-            isAboveActive && distance == 2 -> 88
-            isAboveActive -> 74
-            else -> 132
-        }.coerceIn(54, 255)
-        val blurRadius = when {
-            relativeIndex == 0 -> 0f
-            // Next line should be legible but slightly diffused
-            relativeIndex == 1 -> (3.1f * density) * (1f - 0.5f * transitionEase)
-            // Below next line: stronger blur
-            isBelowActive && distance == 2 -> 6.2f * density
-            isBelowActive -> 8.8f * density
-            // Above active line: no heavy blur; keep it as quiet context.
-            isAboveActive -> 0f
-            else -> 2f * density
-        }
-        val highlightAlpha = when {
-            relativeIndex == 0 -> 255
-            isBelowActive && distance == 1 -> 182
-            isBelowActive && distance == 2 -> 100
-            isBelowActive -> 68
-            isAboveActive && distance == 1 -> 72
-            isAboveActive -> 46
-            else -> 180
-        }.coerceIn(24, 255)
-        val highlightBlurRadius = when {
-            relativeIndex == 0 -> 0f
-            isBelowActive && distance == 1 -> 2.2f * density
-            isBelowActive && distance == 2 -> 5f * density
-            isBelowActive -> 7.2f * density
-            isAboveActive -> 0f
-            else -> 2f * density
-        }
-
-        canvas.save()
-        canvas.scale(scale, scale, marginLeft, line.y + line.focusCenterYOffset)
-        basePaint.alpha = baseAlpha
-        if (blurRadius > 0f) {
-            val textColor = basePaint.color
-            basePaint.setShadowLayer(
-                blurRadius,
-                0f,
-                0f,
-                Color.argb(
-                    (baseAlpha * 0.92f).toInt().coerceIn(0, 210),
-                    Color.red(textColor),
-                    Color.green(textColor),
-                    Color.blue(textColor)
-                )
-            )
-        } else {
-            basePaint.clearShadowLayer()
-        }
-
-        val activeWordIndex = if (isActive) {
-            line.words.indexOfFirst { currentTimeMs in it.startMs..it.endMs }
-        } else {
-            -1
-        }
-        val completedWordCount = if (isActive || isPast) {
-            line.words.count { currentTimeMs >= it.endMs }
-        } else {
-            0
-        }
-        val activeHighlightState = if (isActive && !isLineByLine) {
-            buildActiveHighlightState(line.words, currentTimeMs)
-        } else {
-            null
-        }
-
-        // --- Draw all words as inactive (base layer) ---
-        for ((index, word) in line.words.withIndex()) {
-            if (isPast) continue
-            if (activeHighlightState != null && index in activeHighlightState.activeRange) {
-                drawWordTail(
-                    canvas = canvas,
-                    line = line,
-                    word = word,
-                    paint = basePaint,
-                    revealX = activeHighlightState.sweepX,
-                    rowHeight = lineHeight,
-                )
-                continue
-            }
-            if (isActive && index < completedWordCount) continue
-            drawWord(canvas, line, word, basePaint)
-        }
-        basePaint.clearShadowLayer()
-
-        // --- Draw highlighted layer ---
-        if (isActive || isPast) {
-            if (!isLineByLine) {
-                drawSyncedHighlight(
-                    canvas = canvas,
-                    line = line,
-                    currentTimeMs = currentTimeMs,
-                    isPast = isPast,
-                    activeHighlightState = activeHighlightState,
-                    lineHighlightAlpha = highlightAlpha,
-                    lineHighlightBlurRadius = highlightBlurRadius,
-                )
-                if (line.backgroundWords.isNotEmpty()) {
-                    drawBackgroundVocalLayer(canvas, line, currentTimeMs)
-                }
-                canvas.restore()
-                return
-            }
-
-            val rows = line.words.groupBy { it.yOffset }
-            val sortedRowOffsets = rows.keys.sorted()
-
-            for (rowY in sortedRowOffsets) {
-                val rowWords = rows[rowY] ?: continue
-                val rowStartSec = rowWords.first().startMs / 1000f
-                val rowEndSec = rowWords.last().endMs / 1000f
-
-                val isRowPast = timeSec > rowEndSec
-                val isRowActive = timeSec in rowStartSec..rowEndSec
-
-                val shouldDrawRowHighlight = if (isLineByLine) {
-                    true
-                } else {
-                    isRowPast || isRowActive || isPast
-                }
-                if (!shouldDrawRowHighlight) continue
-
-                val rowTop = line.y + rowY
-                val rowBottom = rowTop + lineHeight
-                val rowRight = marginLeft + rowWords.last().xOffset + rowWords.last().width + FEATHER_PX * 2
-
-                canvas.saveLayer(marginLeft - FEATHER_PX, rowTop - lineHeight, rowRight, rowBottom + lineHeight, null)
-
-                // 1. Draw Active Text (no glow)
-                highlightPaint.alpha = 255
-                for (word in rowWords) {
-                    canvas.drawText(word.text, marginLeft + word.xOffset, line.y + word.yOffset + lineHeight * 0.7f, highlightPaint)
-                }
-
-                // 2. Apply Sweep Mask for the row (Skip if isLineByLine is true)
-                if (!isLineByLine && !isRowPast && !isPast) {
-                    var sweepX = marginLeft
-                    val rowTimeSec = timeSec.coerceIn(rowStartSec, rowEndSec)
-
-                    for (i in rowWords.indices) {
-                        val word = rowWords[i]
-                        val ws = word.startMs / 1000f
-                        val we = word.endMs / 1000f
-                        val wordX = marginLeft + word.xOffset
-
-                        if (rowTimeSec >= we) {
-                            sweepX = wordX + word.width + FEATHER_PX
-                        } else if (rowTimeSec >= ws) {
-                            val wordProgress = ((rowTimeSec - ws) / (we - ws)).coerceIn(0f, 1f)
-                            val easedProgress = wordProgress * wordProgress * (3 - 2 * wordProgress)
-                            sweepX = wordX + word.width * easedProgress
-                            break
-                        } else {
-                            if (i > 0) {
-                                val prevWord = rowWords[i - 1]
-                                val prevEnd = prevWord.endMs / 1000f
-                                val gapDuration = ws - prevEnd
-                                if (gapDuration > 0) {
-                                    val gapProgress = ((rowTimeSec - prevEnd) / gapDuration).coerceIn(0f, 1f)
-                                    val prevEndX = marginLeft + prevWord.xOffset + prevWord.width
-                                    sweepX = prevEndX + (wordX - prevEndX) * gapProgress
-                                }
-                            }
-                            break
-                        }
-                    }
-
-                    val maskShader = LinearGradient(sweepX - FEATHER_PX, 0f, sweepX, 0f, intArrayOf(Color.BLACK, Color.TRANSPARENT), null, Shader.TileMode.CLAMP)
-                    sweepMaskPaint.shader = maskShader
-                    canvas.drawRect(marginLeft - FEATHER_PX, rowTop, rowRight, rowBottom + lineHeight, sweepMaskPaint)
-                }
-
-                canvas.restore()
-            }
-
-            if (isLineByLine) {
-                when (motionProfile) {
-                    MotionProfile.FIRE -> drawContinuousFireLine(
-                        canvas = canvas,
-                        line = line,
-                        words = line.words,
-                        currentTimeMs = currentTimeMs,
-                        rowHeight = lineHeight,
-                        translateY = 0f,
-                    )
-                    MotionProfile.VELVET -> drawContinuousWaterTrails(
-                        canvas = canvas,
-                        line = line,
-                        words = line.words,
-                        currentTimeMs = currentTimeMs,
-                        rowHeight = lineHeight,
-                        translateY = 0f,
-                    )
-                    MotionProfile.PULSE -> drawBouncingBallTrails(
-                        canvas = canvas,
-                        line = line,
-                        words = line.words,
-                        currentTimeMs = currentTimeMs,
-                        rowHeight = lineHeight,
-                        translateY = 0f,
-                    )
-                    else -> Unit
-                }
-            }
-        }
-
-        if (line.backgroundWords.isNotEmpty()) {
-            drawBackgroundVocalLayer(canvas, line, currentTimeMs)
-        }
-
-        canvas.restore()
-    }
-
-    private fun drawSyncedHighlight(
-        canvas: Canvas,
-        line: LyricLine,
-        currentTimeMs: Long,
-        isPast: Boolean,
-        activeHighlightState: ActiveHighlightState?,
-        lineHighlightAlpha: Int,
-        lineHighlightBlurRadius: Float,
-    ) {
-        val completedWordCount = line.words.count { currentTimeMs >= it.endMs }
-        highlightPaint.alpha = lineHighlightAlpha
-        if (lineHighlightBlurRadius > 0f) {
-            highlightPaint.maskFilter = BlurMaskFilter(lineHighlightBlurRadius, BlurMaskFilter.Blur.NORMAL)
-        } else {
-            highlightPaint.maskFilter = null
-        }
-
-        val completedLimit = activeHighlightState?.completedLimit ?: completedWordCount
-        for (index in 0 until completedLimit.coerceAtMost(line.words.size)) {
-            drawWordTranslated(canvas, line, line.words[index], highlightPaint, -lineHeight * 0.035f)
-        }
-
-        if (motionProfile == MotionProfile.FIRE) {
-            drawContinuousFireLine(
-                canvas = canvas,
-                line = line,
-                words = line.words,
-                currentTimeMs = currentTimeMs,
-                rowHeight = lineHeight,
-                translateY = -lineHeight * 0.035f,
-            )
-        }
-        if (motionProfile == MotionProfile.VELVET) {
-            drawContinuousWaterTrails(
-                canvas = canvas,
-                line = line,
-                words = line.words,
-                currentTimeMs = currentTimeMs,
-                rowHeight = lineHeight,
-                translateY = -lineHeight * 0.035f,
-            )
-        }
-        if (motionProfile == MotionProfile.PULSE) {
-            drawBouncingBallTrails(
-                canvas = canvas,
-                line = line,
-                words = line.words,
-                currentTimeMs = currentTimeMs,
-                rowHeight = lineHeight,
-                translateY = -lineHeight * 0.035f,
-            )
-        }
-
-        if (isPast || activeHighlightState == null) {
-            highlightPaint.maskFilter = null
-            return
-        }
-
-        if (activeHighlightState.isGrowable) {
-            drawGrowableVisualWordWipeHighlight(
-                canvas = canvas,
-                line = line,
-                words = line.words.slice(activeHighlightState.activeRange),
-                progress = activeHighlightState.progress,
-                sweepX = activeHighlightState.sweepX,
-                paint = highlightPaint,
-                rowHeight = lineHeight,
-                finalLiftRatio = 0.035f,
-                currentTimeMs = currentTimeMs,
-            )
-        } else {
-            val activeWord = line.words[activeHighlightState.activeWordIndex]
-            drawWordWipeHighlight(
-                canvas = canvas,
-                line = line,
-                word = activeWord,
-                progress = activeHighlightState.progress,
-                paint = highlightPaint,
-                rowHeight = lineHeight,
-                finalLiftRatio = 0.035f,
-                useCharacterLift = false,
-                currentTimeMs = currentTimeMs,
-            )
-        }
-        highlightPaint.maskFilter = null
-    }
-
-    private fun drawBackgroundVocalLayer(canvas: Canvas, line: LyricLine, currentTimeMs: Long) {
-        if (line.backgroundWords.isEmpty()) return
-
-        val revealProgress = ((currentTimeMs - line.startMs).toFloat() / backgroundRevealDurationMs).coerceIn(0f, 1f)
-        val revealEase = revealProgress * revealProgress * (3f - 2f * revealProgress)
-        val fadeOutProgress = ((currentTimeMs - line.endMs).toFloat() / backgroundFadeOutDurationMs).coerceIn(0f, 1f)
-        val fadeOutEase = 1f - (fadeOutProgress * fadeOutProgress * (3f - 2f * fadeOutProgress))
-        val layerVisibility = (revealEase * fadeOutEase).coerceIn(0f, 1f)
-        if (layerVisibility <= 0.01f) return
-
-        val completedWordCount = line.backgroundWords.count { currentTimeMs >= it.endMs }
-        val activeHighlightState = buildActiveHighlightState(line.backgroundWords, currentTimeMs)
-
-        backgroundBasePaint.alpha = (188f * layerVisibility).toInt().coerceIn(0, 188)
-        for ((index, word) in line.backgroundWords.withIndex()) {
-            if (activeHighlightState != null && index in activeHighlightState.activeRange) {
-                drawWordTail(
-                    canvas = canvas,
-                    line = line,
-                    word = word,
-                    paint = backgroundBasePaint,
-                    revealX = activeHighlightState.sweepX,
-                    rowHeight = backgroundLineHeight,
-                )
-                continue
-            }
-            if (index < completedWordCount) continue
-            drawWord(canvas, line, word, backgroundBasePaint)
-        }
-
-        backgroundHighlightPaint.alpha = (255f * layerVisibility).toInt().coerceIn(0, 255)
-        val completedLimit = activeHighlightState?.completedLimit ?: completedWordCount
-        for (index in 0 until completedLimit.coerceAtMost(line.backgroundWords.size)) {
-            drawWordTranslated(canvas, line, line.backgroundWords[index], backgroundHighlightPaint, -backgroundLineHeight * 0.025f)
-        }
-
-        if (motionProfile == MotionProfile.FIRE) {
-            drawContinuousFireLine(
-                canvas = canvas,
-                line = line,
-                words = line.backgroundWords,
-                currentTimeMs = currentTimeMs,
-                rowHeight = backgroundLineHeight,
-                translateY = -backgroundLineHeight * 0.025f,
-            )
-        }
-        if (motionProfile == MotionProfile.VELVET) {
-            drawContinuousWaterTrails(
-                canvas = canvas,
-                line = line,
-                words = line.backgroundWords,
-                currentTimeMs = currentTimeMs,
-                rowHeight = backgroundLineHeight,
-                translateY = -backgroundLineHeight * 0.025f,
-            )
-        }
-        if (motionProfile == MotionProfile.PULSE) {
-            drawBouncingBallTrails(
-                canvas = canvas,
-                line = line,
-                words = line.backgroundWords,
-                currentTimeMs = currentTimeMs,
-                rowHeight = backgroundLineHeight,
-                translateY = -backgroundLineHeight * 0.025f,
-            )
-        }
-
-        if (activeHighlightState == null) {
-            return
-        }
-
-        if (activeHighlightState.isGrowable) {
-            drawGrowableVisualWordWipeHighlight(
-                canvas = canvas,
-                line = line,
-                words = line.backgroundWords.slice(activeHighlightState.activeRange),
-                progress = activeHighlightState.progress,
-                sweepX = activeHighlightState.sweepX,
-                paint = backgroundHighlightPaint,
-                rowHeight = backgroundLineHeight,
-                finalLiftRatio = 0.025f,
-                currentTimeMs = currentTimeMs,
-            )
-        } else {
-            val activeWord = line.backgroundWords[activeHighlightState.activeWordIndex]
-            drawWordWipeHighlight(
-                canvas = canvas,
-                line = line,
-                word = activeWord,
-                progress = activeHighlightState.progress,
-                paint = backgroundHighlightPaint,
-                rowHeight = backgroundLineHeight,
-                finalLiftRatio = 0.025f,
-                useCharacterLift = false,
-                currentTimeMs = currentTimeMs,
-            )
-        }
-    }
 
     private fun drawWordWipeHighlight(
         canvas: Canvas,
@@ -1958,7 +1359,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         if (words.isEmpty()) return
 
         val lineFadeOutProgress = ((currentTimeMs - line.endMs).toFloat() / fireTrailFadeOutDurationMs).coerceIn(0f, 1f)
-        val lineFadeOutEase = 1f - smoothStep(lineFadeOutProgress)
+        val lineFadeOutEase = 1f - smootherStep(lineFadeOutProgress)
         if (currentTimeMs > line.endMs + fireTrailFadeOutDurationMs || lineFadeOutEase <= 0.01f) return
 
         val rows = words.groupBy { it.yOffset }
@@ -1981,7 +1382,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             } else 1f
 
             val lineBaseY = line.y + rowY + rowHeight * 0.82f + translateY
-            val compositeAlpha = ((136f * smoothStep(rowProgress)) * lineFadeOutEase).toInt().coerceIn(0, 140)
+            val compositeAlpha = ((136f * smootherStep(rowProgress)) * lineFadeOutEase).toInt().coerceIn(0, 140)
             if (compositeAlpha <= 2) continue
 
             drawEmberUnderlinePhysics(
@@ -1992,7 +1393,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 rowHeight = rowHeight,
                 trailAlpha = compositeAlpha,
                 currentTimeMs = currentTimeMs,
-                glowProgress = smoothStep(rowProgress),
+                glowProgress = smootherStep(rowProgress),
             )
         }
     }
@@ -2054,10 +1455,10 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             else 1f
 
             // Fade IN: first 10% of the row
-            val appearT  = smoothStep((rowProgress.coerceAtMost(0.10f)) / 0.10f)
+            val appearT  = smootherStep((rowProgress.coerceAtMost(0.10f)) / 0.10f)
             // Fade OUT: after rowEndMs, fade over rowFadeWindowMs
             val fadeOutT = if (currentTimeMs > rowEndMs)
-                1f - smoothStep(((currentTimeMs - rowEndMs).toFloat() / rowFadeWindowMs).coerceIn(0f, 1f))
+                1f - smootherStep(((currentTimeMs - rowEndMs).toFloat() / rowFadeWindowMs).coerceIn(0f, 1f))
             else 1f
 
             val baseY = line.y + rowY + rowHeight * 0.88f + translateY
@@ -2172,7 +1573,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         if (words.isEmpty()) return
 
         val lineFadeOutProgress = ((currentTimeMs - line.endMs).toFloat() / fireTrailFadeOutDurationMs).coerceIn(0f, 1f)
-        val lineFadeOutEase = 1f - smoothStep(lineFadeOutProgress)
+        val lineFadeOutEase = 1f - smootherStep(lineFadeOutProgress)
         if (currentTimeMs > line.endMs + fireTrailFadeOutDurationMs || lineFadeOutEase <= 0.01f) return
 
         val rows = words.groupBy { it.yOffset }
@@ -2192,7 +1593,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             val rowProgress = if (rowEndMs > rowStartMs) {
                 ((currentTimeMs - rowStartMs).toFloat() / (rowEndMs - rowStartMs).toFloat()).coerceIn(0f, 1f)
             } else 1f
-            val alpha = ((118f * smoothStep(rowProgress)) * lineFadeOutEase).toInt().coerceIn(0, 136)
+            val alpha = ((118f * smootherStep(rowProgress)) * lineFadeOutEase).toInt().coerceIn(0, 136)
             if (alpha <= 2) continue
 
             drawEmberUnderlinePhysics(
@@ -2203,7 +1604,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 rowHeight = rowHeight,
                 trailAlpha = alpha,
                 currentTimeMs = currentTimeMs,
-                glowProgress = smoothStep(rowProgress),
+                glowProgress = smootherStep(rowProgress),
                 coolColor = blendColors(glowColor, Color.rgb(60, 185, 255), 0.34f),
                 midColor = blendColors(glowColor, Color.rgb(105, 225, 255), 0.28f),
                 tipColor = blendColors(glowColor, Color.rgb(210, 250, 255), 0.22f),
@@ -2867,9 +2268,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 val baseGrowth = if (charCount <= 3) 0.07f else 0.05f
                 val charMaxScale = 1f + baseGrowth + charEnergy * 0.1f
                 val riseProgress = (localProgress / 0.56f).coerceIn(0f, 1f)
-                val riseEase = riseProgress * riseProgress * (3f - 2f * riseProgress)
+                val riseEase = smootherStep(riseProgress)
                 val settleProgress = ((localProgress - 0.56f) / 0.44f).coerceIn(0f, 1f)
-                val settleEase = settleProgress * settleProgress * (3f - 2f * settleProgress)
+                val settleEase = smootherStep(settleProgress)
                 val liftEnvelope = (riseEase * (1f - 0.76f * settleEase)).coerceIn(0f, 1f)
                 val scaleEnvelope = (riseEase * (1f - settleEase)).coerceIn(0f, 1f)
                 val shadowEnvelope = (riseEase * (1f - 0.92f * settleEase)).coerceIn(0f, 1f)
@@ -2905,44 +2306,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 drawableIndex += 1
             }
         }
-    }
-
-    private fun buildActiveHighlightState(words: List<LyricWord>, currentTimeMs: Long): ActiveHighlightState? {
-        val activeWordIndex = words.indexOfFirst { currentTimeMs in it.startMs..it.endMs }
-        if (activeWordIndex < 0) return null
-
-        val activeWord = words[activeWordIndex]
-        val visualWordRange = LyricsVisualWords.findVisualWordRange(words, activeWordIndex)
-        val visualWord = if (!visualWordRange.isEmpty()) words.slice(visualWordRange) else listOf(activeWord)
-        val singleRowVisualWord = visualWord.map { it.yOffset }.distinct().size == 1
-        val combinedText = visualWord.joinToString(separator = "") { it.text }
-        val combinedStartMs = visualWord.firstOrNull()?.startMs ?: activeWord.startMs
-        val combinedEndMs = visualWord.lastOrNull()?.endMs ?: activeWord.endMs
-        val isGrowable = singleRowVisualWord &&
-            LyricsVisualWords.isGrowableVisualWord(combinedText, combinedStartMs, combinedEndMs)
-
-        val activeRange = if (isGrowable && !visualWordRange.isEmpty()) {
-            visualWordRange
-        } else {
-            activeWordIndex..activeWordIndex
-        }
-        val rangeWords = words.slice(activeRange)
-        val highlightStartMs = if (isGrowable) combinedStartMs else activeWord.startMs
-        val highlightEndMs = if (isGrowable) combinedEndMs else activeWord.endMs
-        val durationMs = (highlightEndMs - highlightStartMs).coerceAtLeast(1L).toFloat()
-        val progress = ((currentTimeMs - highlightStartMs).coerceAtLeast(0L).toFloat() / durationMs).coerceIn(0f, 1f)
-        val rangeLeft = marginLeft + rangeWords.first().xOffset
-        val rangeWidth = (rangeWords.last().xOffset + rangeWords.last().width) - rangeWords.first().xOffset
-        val sweepX = rangeLeft + rangeWidth.coerceAtLeast(0f) * progress
-
-        return ActiveHighlightState(
-            activeWordIndex = activeWordIndex,
-            completedLimit = if (isGrowable) activeRange.first else activeWordIndex,
-            activeRange = activeRange,
-            progress = progress,
-            sweepX = sweepX,
-            isGrowable = isGrowable,
-        )
     }
 
     private class SuspendedParticle {
@@ -3380,238 +2743,22 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     // PRE-COMPUTATION & PARSING
     // ========================================================================
 
-    private data class LayoutMetrics(
-        val height: Float,
-        val width: Float,
-    )
-
-    private fun shouldInsertSpacing(previous: LyricWord?, current: LyricWord): Boolean {
-        if (previous == null) return false
-        if (previous.trailingSpace) return true
-        if (current.isPart) return false
-
-        val prevText = previous.text
-        val currentText = current.text
-
-        if (prevText.endsWith("-")) return false
-        if (prevText.endsWith("'") || prevText.endsWith("’")) return false
-        if (currentText.startsWith("'") || currentText.startsWith("’")) return false
-        if (currentText.matches(Regex("^[,.;:!?)]"))) return false
-
-        return true
-    }
-
-    private fun layoutWords(
-        words: MutableList<LyricWord>,
-        paint: Paint,
-        maxWidth: Float,
-        topOffset: Float,
-        rowHeight: Float,
-        spacingWidth: Float,
-    ): LayoutMetrics {
-        if (words.isEmpty()) {
-            return LayoutMetrics(0f, 0f)
-        }
-
-        var offsetX = 0f
-        var rowOffset = 0f
-        var maxRowWidth = 0f
-        var previousWord: LyricWord? = null
-
-        for (word in words) {
-            word.width = paint.measureText(word.text)
-            val spacingBefore = if (LyricsVisualWords.shouldInsertSpacing(previousWord, word)) spacingWidth else 0f
-
-            if (offsetX + spacingBefore + word.width > maxWidth && offsetX > 0f) {
-                maxRowWidth = maxOf(maxRowWidth, offsetX)
-                offsetX = 0f
-                rowOffset += rowHeight
-            }
-
-            if (offsetX > 0f) {
-                offsetX += spacingBefore
-            }
-
-            word.xOffset = offsetX
-            word.yOffset = topOffset + rowOffset
-            offsetX += word.width
-            previousWord = word
-        }
-
-        maxRowWidth = maxOf(maxRowWidth, offsetX)
-        return LayoutMetrics(
-            height = rowOffset + rowHeight,
-            width = maxRowWidth,
-        )
-    }
-
     private fun precomputePositions() {
-        if (width <= 0) return
-        val maxWidth = width - marginLeft * 2
-        var currentY = 0f
-
-        for (line in lines) {
-            line.y = currentY
-            val hasMain = line.words.isNotEmpty()
-            val hasBackground = line.backgroundWords.isNotEmpty()
-            val mainMetrics = if (hasMain) {
-                layoutWords(
-                    words = line.words,
-                    paint = basePaint,
-                    maxWidth = maxWidth,
-                    topOffset = 0f,
-                    rowHeight = lineHeight,
-                    spacingWidth = spaceWidth,
-                )
-            } else {
-                LayoutMetrics(0f, 0f)
-            }
-
-            line.backgroundPlacement = BackgroundPlacement.AFTER
-            line.mainTopOffset = 0f
-            line.mainHeight = mainMetrics.height
-            line.backgroundTopOffset = if (hasBackground && hasMain) mainMetrics.height + backgroundGap else 0f
-            val backgroundMetrics = if (hasBackground) {
-                layoutWords(
-                    words = line.backgroundWords,
-                    paint = backgroundBasePaint,
-                    maxWidth = maxWidth,
-                    topOffset = line.backgroundTopOffset,
-                    rowHeight = backgroundLineHeight,
-                    spacingWidth = backgroundSpaceWidth,
-                )
-            } else {
-                LayoutMetrics(0f, 0f)
-            }
-            line.backgroundHeight = backgroundMetrics.height
-            line.totalWidth = maxOf(mainMetrics.width, backgroundMetrics.width)
-            line.totalHeight = maxOf(
-                line.mainTopOffset + line.mainHeight,
-                line.backgroundTopOffset + line.backgroundHeight
-            ).coerceAtLeast(lineHeight)
-            line.focusCenterYOffset = if (line.mainHeight > 0f) {
-                line.mainTopOffset + line.mainHeight * 0.5f
-            } else {
-                line.totalHeight * 0.5f
-            }
-
-            currentY += line.totalHeight + lineSpacing
-        }
-
-    }
-
-    private fun finalizeParsedLine(
-        result: MutableList<LyricLine>,
-        mainWords: MutableList<LyricWord>,
-        backgroundWords: MutableList<LyricWord>,
-    ) {
-        val normalizedMainWords = if (mainWords.isNotEmpty()) {
-            mainWords.toMutableList()
-        } else {
-            backgroundWords.map { it.copy(isBackground = false) }.toMutableList()
-        }
-        val normalizedBackgroundWords = if (mainWords.isNotEmpty()) {
-            backgroundWords.toMutableList()
-        } else {
-            mutableListOf()
-        }
-
-        if (normalizedMainWords.isEmpty() && normalizedBackgroundWords.isEmpty()) {
-            return
-        }
-
-        val allWords = normalizedMainWords + normalizedBackgroundWords
-        result.add(
-            LyricLine(
-                words = normalizedMainWords,
-                backgroundWords = normalizedBackgroundWords,
-                startMs = allWords.minOf { it.startMs },
-                endMs = allWords.maxOf { it.endMs },
-            )
+        lyricsLayoutEngine.layout(
+            lines = lines,
+            mainPaint = basePaint,
+            backgroundPaint = backgroundBasePaint,
+            config = LyricsLayoutConfig(
+                width = width,
+                marginLeft = marginLeft,
+                lineHeight = lineHeight,
+                lineSpacing = lineSpacing,
+                spaceWidth = spaceWidth,
+                backgroundLineHeight = backgroundLineHeight,
+                backgroundSpaceWidth = backgroundSpaceWidth,
+                backgroundGap = backgroundGap,
+            ),
         )
-    }
-
-    private fun parseLyrics(data: List<Map<String, Any>>): List<LyricLine> {
-        val result = mutableListOf<LyricLine>()
-        var currentMainWords = mutableListOf<LyricWord>()
-        var currentBackgroundWords = mutableListOf<LyricWord>()
-
-        for (wordMap in data) {
-            val text = wordMap["w"] as? String ?: ""
-            val startSec = (wordMap["s"] as? Number)?.toDouble() ?: 0.0
-            val endSec = (wordMap["e"] as? Number)?.toDouble() ?: startSec
-            val startMs = (startSec * 1000).toLong()
-            val endMs = (endSec * 1000).toLong()
-            val hasSourceSpacing = wordMap.containsKey("sp")
-            val trailingSpace = wordMap["sp"] as? Boolean ?: false
-            val isBackground = wordMap["bg"] as? Boolean ?: false
-            val isPart = wordMap["p"] as? Boolean ?: false
-            val normalizedText = text.replace(Regex("\\s+"), " ").trim()
-            val targetWords = if (isBackground) currentBackgroundWords else currentMainWords
-
-            if (hasSourceSpacing) {
-                if (normalizedText.isNotEmpty()) {
-                    targetWords.add(
-                        LyricWord(
-                            text = normalizedText,
-                            startMs = startMs,
-                            endMs = endMs,
-                            trailingSpace = trailingSpace,
-                            isBackground = isBackground,
-                            isPart = isPart,
-                        )
-                    )
-                }
-            } else {
-                val tokens = normalizedText
-                    .split(Regex("\\s+"))
-                    .map { it.trim() }
-                    .filter { it.isNotEmpty() }
-
-                if (tokens.size <= 1) {
-                    if (normalizedText.isNotEmpty()) {
-                        targetWords.add(
-                            LyricWord(
-                                text = normalizedText,
-                                startMs = startMs,
-                                endMs = endMs,
-                                trailingSpace = false,
-                                isBackground = isBackground,
-                                isPart = isPart,
-                            )
-                        )
-                    }
-                } else {
-                    val total = (endMs - startMs).coerceAtLeast(1L)
-                    for (index in tokens.indices) {
-                        val tokenStart = startMs + (total * index) / tokens.size
-                        val tokenEnd = if (index == tokens.lastIndex) {
-                            endMs
-                        } else {
-                            startMs + (total * (index + 1)) / tokens.size
-                        }
-                        targetWords.add(
-                            LyricWord(
-                                text = tokens[index],
-                                startMs = tokenStart,
-                                endMs = tokenEnd,
-                                trailingSpace = index < tokens.lastIndex,
-                                isBackground = isBackground,
-                                isPart = isPart,
-                            )
-                        )
-                    }
-                }
-            }
-
-            if (wordMap["n"] as? Boolean == true) {
-                finalizeParsedLine(result, currentMainWords, currentBackgroundWords)
-                currentMainWords = mutableListOf()
-                currentBackgroundWords = mutableListOf()
-            }
-        }
-        finalizeParsedLine(result, currentMainWords, currentBackgroundWords)
-        return result
     }
 
     private fun emitLineChangeIfNeeded(lineIndex: Int) {
