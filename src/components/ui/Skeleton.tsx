@@ -3,6 +3,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import Animated, {
+    Easing,
     interpolate,
     useAnimatedStyle,
     useSharedValue,
@@ -21,25 +22,24 @@ const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
 
 export const Skeleton = ({ width = '100%', height, borderRadius = 8, style }: SkeletonProps) => {
     const { isDark } = useTheme();
-    const shimmerValue = useSharedValue(-1);
+    const pulseValue = useSharedValue(0.4);
 
     useEffect(() => {
-        shimmerValue.value = withRepeat(
-            withTiming(1, { duration: 1500 }),
+        pulseValue.value = withRepeat(
+            withTiming(1, { duration: 1200, easing: Easing.inOut(Easing.ease) }),
             -1,
-            false
+            true
         );
-    }, [shimmerValue]);
+    }, [pulseValue]);
 
     const animatedStyle = useAnimatedStyle(() => {
-        const translateX = interpolate(shimmerValue.value, [-1, 1], [-400, 400]);
         return {
-            transform: [{ translateX }],
+            opacity: pulseValue.value,
         };
     });
 
     const baseColor = isDark ? 'rgba(255, 255, 255, 0.08)' : 'rgba(0, 0, 0, 0.05)';
-    const highlightColor = isDark ? 'rgba(255, 255, 255, 0.15)' : 'rgba(0, 0, 0, 0.1)';
+    const highlightColor = isDark ? 'rgba(255, 255, 255, 0.14)' : 'rgba(0, 0, 0, 0.08)';
 
     return (
         <View
@@ -49,11 +49,12 @@ export const Skeleton = ({ width = '100%', height, borderRadius = 8, style }: Sk
                 style,
             ]}
         >
-            <AnimatedLinearGradient
-                colors={['transparent', highlightColor, 'transparent']}
-                start={{ x: 0, y: 0.5 }}
-                end={{ x: 1, y: 0.5 }}
-                style={[StyleSheet.absoluteFill, animatedStyle, { width: '250%' }]} // Increased width for wider shimmer effect (padding adjustment)
+            <Animated.View
+                style={[
+                    StyleSheet.absoluteFill,
+                    animatedStyle,
+                    { backgroundColor: highlightColor }
+                ]}
             />
         </View>
     );

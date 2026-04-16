@@ -17,6 +17,7 @@ import TrackPlayer, {
     RepeatMode,
     State,
 } from 'react-native-track-player';
+import { getArtworkNotificationUri } from './artworkThumbnails';
 import { Track } from '../types/audio';
 
 let isInitialized = false;
@@ -45,8 +46,39 @@ function normalizeArtworkUri(value?: string | null): string | undefined {
     return undefined;
 }
 
-function resolveArtworkForNowPlaying(track: Track): string | undefined {
-    return normalizeArtworkUri(track.artwork) ?? normalizeArtworkUri(track.artworkThumb);
+function resolveArtworkForQueue(track: Track): string | undefined {
+    // Keep the native queue as light as possible on low-memory Android devices.
+    // Artwork for the active item is injected separately via updateNowPlayingMetadata.
+    return undefined;
+}
+
+async function resolveArtworkForNowPlaying(track: Track): Promise<string | undefined> {
+    const notificationArtwork = await getArtworkNotificationUri(track.artwork)
+        .catch(() => undefined);
+    if (notificationArtwork) {
+        return normalizeArtworkUri(notificationArtwork);
+    }
+
+    return normalizeArtworkUri(track.artworkThumb) ?? normalizeArtworkUri(track.artwork);
+}
+
+function buildNativeTrack(track: Track, options?: { artwork?: string }): any {
+    return {
+        id: track.id,
+        mediaId: track.id,
+        url: track.uri,
+        title: track.title || 'Unknown Title',
+        artist: track.artist || 'Unknown Artist',
+        album: track.album || 'Unknown Album',
+        artwork: options?.artwork,
+        duration: track.duration ? track.duration / 1000 : undefined,
+        genre: track.genre,
+        // Technical metadata preserved for UI
+        format: track.format,
+        sampleRate: track.sampleRate,
+        bitDepth: track.bitDepth,
+        quality: track.quality,
+    };
 }
 
 /**
@@ -139,25 +171,13 @@ export async function playTrack(track: Track): Promise<void> {
         // load() can sometimes preserve metadata from previous sessions on buggy Android versions.
         await TrackPlayer.reset();
 
-        const trackData: any = {
-            id: track.id,
-            mediaId: track.id,
-            url: track.uri,
-            title: track.title || 'Unknown Title',
-            artist: track.artist || 'Unknown Artist',
-            album: track.album || 'Unknown Album',
-            artwork: resolveArtworkForNowPlaying(track),
-            duration: track.duration ? track.duration / 1000 : undefined,
-            genre: track.genre,
-            // Technical metadata preserved for UI
-            format: track.format,
-            sampleRate: track.sampleRate,
-            bitDepth: track.bitDepth,
-            quality: track.quality,
-        };
+        const trackData = buildNativeTrack(track, {
+            artwork: resolveArtworkForQueue(track),
+        });
 
         await TrackPlayer.add([trackData]);
         await TrackPlayer.play();
+        await updateNowPlayingTrackMetadata(track);
     } catch (error) {
         console.error('[TrackPlayer] Play error:', error);
         throw error;
@@ -180,21 +200,8 @@ export async function playQueue(tracks: Track[], startIndex: number = 0): Promis
 
         await TrackPlayer.reset();
 
-        const trackPlayerTracks = tracks.map(track => ({
-            id: track.id,
-            mediaId: track.id,
-            url: track.uri,
-            title: track.title || 'Unknown Title',
-            artist: track.artist || 'Unknown Artist',
-            album: track.album || 'Unknown Album',
-            artwork: resolveArtworkForNowPlaying(track),
-            duration: track.duration ? track.duration / 1000 : undefined,
-            genre: track.genre,
-            // Technical metadata preserved for UI
-            format: track.format,
-            sampleRate: track.sampleRate,
-            bitDepth: track.bitDepth,
-            quality: track.quality,
+        const trackPlayerTracks = tracks.map(track => buildNativeTrack(track, {
+            artwork: resolveArtworkForQueue(track),
         }));
 
         const safeIndex = Math.max(0, Math.min(startIndex, trackPlayerTracks.length - 1));
@@ -204,8 +211,12 @@ export async function playQueue(tracks: Track[], startIndex: number = 0): Promis
             await TrackPlayer.skip(safeIndex);
         }
         await TrackPlayer.play();
+        await updateNowPlayingTrackMetadata(tracks[safeIndex] ?? null);
 
-        console.log('[TrackPlayer] Playing queue, starting at:', tracks[safeIndex]?.title);
+        console.log('[TrackPlayer] Playing queue, starting at:', tracks[safeIndex]?.title, {
+            queueSize: trackPlayerTracks.length,
+            nativeArtworkItems: trackPlayerTracks.filter(track => !!track.artwork).length,
+        });
     } catch (error) {
         console.error('[TrackPlayer] Play queue error:', error);
         throw error;
@@ -396,6 +407,26 @@ export async function setRepeatMode(mode: 'off' | 'all' | 'one'): Promise<void> 
 
     await TrackPlayer.setRepeatMode(repeatModes[mode]);
     console.log('[TrackPlayer] Repeat mode:', mode);
+}
+
+/**
+ * Refresh the active notification / lock-screen metadata without bloating the
+ * whole native queue payload.
+ */
+export async function updateNowPlayingTrackMetadata(track: Track | null): Promise<void> {
+    if (!isInitialized || !track) return;
+
+    try {
+        const artwork = await resolveArtworkForNowPlaying(track);
+        await TrackPlayer.updateNowPlayingMetadata({
+            title: track.title || 'Unknown Title',
+            artist: track.artist || 'Unknown Artist',
+            album: track.album || 'Unknown Album',
+            artwork,
+        });
+    } catch (error) {
+        console.warn('[TrackPlayer] Failed to refresh now playing metadata:', error);
+    }
 }
 
 /**

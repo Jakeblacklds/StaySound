@@ -1,9 +1,9 @@
-import { CustomIcon, EmptyState, Skeleton } from '@/src/components/ui';
+import { CustomIcon, DownloadAnimatedButton, EmptyState, Skeleton, TrackListItem } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
 import { createTidalStreamTrack, getTidalArtistDetail, isValidAudioFile } from '@/src/services/tidalService';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
-import { TidalAlbum, TidalArtistDetail, TidalTrack } from '@/src/types';
+import { TidalArtistDetail, TidalTrack } from '@/src/types';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -11,24 +11,23 @@ import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
-import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeInRight, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-function formatTrackDuration(ms: number): string {
-    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}:${String(seconds).padStart(2, '0')}`;
-}
+const HEADER_HEIGHT = 400;
+const DEFAULT_VISIBLE_TOP_TRACKS = 8;
+const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
 export default function TidalArtistScreen() {
     const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
+    const scrollY = useSharedValue(0);
 
     const [artistDetail, setArtistDetail] = useState<TidalArtistDetail | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [tracksExpanded, setTracksExpanded] = useState(false);
 
     const {
         downloads,
@@ -44,6 +43,7 @@ export default function TidalArtistScreen() {
     const pendingTrackPreview = usePlayerStore(s => s.pendingTrackPreview);
     const isPlayerPlaying = usePlayerStore(s => s.isPlaying);
     const setPendingTrackPreview = usePlayerStore(s => s.setPendingTrackPreview);
+
     const activeTidalTrackId = useMemo(() => {
         const sourceTrack = pendingTrackPreview ?? currentPlayerTrack;
         if (!sourceTrack) return null;
@@ -85,6 +85,27 @@ export default function TidalArtistScreen() {
             cancelled = true;
         };
     }, [id, name]);
+
+    const scrollHandler = useAnimatedScrollHandler({
+        onScroll: (event) => {
+            scrollY.value = event.contentOffset.y;
+        },
+    });
+
+    const headerStyle = useAnimatedStyle(() => ({
+        transform: [
+            { scale: interpolate(scrollY.value, [-100, 0], [1.08, 1], 'clamp') },
+        ],
+        opacity: interpolate(scrollY.value, [0, HEADER_HEIGHT * 0.55], [1, 0.78], 'clamp'),
+    }));
+
+    const heroBlurStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(scrollY.value, [0, HEADER_HEIGHT * 0.42], [0.04, 1], 'clamp'),
+    }));
+
+    const heroScrimStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(scrollY.value, [0, HEADER_HEIGHT * 0.38], [0, 0.38], 'clamp'),
+    }));
 
     const handleTidalPlay = useCallback(async (track: TidalTrack) => {
         setPendingTrackPreview({
@@ -128,9 +149,7 @@ export default function TidalArtistScreen() {
                     throw streamError;
                 }
 
-                Alert.alert('Preparando reproduccion', 'Este track requiere descarga local para reproducirse.');
                 await download(track);
-
                 const localTrack = useLibraryStore.getState().tracks.get(`tidal_${track.id}`);
                 if (!localTrack) {
                     throw new Error('No se pudo preparar el archivo local');
@@ -141,86 +160,54 @@ export default function TidalArtistScreen() {
         } catch (playError) {
             setPendingTrackPreview(null);
             const message = playError instanceof Error ? playError.message : 'No se pudo reproducir esta pista';
-            Alert.alert('Error de reproduccion', message);
+            Alert.alert('Error', message);
         }
     }, [download, forgetDownloadedTrack, getDownloadedTrack, play, setPendingTrackPreview]);
 
     const handleTidalDownload = useCallback(async (track: TidalTrack) => {
         try {
             const state = downloads.get(track.id);
+            if (isDownloaded(track.id) || state?.status === 'done') {
+                return;
+            }
             if (state?.status === 'downloading') {
                 await cancelDownload(track.id);
                 return;
             }
-
             await download(track);
         } catch (downloadError) {
             const message = downloadError instanceof Error ? downloadError.message : 'Error en descarga';
             Alert.alert('Descarga fallida', message);
         }
-    }, [cancelDownload, download, downloads]);
+    }, [cancelDownload, download, downloads, isDownloaded]);
 
-    const openAlbum = useCallback((album: TidalAlbum) => {
-        router.push({ pathname: '/tidal-album/[id]', params: { id: String(album.id) } });
+    const openAlbum = useCallback((albumId: number) => {
+        router.push({ pathname: '/tidal-album/[id]', params: { id: String(albumId) } });
     }, []);
 
     const sortedAlbums = useMemo(() => {
-        if (!artistDetail) return [];
+        if (!artistDetail || !artistDetail.albums) return [];
         return [...artistDetail.albums].sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
     }, [artistDetail]);
+
+    const visibleTopTracks = useMemo(() => {
+        const tracks = artistDetail?.topTracks ?? [];
+        return tracksExpanded ? tracks : tracks.slice(0, DEFAULT_VISIBLE_TOP_TRACKS);
+    }, [artistDetail?.topTracks, tracksExpanded]);
 
     if (isLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <LinearGradient
-                    colors={[theme.colors.primaryContainer, theme.colors.background, theme.colors.background]}
-                    style={StyleSheet.absoluteFill}
-                />
-                <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 18 }]}>
-                    <View style={styles.topBar}>
-                        <Skeleton height={44} width={120} borderRadius={999} />
-                    </View>
-
-                    <View style={styles.heroWrap}>
-                        <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant, overflow: 'hidden' }]}>
-                            <Skeleton height={270} width="100%" borderRadius={24} />
-                            <View style={styles.heroContent}>
-                                <Skeleton height={32} width="60%" borderRadius={8} style={{ marginBottom: 12 }} />
-                                <View style={styles.statsRow}>
-                                    <Skeleton height={32} width={150} borderRadius={16} />
-                                    <Skeleton height={32} width={150} borderRadius={16} />
-                                </View>
-                            </View>
-                        </View>
-                    </View>
-
-                    <View style={styles.section}>
-                        <Skeleton height={24} width={180} borderRadius={4} style={{ marginBottom: 16 }} />
-                        {[1, 2, 3, 4].map((i) => (
-                            <View key={`s-tra-${i}`} style={[styles.trackRow, { backgroundColor: theme.colors.surface, opacity: 0.6 }]}>
-                                <View style={styles.trackContent}>
-                                    <Skeleton height={18} width="70%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                    <Skeleton height={14} width="50%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                    <Skeleton height={12} width="30%" borderRadius={4} />
-                                </View>
-                                <Skeleton height={36} width={94} borderRadius={18} />
-                            </View>
-                        ))}
-                    </View>
-
-                    <View style={styles.section}>
-                        <Skeleton height={24} width={170} borderRadius={4} style={{ marginBottom: 16 }} />
-                        {[1, 2].map((i) => (
-                            <View key={`s-alb-${i}`} style={[styles.albumRow, { backgroundColor: theme.colors.surface, opacity: 0.6 }]}>
-                                <Skeleton height={56} width={56} borderRadius={8} />
-                                <View style={styles.albumContent}>
-                                    <Skeleton height={18} width="60%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                    <Skeleton height={14} width="30%" borderRadius={4} />
-                                </View>
-                                <Skeleton height={20} width={80} borderRadius={10} />
-                            </View>
-                        ))}
+                <View style={[styles.backButtonWrap, { top: insets.top + 8 }]}>
+                    <Skeleton height={44} width={44} borderRadius={22} />
+                </View>
+                <ScrollView contentContainerStyle={{ paddingTop: insets.top + 100 }}>
+                    <Skeleton height={200} width="100%" />
+                    <View style={{ padding: 20 }}>
+                        <Skeleton height={40} width="60%" style={{ marginBottom: 20 }} />
+                        <Skeleton height={60} width="100%" style={{ marginBottom: 10 }} />
+                        <Skeleton height={60} width="100%" style={{ marginBottom: 10 }} />
                     </View>
                 </ScrollView>
             </SafeAreaView>
@@ -240,123 +227,203 @@ export default function TidalArtistScreen() {
     }
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
             <Stack.Screen options={{ headerShown: false }} />
-            <StatusBar barStyle="light-content" />
+            <StatusBar barStyle={theme.id.includes('dark') ? 'light-content' : 'dark-content'} />
 
-            <LinearGradient
-                colors={[theme.colors.primaryContainer, theme.colors.background, theme.colors.background]}
-                style={StyleSheet.absoluteFill}
-            />
-
-            <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 18 }]}>
-                <View style={styles.topBar}>
-                    <Pressable onPress={() => router.back()}>
-                        <BlurView intensity={45} tint="light" style={styles.backChip}>
-                            <Text style={[styles.backChipLabel, { color: theme.colors.onSurface }]}>Volver / Back</Text>
-                        </BlurView>
-                    </Pressable>
-                </View>
-
-                <Animated.View entering={FadeIn.duration(500)} style={styles.heroWrap}>
-                    <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant }]}>
-                        <Image source={artistDetail.artist.artworkUrl ? { uri: artistDetail.artist.artworkUrl } : undefined} style={styles.artistImage} contentFit="cover" />
-                        <LinearGradient
-                            colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.65)']}
-                            style={styles.heroOverlay}
-                        />
-                        <View style={styles.heroContent}>
-                            <Text variant="headlineSmall" style={styles.heroTitle}>
-                                {artistDetail.artist.name}
-                            </Text>
-                            <View style={styles.statsRow}>
-                                <View style={styles.statChip}>
-                                    <Text style={styles.statChipLabel}>{artistDetail.topTracks.length} Top Tracks / Canciones</Text>
-                                </View>
-                                <View style={styles.statChip}>
-                                    <Text style={styles.statChipLabel}>{sortedAlbums.length} Albums / Álbumes</Text>
-                                </View>
-                            </View>
+            {/* Full Width Edge-to-Edge Hero Image */}
+            <View style={styles.absoluteTop}>
+                <Animated.View style={[styles.heroImageContainer, headerStyle]}>
+                    {artistDetail?.artist?.artworkUrl ? (
+                        <Image source={{ uri: artistDetail.artist.artworkUrl }} style={StyleSheet.absoluteFillObject} contentFit="cover" transition={400} />
+                    ) : (
+                        <View style={[StyleSheet.absoluteFillObject, { backgroundColor: theme.colors.surfaceVariant, alignItems: 'center', justifyContent: 'center' }]}>
+                            <CustomIcon name="Artista" size={80} color={theme.colors.primary} />
                         </View>
-                    </View>
+                    )}
+                    <LinearGradient
+                        colors={['rgba(0,0,0,0.1)', 'rgba(0,0,0,0.4)', theme.colors.background]}
+                        style={StyleSheet.absoluteFillObject}
+                        locations={[0, 0.4, 0.98]}
+                    />
+                    <AnimatedBlurView
+                        intensity={95}
+                        tint={theme.id.includes('dark') ? 'dark' : 'light'}
+                        experimentalBlurMethod="dimezisBlurView"
+                        style={[StyleSheet.absoluteFillObject, heroBlurStyle]}
+                    />
+                    <Animated.View
+                        pointerEvents="none"
+                        style={[
+                            StyleSheet.absoluteFillObject,
+                            {
+                                backgroundColor: theme.id.includes('dark')
+                                    ? 'rgba(8,10,14,0.82)'
+                                    : 'rgba(248,250,252,0.54)',
+                            },
+                            heroScrimStyle,
+                        ]}
+                    />
+                </Animated.View>
+            </View>
+
+            <View style={[styles.backButtonWrap, { top: insets.top + 8 }]}>
+                <Pressable
+                    hitSlop={20}
+                    onPress={() => router.back()}
+                    style={styles.backButton}
+                >
+                    <CustomIcon name="Previous" size={24} color="#FFFFFF" />
+                </Pressable>
+            </View>
+
+            <Animated.ScrollView
+                onScroll={scrollHandler}
+                scrollEventThrottle={16}
+                contentContainerStyle={[styles.content, { paddingTop: HEADER_HEIGHT - 110 }]}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Clean, minimalist text hero */}
+                <Animated.View entering={FadeIn.delay(150)} style={styles.artistInfo}>
+                    <Text
+                        style={[styles.artistName, { color: theme.colors.onBackground, fontFamily: theme.typography.fontFamily.bold }]}
+                        numberOfLines={2}
+                    >
+                        {artistDetail?.artist?.name || 'Unknown'}
+                    </Text>
+                    <Text
+                        variant="bodyLarge"
+                        style={[styles.artistMeta, { color: theme.colors.onSurfaceVariant }]}
+                    >
+                        {artistDetail?.topTracks?.length || 0} canciones · {sortedAlbums.length} albums
+                    </Text>
                 </Animated.View>
 
-                {artistDetail.topTracks.length > 0 ? (
-                    <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
-                        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Top Tracks / Canciones</Text>
-                        {artistDetail.topTracks.map(track => {
-                            const state = downloads.get(track.id);
-                            const downloaded = isDownloaded(track.id) || state?.status === 'done';
-                            const isDownloadingItem = state?.status === 'downloading';
-                            const isError = state?.status === 'error';
-                            const progressLabel = `${Math.round((state?.progress ?? 0) * 100)}%`;
-                            const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
+                {artistDetail?.topTracks && artistDetail.topTracks.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(200)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text
+                                variant="titleMedium"
+                                style={[styles.sectionTitle, { color: theme.colors.onBackground, fontFamily: theme.typography.fontFamily.bold }]}
+                            >
+                                Top Tracks
+                            </Text>
+                        </View>
 
-                            return (
-                                <Pressable
-                                    key={track.id}
-                                    onPress={() => handleTidalPlay(track)}
-                                    style={[
-                                        styles.trackRow,
-                                        {
-                                            backgroundColor: isTrackActive ? 'rgba(255,255,255,0.16)' : theme.colors.surface,
-                                            borderColor: isTrackActive ? theme.colors.primary : 'rgba(255,255,255,0.08)',
-                                        },
-                                    ]}
-                                >
-                                    {isTrackActive ? (
-                                        <Animated.View
-                                            entering={FadeIn.duration(180)}
-                                            exiting={FadeOut.duration(180)}
-                                            pointerEvents="none"
-                                            style={[StyleSheet.absoluteFillObject, styles.trackRowActiveOverlay, { backgroundColor: 'rgba(255,255,255,0.05)' }]}
+                        <View style={styles.tracksWrap}>
+                            {visibleTopTracks.map((track, index) => {
+                                const state = downloads.get(track.id);
+                                const downloaded = isDownloaded(track.id) || state?.status === 'done';
+                                const isDownloading = state?.status === 'downloading';
+                                const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
+                                const progress = state?.progress ?? 0;
+
+                                // Adapt TidalTrack to Track for TrackListItem compatibility
+                                const uiTrack = {
+                                    id: `tidal_ui_${track.id}`,
+                                    uri: '',
+                                    title: track.title || 'Unknown Title',
+                                    artist: track.artist || artistDetail?.artist?.name || 'Unknown Artist',
+                                    album: track.album || 'Unknown Album',
+                                    artwork: track.artworkUrl,
+                                    duration: Math.floor((track.durationMs || 0) / 1000),
+                                    format: 'flac',
+                                    dateAdded: Date.now()
+                                };
+
+                                return (
+                                    <Animated.View key={track.id} entering={FadeInRight.delay(250 + index * 40)}>
+                                        <TrackListItem
+                                            track={uiTrack}
+                                            index={index}
+                                            showArtwork={false}
+                                            showIndex={true}
+                                            visualStyle="library"
+                                            isPlaying={isTrackActive}
+                                            onPress={() => handleTidalPlay(track)}
+                                            onOptionsPress={downloaded ? undefined : () => handleTidalDownload(track)}
+                                            optionsIcon={downloaded ? 'Checkmark' : (isDownloading ? 'Pause' : 'Descargar')}
+                                            optionsIconColor={downloaded ? theme.colors.primary : theme.colors.onSurfaceVariant}
+                                            optionsBusy={isDownloading}
+                                            optionsDisabled={downloaded}
+                                            optionsAccessory={(
+                                                <DownloadAnimatedButton
+                                                    status={
+                                                        isDownloading ? 'downloading' :
+                                                        downloaded ? 'done' :
+                                                        state?.status === 'error' ? 'error' : 'idle'
+                                                    }
+                                                    progress={progress}
+                                                    size={20}
+                                                    onPress={() => handleTidalDownload(track)}
+                                                />
+                                            )}
                                         />
-                                    ) : null}
-                                    <View style={styles.trackContent}>
-                                        <Text numberOfLines={1} style={[styles.trackTitle, { color: theme.colors.onSurface }]}>{track.title}</Text>
-                                        <Text numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>{track.album}</Text>
-                                        <Text style={{ color: theme.colors.onSurfaceVariant }}>{formatTrackDuration(track.durationMs)}</Text>
-                                    </View>
-                                    <Button
-                                        compact
-                                        mode={downloaded ? 'contained' : 'contained-tonal'}
-                                        onPress={(event) => {
-                                            event.stopPropagation();
-                                            void handleTidalDownload(track);
-                                        }}
-                                        style={{ minWidth: 94 }}
-                                        icon={downloaded ? undefined : () => <CustomIcon name="Descargar" size={14} color={theme.colors.primary} />}
-                                    >
-                                        {downloaded ? 'Guardado' : isDownloadingItem ? progressLabel : isError ? 'Reintentar' : 'Descargar'}
-                                    </Button>
-                                </Pressable>
-                            );
-                        })}
-                    </Animated.View>
-                ) : null}
+                                    </Animated.View>
+                                );
+                            })}
+                        </View>
 
-                {sortedAlbums.length > 0 ? (
-                    <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.section}>
-                        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Albums / Álbumes</Text>
-                        {sortedAlbums.map(album => (
-                            <Pressable key={album.id} style={[styles.albumRow, { backgroundColor: theme.colors.surface }]} onPress={() => openAlbum(album)}>
-                                <Image source={album.artworkUrl ? { uri: album.artworkUrl } : undefined} style={styles.albumImage} contentFit="cover" />
-                                <View style={styles.albumContent}>
-                                    <Text numberOfLines={1} style={[styles.trackTitle, { color: theme.colors.onSurface }]}>{album.title}</Text>
-                                    <Text style={{ color: theme.colors.onSurfaceVariant }}>{album.year ?? 'Año desconocido / Unknown year'}</Text>
-                                </View>
-                                <Text style={{ color: theme.colors.primary, fontWeight: '700' }}>Abrir / Open</Text>
+                        {artistDetail.topTracks.length > DEFAULT_VISIBLE_TOP_TRACKS ? (
+                            <Pressable onPress={() => setTracksExpanded(value => !value)} style={styles.expandButton}>
+                                <Text style={[styles.expandButtonLabel, { color: theme.colors.primary }]}>
+                                    {tracksExpanded ? 'Mostrar menos' : `Ver ${artistDetail.topTracks.length - DEFAULT_VISIBLE_TOP_TRACKS} mas`}
+                                </Text>
                             </Pressable>
-                        ))}
+                        ) : null}
                     </Animated.View>
-                ) : null}
-            </ScrollView>
-        </SafeAreaView>
+                )}
+
+                {sortedAlbums.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(350)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text
+                                variant="titleMedium"
+                                style={[styles.sectionTitle, { color: theme.colors.onBackground, fontFamily: theme.typography.fontFamily.bold }]}
+                            >
+                                Albums
+                            </Text>
+                        </View>
+
+                        <View style={styles.albumsList}>
+                            {sortedAlbums.map((album, index) => (
+                                <Animated.View
+                                    key={album.id}
+                                    entering={FadeInRight.delay(320 + index * 45)}
+                                >
+                                    <Pressable onPress={() => openAlbum(album.id)} style={styles.albumRow}>
+                                        <View style={[styles.albumArtWrap, { backgroundColor: theme.colors.surfaceVariant }]}>
+                                            {album.artworkUrl ? (
+                                                <Image source={{ uri: album.artworkUrl }} style={styles.albumArt} contentFit="cover" transition={200} />
+                                            ) : (
+                                                <CustomIcon name="Album" size={28} color={theme.colors.onSurfaceVariant} />
+                                            )}
+                                        </View>
+                                        <View style={styles.albumCopy}>
+                                            <Text numberOfLines={1} style={[styles.albumTitle, { color: theme.colors.onBackground }]}>
+                                                {album.title}
+                                            </Text>
+                                            <Text numberOfLines={1} style={[styles.albumMetaLine, { color: theme.colors.onSurfaceVariant }]}>
+                                                {album.year ?? 'Sin fecha'} · {album.numberOfTracks ?? 0} tracks
+                                            </Text>
+                                        </View>
+                                        <CustomIcon name="Next" size={16} color={theme.colors.onSurfaceVariant} />
+                                    </Pressable>
+                                </Animated.View>
+                            ))}
+                        </View>
+                    </Animated.View>
+                )}
+
+            </Animated.ScrollView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
-    container: { flex: 1 },
+    container: {
+        flex: 1,
+    },
     centered: {
         flex: 1,
         justifyContent: 'center',
@@ -364,112 +431,103 @@ const styles = StyleSheet.create({
         gap: 12,
         paddingHorizontal: 20,
     },
+    absoluteTop: {
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        height: HEADER_HEIGHT,
+        zIndex: 0,
+    },
+    heroImageContainer: {
+        flex: 1,
+    },
+    backButtonWrap: {
+        position: 'absolute',
+        left: 16,
+        zIndex: 20,
+    },
+    backButton: {
+        width: 44,
+        height: 44,
+        borderRadius: 22,
+        backgroundColor: 'rgba(0,0,0,0.3)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     content: {
         paddingBottom: 120,
+        zIndex: 1,
     },
-    topBar: {
-        paddingHorizontal: 16,
-        marginBottom: 14,
+    artistInfo: {
+        paddingHorizontal: 20,
+        marginBottom: 32,
     },
-    backChip: {
-        alignSelf: 'flex-start',
-        borderRadius: 999,
-        overflow: 'hidden',
-        paddingHorizontal: 16,
-        paddingVertical: 10,
+    artistName: {
+        fontSize: 42,
+        lineHeight: 46,
+        letterSpacing: -1.5,
     },
-    backChipLabel: {
-        fontWeight: '700',
-    },
-    heroWrap: {
-        paddingHorizontal: 16,
-    },
-    hero: {
-        height: 270,
-        borderRadius: 24,
-        overflow: 'hidden',
-    },
-    heroOverlay: {
-        ...StyleSheet.absoluteFillObject,
-    },
-    artistImage: {
-        width: '100%',
-        height: '100%',
-        backgroundColor: 'rgba(127,127,127,0.2)',
-    },
-    heroContent: {
-        position: 'absolute',
-        bottom: 18,
-        left: 18,
-        right: 18,
-    },
-    heroTitle: {
-        color: '#FFFFFF',
-        fontWeight: '800',
-        marginBottom: 10,
-    },
-    statsRow: {
-        flexDirection: 'row',
-        gap: 8,
-        flexWrap: 'wrap',
-    },
-    statChip: {
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.18)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-    },
-    statChipLabel: {
-        color: '#FFFFFF',
-        fontWeight: '600',
+    artistMeta: {
+        marginTop: 6,
+        fontWeight: '500',
     },
     section: {
-        marginTop: 18,
-        marginBottom: 8,
-        paddingHorizontal: 16,
+        marginBottom: 36,
+    },
+    sectionHeader: {
+        paddingHorizontal: 20,
+        marginBottom: 10,
     },
     sectionTitle: {
-        marginBottom: 12,
-        fontWeight: '800',
+        letterSpacing: -0.3,
     },
-    trackRow: {
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        padding: 10,
-        marginBottom: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
+    tracksWrap: {
+        paddingHorizontal: 8,
     },
-    trackRowActiveOverlay: {
-        borderRadius: 16,
+    expandButton: {
+        paddingHorizontal: 20,
+        paddingTop: 10,
     },
-    trackContent: {
-        flex: 1,
-    },
-    trackTitle: {
+    expandButtonLabel: {
         fontWeight: '700',
+        letterSpacing: -0.1,
+    },
+    albumsList: {
+        paddingHorizontal: 20,
+        gap: 14,
     },
     albumRow: {
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        padding: 10,
-        marginBottom: 10,
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 14,
+        paddingVertical: 4,
     },
-    albumImage: {
-        width: 56,
-        height: 56,
-        borderRadius: 8,
-        backgroundColor: 'rgba(127,127,127,0.2)',
+    albumArtWrap: {
+        width: 72,
+        height: 72,
+        borderRadius: 18,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
     },
-    albumContent: {
+    albumArt: {
+        width: '100%',
+        height: '100%',
+    },
+    albumCopy: {
         flex: 1,
+        justifyContent: 'center',
+        gap: 4,
+    },
+    albumTitle: {
+        fontSize: 17,
+        lineHeight: 22,
+        fontWeight: '700',
+        letterSpacing: -0.35,
+    },
+    albumMetaLine: {
+        fontSize: 13,
+        lineHeight: 18,
     },
 });

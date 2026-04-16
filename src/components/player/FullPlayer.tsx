@@ -848,7 +848,15 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                 translateY: interpolate(
                     lyricsTransitionProgress.value,
                     [0, 1],
-                    [18, 0],
+                    [24, 0],
+                    Extrapolation.CLAMP
+                ),
+            },
+            {
+                scale: interpolate(
+                    lyricsTransitionProgress.value,
+                    [0, 1],
+                    [0.96, 1],
                     Extrapolation.CLAMP
                 ),
             },
@@ -1212,10 +1220,12 @@ export function FullPlayer() {
 
     const toggleLyricsFull = (val: boolean) => {
         setIsLyricsExpanded(val);
-        lyricsExpansion.value = withTiming(val ? 1 : 0, {
-            duration: lightweightMode ? (val ? 240 : 160) : (val ? 350 : 200),
-            easing: val ? M3_EMPHASIZED_DECEL : M3_EMPHASIZED_ACCEL,
-        });
+        lyricsExpansion.value = val 
+            ? withSpring(1, { damping: 18, stiffness: 120, mass: 1 })
+            : withTiming(0, {
+                duration: lightweightMode ? 160 : 200,
+                easing: M3_EMPHASIZED_ACCEL,
+            });
     };
 
     React.useEffect(() => {
@@ -1401,7 +1411,10 @@ export function FullPlayer() {
     const lyricsBgOverlayStyle = useAnimatedStyle(() => ({ opacity: interpolate(lyricsExpansion.value, [0, 1], [0, 0.6]) }));
     const lyricsContentAnimStyle = useAnimatedStyle(() => ({
         opacity: lyricsExpansion.value,
-        transform: [{ translateY: interpolate(lyricsExpansion.value, [0, 1], [40, 0], Extrapolation.CLAMP) }]
+        transform: [
+            { translateY: interpolate(lyricsExpansion.value, [0, 1], [32, 0], Extrapolation.CLAMP) },
+            { scale: interpolate(lyricsExpansion.value, [0, 1], [0.94, 1], Extrapolation.CLAMP) }
+        ]
     }));
 
     const textStyle = useAnimatedStyle(() => ({ color: playerAnimColors.text.value }));

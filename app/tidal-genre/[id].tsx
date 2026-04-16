@@ -1,6 +1,8 @@
 import { EmptyState, Skeleton, CustomIcon } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
 import { 
+    getArtworkUrl,
+    getPlaylistArtworkUrl,
     searchTidal, 
     searchTidalPlaylists, 
     extractAlbumsFromTracks
@@ -20,6 +22,9 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 
 const CARD_HEIGHT_SQUARE = 180;
 const CARD_HEIGHT_TALL = 260;
+const GENRE_GRID_INITIAL_ITEMS = 16;
+const GENRE_GRID_PAGE_SIZE = 16;
+const GENRE_GRID_MAX_ITEMS = 96;
 
 function withAlpha(color: string, alpha: string): string {
     return color.length === 7 ? color + alpha : color;
@@ -48,6 +53,104 @@ function normalizeCardImageUri(value: unknown): string | undefined {
         .replace('200x200', '640x640')
         .replace('300x300', '640x640')
         .replace('500x500', '640x640');
+}
+
+type CuratedGridItem = {
+    id: string;
+    type: 'albums' | 'playlists';
+    data: {
+        id?: string | number;
+        uuid?: string;
+        title: string;
+        artworkUrl?: string;
+        artistName?: string;
+    } & Record<string, unknown>;
+};
+
+function looksLikePlaylistItem(item: Record<string, unknown>): boolean {
+    const url = typeof item.url === 'string' ? item.url : '';
+    return (
+        typeof item.numberOfTracks === 'number'
+        || typeof item.squareImage === 'string'
+        || url.includes('/playlist/')
+    );
+}
+
+function resolveCuratedArtworkUrl(item: Record<string, unknown>, type: 'albums' | 'playlists'): string | undefined {
+    const rawCandidates = type === 'playlists'
+        ? [item.squareImage, item.image, item.cover, item.picture]
+        : [item.cover, item.image, item.squareImage, item.picture];
+
+    for (const candidate of rawCandidates) {
+        if (typeof candidate !== 'string') continue;
+        const trimmed = candidate.trim();
+        if (!trimmed) continue;
+        if (trimmed.startsWith('http')) return trimmed;
+        return type === 'playlists' ? getPlaylistArtworkUrl(trimmed) : getArtworkUrl(trimmed);
+    }
+
+    return undefined;
+}
+
+function buildCuratedItems(data: any): CuratedGridItem[] {
+    const allItems: CuratedGridItem[] = [];
+
+    (data.sections || []).forEach((section: any) => {
+        const type = section.type === 'ALBUM_LIST' ? 'albums'
+            : section.type === 'PLAYLIST_LIST' ? 'playlists'
+            : null;
+
+        if (!type || !Array.isArray(section.items)) return;
+
+        allItems.push(...section.items.map((item: any) => ({
+            id: String(item.id || item.uuid),
+            type,
+            data: {
+                ...item,
+                id: item.id || item.uuid,
+                title: item.title || item.name,
+                artworkUrl: resolveCuratedArtworkUrl(item, type),
+                artistName: item.artist?.name || item.artists?.[0]?.name || item.artistName || 'Curated',
+            },
+        })));
+    });
+
+    const fallbackCollections = Object.values(data)
+        .filter((value): value is any[] => Array.isArray(value) && value.length > 0);
+
+    fallbackCollections.forEach(collection => {
+        collection.forEach((item: any) => {
+            if (!item || typeof item !== 'object') return;
+
+            const type: 'albums' | 'playlists' | null = looksLikePlaylistItem(item)
+                ? 'playlists'
+                : typeof item.id === 'number'
+                    ? 'albums'
+                    : null;
+
+            if (!type) return;
+
+            allItems.push({
+                id: String(item.id || item.uuid),
+                type,
+                data: {
+                    ...item,
+                    id: item.id || item.uuid,
+                    title: item.title || item.name,
+                    artworkUrl: resolveCuratedArtworkUrl(item, type),
+                    artistName: item.artist?.name || item.artists?.[0]?.name || item.artistName || 'Curated',
+                },
+            });
+        });
+    });
+
+    const seen = new Set<string>();
+    return allItems.filter(item => {
+        const key = `${item.type}-${item.id}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return true;
+    });
 }
 
 const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, isLeft, type, onPress }: { item: any, colIndex: number, isLeft: boolean, type: 'albums' | 'playlists', onPress: () => void }) {
@@ -93,16 +196,18 @@ export default function TidalGenreScreen() {
     const [playlists, setPlaylists] = useState<TidalPlaylist[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [visibleCount, setVisibleCount] = useState(GENRE_GRID_INITIAL_ITEMS);
 
     const albums = useMemo(() => extractAlbumsFromTracks(tracks), [tracks]);
 
-    const [curatedItems, setCuratedItems] = useState<any[]>([]);
+    const [curatedItems, setCuratedItems] = useState<CuratedGridItem[]>([]);
 
     useEffect(() => {
         if (!id) return;
         let cancelled = false;
         setIsLoading(true);
         setError(null);
+        setVisibleCount(GENRE_GRID_INITIAL_ITEMS);
 
         const fetchCurated = async () => {
             try {
@@ -112,36 +217,10 @@ export default function TidalGenreScreen() {
                     const data = await response.json();
                     if (cancelled) return;
 
-                    const allItems: any[] = [];
-                    (data.sections || []).forEach((section: any) => {
-                        const type = section.type === 'ALBUM_LIST' ? 'albums' : 
-                                     section.type === 'PLAYLIST_LIST' ? 'playlists' : 
-                                     section.type === 'TRACK_LIST' ? 'tracks' : null;
-                        
-                        if (type && type !== 'tracks' && section.items) {
-                            allItems.push(...section.items.map((item: any) => ({
-                                id: String(item.id || item.uuid),
-                                type,
-                                data: {
-                                    ...item,
-                                    id: item.id || item.uuid,
-                                    title: item.title || item.name,
-                                    artworkUrl: item.cover || item.image || item.uuid || item.picture,
-                                    artistName: item.artist?.name || item.artists?.[0]?.name || item.artistName || 'Curated'
-                                }
-                            })));
-                        }
-                    });
+                    const allItems = buildCuratedItems(data);
 
                     if (allItems.length > 0) {
-                        // Deduplicate items to avoid React key errors
-                        const seen = new Set();
-                        const uniqueItems = allItems.filter(item => {
-                            const duplicate = seen.has(item.id);
-                            seen.add(item.id);
-                            return !duplicate;
-                        });
-                        setCuratedItems(uniqueItems);
+                        setCuratedItems(allItems);
                         setIsLoading(false);
                         return;
                     }
@@ -174,7 +253,7 @@ export default function TidalGenreScreen() {
 
     // Merge everything into a mixed list for the masonry grid
     const mergedResults = useMemo(() => {
-        if (curatedItems.length > 0) return curatedItems;
+        if (curatedItems.length > 0) return curatedItems.slice(0, GENRE_GRID_MAX_ITEMS);
 
         const results: Array<{ id: string | number; type: 'albums' | 'playlists'; data: any }> = [];
         const pCount = playlists.length;
@@ -185,12 +264,21 @@ export default function TidalGenreScreen() {
             if (i < pCount) results.push({ id: `p-${playlists[i].uuid}`, type: 'playlists', data: playlists[i] });
             if (i < aCount) results.push({ id: `a-${albums[i].id}`, type: 'albums', data: albums[i] });
         }
-        return results;
+        return results.slice(0, GENRE_GRID_MAX_ITEMS);
     }, [curatedItems, playlists, albums]);
 
+    const visibleResults = useMemo(
+        () => mergedResults.slice(0, visibleCount),
+        [mergedResults, visibleCount]
+    );
+    const hasMoreResults = visibleResults.length < mergedResults.length;
+    const loadMoreResults = useCallback(() => {
+        setVisibleCount(prev => Math.min(prev + GENRE_GRID_PAGE_SIZE, mergedResults.length));
+    }, [mergedResults.length]);
+
     const renderGrid = () => {
-        const leftCol = mergedResults.filter((_, i) => i % 2 === 0);
-        const rightCol = mergedResults.filter((_, i) => i % 2 !== 0);
+        const leftCol = visibleResults.filter((_, i) => i % 2 === 0);
+        const rightCol = visibleResults.filter((_, i) => i % 2 !== 0);
 
         return (
             <View style={styles.gridWrapper}>
@@ -280,6 +368,26 @@ export default function TidalGenreScreen() {
                 ) : (
                     <Animated.View entering={FadeInDown.delay(100)} style={styles.section}>
                         {renderGrid()}
+                        {hasMoreResults ? (
+                            <Pressable
+                                onPress={loadMoreResults}
+                                style={({ pressed }) => [
+                                    styles.loadMoreButton,
+                                    {
+                                        backgroundColor: withAlpha(theme.colors.surfaceVariant || theme.colors.surface, 'E8'),
+                                        borderColor: withAlpha(theme.colors.outline, '2E'),
+                                    },
+                                    pressed && { opacity: 0.86 },
+                                ]}
+                            >
+                                <Text style={[styles.loadMoreLabel, { color: theme.colors.onSurface }]}>
+                                    Cargar mas
+                                </Text>
+                                <Text style={[styles.loadMoreMeta, { color: theme.colors.onSurfaceVariant }]}>
+                                    Mostrando {visibleResults.length} de {mergedResults.length}
+                                </Text>
+                            </Pressable>
+                        ) : null}
                     </Animated.View>
                 )}
             </ScrollView>
@@ -322,6 +430,23 @@ const styles = StyleSheet.create({
         color: 'rgba(255,255,255,0.7)',
         ...typeScale.bodyMedium,
         fontSize: 12,
+        marginTop: 4,
+    },
+    loadMoreButton: {
+        marginTop: 16,
+        marginBottom: 12,
+        borderRadius: 20,
+        borderWidth: 1,
+        paddingVertical: 14,
+        paddingHorizontal: 16,
+        alignItems: 'center',
+    },
+    loadMoreLabel: {
+        ...typeScale.body,
+        fontWeight: '700',
+    },
+    loadMoreMeta: {
+        ...typeScale.caption,
         marginTop: 4,
     },
 });

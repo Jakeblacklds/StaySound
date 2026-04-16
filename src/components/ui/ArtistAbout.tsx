@@ -40,48 +40,46 @@ export function ArtistAbout({ artistName, accentColor }: ArtistAboutProps) {
                 About the Artist
             </Text>
 
-            <View style={[styles.card, { backgroundColor: theme.colors.surfaceVariant + '40' }]}>
-                {info.photo_url && (
-                    <Image
-                        source={{ uri: info.photo_url }}
-                        style={styles.artistPhoto}
-                        contentFit="cover"
-                        transition={500}
-                    />
-                )}
+            {info.photo_url && (
+                <Image
+                    source={{ uri: info.photo_url }}
+                    style={styles.artistPhoto}
+                    contentFit="cover"
+                    transition={500}
+                />
+            )}
 
-                <View style={styles.infoContent}>
-                    <Text
-                        variant="headlineSmall"
-                        style={{ color: theme.colors.onSurface, fontFamily: theme.typography.fontFamily.bold }}
-                    >
-                        {artistName}
-                    </Text>
+            <View style={styles.infoContent}>
+                <Text
+                    variant="headlineSmall"
+                    style={{ color: theme.colors.onSurface, fontFamily: theme.typography.fontFamily.bold }}
+                >
+                    {artistName}
+                </Text>
 
-                    {info.biography ? (
-                        <Pressable onPress={() => setIsExpanded(!isExpanded)}>
-                            <Text
-                                variant="bodyMedium"
-                                numberOfLines={isExpanded ? undefined : 4}
-                                style={{ color: theme.colors.onSurfaceVariant, marginTop: 8, lineHeight: 20 }}
-                            >
-                                {info.biography}
-                            </Text>
-                            {!isExpanded && info.biography.length > 150 && (
-                                <Text style={{ color: accentColor, marginTop: 4, fontWeight: 'bold' }}>
-                                    Read more
-                                </Text>
-                            )}
-                        </Pressable>
-                    ) : (
+                {info.biography ? (
+                    <Pressable onPress={() => setIsExpanded(!isExpanded)}>
                         <Text
                             variant="bodyMedium"
-                            style={{ color: theme.colors.onSurfaceVariant, marginTop: 4, fontStyle: 'italic' }}
+                            numberOfLines={isExpanded ? undefined : 4}
+                            style={{ color: theme.colors.onSurfaceVariant, marginTop: 10, lineHeight: 22 }}
                         >
-                            Artist verified on Deezer. No biography available.
+                            {info.biography}
                         </Text>
-                    )}
-                </View>
+                        {!isExpanded && info.biography.length > 150 && (
+                            <Text style={{ color: accentColor, marginTop: 8, fontWeight: 'bold' }}>
+                                Read more
+                            </Text>
+                        )}
+                    </Pressable>
+                ) : (
+                    <Text
+                        variant="bodyMedium"
+                        style={{ color: theme.colors.onSurfaceVariant, marginTop: 6, fontStyle: 'italic' }}
+                    >
+                        Artist verified on Deezer. No biography available.
+                    </Text>
+                )}
             </View>
         </Animated.View>
     );
@@ -96,18 +94,13 @@ const styles = StyleSheet.create({
     header: {
         marginBottom: 16,
     },
-    card: {
-        borderRadius: 24,
-        overflow: 'hidden',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.1)',
-    },
     artistPhoto: {
         width: '100%',
-        height: 200,
+        height: 240,
+        borderRadius: 28,
     },
     infoContent: {
-        padding: 20,
+        paddingTop: 16,
     },
     loadingContainer: {
         height: 100,

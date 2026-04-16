@@ -1,5 +1,6 @@
 import { useDynamicColors } from '@/src/hooks';
 import { usePlayerStore } from '@/src/stores';
+import { useUIStore } from '@/src/stores/uiStore';
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
@@ -140,8 +141,11 @@ function SharedPlayerShellInner() {
     const stop = usePlayerStore(s => s.stop);
     const expansion = usePlayerStore(s => s.expansion);
     const playerVisible = usePlayerStore(s => s.playerVisible);
+    const actionSheetVisible = useUIStore(s => s.actionSheetVisible);
+    const confirmModalVisible = useUIStore(s => s.confirmModalVisible);
 
     const displayTrack = pendingTrackPreview ?? currentTrack;
+    const hasBlockingOverlay = actionSheetVisible || confirmModalVisible;
     const shouldShowTidalLoading = Boolean(pendingTrackPreview)
         || (isLoading && (currentTrack?.source === 'tidal' || currentTrack?.source === 'tidal_stream'));
     const [isTrackSwitching, setIsTrackSwitching] = useState(false);
@@ -419,7 +423,7 @@ function SharedPlayerShellInner() {
         });
     }, [playPress]);
 
-    if (!displayTrack) return null;
+    if (!displayTrack || hasBlockingOverlay) return null;
 
     return (
         <GestureDetector gesture={panGesture}>

@@ -46,6 +46,39 @@ class AudioEngineClass {
         buffered: 0,
     };
 
+    private resolveNotificationTrack(track: Track | null): Track | null {
+        if (!track?.id) {
+            return track;
+        }
+
+        try {
+            const { usePlayerStore } = require('../stores/playerStore');
+            const playerState = usePlayerStore.getState();
+            const queueTrack = playerState.queue.find((item: Track) => item.id === track.id);
+            if (queueTrack) {
+                return queueTrack;
+            }
+
+            if (playerState.currentTrack?.id === track.id) {
+                return playerState.currentTrack;
+            }
+        } catch {
+            // Fall back to the engine track if the store is unavailable.
+        }
+
+        try {
+            const { useLibraryStore } = require('../stores/libraryStore');
+            const libraryTrack = useLibraryStore.getState().tracks.get(track.id);
+            if (libraryTrack) {
+                return libraryTrack;
+            }
+        } catch {
+            // Fall back to the engine track if the library store is unavailable.
+        }
+
+        return track;
+    }
+
     /**
      * Initialize audio engine with callbacks
      */
@@ -114,6 +147,7 @@ class AudioEngineClass {
             this.currentState.buffered = progress.buffered * 1000;
             this.currentState.currentTrack = activeTrack;
             this.currentState.queueIndex = activeIndex;
+            void TrackPlayerService.updateNowPlayingTrackMetadata(this.resolveNotificationTrack(activeTrack));
 
             this.callbacks.onStateChange?.(this.currentState);
             this.callbacks.onTrackChange?.(activeTrack);
@@ -176,6 +210,7 @@ class AudioEngineClass {
                     this.currentState.queueIndex = index ?? -1;
                     this.currentState.duration = normalized.duration;
                     this.currentState.position = 0;
+                    void TrackPlayerService.updateNowPlayingTrackMetadata(this.resolveNotificationTrack(normalized));
                 } else {
                     const [activeTrack, activeIndex] = await Promise.all([
                         TrackPlayerService.getCurrentTrack(),
@@ -184,6 +219,7 @@ class AudioEngineClass {
                     this.currentState.currentTrack = activeTrack;
                     this.currentState.queueIndex = activeIndex;
                     this.currentState.duration = activeTrack?.duration || 0;
+                    void TrackPlayerService.updateNowPlayingTrackMetadata(this.resolveNotificationTrack(activeTrack));
                 }
 
                 this.callbacks.onTrackChange?.(this.currentState.currentTrack);

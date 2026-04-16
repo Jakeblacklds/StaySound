@@ -16,7 +16,7 @@ import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useS
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const HEADER_HEIGHT = 300;
-const ARTWORK_SIZE = 200;
+const ARTWORK_SIZE = 224;
 const HERO_TOP_OFFSET = 56;
 const BACK_BUTTON_TOP_OFFSET = 10;
 const CONTENT_TOP_GAP = 24;
@@ -94,6 +94,12 @@ export default function AlbumDetailScreen() {
                 {/* Album Info */}
                 <View style={styles.albumInfo}>
                     <Text
+                        variant="labelMedium"
+                        style={[styles.albumKicker, { color: albumColors.isDark ? 'rgba(255,255,255,0.56)' : 'rgba(0,0,0,0.44)' }]}
+                    >
+                        ALBUM
+                    </Text>
+                    <Text
                         variant="headlineMedium"
                         style={[styles.albumTitle, { color: albumColors.text }]}
                         numberOfLines={2}
@@ -102,13 +108,13 @@ export default function AlbumDetailScreen() {
                     </Text>
                     <Text
                         variant="titleMedium"
-                        style={{ color: albumColors.primary, marginBottom: 4 }}
+                        style={[styles.albumArtist, { color: albumColors.primary }]}
                     >
                         {album.artist}
                     </Text>
                     <Text
                         variant="bodySmall"
-                        style={{ color: albumColors.isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)' }}
+                        style={[styles.albumMeta, { color: albumColors.isDark ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.56)' }]}
                     >
                         {tracks.length} songs • {formatDuration(totalDuration)}
                     </Text>
@@ -155,7 +161,7 @@ export default function AlbumDetailScreen() {
             </Animated.View>
 
             {/* Artwork */}
-            <Animated.View style={[styles.artworkContainer, { paddingTop: insets.top + HERO_TOP_OFFSET }, artworkStyle]}>
+            <Animated.View style={[styles.artworkContainer, { paddingTop: insets.top + HERO_TOP_OFFSET, paddingHorizontal: 24 }, artworkStyle]}>
                 <View style={[styles.artwork, { backgroundColor: theme.colors.surfaceVariant }]}>
                     {album.artwork ? (
                         <Image source={{ uri: album.artwork }} style={styles.artworkImage} />
@@ -212,13 +218,13 @@ const styles = StyleSheet.create({
         position: 'absolute',
         left: 0,
         right: 0,
-        alignItems: 'center',
+        alignItems: 'flex-start',
         zIndex: 10,
     },
     artwork: {
         width: ARTWORK_SIZE,
         height: ARTWORK_SIZE,
-        borderRadius: 12,
+        borderRadius: 26,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
@@ -246,20 +252,31 @@ const styles = StyleSheet.create({
     },
     headerContent: {
         paddingHorizontal: 24,
-        paddingTop: 16,
+        paddingTop: 18,
     },
     albumInfo: {
-        alignItems: 'center',
-        marginBottom: 24,
+        alignItems: 'flex-start',
+        marginBottom: 26,
+    },
+    albumKicker: {
+        letterSpacing: 1.4,
+        marginBottom: 8,
     },
     albumTitle: {
         fontWeight: 'bold',
-        textAlign: 'center',
-        marginBottom: 4,
+        textAlign: 'left',
+        marginBottom: 6,
+        letterSpacing: -0.9,
+    },
+    albumArtist: {
+        marginBottom: 6,
+    },
+    albumMeta: {
+        marginTop: 2,
     },
     trackListTitle: {
-        letterSpacing: 1,
-        marginBottom: 8,
-        marginLeft: 8,
+        letterSpacing: 1.2,
+        marginBottom: 10,
+        marginLeft: 0,
     },
 });

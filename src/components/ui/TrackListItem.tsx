@@ -16,7 +16,7 @@ import { formatDuration } from '@/src/services';
 import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { Track } from '@/src/types';
 import { Image } from 'expo-image';
-import React, { useEffect, useMemo } from 'react';
+import React, { ReactNode, useEffect, useMemo } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, { Easing, cancelAnimation, useAnimatedProps, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { CustomIcon, IconName } from './CustomIcon';
@@ -38,6 +38,8 @@ interface TrackListItemProps {
     optionsIconColor?: string;
     optionsBusy?: boolean;
     optionsLabel?: string;
+    optionsDisabled?: boolean;
+    optionsAccessory?: ReactNode;
 }
 
 function LibraryTrackListItemInner({
@@ -54,6 +56,8 @@ function LibraryTrackListItemInner({
     optionsIconColor,
     optionsBusy = false,
     optionsLabel,
+    optionsDisabled = false,
+    optionsAccessory,
 }: TrackListItemProps) {
     const { theme } = useTheme();
     const performanceProfile = usePerformanceProfile();
@@ -202,7 +206,11 @@ function LibraryTrackListItemInner({
                             style={[{ marginLeft: 6, opacity: 0.9 }, animatedFavoriteStyle]}
                         />
                     ) : null}
-                    {onOptionsPress ? (
+                    {optionsAccessory ? (
+                        <View style={styles.customOptionsWrap}>
+                            {optionsAccessory}
+                        </View>
+                    ) : onOptionsPress || optionsIcon ? (
                         <View
                             style={[
                                 styles.queueBtnWrap,
@@ -210,19 +218,21 @@ function LibraryTrackListItemInner({
                                     backgroundColor: optionsBusy
                                         ? `${theme.colors.primary}${theme.id.startsWith('material3') ? '26' : '20'}`
                                         : 'transparent',
-                                    opacity: optionsBusy ? 1 : 0.92,
+                                    opacity: optionsDisabled ? 0.88 : (optionsBusy ? 1 : 0.92),
                                 },
                             ]}
                         >
                             <Pressable
                                 hitSlop={12}
                                 android_ripple={{ color: theme.colors.primary + '15', borderless: true }}
+                                disabled={optionsDisabled || !onOptionsPress}
                                 style={[
                                     styles.queueBtn,
                                     optionsLabel ? styles.queueBtnWithLabel : null,
                                 ]}
                                 onPress={(event) => {
                                     event.stopPropagation();
+                                    if (optionsDisabled || !onOptionsPress) return;
                                     onOptionsPress(track);
                                 }}
                             >
@@ -279,6 +289,8 @@ function DefaultTrackListItemInner({
     optionsIconColor,
     optionsBusy = false,
     optionsLabel,
+    optionsDisabled = false,
+    optionsAccessory,
 }: TrackListItemProps) {
     const { theme } = useTheme();
     const performanceProfile = usePerformanceProfile();
@@ -387,7 +399,7 @@ function DefaultTrackListItemInner({
         backgroundColor: optionsBusy
             ? `${aC.primary.value}${isMaterial3 ? '26' : '20'}`
             : 'transparent',
-        opacity: optionsBusy ? 1 : 0.92,
+        opacity: optionsDisabled ? 0.88 : (optionsBusy ? 1 : 0.92),
     }));
     const animatedOptionsLabelStyle = useAnimatedStyle(() => ({
         color: optionsBusy
@@ -488,17 +500,23 @@ function DefaultTrackListItemInner({
                             style={{ marginLeft: 6, opacity: 0.9 }}
                         />
                     )}
-                    {onOptionsPress ? (
+                    {optionsAccessory ? (
+                        <View style={styles.customOptionsWrap}>
+                            {optionsAccessory}
+                        </View>
+                    ) : onOptionsPress || optionsIcon ? (
                         <Animated.View style={[styles.queueBtnWrap, animatedOptionsButtonStyle]}>
                             <Pressable
                                 hitSlop={12}
                                 android_ripple={{ color: theme.colors.primary + '15', borderless: true }}
+                                disabled={optionsDisabled || !onOptionsPress}
                                 style={[
                                     styles.queueBtn,
                                     optionsLabel ? styles.queueBtnWithLabel : null,
                                 ]}
                                 onPress={(event) => {
                                     event.stopPropagation();
+                                    if (optionsDisabled || !onOptionsPress) return;
                                     onOptionsPress(track);
                                 }}
                             >
@@ -557,7 +575,9 @@ function arePropsEqual(prev: TrackListItemProps, next: TrackListItemProps): bool
         prev.optionsIcon === next.optionsIcon &&
         prev.optionsIconColor === next.optionsIconColor &&
         prev.optionsBusy === next.optionsBusy &&
-        prev.optionsLabel === next.optionsLabel
+        prev.optionsLabel === next.optionsLabel &&
+        prev.optionsDisabled === next.optionsDisabled &&
+        prev.optionsAccessory === next.optionsAccessory
     );
 }
 
@@ -628,6 +648,11 @@ const styles = StyleSheet.create({
     queueBtnWrap: {
         marginLeft: 8,
         borderRadius: 99,
+    },
+    customOptionsWrap: {
+        marginLeft: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     queueBtnWithLabel: {
         paddingHorizontal: 8,

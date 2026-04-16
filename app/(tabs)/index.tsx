@@ -1,4 +1,4 @@
-﻿import { AlbumCard, CustomIcon, EmptyState } from '@/src/components/ui';
+import { AlbumCard, CustomIcon, EmptyState } from '@/src/components/ui';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n, type TranslationKey } from '@/src/i18n';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
@@ -83,9 +83,9 @@ const TrackCard = React.memo(({
   const imageCachePolicy = performanceProfile.imageCachePolicyList;
 
   const cardBgStyle = useMemo(() => ({
-    backgroundColor: theme.colors.surface,
-    borderColor: theme.colors.outline + '26',
-  }), [theme.colors.outline, theme.colors.surface]);
+    backgroundColor: 'transparent',
+    borderColor: 'transparent',
+  }), []);
 
   const artBgStyle = useMemo(() => ({
     backgroundColor: theme.colors.surfaceVariant
@@ -193,7 +193,8 @@ const HeroCarouselCard = React.memo(({
   const performanceProfile = usePerformanceProfile();
   const imageCachePolicy = performanceProfile.imageCachePolicyList;
   const artworkHeight = Math.min(width - 6, 332);
-  const cardHeight = artworkHeight + 132;
+  const INFO_SECTION_HEIGHT = 118;
+  const cardHeight = artworkHeight + INFO_SECTION_HEIGHT + 14;
   const albumLabel = track.album && track.album !== 'Unknown Album' ? track.album : track.artist;
   const animatedStyle = useAnimatedStyle(() => {
     const inputRange = [
@@ -246,7 +247,7 @@ const HeroCarouselCard = React.memo(({
             {track.artwork ? (
               <Image
                 source={{ uri: track.artwork || track.artworkThumb }}
-                style={StyleSheet.absoluteFill}
+                style={[StyleSheet.absoluteFill, { borderRadius: 28 }]}
                 contentFit="cover"
                 recyclingKey={`hero-carousel-${track.id}`}
                 cachePolicy={imageCachePolicy}
@@ -259,20 +260,35 @@ const HeroCarouselCard = React.memo(({
             <LinearGradient
               colors={['transparent', 'rgba(0,0,0,0.10)', 'rgba(0,0,0,0.34)']}
               locations={[0, 0.62, 1]}
-              style={styles.heroCarouselArtworkFade}
+              style={[styles.heroCarouselArtworkFade, { borderRadius: 28 }]}
             />
           </View>
 
-          <View style={styles.heroCarouselInfo}>
-            <Text variant="headlineSmall" style={[styles.heroCarouselTitle, { color: theme.colors.onBackground }]}>
+          <View style={[styles.heroCarouselInfo, { height: INFO_SECTION_HEIGHT }]}>
+            <Text
+              variant="headlineSmall"
+              numberOfLines={2}
+              ellipsizeMode="tail"
+              style={[styles.heroCarouselTitle, { color: theme.colors.onBackground }]}
+            >
               {track.title}
             </Text>
-            <Text variant="bodyMedium" style={[styles.heroCarouselArtist, { color: theme.colors.onSurfaceVariant }]}>
+            <Text
+              variant="bodyMedium"
+              numberOfLines={1}
+              ellipsizeMode="tail"
+              style={[styles.heroCarouselArtist, { color: theme.colors.onSurfaceVariant }]}
+            >
               {track.artist}
             </Text>
             <View style={styles.heroCarouselMetaRow}>
               <CustomIcon name="Album" size={12} color={theme.colors.onSurfaceVariant} />
-              <Text variant="bodySmall" style={[styles.heroCarouselMetaText, { color: theme.colors.onSurfaceVariant }]}>
+              <Text
+                variant="bodySmall"
+                numberOfLines={1}
+                ellipsizeMode="tail"
+                style={[styles.heroCarouselMetaText, { color: theme.colors.onSurfaceVariant }]}
+              >
                 {albumLabel}
               </Text>
             </View>
@@ -569,7 +585,7 @@ export default function HomeScreen() {
             <View style={styles.albumGrid}>
               {recentlyAddedAlbums.map((album) => (
                 <View key={album.id} style={styles.albumWrapper}>
-                  <AlbumCard album={album} size="medium" onPress={handleAlbumPress} />
+                  <AlbumCard album={album} size="medium" presentation="stacked" onPress={handleAlbumPress} />
                 </View>
               ))}
             </View>
@@ -604,24 +620,23 @@ function hashSimple(str: string | number): number {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingBottom: 140 },
-  heroCard: { marginHorizontal: 16, marginTop: 12, marginBottom: 20 },
-  header: { paddingHorizontal: 2, paddingTop: 22, marginBottom: 22 },
+  heroCard: { marginHorizontal: 16, marginTop: 8, marginBottom: 28 },
+  header: { paddingHorizontal: 2, paddingTop: 18, marginBottom: 26 },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   profileArea: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  avatarContainer: { width: 56, height: 56, borderRadius: 18, borderWidth: 1, overflow: 'hidden', marginRight: 14 },
+  avatarContainer: { width: 52, height: 52, borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginRight: 14 },
   avatar: { width: '100%', height: '100%' },
   avatarPlaceholder: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
   headerTextContainer: { flex: 1 },
-  greetingText: { ...typeScale.caption, marginBottom: 0, opacity: 0.8 },
-  appTitle: { ...typeScale.screenTitle },
-  settingsBtn: { width: 44, height: 44, borderRadius: 14, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  heroPicksSection: { marginBottom: 18, marginHorizontal: -16 },
+  greetingText: { ...typeScale.caption, marginBottom: 3, opacity: 0.72, textTransform: 'uppercase', letterSpacing: 0.8 },
+  appTitle: { ...typeScale.screenTitle, letterSpacing: -0.8 },
+  settingsBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
+  heroPicksSection: { marginBottom: 10, marginHorizontal: -16 },
   heroCarouselList: { paddingLeft: HERO_CAROUSEL_EDGE_PADDING, paddingRight: HERO_CAROUSEL_EDGE_PADDING },
   heroCarouselItemSpacing: { marginRight: HERO_CAROUSEL_GAP },
   heroCarouselCard: {
     borderRadius: 28,
     borderWidth: 0,
-    overflow: 'hidden',
   },
   heroCarouselPressable: {
     flex: 1,
@@ -638,8 +653,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   heroCarouselArtworkFade: { ...StyleSheet.absoluteFillObject },
-  heroCarouselInfo: { marginTop: 14, paddingHorizontal: 2, minHeight: 112 },
-  heroCarouselTitle: { ...typeScale.screenTitle, lineHeight: 32, fontWeight: '700' },
+  heroCarouselInfo: { marginTop: 14, paddingHorizontal: 2, overflow: 'hidden' },
+  heroCarouselTitle: { ...typeScale.screenTitle, lineHeight: 30, fontWeight: '700', letterSpacing: -0.8 },
   heroCarouselArtist: { marginTop: 6, lineHeight: 22 },
   heroCarouselMetaRow: {
     flexDirection: 'row',
@@ -660,20 +675,20 @@ const styles = StyleSheet.create({
     borderRadius: 999,
     backgroundColor: '#FFFFFF',
   },
-  sectionBlock: { marginHorizontal: 16, marginBottom: 28 },
+  sectionBlock: { marginHorizontal: 16, marginBottom: 34 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 0, marginBottom: 14 },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center' },
   sectionIcon: { marginRight: 8 },
-  sectionTitle: { ...typeScale.title, letterSpacing: -0.2, fontWeight: '700' },
+  sectionTitle: { ...typeScale.title, letterSpacing: -0.35, fontWeight: '700' },
   horizontalList: { paddingLeft: 0, paddingRight: 0, marginBottom: 2 },
   listSeparator: { width: 14 },
-  trackCard: { width: TRACK_CARD_WIDTH, borderRadius: 16, overflow: 'hidden', padding: 8, borderWidth: 1 },
+  trackCard: { width: TRACK_CARD_WIDTH, borderRadius: 0, overflow: 'visible', padding: 0, borderWidth: 0 },
   pressedCard: { opacity: 0.8, transform: [{ scale: 0.96 }] },
-  trackCardArt: { width: TRACK_CARD_WIDTH - 16, height: TRACK_CARD_WIDTH - 16, borderRadius: 12, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
-  trackCardTitle: { ...typeScale.bodyStrong, paddingHorizontal: 2 },
-  trackCardSubtitle: { paddingHorizontal: 2 },
-  albumGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 6, marginBottom: 4 },
-  albumWrapper: { width: '50%', padding: 8, marginBottom: 10 },
+  trackCardArt: { width: TRACK_CARD_WIDTH, height: TRACK_CARD_WIDTH, borderRadius: 22, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
+  trackCardTitle: { ...typeScale.bodyStrong, paddingHorizontal: 1, letterSpacing: -0.2 },
+  trackCardSubtitle: { paddingHorizontal: 1, opacity: 0.84 },
+  albumGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 2, marginBottom: 4 },
+  albumWrapper: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
   emptyContainer: { marginTop: 20, height: 300, paddingHorizontal: 20 },
   bottomSpacer: { height: 40 },
 });

@@ -2,6 +2,7 @@
 export { default as Album } from "./Album";
 export { default as Artista } from "./Artista";
 export { default as Cancion } from "./Canci\u00f3n";
+export { default as Checkmark } from "./Checkmark";
 export { default as Cola } from "./Cola";
 export { default as Descargar } from "./Descargar";
 export { default as Heart } from "./Heart";

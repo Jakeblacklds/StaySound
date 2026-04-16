@@ -17,7 +17,7 @@ import Animated, { FadeIn, FadeInDown, FadeInRight, interpolate, useAnimatedScro
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const HEADER_HEIGHT = 300;
-const AVATAR_SIZE = 188;
+const AVATAR_SIZE = 220;
 const HERO_TOP_OFFSET = 56;
 const BACK_BUTTON_TOP_OFFSET = 10;
 const CONTENT_TOP_GAP = 24;
@@ -91,16 +91,21 @@ export default function ArtistDetailScreen() {
         <View style={[styles.container, { backgroundColor: artistColors.background }]}>
             <StatusBar barStyle={artistColors.isDark ? 'light-content' : 'dark-content'} />
 
-            {/* Gradient Background */}
+            {artworkUri ? (
+                <Animated.View style={[StyleSheet.absoluteFill, headerStyle]}>
+                    <Image source={{ uri: artworkUri }} style={styles.heroBackdrop} blurRadius={28} />
+                </Animated.View>
+            ) : null}
+
             <Animated.View style={[StyleSheet.absoluteFill, headerStyle]}>
                 <LinearGradient
-                    colors={[artistColors.primary + '40', artistColors.background]}
+                    colors={['rgba(0,0,0,0)', artistColors.primary + '2A', artistColors.background]}
                     style={StyleSheet.absoluteFill}
                 />
             </Animated.View>
 
             {/* Artist Avatar */}
-            <Animated.View style={[styles.avatarContainer, { paddingTop: insets.top + HERO_TOP_OFFSET }, avatarStyle]}>
+            <Animated.View style={[styles.avatarContainer, { paddingTop: insets.top + HERO_TOP_OFFSET, paddingHorizontal: 24 }, avatarStyle]}>
                 <View style={[styles.avatar, { backgroundColor: theme.colors.surfaceVariant }]}>
                     {artworkUri ? (
                         <Image source={{ uri: artworkUri }} style={styles.avatarImage} />
@@ -134,6 +139,12 @@ export default function ArtistDetailScreen() {
                 {/* Artist Info */}
                 <Animated.View entering={FadeIn.delay(200)} style={styles.artistInfo}>
                     <Text
+                        variant="labelMedium"
+                        style={[styles.artistKicker, { color: artistColors.isDark ? 'rgba(255,255,255,0.58)' : 'rgba(0,0,0,0.46)' }]}
+                    >
+                        ARTISTA
+                    </Text>
+                    <Text
                         variant="headlineLarge"
                         style={[styles.artistName, { color: artistColors.text }]}
                     >
@@ -141,7 +152,7 @@ export default function ArtistDetailScreen() {
                     </Text>
                     <Text
                         variant="bodyMedium"
-                        style={{ color: artistColors.isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.6)', marginTop: 4 }}
+                        style={[styles.artistMeta, { color: artistColors.isDark ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.56)' }]}
                     >
                         {tracks.length} songs • {albums.length} albums
                     </Text>
@@ -202,6 +213,7 @@ export default function ArtistDetailScreen() {
                                     <AlbumCard
                                         album={album}
                                         size="medium"
+                                        presentation="stacked"
                                         onPress={handleAlbumPress}
                                     />
                                 </Animated.View>
@@ -222,17 +234,22 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
+    heroBackdrop: {
+        ...StyleSheet.absoluteFillObject,
+        width: '100%',
+        height: HEADER_HEIGHT + 140,
+    },
     avatarContainer: {
         position: 'absolute',
         left: 0,
         right: 0,
-        alignItems: 'center',
+        alignItems: 'flex-start',
         zIndex: 10,
     },
     avatar: {
         width: AVATAR_SIZE,
         height: AVATAR_SIZE,
-        borderRadius: AVATAR_SIZE / 2,
+        borderRadius: 30,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
@@ -259,37 +276,41 @@ const styles = StyleSheet.create({
         paddingBottom: 120,
     },
     artistInfo: {
-        alignItems: 'center',
+        alignItems: 'flex-start',
         paddingHorizontal: 24,
-        marginBottom: 24,
+        marginBottom: 28,
+    },
+    artistKicker: {
+        letterSpacing: 1.4,
+        marginBottom: 8,
     },
     artistName: {
         fontWeight: 'bold',
-        textAlign: 'center',
+        textAlign: 'left',
+        letterSpacing: -1.1,
+    },
+    artistMeta: {
+        marginTop: 8,
     },
     section: {
-        marginBottom: 32,
+        marginBottom: 36,
     },
     sectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
         paddingHorizontal: 24,
-        marginBottom: 12,
+        marginBottom: 14,
     },
     sectionTitle: {
         fontWeight: 'bold',
+        letterSpacing: -0.3,
     },
     albumsScroll: {
-        paddingHorizontal: 20,
-        gap: 12,
+        paddingHorizontal: 24,
+        gap: 10,
     },
     albumWrapper: {
-        width: 160,
-    },
-    aboutCard: {
-        marginHorizontal: 24,
-        padding: 20,
-        borderRadius: 16,
+        width: 148,
     },
 });

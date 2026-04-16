@@ -1,9 +1,8 @@
-import { CustomIcon, EmptyState, Skeleton } from '@/src/components/ui';
+import { CustomIcon, DownloadAnimatedButton, EmptyState, Skeleton } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
 import { FileSystemStorage } from '@/src/services/storage';
 import {
     createTidalStreamTrack,
-    extractAlbumsFromTracks,
     getTidalAlbumDetail,
     getTidalArtistInfo,
     getTidalMirrorAvailability,
@@ -11,6 +10,7 @@ import {
     getTidalTrackRecommendations,
     isValidAudioFile,
     searchTidal,
+    searchTidalAlbums,
     searchTidalArtists,
     searchTidalPlaylists,
     TIDAL_API_BASES,
@@ -297,6 +297,7 @@ export default function TidalScreen() {
     const [artists, setArtists] = useState<TidalArtist[]>([]);
     const [artistArtworkOverrides, setArtistArtworkOverrides] = useState<Map<number, string>>(new Map());
     const [playlists, setPlaylists] = useState<TidalPlaylist[]>([]);
+    const [albums, setAlbums] = useState<TidalAlbum[]>([]);
     const [isLoading, setIsLoading] = useState(false);
     const [hasResolvedSearch, setHasResolvedSearch] = useState(false);
     const [error, setError] = useState<string | null>(null);
@@ -358,6 +359,12 @@ export default function TidalScreen() {
     };
 
     const artistArtworkAttempted = useRef<Set<number>>(new Set());
+    const pendingSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const activeTabRef = useRef<TidalTab>('all');
+
+    useEffect(() => {
+        activeTabRef.current = activeTab;
+    }, [activeTab]);
 
     const {
         downloads,
@@ -385,6 +392,15 @@ export default function TidalScreen() {
     const triggerSearch = useCallback((nextQuery: string, tab: TidalTab = 'all') => {
         const trimmed = nextQuery.trim();
 
+        if (pendingSearchTimeoutRef.current) {
+            clearTimeout(pendingSearchTimeoutRef.current);
+            pendingSearchTimeoutRef.current = null;
+        }
+
+        if (trimmed === committedQuery.trim() && hasResolvedSearch && tab === activeTab) {
+            return;
+        }
+
         setActiveTab(tab);
         setCommittedQuery(trimmed);
         setSearchRunId(prev => prev + 1);
@@ -400,10 +416,14 @@ export default function TidalScreen() {
                 return nextRecent;
             });
         }
-    }, []);
+    }, [activeTab, committedQuery, hasResolvedSearch]);
 
     useEffect(() => {
         if (!query.trim()) {
+            if (pendingSearchTimeoutRef.current) {
+                clearTimeout(pendingSearchTimeoutRef.current);
+                pendingSearchTimeoutRef.current = null;
+            }
             setCommittedQuery('');
             setSearchRunId(prev => prev + 1);
             setHasResolvedSearch(false);
@@ -412,16 +432,21 @@ export default function TidalScreen() {
             return;
         }
 
-        const timeout = setTimeout(() => {
-            triggerSearch(query);
+        pendingSearchTimeoutRef.current = setTimeout(() => {
+            triggerSearch(query, activeTabRef.current);
         }, SEARCH_COMMIT_DELAY_MS);
 
-        return () => clearTimeout(timeout);
+        return () => {
+            if (pendingSearchTimeoutRef.current) {
+                clearTimeout(pendingSearchTimeoutRef.current);
+                pendingSearchTimeoutRef.current = null;
+            }
+        };
     }, [query, triggerSearch]);
 
     const handleSubmitSearch = useCallback(() => {
         Keyboard.dismiss();
-        triggerSearch(query);
+        triggerSearch(query, activeTabRef.current);
     }, [query, triggerSearch]);
 
     useEffect(() => {
@@ -429,6 +454,7 @@ export default function TidalScreen() {
         if (!currentQuery) {
             setTracks([]);
             setArtists([]);
+            setAlbums([]);
             setArtistArtworkOverrides(new Map());
             artistArtworkAttempted.current.clear();
             setHasResolvedSearch(false);
@@ -444,12 +470,14 @@ export default function TidalScreen() {
         Promise.all([
             searchTidal(currentQuery),
             searchTidalArtists(currentQuery),
+            searchTidalAlbums(currentQuery),
             searchTidalPlaylists(currentQuery),
         ])
-            .then(([nextTracks, nextArtists, nextPlaylists]) => {
+            .then(([nextTracks, nextArtists, nextAlbums, nextPlaylists]) => {
                 if (cancelled) return;
                 setTracks(nextTracks);
                 setArtists(nextArtists);
+                setAlbums(nextAlbums);
                 setPlaylists(nextPlaylists);
                 setArtistArtworkOverrides(new Map());
                 artistArtworkAttempted.current.clear();
@@ -458,6 +486,7 @@ export default function TidalScreen() {
                 if (cancelled) return;
                 setTracks([]);
                 setArtists([]);
+                setAlbums([]);
                 setPlaylists([]);
                 const message = searchError instanceof Error ? searchError.message : 'No se pudo consultar Tidal';
                 setError(message);
@@ -473,8 +502,6 @@ export default function TidalScreen() {
             cancelled = true;
         };
     }, [committedQuery, searchRunId]);
-
-    const albums = useMemo(() => extractAlbumsFromTracks(tracks), [tracks]);
 
     const handleTidalPlay = useCallback(async (track: TidalTrack) => {
         setPendingTrackPreview({
@@ -628,14 +655,27 @@ export default function TidalScreen() {
         }
     }, []);
 
+    const hasQuery = query.length > 0;
+    const hasCommittedQuery = committedQuery.trim().length > 0;
+
+    const visibleArtistsForArtwork = useMemo(() => {
+        if (hasCommittedQuery) {
+            return artists.slice(0, activeTab === 'all' ? 6 : artists.length);
+        }
+
+        return recommendedArtists;
+    }, [activeTab, artists, hasCommittedQuery, recommendedArtists]);
+
     // Fetches artist artwork in background without slowing down search results
     useEffect(() => {
-        const artistsToResolve = [...artists, ...recommendedArtists];
+        const artistsToResolve = visibleArtistsForArtwork.filter(
+            artist => !artistArtworkOverrides.has(artist.id),
+        );
         if (artistsToResolve.length === 0) return;
         artistsToResolve.forEach(artist => {
             void resolveArtistArtwork(artist);
         });
-    }, [artists, recommendedArtists, resolveArtistArtwork]);
+    }, [artistArtworkOverrides, resolveArtistArtwork, visibleArtistsForArtwork]);
 
     const renderTrackRow = useCallback((track: TidalTrack) => {
         const state = downloads.get(track.id);
@@ -684,22 +724,16 @@ export default function TidalScreen() {
                     <Text style={[typeScale.bodySmall, { color: theme.colors.onSurfaceVariant, marginRight: 12 }]}>
                         {formatTrackDuration(track.durationMs)}
                     </Text>
-                    <Pressable 
-                        onPress={(e) => {
-                            e.stopPropagation();
-                            void handleTidalDownload(track);
-                        }}
-                    >
-                        {isDownloadingItem ? (
-                            <Text style={[typeScale.micro, { color: theme.colors.primary }]}>{progressLabel}</Text>
-                        ) : downloaded ? (
-                            <IconButton icon="check-circle" iconColor={theme.colors.primary} size={20} style={{ margin: 0 }} />
-                        ) : isError ? (
-                            <IconButton icon="alert-circle" iconColor={theme.colors.error} size={20} style={{ margin: 0 }} />
-                        ) : (
-                            <IconButton icon="download-outline" iconColor={theme.colors.onSurfaceVariant + '80'} size={20} style={{ margin: 0 }} />
-                        )}
-                    </Pressable>
+                    <DownloadAnimatedButton
+                        status={
+                            isDownloadingItem ? 'downloading' :
+                            downloaded ? 'done' :
+                            isError ? 'error' : 'idle'
+                        }
+                        progress={state?.progress ?? 0}
+                        size={22}
+                        onPress={() => handleTidalDownload(track)}
+                    />
                 </View>
             </Pressable>
         );
@@ -708,8 +742,6 @@ export default function TidalScreen() {
     // MasonryGrid and MasonryGridCard are defined at module level above
 
     const [isFocused, setIsFocused] = useState(false);
-    const hasQuery = query.length > 0;
-    const hasCommittedQuery = committedQuery.trim().length > 0;
     const availableMirrors = useMemo(
         () => [
             'https://dabmusic.xyz/api',
@@ -805,7 +837,7 @@ export default function TidalScreen() {
 
     const applySuggestion = useCallback((nextQuery: string) => {
         setQuery(nextQuery);
-        triggerSearch(nextQuery);
+        triggerSearch(nextQuery, activeTabRef.current);
     }, [triggerSearch]);
 
     const applyGenreSuggestion = useCallback((genre: { id: string; label: string; query: string }) => {
@@ -1127,7 +1159,7 @@ export default function TidalScreen() {
                                                             contentFit="cover"
                                                         />
                                                     ) : (
-                                                        <CustomIcon name="Artist" size={24} color={theme.colors.onSurfaceVariant + '80'} />
+                                                        <CustomIcon name="Artista" size={24} color={theme.colors.onSurfaceVariant + '80'} />
                                                     )}
                                                 </View>
                                                 <Text numberOfLines={1} style={[styles.artistCircleName, { color: theme.colors.onSurface }]}>{artist.name}</Text>
@@ -1145,12 +1177,12 @@ export default function TidalScreen() {
                 ) : (
                     <Animated.View key={`results-${committedQuery}-${searchRunId}`} entering={FadeInDown.duration(260)} exiting={FadeOut.duration(180)} style={styles.resultsContent}>
                         {(activeTab === 'all' || activeTab === 'artists') && artists.length > 0 ? (
-                            <Animated.View entering={FadeInDown.delay(100).duration(400)} style={styles.section}>
+                            <View style={styles.section}>
                                 <View style={styles.sectionHeader}>
                                     <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Artistas</Text>
                                 </View>
                                 {<MasonryGrid items={artists.slice(0, activeTab === 'all' ? 6 : artists.length)} type="artists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />}
-                            </Animated.View>
+                            </View>
                         ) : null}
 
                         {(activeTab === 'all' || activeTab === 'albums') && albums.length > 0 ? (
@@ -1475,12 +1507,12 @@ const styles = StyleSheet.create({
     },
     header: {
         marginHorizontal: 16,
-        marginTop: 10,
-        marginBottom: 12,
+        marginTop: 6,
+        marginBottom: 18,
         paddingHorizontal: 0,
-        paddingTop: 10,
-        paddingBottom: 10,
-        gap: 12,
+        paddingTop: 8,
+        paddingBottom: 4,
+        gap: 16,
         elevation: 0,
         overflow: 'hidden',
     },
@@ -1518,13 +1550,13 @@ const styles = StyleSheet.create({
     },
     headerTitle: {
         ...typeScale.screenTitle,
-        letterSpacing: -0.6,
+        letterSpacing: -1,
     },
     settingsButton: {
         margin: 0,
         width: 40,
         height: 40,
-        borderRadius: 14,
+        borderRadius: 12,
         zIndex: 5,
         elevation: 5,
     },
@@ -1535,7 +1567,7 @@ const styles = StyleSheet.create({
         borderRadius: 0,
         borderBottomWidth: 1,
         paddingHorizontal: 0,
-        paddingVertical: 0,
+        paddingVertical: 2,
         zIndex: 1,
     },
     searchbar: {
@@ -1546,16 +1578,16 @@ const styles = StyleSheet.create({
     searchInput: {
         ...typeScale.bodyStrong,
         paddingLeft: 0,
-        fontSize: 18,
-        lineHeight: 26,
-        letterSpacing: -0.2,
+        fontSize: 20,
+        lineHeight: 28,
+        letterSpacing: -0.35,
     },
     filterScroller: {
         paddingHorizontal: 16,
-        marginBottom: 18,
+        marginBottom: 22,
     },
     filterRow: {
-        gap: 10,
+        gap: 18,
         paddingRight: 16,
     },
     filterChip: {
@@ -1567,20 +1599,19 @@ const styles = StyleSheet.create({
         alignItems: 'center',
     },
     filterChipInner: {
-        alignItems: 'center',
+        alignItems: 'flex-start',
     },
     filterChipLabel: {
-        ...typeScale.caption,
+        ...typeScale.label,
         fontWeight: '700',
-        letterSpacing: 0.8,
-        textTransform: 'uppercase',
-        fontSize: 10,
+        letterSpacing: 0.3,
+        fontSize: 13,
     },
     filterChipUnderline: {
-        width: 4,
-        height: 4,
-        borderRadius: 2,
-        marginTop: 6,
+        width: 24,
+        height: 2,
+        borderRadius: 999,
+        marginTop: 8,
     },
     recentSection: {
         paddingHorizontal: 16,
@@ -1621,7 +1652,7 @@ const styles = StyleSheet.create({
     discoveryContainer: {
         paddingHorizontal: 16,
         paddingBottom: 24,
-        gap: 14,
+        gap: 26,
     },
     discoveryPanel: {
         borderRadius: 28,
@@ -1669,7 +1700,7 @@ const styles = StyleSheet.create({
         paddingBottom: 8,
     },
     section: {
-        marginBottom: 20,
+        marginBottom: 28,
         paddingHorizontal: 16,
     },
     sectionHeader: {
@@ -1680,6 +1711,7 @@ const styles = StyleSheet.create({
     },
     sectionTitle: {
         ...typeScale.title,
+        letterSpacing: -0.35,
     },
     trackRow: {
         borderRadius: 18,
@@ -1729,38 +1761,38 @@ const styles = StyleSheet.create({
         gap: 10,
     },
     sectionNoPadding: {
-        marginBottom: 20,
+        marginBottom: 28,
     },
     horizontalScroll: {
         paddingLeft: 0,
         paddingRight: 16,
-        gap: 12,
+        gap: 14,
         paddingBottom: 4,
     },
     artistCircleCard: {
-        alignItems: 'center',
-        width: 100,
-        gap: 8,
+        alignItems: 'flex-start',
+        width: 108,
+        gap: 10,
     },
     artistCircleImage: {
-        width: 80,
-        height: 80,
-        borderRadius: 40,
+        width: 92,
+        height: 112,
+        borderRadius: 24,
         backgroundColor: 'rgba(127,127,127,0.1)',
     },
     artistCircleName: {
         ...typeScale.label,
-        textAlign: 'center',
+        textAlign: 'left',
         fontWeight: '600',
     },
     trackCard: {
-        width: 140,
-        gap: 8,
+        width: 154,
+        gap: 10,
     },
     trackCardImage: {
-        width: 140,
-        height: 140,
-        borderRadius: 20,
+        width: 154,
+        height: 186,
+        borderRadius: 26,
         backgroundColor: 'rgba(127,127,127,0.1)',
     },
     trackCardContent: {
@@ -1768,31 +1800,35 @@ const styles = StyleSheet.create({
     },
     trackCardTitle: {
         ...typeScale.bodyStrong,
-        fontSize: 14,
+        fontSize: 15,
+        letterSpacing: -0.2,
     },
     trackCardArtist: {
         ...typeScale.caption,
         fontSize: 12,
+        opacity: 0.84,
     },
     genreGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
-        gap: 12,
+        gap: 10,
     },
     genreCard: {
-        width: '48%', // Approx 2 columns
-        height: 60,
-        borderRadius: 16,
+        width: '48%',
+        height: 74,
+        borderRadius: 24,
         borderWidth: 1,
-        justifyContent: 'center',
+        justifyContent: 'flex-end',
         paddingHorizontal: 16,
+        paddingBottom: 14,
         overflow: 'hidden',
         position: 'relative',
     },
     genreCardLabel: {
-        ...typeScale.bodyMedium,
-        fontSize: 13,
+        ...typeScale.body,
+        fontSize: 14,
         fontWeight: '600',
+        letterSpacing: -0.2,
     },
     genreCardDot: {
         display: 'none',

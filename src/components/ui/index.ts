@@ -12,3 +12,4 @@ export { PlaylistCard } from './PlaylistCard';
 export { ScanButton } from './ScanButton';
 export { Skeleton } from './Skeleton';
 export { TrackListItem as MemoizedTrackListItem, TrackListItem } from './TrackListItem';
+export { DownloadAnimatedButton } from './DownloadAnimatedButton';

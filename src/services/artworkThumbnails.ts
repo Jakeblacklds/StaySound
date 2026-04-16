@@ -4,6 +4,8 @@ import * as ImageManipulator from 'expo-image-manipulator';
 const ARTWORK_THUMB_DIR = `${FileSystem.cacheDirectory}artwork_thumbs/`;
 const THUMB_SIZE = 128;
 const THUMB_QUALITY = 0.72;
+const NOTIFICATION_SIZE = 512;
+const NOTIFICATION_QUALITY = 0.86;
 
 const inFlight = new Map<string, Promise<string | undefined>>();
 
@@ -17,6 +19,10 @@ function hashString(value: string): string {
 }
 
 function toSourceUri(artworkUri: string): string | null {
+    if (artworkUri.startsWith('http://') || artworkUri.startsWith('https://')) {
+        return artworkUri;
+    }
+
     if (artworkUri.startsWith('file://') || artworkUri.startsWith('content://')) {
         return artworkUri;
     }
@@ -35,7 +41,16 @@ async function ensureThumbDir(): Promise<void> {
     }
 }
 
-export async function getArtworkThumbUri(artworkUri?: string): Promise<string | undefined> {
+type ArtworkVariantOptions = {
+    size: number;
+    quality: number;
+    suffix: string;
+};
+
+async function getArtworkVariantUri(
+    artworkUri: string | undefined,
+    options: ArtworkVariantOptions
+): Promise<string | undefined> {
     if (!artworkUri) return undefined;
 
     const normalized = artworkUri.trim();
@@ -45,7 +60,7 @@ export async function getArtworkThumbUri(artworkUri?: string): Promise<string | 
     const sourceUri = toSourceUri(normalized);
     if (!sourceUri) return undefined;
 
-    const cacheKey = hashString(normalized);
+    const cacheKey = hashString(`${options.suffix}:${normalized}`);
     const targetUri = `${ARTWORK_THUMB_DIR}${cacheKey}.jpg`;
 
     const existing = await FileSystem.getInfoAsync(targetUri);
@@ -63,9 +78,9 @@ export async function getArtworkThumbUri(artworkUri?: string): Promise<string | 
 
             const result = await ImageManipulator.manipulateAsync(
                 sourceUri,
-                [{ resize: { width: THUMB_SIZE, height: THUMB_SIZE } }],
+                [{ resize: { width: options.size, height: options.size } }],
                 {
-                    compress: THUMB_QUALITY,
+                    compress: options.quality,
                     format: ImageManipulator.SaveFormat.JPEG,
                 }
             );
@@ -90,4 +105,20 @@ export async function getArtworkThumbUri(artworkUri?: string): Promise<string | 
 
     inFlight.set(cacheKey, task);
     return task;
+}
+
+export async function getArtworkThumbUri(artworkUri?: string): Promise<string | undefined> {
+    return getArtworkVariantUri(artworkUri, {
+        size: THUMB_SIZE,
+        quality: THUMB_QUALITY,
+        suffix: 'thumb',
+    });
+}
+
+export async function getArtworkNotificationUri(artworkUri?: string): Promise<string | undefined> {
+    return getArtworkVariantUri(artworkUri, {
+        size: NOTIFICATION_SIZE,
+        quality: NOTIFICATION_QUALITY,
+        suffix: 'notification',
+    });
 }

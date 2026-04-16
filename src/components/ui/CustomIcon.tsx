@@ -8,6 +8,7 @@ export type IconName =
     | 'Album'
     | 'Artista'
     | 'Cancion'
+    | 'Checkmark'
     | 'Cola'
     | 'Descargar'
     | 'Heart'
@@ -29,6 +30,7 @@ const iconMap: Record<IconName, React.ElementType> = {
     Album: Icons.Album,
     Artista: Icons.Artista,
     Cancion: Icons.Cancion,
+    Checkmark: Icons.Checkmark,
     Cola: Icons.Cola,
     Descargar: Icons.Descargar,
     Heart: Icons.Heart,
