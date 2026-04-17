@@ -456,6 +456,36 @@ export const playerStyles = StyleSheet.create({
         justifyContent: 'flex-end',
         minHeight: 64,
     },
+    lyricsVariantSwitcher: {
+        minWidth: 62,
+        height: 58,
+        borderRadius: 29,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 2,
+        paddingHorizontal: 10,
+    },
+    lyricsVariantSwitcherText: {
+        ...typeScale.micro,
+        letterSpacing: 0.45,
+    },
+    lyricsVariantSwitcherPlaceholder: {
+        width: 62,
+        height: 58,
+    },
+    lyricsVariantCaption: {
+        position: 'absolute',
+        left: 78,
+        right: 78,
+        alignItems: 'center',
+        zIndex: 118,
+    },
+    lyricsVariantCaptionText: {
+        ...typeScale.caption,
+        textAlign: 'center',
+        letterSpacing: 0.3,
+    },
     lyricsThemeOptionsIsland: {
         overflow: 'hidden',
         borderWidth: 1,

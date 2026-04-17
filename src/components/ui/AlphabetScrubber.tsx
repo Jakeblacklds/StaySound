@@ -16,6 +16,7 @@ import { LayoutChangeEvent, StyleSheet, Text, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Text as PaperText } from 'react-native-paper';
 import type { SharedValue } from 'react-native-reanimated';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import Animated, {
     Extrapolation,
     interpolate,
@@ -25,9 +26,12 @@ import Animated, {
     withSpring,
     withTiming,
 } from 'react-native-reanimated';
+import { MINI_HEIGHT, TAB_BAR_HEIGHT } from '@/src/components/player/playerLayout';
 
 const LETTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ#'.split('');
 const LETTER_COUNT = LETTERS.length;
+const MIN_SCRUBBER_BOTTOM_OFFSET = 142;
+const SCRUBBER_MINIPLAYER_GAP = 12;
 
 interface AlphabetScrubberProps {
     onLetterChange: (letter: string) => void;
@@ -73,6 +77,7 @@ function CursorHighlight({ activeIndex, isActive, containerHeight, color }: Curs
 // ─── Main component ───────────────────────────────────────────────────────────
 export function AlphabetScrubber({ onLetterChange, onScrubStateChange }: AlphabetScrubberProps) {
     const { theme } = useTheme();
+    const insets = useSafeAreaInsets();
 
     const containerHeight = useSharedValue(0);
     const isActive = useSharedValue(0);
@@ -81,6 +86,10 @@ export function AlphabetScrubber({ onLetterChange, onScrubStateChange }: Alphabe
 
     const [bubbleLetter, setBubbleLetter] = React.useState<string | null>(null);
     const lastHapticAt = React.useRef(0);
+    const bottomOffset = Math.max(
+        insets.bottom + TAB_BAR_HEIGHT + MINI_HEIGHT + SCRUBBER_MINIPLAYER_GAP,
+        MIN_SCRUBBER_BOTTOM_OFFSET,
+    );
 
     const emitLetterChange = useCallback((idx: number) => {
         const letter = LETTERS[idx];
@@ -176,7 +185,7 @@ export function AlphabetScrubber({ onLetterChange, onScrubStateChange }: Alphabe
     });
 
     return (
-        <View style={styles.wrapper}>
+        <View style={[styles.wrapper, { bottom: bottomOffset }]}>
             <GestureDetector gesture={gesture}>
                 <Animated.View
                     style={[
@@ -233,7 +242,6 @@ const styles = StyleSheet.create({
         position: 'absolute',
         right: 6,
         top: 0,
-        bottom: 142,
         width: 32,
         justifyContent: 'center',
         zIndex: 100,

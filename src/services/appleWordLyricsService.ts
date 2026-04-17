@@ -1,6 +1,15 @@
 import { DOMParser } from '@xmldom/xmldom';
 import type { KaraokeLyricsJSON, KaraokeWordRaw } from '../types/karaokeTypes';
 
+export type AppleWordLyricsOption = {
+    id: string;
+    label: string;
+    source: 'binimum' | 'kpoe';
+    payload: KaraokeLyricsJSON;
+    lyricsUrl?: string;
+    timingType?: string;
+};
+
 type LyricsApiSearchResult = {
     timing_type?: string;
     lyricsUrl?: string;
@@ -43,6 +52,7 @@ type KpoePayload = {
 
 class AppleWordLyricsService {
     private readonly CACHE_API_URL = 'https://lyrics-api.binimum.org/';
+    private readonly MAX_WORD_OPTIONS = 3;
     private readonly KPOE_SOURCE_ORDER = 'apple,lyricsplus,musixmatch,spotify,musixmatch-word';
     private readonly KPOE_SERVERS = [
         'https://lyricsplus.prjktla.workers.dev',
@@ -70,6 +80,16 @@ class AppleWordLyricsService {
         return (value ?? '')
             .replace(/\s*[\(\[].*?[\)\]]/g, '')
             .replace(/\s*-\s*(Remastered|Original Mix|Single Version|Edit|Mix|Radio|Official|Lyric|Video).*$/gi, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    private normalizeComparisonValue(value?: string | null): string {
+        return (value ?? '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/[^a-z0-9]+/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
     }
@@ -363,6 +383,45 @@ class AppleWordLyricsService {
         return numericParts[0] ?? null;
     }
 
+    private buildCandidateLabel(index: number, result?: LyricsApiSearchResult): string {
+        const title = this.cleanMetadata(result?.track_name);
+        const artist = this.cleanMetadata(result?.artist_name);
+        const parts = [title, artist].filter(Boolean);
+        if (parts.length > 0) {
+            return parts.join(' • ');
+        }
+        return `Opción ${index + 1}`;
+    }
+
+    private scoreSearchResult(
+        result: LyricsApiSearchResult,
+        title: string,
+        artist: string,
+        durationSec?: number,
+        isrc?: string,
+    ): number {
+        let score = 0;
+        const normalizedTitle = this.normalizeComparisonValue(title);
+        const normalizedArtist = this.normalizeComparisonValue(artist);
+        const resultTitle = this.normalizeComparisonValue(result.track_name);
+        const resultArtist = this.normalizeComparisonValue(result.artist_name);
+
+        if (result.lyricsUrl) score += 5;
+        if (!this.isLikelyUnsyncedTimingType(result.timing_type)) score += 20;
+        if (resultTitle && resultTitle === normalizedTitle) score += 18;
+        if (resultArtist && resultArtist === normalizedArtist) score += 14;
+        if (isrc && result.isrc && isrc.trim().toLowerCase() === result.isrc.trim().toLowerCase()) score += 30;
+
+        if (durationSec && result.duration) {
+            const delta = Math.abs(result.duration - durationSec);
+            if (delta <= 1.5) score += 12;
+            else if (delta <= 4) score += 8;
+            else if (delta <= 8) score += 4;
+        }
+
+        return score;
+    }
+
     private buildLyricsPayload(song: string, artist: string, lyrics: KaraokeWordRaw[], fallbackDurationSec?: number): KaraokeLyricsJSON | null {
         if (!lyrics.length) return null;
 
@@ -642,12 +701,12 @@ class AppleWordLyricsService {
         return null;
     }
 
-    async searchWordLyrics(title: string, artist: string, album?: string, durationSec?: number, isrc?: string): Promise<KaraokeLyricsJSON | null> {
+    async searchWordLyricsOptions(title: string, artist: string, album?: string, durationSec?: number, isrc?: string): Promise<AppleWordLyricsOption[]> {
         const cleanTitle = this.cleanMetadata(title);
         const cleanArtist = this.cleanMetadata(artist);
         const cleanAlbum = this.cleanMetadata(album);
 
-        if (!cleanTitle || !cleanArtist) return null;
+        if (!cleanTitle || !cleanArtist) return [];
 
         const searchResults = await this.fetchSearchResults(cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);
         if (searchResults.length > 0) {
@@ -663,38 +722,82 @@ class AppleWordLyricsService {
             console.log('[AppleWordLyrics] search candidates: 0', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
         }
 
-        const wordResult = searchResults.find(result => !!result.lyricsUrl && !this.isLikelyUnsyncedTimingType(result.timing_type));
+        const sortedCandidates = searchResults
+            .filter(result => !!result.lyricsUrl && !this.isLikelyUnsyncedTimingType(result.timing_type))
+            .map(result => ({
+                result,
+                score: this.scoreSearchResult(result, cleanTitle, cleanArtist, durationSec, isrc),
+            }))
+            .sort((left, right) => right.score - left.score)
+            .map(entry => entry.result);
 
-        if (wordResult?.lyricsUrl) {
+        const options: AppleWordLyricsOption[] = [];
+        const seenUrls = new Set<string>();
+
+        for (const result of sortedCandidates) {
+            if (!result.lyricsUrl || seenUrls.has(result.lyricsUrl)) continue;
+            seenUrls.add(result.lyricsUrl);
+
             console.log(
                 '[AppleWordLyrics] selected candidate:',
-                `timing=${wordResult.timing_type ?? 'unknown'}`,
-                `track=${wordResult.track_name ?? '?'}`,
-                `artist=${wordResult.artist_name ?? '?'}`,
-                `url=${wordResult.lyricsUrl}`
+                `timing=${result.timing_type ?? 'unknown'}`,
+                `track=${result.track_name ?? '?'}`,
+                `artist=${result.artist_name ?? '?'}`,
+                `url=${result.lyricsUrl}`
             );
-            const ttmlLyrics = await this.fetchTtmlLyrics(wordResult.lyricsUrl, title, artist, wordResult.duration ?? durationSec);
-            if (ttmlLyrics?.lyrics?.length) {
-                console.log('[AppleWordLyrics] TTML result:', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
-                return ttmlLyrics;
+
+            const ttmlLyrics = await this.fetchTtmlLyrics(result.lyricsUrl, title, artist, result.duration ?? durationSec);
+            if (!ttmlLyrics?.lyrics?.length) {
+                console.log('[AppleWordLyrics] selected candidate returned no parseable TTML');
+                continue;
             }
-            console.log('[AppleWordLyrics] selected candidate returned no parseable TTML');
+
+            const optionIndex = options.length;
+            options.push({
+                id: `binimum-${optionIndex + 1}`,
+                label: this.buildCandidateLabel(optionIndex, result),
+                source: 'binimum',
+                payload: ttmlLyrics,
+                lyricsUrl: result.lyricsUrl,
+                timingType: result.timing_type,
+            });
+
+            if (options.length >= this.MAX_WORD_OPTIONS) {
+                break;
+            }
+        }
+
+        if (options.length > 0) {
+            console.log('[AppleWordLyrics] TTML options ready:', options.length, cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
+            return options;
         }
 
         const kpoeLyrics = await this.fetchKpoeLyrics(cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);
         if (kpoeLyrics?.lyrics?.length) {
             console.log('[AppleWordLyrics] KPoe JSON result:', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
-            return {
-                ...kpoeLyrics,
-                meta: {
-                    ...kpoeLyrics.meta,
-                    song: title,
-                    artist,
+            return [
+                {
+                    id: 'kpoe-1',
+                    label: 'KPoe',
+                    source: 'kpoe',
+                    payload: {
+                        ...kpoeLyrics,
+                        meta: {
+                            ...kpoeLyrics.meta,
+                            song: title,
+                            artist,
+                        },
+                    },
                 },
-            };
+            ];
         }
 
-        return null;
+        return [];
+    }
+
+    async searchWordLyrics(title: string, artist: string, album?: string, durationSec?: number, isrc?: string): Promise<KaraokeLyricsJSON | null> {
+        const options = await this.searchWordLyricsOptions(title, artist, album, durationSec, isrc);
+        return options[0]?.payload ?? null;
     }
 }
 

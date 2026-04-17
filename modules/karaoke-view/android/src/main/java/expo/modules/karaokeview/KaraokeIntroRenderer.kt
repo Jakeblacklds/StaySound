@@ -1,10 +1,7 @@
 package expo.modules.karaokeview
 
-import android.graphics.Canvas
-import android.graphics.Color
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.Typeface
+import android.graphics.*
+import kotlin.math.cos
 import kotlin.math.sin
 
 internal data class KaraokeIntroState(
@@ -20,42 +17,31 @@ internal data class KaraokeIntroLayout(
     val density: Float,
 )
 
-internal class KaraokeIntroRenderer(density: Float) {
-    private val introCardPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-    private val introCardStrokePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.1f * density
-    }
-    private val introTitlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+internal class KaraokeIntroRenderer(private val density: Float) {
+    private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
-        textSize = 19f * density
+        textSize = 24f * density
     }
-    private val introSubtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
+    
+    private val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
-        textSize = 14f * density
+        textSize = 15f * density
     }
-    private val introCountdownPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
-        textAlign = Paint.Align.CENTER
-        textSize = 11.5f * density
-    }
-    private val introAuraBasePaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeWidth = 1.1f * density
-    }
-    private val introAuraTrailPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE
-        strokeCap = Paint.Cap.ROUND
-        strokeJoin = Paint.Join.ROUND
-        strokeWidth = 2.4f * density
-    }
-    private val introAuraOrbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+
+    private val activeTitlePaint = Paint(titlePaint)
+    private val activeSubtitlePaint = Paint(subtitlePaint)
+
+    private val radialGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         style = Paint.Style.FILL
     }
+
+    private val orbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        style = Paint.Style.FILL
+    }
+
+    private val wavePath = Path()
 
     fun draw(
         canvas: Canvas,
@@ -63,101 +49,180 @@ internal class KaraokeIntroRenderer(density: Float) {
         state: KaraokeIntroState,
         layout: KaraokeIntroLayout,
     ) {
-        if (state.firstLineStartMs < 700L) return
+        // Only show if there is a significant intro wait
+        if (state.firstLineStartMs < 800L) return
 
-        val introEndMs = (state.firstLineStartMs - 120L).coerceAtLeast(260L)
+        val introEndMs = (state.firstLineStartMs - 150L).coerceAtLeast(300L)
         if (currentTimeMs >= introEndMs) return
 
-        val title = if (state.title.isNotBlank()) state.title else "Preparando intro"
-        val subtitle = if (state.subtitle.isNotBlank()) state.subtitle else "La primera estrofa viene en breve"
+        val title = if (state.title.isNotBlank()) state.title else "Disfruta el intro"
+        val subtitle = if (state.subtitle.isNotBlank()) state.subtitle else "La música está por comenzar"
 
+        // Timing variables
         val progress = (currentTimeMs.toFloat() / state.firstLineStartMs.toFloat()).coerceIn(0f, 1f)
-        val reveal = smootherStep((currentTimeMs / 260f).coerceIn(0f, 1f))
-        val fadeOutStart = introEndMs * 0.78f
+        val reveal = smootherStep((currentTimeMs / 400f).coerceIn(0f, 1f))
+        val fadeOutStart = introEndMs * 0.82f
         val fadeOut = if (currentTimeMs <= fadeOutStart) {
             1f
         } else {
             1f - ((currentTimeMs - fadeOutStart) / (introEndMs - fadeOutStart)).coerceIn(0f, 1f)
         }
         val visibility = (reveal * fadeOut).coerceIn(0f, 1f)
-        if (visibility <= 0.02f) return
+        if (visibility <= 0.01f) return
 
+        val centerX = layout.width / 2f
+        val centerY = layout.height * 0.22f
         val density = layout.density
-        val cardWidth = layout.width * 0.78f
-        val cardHeight = 96f * density
-        val left = (layout.width - cardWidth) * 0.5f
-        val top = layout.height * 0.14f
-        val right = left + cardWidth
-        val bottom = top + cardHeight
-        val radius = 18f * density
-        val cardRect = RectF(left, top, right, bottom)
 
-        val cardAlpha = (156f * visibility).toInt().coerceIn(0, 196)
-        val strokeAlpha = (88f * visibility).toInt().coerceIn(0, 140)
-        introCardPaint.color = Color.argb(cardAlpha, 15, 17, 24)
-        introCardStrokePaint.color = Color.argb(strokeAlpha, 255, 255, 255)
-        canvas.drawRoundRect(cardRect, radius, radius, introCardPaint)
-        canvas.drawRoundRect(cardRect, radius, radius, introCardStrokePaint)
+        // Colors
+        val accentR = Color.red(state.activeColor)
+        val accentG = Color.green(state.activeColor)
+        val accentB = Color.blue(state.activeColor)
 
-        val titleY = top + 30f * density
-        val subtitleY = titleY + 20f * density
-        val centerX = cardRect.centerX()
-        introTitlePaint.color = Color.argb((236f * visibility).toInt().coerceIn(0, 255), 255, 255, 255)
-        introSubtitlePaint.color = Color.argb((170f * visibility).toInt().coerceIn(0, 255), 235, 239, 255)
-        introCountdownPaint.color = Color.argb((140f * visibility).toInt().coerceIn(0, 255), 206, 220, 255)
+        // 1. Draw Radial Background Aura (Replacing the "Box")
+        drawBackgroundAura(canvas, centerX, centerY, visibility, progress, currentTimeMs, accentR, accentG, accentB, density, layout)
 
-        canvas.drawText(ellipsizeCenter(title, 34), centerX, titleY, introTitlePaint)
-        canvas.drawText(ellipsizeCenter(subtitle, 44), centerX, subtitleY, introSubtitlePaint)
-        drawAura(
+        // 2. Setup text positions
+        val titleY = centerY - 2f * density
+        val subtitleY = centerY + 24f * density
+
+        // 3. Draw Base (Inactive) Text
+        titlePaint.color = Color.argb((80f * visibility).toInt(), 255, 255, 255)
+        subtitlePaint.color = Color.argb((60f * visibility).toInt(), 230, 230, 255)
+        
+        canvas.drawText(ellipsizeCenter(title, 32), centerX, titleY, titlePaint)
+        canvas.drawText(ellipsizeCenter(subtitle, 42), centerX, subtitleY, subtitlePaint)
+
+        // 4. Draw Liquid (Active) Text Reveal (Replacing the "Bar")
+        drawLiquidReveal(
             canvas = canvas,
-            cardRect = cardRect,
-            progress = smootherStep(progress),
+            centerX = centerX,
+            title = title,
+            subtitle = subtitle,
+            titleY = titleY,
+            subtitleY = subtitleY,
+            progress = progress,
             visibility = visibility,
             currentTimeMs = currentTimeMs,
             activeColor = state.activeColor,
             density = density,
+            layout = layout
         )
+
+        // 5. Orbital Particles (Replacing the "Count-down" feel)
+        drawOrbitalEnergy(canvas, centerX, centerY, progress, visibility, currentTimeMs, accentR, accentG, accentB, density)
     }
 
-    private fun drawAura(
+    private fun drawBackgroundAura(
         canvas: Canvas,
-        cardRect: RectF,
+        cx: Float,
+        cy: Float,
+        visibility: Float,
+        progress: Float,
+        currentTimeMs: Long,
+        r: Int, g: Int, b: Int,
+        density: Float,
+        layout: KaraokeIntroLayout
+    ) {
+        val pulse = (sin(currentTimeMs / 450f) + 1f) * 0.5f
+        val baseRadius = 140f * density * (0.9f + 0.1f * pulse + 0.2f * progress)
+        
+        // Define a radial gradient for a soft "glow" behavior
+        val colors = intArrayOf(
+            Color.argb((32f * visibility).toInt(), r, g, b),
+            Color.argb((8f * visibility).toInt(), r, g, b),
+            Color.TRANSPARENT
+        )
+        val radialShader = RadialGradient(cx, cy, baseRadius, colors, null, Shader.TileMode.CLAMP)
+        radialGlowPaint.shader = radialShader
+        
+        canvas.drawCircle(cx, cy, baseRadius, radialGlowPaint)
+    }
+
+    private fun drawLiquidReveal(
+        canvas: Canvas,
+        centerX: Float,
+        title: String,
+        subtitle: String,
+        titleY: Float,
+        subtitleY: Float,
         progress: Float,
         visibility: Float,
         currentTimeMs: Long,
         activeColor: Int,
         density: Float,
+        layout: KaraokeIntroLayout
     ) {
-        val auraPadding = 12f * density
-        val auraRect = RectF(
-            cardRect.left - auraPadding,
-            cardRect.top - auraPadding,
-            cardRect.right + auraPadding,
-            cardRect.bottom + auraPadding,
-        )
-        val auraRadius = 24f * density
-        val accentR = Color.red(activeColor)
-        val accentG = Color.green(activeColor)
-        val accentB = Color.blue(activeColor)
-
-        val pulse = (sin(currentTimeMs / 320f) + 1f) * 0.5f
-        val baseAlpha = ((30f + 15f * pulse) * visibility).toInt().coerceIn(0, 100)
-        introAuraBasePaint.color = Color.argb(baseAlpha, accentR, accentG, accentB)
-        canvas.drawRoundRect(auraRect, auraRadius, auraRadius, introAuraBasePaint)
-
         if (progress <= 0f) return
 
-        val revealAlpha = (180f * visibility).toInt().coerceIn(0, 255)
-        introAuraTrailPaint.color = Color.argb(revealAlpha, accentR, accentG, accentB)
-        val centerX = cardRect.centerX()
-        val expandWidth = (cardRect.width() * 0.5f) * progress
-        val growRect = RectF(centerX - expandWidth, cardRect.bottom + 4f * density, centerX + expandWidth, cardRect.bottom + 6f * density)
-        canvas.drawRoundRect(growRect, 2f * density, 2f * density, introAuraTrailPaint)
+        // Total vertical span of the intro text group
+        val totalTop = titleY - 30f * density
+        val totalBottom = subtitleY + 10f * density
+        val heightRange = totalBottom - totalTop
+        
+        // The liquid level rises from bottom to top
+        val fillLevelY = totalBottom - (heightRange * progress)
 
-        val corePulse = 0.85f + 0.15f * ((sin(currentTimeMs / 250f) + 1f) * 0.5f)
-        val orbRadius = 6f * corePulse * density
-        introAuraOrbPaint.color = Color.argb((255f * visibility * progress).toInt().coerceIn(0, 255), accentR, accentG, accentB)
-        canvas.drawCircle(cardRect.centerX(), cardRect.bottom + 5f * density, orbRadius, introAuraOrbPaint)
+        // Create the wave path
+        wavePath.reset()
+        wavePath.moveTo(-100f, layout.height.toFloat() + 100f) // Start below everything
+        wavePath.lineTo(layout.width.toFloat() + 100f, layout.height.toFloat() + 100f)
+        wavePath.lineTo(layout.width.toFloat() + 100f, fillLevelY)
+        
+        // Add animated wave at the surface
+        val waveAmplitude = 3f * density
+        val waveFrequency = 0.025f / density
+        val waveShift = currentTimeMs * 0.006f
+        
+        var x = layout.width.toFloat() + 100f
+        while (x > -100f) {
+            val y = fillLevelY + sin(x * waveFrequency + waveShift) * waveAmplitude
+            wavePath.lineTo(x, y)
+            x -= 4f * density
+        }
+        wavePath.close()
+
+        canvas.save()
+        canvas.clipPath(wavePath)
+
+        activeTitlePaint.color = Color.argb((255f * visibility).toInt(), 255, 255, 255)
+        activeSubtitlePaint.color = Color.argb((220f * visibility).toInt(), 235, 240, 255)
+        
+        canvas.drawText(ellipsizeCenter(title, 32), centerX, titleY, activeTitlePaint)
+        canvas.drawText(ellipsizeCenter(subtitle, 42), centerX, subtitleY, activeSubtitlePaint)
+
+        canvas.restore()
+    }
+
+    private fun drawOrbitalEnergy(
+        canvas: Canvas,
+        cx: Float,
+        cy: Float,
+        progress: Float,
+        visibility: Float,
+        currentTimeMs: Long,
+        r: Int, g: Int, b: Int,
+        density: Float
+    ) {
+        // Two orbs that orbit the center and converge as progress -> 1
+        val rotation = currentTimeMs * 0.003f
+        val orbitRadius = (120f * density) * (1f - progress).coerceAtLeast(0.1f)
+        
+        for (i in 0..1) {
+            val angle = rotation + i * Math.PI.toFloat()
+            val orbX = cx + cos(angle) * orbitRadius
+            val orbY = cy + sin(angle) * orbitRadius
+            
+            val orbSize = (4f + 2f * sin(currentTimeMs / 300f + i)) * density * visibility
+            
+            // Outer glow
+            orbPaint.color = Color.argb((100f * visibility * (1f - progress * 0.5f)).toInt(), r, g, b)
+            canvas.drawCircle(orbX, orbY, orbSize * 2.5f, orbPaint)
+            
+            // Core
+            orbPaint.color = Color.argb((255f * visibility).toInt(), 255, 255, 255)
+            canvas.drawCircle(orbX, orbY, orbSize, orbPaint)
+        }
     }
 
     private fun smootherStep(value: Float): Float {

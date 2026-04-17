@@ -616,7 +616,7 @@ export default function TidalScreen() {
     }, [cancelDownload, download, downloads]);
 
     const openArtist = useCallback((artist: TidalArtist) => {
-        router.push({
+        router.navigate({
             pathname: '/tidal-artist/[id]',
             params: { id: String(artist.id), name: artist.name },
         });

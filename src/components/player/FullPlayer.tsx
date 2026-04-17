@@ -5,10 +5,11 @@
  */
 
 import { useDynamicColorsWithOptions } from '@/src/hooks';
-import type { AlbumColors } from '@/src/services/colorExtractor';
-import { generateArtistId } from '@/src/services/metadataService';
 import { LyricsRepository } from '@/src/services';
+import type { AppleWordLyricsCandidate } from '@/src/services/lyricsRepository';
+import type { AlbumColors } from '@/src/services/colorExtractor';
 import { FileSystemStorage } from '@/src/services/storage';
+import { searchTidalArtists } from '@/src/services/tidalService';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { ensureColorContrast, mixHexColors, withAlpha } from '@/src/utils/colorContrast';
@@ -18,7 +19,7 @@ import { BlurView } from 'expo-blur';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { usePathname, useRouter } from 'expo-router';
 import { KaraokeView } from 'karaoke-view';
-import React, { useCallback, useState } from 'react';
+import React, { useCallback, useRef, useState } from 'react';
 import { BackHandler, Dimensions, Pressable, StyleSheet, View, processColor } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Button, IconButton, Text } from 'react-native-paper';
@@ -146,6 +147,15 @@ function getProtectedDynamicAccent(accentColor: string, fallbackColor: string) {
     }
 
     return mixPlayerHexColors(accentColor, fallbackColor, 0.42);
+}
+
+function normalizeArtistSearchValue(value?: string | null) {
+    return (value ?? '')
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
 }
 
 type PlayerQueueOverlayLayerProps = {
@@ -300,7 +310,8 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
         currentTrackId ? state.tracks.get(currentTrackId) ?? null : null
     );
     const [lyricsMode, setLyricsMode] = useState<'synced' | 'lrc'>('synced');
-    const [trackLyrics, setTrackLyrics] = useState<KaraokeLyricsJSON | null>(null);
+    const [trackLyricsOptions, setTrackLyricsOptions] = useState<AppleWordLyricsCandidate[]>([]);
+    const [selectedTrackLyricsOptionIndex, setSelectedTrackLyricsOptionIndex] = useState(0);
     const [lrcLyrics, setLrcLyrics] = useState<KaraokeLyricsJSON | null>(null);
     const [isLyricsLoading, setIsLyricsLoading] = useState(false);
     const [isDownloadingLrc, setIsDownloadingLrc] = useState(false);
@@ -325,7 +336,8 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
     const prevTrackIdRef = React.useRef<string | null>(null);
 
     const resetLyricsState = useCallback(() => {
-        setTrackLyrics(null);
+        setTrackLyricsOptions([]);
+        setSelectedTrackLyricsOptionIndex(0);
         setLrcLyrics(null);
         setLyricsMode('synced');
         setIsLyricsLoading(false);
@@ -576,7 +588,8 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
         }
 
         if (!songTitle || !artist) {
-            setTrackLyrics(null);
+            setTrackLyricsOptions([]);
+            setSelectedTrackLyricsOptionIndex(0);
             setLrcLyrics(null);
             setIsLyricsLoading(false);
             setIsDownloadingLrc(false);
@@ -602,15 +615,16 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                     setLyricsMode(prev => prev === 'synced' ? 'lrc' : prev);
                 }
 
-                const applePayload = await LyricsRepository.getAppleWordLyrics(songTitle, artist, album, durationSec, trackId, isrc);
+                const appleOptions = await LyricsRepository.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc);
                 if (lyricsRequestIdRef.current !== requestId) return;
 
-                const hasAppleWords = !!applePayload?.lyrics?.length;
+                const bestApplePayload = appleOptions[0]?.payload ?? null;
+                const hasAppleWords = appleOptions.length > 0;
                 console.log(
-                    `[LyricsDebug] apple result title="${songTitle}" artist="${artist}" hasWords=${hasAppleWords} count=${applePayload?.lyrics?.length ?? 0}`
+                    `[LyricsDebug] apple result title="${songTitle}" artist="${artist}" hasWords=${hasAppleWords} count=${bestApplePayload?.lyrics?.length ?? 0} options=${appleOptions.length}`
                 );
 
-                let payload = applePayload;
+                let payload: KaraokeLyricsJSON | null = bestApplePayload;
                 let hasWords = hasAppleWords;
 
                 if (!hasAppleWords) {
@@ -622,7 +636,8 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                 console.log(
                     `[LyricsDebug] synced result title="${songTitle}" artist="${artist}" hasWords=${hasWords} count=${payload?.lyrics?.length ?? 0}`
                 );
-                setTrackLyrics(hasWords ? (payload as KaraokeLyricsJSON) : null);
+                setTrackLyricsOptions(appleOptions);
+                setSelectedTrackLyricsOptionIndex(0);
 
                 if (hasWords) {
                     setLyricsMode('synced');
@@ -679,13 +694,14 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
         };
     }, [lyricsLookupTrack?.album, lyricsLookupTrack?.artist, lyricsLookupTrack?.duration, lyricsLookupTrack?.id, lyricsLookupTrack?.isrc, lyricsLookupTrack?.title, visible]);
 
-
-
-    const hasSyncedLyrics = !!trackLyrics?.lyrics?.length;
+    const selectedTrackLyrics = trackLyricsOptions[selectedTrackLyricsOptionIndex]?.payload ?? null;
+    const hasSyncedLyrics = trackLyricsOptions.length > 0 || !!selectedTrackLyrics?.lyrics?.length;
     const hasLrcLyrics = !!lrcLyrics?.lyrics?.length;
     const activeLyrics = lyricsMode === 'synced'
-        ? (trackLyrics ?? lrcLyrics)
-        : (lrcLyrics ?? trackLyrics);
+        ? (selectedTrackLyrics ?? lrcLyrics)
+        : (lrcLyrics ?? selectedTrackLyrics);
+    const hasMultipleSyncedLyricsOptions = trackLyricsOptions.length > 1;
+    const activeSyncedLyricsOption = trackLyricsOptions[selectedTrackLyricsOptionIndex] ?? null;
     const shouldShowDownloadLrc =
         hasResolvedLyricsAttempt &&
         !isLyricsLoading &&
@@ -733,11 +749,11 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
 
         try {
             const [appleResult] = await Promise.allSettled([
-                LyricsRepository.getAppleWordLyrics(title, artist, album, durationSec, trackId, isrc),
+                LyricsRepository.getAppleWordLyricsOptions(title, artist, album, durationSec, trackId, isrc),
             ]);
             if (prefetchRequestIdRef.current !== myRequestId) return;
 
-            const hasApple = appleResult.status === 'fulfilled' && !!appleResult.value?.lyrics?.length;
+            const hasApple = appleResult.status === 'fulfilled' && appleResult.value.length > 0;
             if (!hasApple) {
                 await LyricsRepository.getLyrics(title, artist).catch(() => {});
             }
@@ -874,7 +890,7 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
 
     React.useEffect(() => {
         console.log(
-            `[LyricsDebug] mode state mode=${lyricsMode} synced=${trackLyrics?.lyrics?.length ?? 0} lrc=${lrcLyrics?.lyrics?.length ?? 0}`
+            `[LyricsDebug] mode state mode=${lyricsMode} synced=${selectedTrackLyrics?.lyrics?.length ?? 0} lrc=${lrcLyrics?.lyrics?.length ?? 0} syncedOptions=${trackLyricsOptions.length}`
         );
         if (lyricsMode === 'synced' && !hasSyncedLyrics && hasLrcLyrics) {
             setLyricsMode('lrc');
@@ -884,7 +900,17 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
         if (lyricsMode === 'lrc' && !hasLrcLyrics && hasSyncedLyrics) {
             setLyricsMode('synced');
         }
-    }, [hasLrcLyrics, hasSyncedLyrics, lyricsMode]);
+    }, [hasLrcLyrics, hasSyncedLyrics, lyricsMode, lrcLyrics?.lyrics?.length, selectedTrackLyrics?.lyrics?.length, trackLyricsOptions.length]);
+
+    const handleCycleSyncedLyricsOption = useCallback(() => {
+        if (trackLyricsOptions.length <= 1) return;
+        setSelectedTrackLyricsOptionIndex(prev => {
+            const next = (prev + 1) % trackLyricsOptions.length;
+            return next;
+        });
+        setLyricsMode('synced');
+        lyricsTransitionProgress.value = 0;
+    }, [lyricsTransitionProgress, trackLyricsOptions.length]);
 
     if (!expanded) {
         return null;
@@ -958,7 +984,7 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                 <View style={styles.fullScreenLyricsHeader}>
                     <IconButton icon="close-circle" size={36} iconColor={lyricsTextColor} onPress={onClose} />
                     <View style={styles.lyricsModeContainer}>
-                        {trackLyrics && lrcLyrics && (
+                        {hasSyncedLyrics && lrcLyrics && (
                             <View style={[styles.lyricsModeSwitcher, { backgroundColor: modeSwitcherBackground }]}>
                                 <Pressable
                                     onPress={() => setLyricsMode('synced')}
@@ -1018,6 +1044,31 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                                 </AnimatedPressable>
                             </View>
 
+                            {hasMultipleSyncedLyricsOptions ? (
+                                <AnimatedPressable
+                                    onPress={handleCycleSyncedLyricsOption}
+                                    style={[
+                                        styles.lyricsVariantSwitcher,
+                                        {
+                                            backgroundColor: motionRailBackground,
+                                            borderColor: motionRailBorder,
+                                        },
+                                    ]}
+                                    pressedScale={0.96}
+                                >
+                                    <MaterialCommunityIcons
+                                        name="format-list-numbered"
+                                        size={19}
+                                        color={protectedAccentColor}
+                                    />
+                                    <Text style={[styles.lyricsVariantSwitcherText, { color: secondaryLyricsTextColor }]}>
+                                        {selectedTrackLyricsOptionIndex + 1}/{trackLyricsOptions.length}
+                                    </Text>
+                                </AnimatedPressable>
+                            ) : (
+                                <View style={styles.lyricsVariantSwitcherPlaceholder} />
+                            )}
+
                             <View style={styles.lyricsThemeIslandWrap}>
                                 <Animated.View
                                     pointerEvents={lyricsControlsExpanded ? 'auto' : 'none'}
@@ -1072,6 +1123,13 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                                 </AnimatedPressable>
                             </View>
                         </View>
+                        {hasMultipleSyncedLyricsOptions && lyricsMode === 'synced' && activeSyncedLyricsOption ? (
+                            <View style={[styles.lyricsVariantCaption, { bottom: Math.max(insets.bottom + 82, 88) }]}>
+                                <Text numberOfLines={1} style={[styles.lyricsVariantCaptionText, { color: secondaryLyricsTextColor }]}>
+                                    {activeSyncedLyricsOption.label}
+                                </Text>
+                            </View>
+                        ) : null}
                     </Animated.View>
                 ) : (
                     <View style={styles.lyricsFallbackState}>
@@ -1112,6 +1170,8 @@ export function FullPlayer() {
     const isVisible = usePlayerStore(state => state.playerVisible);
     const setPlayerVisible = usePlayerStore(state => state.setPlayerVisible);
     const setExpansion = usePlayerStore(state => state.setExpansion);
+    const artistNavigationInFlightRef = useRef(false);
+    const lastArtistRouteRef = useRef<string | null>(null);
 
     const playerVariant = usePlayerStore(state => state.playerVariant);
     const currentTrack = usePlayerStore(state => state.currentTrack);
@@ -1276,27 +1336,45 @@ export function FullPlayer() {
         }
     }, [lightweightMode, showLyrics]);
 
-    const handleArtistPress = useCallback(() => {
-        if (!currentTrack?.artist?.trim()) return;
+    const handleArtistPress = useCallback(async () => {
+        const artistName = currentTrack?.artist?.trim();
+        if (!artistName || artistNavigationInFlightRef.current) return;
 
-        const rawArtistId = currentTrack.artistId?.trim();
-        if ((currentTrack.source === 'tidal' || currentTrack.source === 'tidal_stream') && rawArtistId && /^\d+$/.test(rawArtistId)) {
-            router.push({
+        artistNavigationInFlightRef.current = true;
+        setPlayerVisible(false);
+
+        try {
+            let artistId = currentTrack?.artistId?.trim() || '';
+
+            if (!/^\d+$/.test(artistId)) {
+                const matches = await searchTidalArtists(artistName);
+                const normalizedArtistName = normalizeArtistSearchValue(artistName);
+                const bestMatch = matches.find(candidate =>
+                    normalizeArtistSearchValue(candidate.name) === normalizedArtistName
+                ) ?? matches[0];
+
+                artistId = bestMatch ? String(bestMatch.id) : '';
+            }
+
+            if (!artistId) return;
+
+            const targetRoute = `/tidal-artist/${artistId}`;
+            if (pathname === targetRoute || lastArtistRouteRef.current === targetRoute) {
+                return;
+            }
+
+            lastArtistRouteRef.current = targetRoute;
+            router.navigate({
                 pathname: '/tidal-artist/[id]',
-                params: { id: rawArtistId, name: currentTrack.artist },
+                params: { id: artistId, name: artistName },
             });
-            return;
+        } finally {
+            setTimeout(() => {
+                artistNavigationInFlightRef.current = false;
+                lastArtistRouteRef.current = null;
+            }, 500);
         }
-
-        const localArtistId = rawArtistId && !/^\d+$/.test(rawArtistId)
-            ? rawArtistId
-            : generateArtistId(currentTrack.artist);
-
-        router.push({
-            pathname: '/artist/[id]',
-            params: { id: localArtistId },
-        });
-    }, [currentTrack, router]);
+    }, [currentTrack?.artist, currentTrack?.artistId, pathname, router, setPlayerVisible]);
 
     const handleCloseQueue = useCallback(() => {
         setShowQueue(false);
