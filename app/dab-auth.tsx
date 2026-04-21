@@ -15,7 +15,7 @@ export default function DabAuthScreen() {
     const session = useDabAuthStore(state => state.session);
     const isLoggingIn = useDabAuthStore(state => state.isLoggingIn);
     const isRegistering = useDabAuthStore(state => state.isRegistering);
-    const login = useDabAuthStore(state => state.login);
+    const authenticate = useDabAuthStore(state => state.authenticate);
     const register = useDabAuthStore(state => state.register);
     const signOut = useDabAuthStore(state => state.signOut);
 
@@ -39,12 +39,12 @@ export default function DabAuthScreen() {
     const handleLogin = async () => {
         try {
             setLocalError(null);
-            await login(email, password);
+            await authenticate(email, password, username);
             if (rootNavigationState?.key) {
                 router.replace('/(tabs)/settings');
             }
         } catch (error) {
-            setLocalError(error instanceof Error ? error.message : 'No se pudo iniciar sesion en DAB.');
+            setLocalError(error instanceof Error ? error.message : 'No se pudo conectar la cuenta de DAB.');
         }
     };
 
@@ -136,7 +136,7 @@ export default function DabAuthScreen() {
                             loading={isLoggingIn}
                             disabled={isBusy || !email.trim() || !password.trim()}
                         >
-                            Entrar a DAB
+                            Entrar o crear cuenta
                         </Button>
                     ) : (
                         <Button
@@ -161,8 +161,10 @@ export default function DabAuthScreen() {
 
                     <HelperText type="info" visible={true}>
                         {session
-                            ? `Sesión activa: ${session.email}`
-                            : 'La cuenta se guarda solo en este dispositivo usando storage local.'}
+                            ? `Sesion activa: ${session.email}`
+                            : mode === 'login'
+                                ? 'Si la cuenta ya existe en DAB entra con ese correo. Si no existe, se crea automaticamente.'
+                                : 'La cuenta se guarda solo en este dispositivo usando storage local.'}
                     </HelperText>
                     <HelperText type="error" visible={!!localError}>
                         {localError || ' '}

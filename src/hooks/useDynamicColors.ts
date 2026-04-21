@@ -15,7 +15,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from 'react';
-import { useSharedValue, withTiming } from 'react-native-reanimated';
+import { Easing, useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors, getImageColors } from '../services/colorExtractor';
 import { useTheme } from '../theme/ThemeProvider';
 
@@ -74,7 +74,7 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
     }), [accent, background, onPrimary, onSurface, primary, secondary, text]);
 
     const animatePalette = React.useCallback((palette: AlbumColors) => {
-        const cfg = { duration: 600 };
+        const cfg = { duration: 1200, easing: Easing.out(Easing.cubic) };
         primary.value = withTiming(palette.primary, cfg);
         secondary.value = withTiming(palette.secondary, cfg);
         background.value = withTiming(palette.background, cfg);

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * PlayerStore - Zustand store for playback state
  *
  * Manages player state synced with Track Player for background playback
@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { AudioEngine } from '../services/audioEngine';
 import { extractMetadata, findArtworkInFolder, withTimeout } from '../services/fileScanner';
+import { isTrackPlayable } from '../services/trackPlayerService';
 import { FileSystemStorage } from '../services/storage';
 import { getPerformanceProfile } from '../theme/performanceProfile';
 import { RepeatMode, Track } from '../types/audio';
@@ -125,6 +126,41 @@ function createBoundedLinearPlaybackContext(tracks: Track[], focusIndex = 0): { 
     };
 }
 
+function sanitizePlayableQueue(tracks: Track[], preferredIndex = 0): {
+    queue: Track[];
+    queueIndex: number;
+    filteredCount: number;
+} {
+    if (tracks.length === 0) {
+        return { queue: [], queueIndex: -1, filteredCount: 0 };
+    }
+
+    const indexedTracks = tracks.map((track, index) => ({ track, index }));
+    const playableEntries = indexedTracks.filter(({ track }) => isTrackPlayable(track));
+    const filteredCount = indexedTracks.length - playableEntries.length;
+
+    if (playableEntries.length === 0) {
+        return { queue: [], queueIndex: -1, filteredCount };
+    }
+
+    const safePreferredIndex = Math.max(0, Math.min(preferredIndex, tracks.length - 1));
+    let nextQueueIndex = playableEntries.findIndex(entry => entry.index === safePreferredIndex);
+
+    if (nextQueueIndex < 0) {
+        nextQueueIndex = playableEntries.findIndex(entry => entry.index > safePreferredIndex);
+    }
+
+    if (nextQueueIndex < 0) {
+        nextQueueIndex = playableEntries.length - 1;
+    }
+
+    return {
+        queue: playableEntries.map(({ track }) => track),
+        queueIndex: nextQueueIndex,
+        filteredCount,
+    };
+}
+
 function shouldAcceptEngineTrackId(nextTrackId: string | undefined, currentQueue: Track[]): boolean {
     if (!nextTrackId) return true;
 
@@ -146,6 +182,181 @@ function shouldAcceptEngineTrackId(nextTrackId: string | undefined, currentQueue
     return true;
 }
 
+const UNKNOWN_TRACK_VALUES = new Set([
+    '',
+    'unknown',
+    'unknown title',
+    'unknown artist',
+    'unknown album',
+]);
+
+function normalizeTrackValue(value?: string | null): string {
+    return (value ?? '').trim().toLowerCase();
+}
+
+function hasMeaningfulTrackValue(value?: string | null): boolean {
+    const normalized = normalizeTrackValue(value);
+    return !!normalized && !UNKNOWN_TRACK_VALUES.has(normalized);
+}
+
+function getTrackConfidenceScore(track: Track | null | undefined): number {
+    if (!track) return 0;
+
+    let score = 0;
+    if (hasMeaningfulTrackValue(track.id)) score += 3;
+    if (hasMeaningfulTrackValue(track.uri)) score += 3;
+    if (hasMeaningfulTrackValue(track.title)) score += 2;
+    if (hasMeaningfulTrackValue(track.artist)) score += 2;
+    if (hasMeaningfulTrackValue(track.album)) score += 1;
+    if (hasMeaningfulTrackValue(track.artwork)) score += 1;
+
+    return score;
+}
+
+function shouldIgnoreEngineTrackDowngrade(
+    currentTrack: Track | null,
+    nextTrack: Track | null,
+    isPlaying: boolean
+): boolean {
+    if (!isPlaying || !currentTrack || !nextTrack) return false;
+    if (currentTrack.id && nextTrack.id && currentTrack.id === nextTrack.id) return false;
+
+    const currentScore = getTrackConfidenceScore(currentTrack);
+    const nextScore = getTrackConfidenceScore(nextTrack);
+    if (nextScore >= currentScore) return false;
+
+    const weakIdentity = !hasMeaningfulTrackValue(nextTrack.id)
+        || !hasMeaningfulTrackValue(nextTrack.title)
+        || !hasMeaningfulTrackValue(nextTrack.artist);
+
+    if (!weakIdentity) return false;
+
+    // Ignore transient/partial native payloads that would regress the UI.
+    return true;
+}
+
+function findBestQueueMatchIndex(storeQueue: Track[], nextTrack: Track): number {
+    if (storeQueue.length === 0) return -1;
+
+    const byId = hasMeaningfulTrackValue(nextTrack.id)
+        ? storeQueue
+            .map((track, index) => ({ track, index }))
+            .filter(entry => entry.track.id === nextTrack.id)
+        : [];
+
+    if (byId.length === 1) {
+        return byId[0].index;
+    }
+
+    const normalizedNextUri = normalizeTrackValue(nextTrack.uri);
+    const normalizedNextTitle = normalizeTrackValue(nextTrack.title);
+    const normalizedNextArtist = normalizeTrackValue(nextTrack.artist);
+
+    const pool = byId.length > 1 ? byId : storeQueue.map((track, index) => ({ track, index }));
+    let bestIndex = -1;
+    let bestScore = -1;
+
+    for (const entry of pool) {
+        let score = 0;
+
+        if (normalizedNextUri && normalizeTrackValue(entry.track.uri) === normalizedNextUri) score += 6;
+        if (normalizedNextTitle && normalizeTrackValue(entry.track.title) === normalizedNextTitle) score += 4;
+        if (normalizedNextArtist && normalizeTrackValue(entry.track.artist) === normalizedNextArtist) score += 4;
+
+        if (score > bestScore) {
+            bestScore = score;
+            bestIndex = entry.index;
+        }
+    }
+
+    return bestScore > 0 ? bestIndex : -1;
+}
+
+function normalizeComparableUri(uri?: string | null): string {
+    const value = (uri ?? '').trim().toLowerCase();
+    if (!value) return '';
+
+    if (value.startsWith('file://')) {
+        return value.replace(/^file:\/+/, '/');
+    }
+
+    return value;
+}
+
+function isLikelyLocalTrack(track: Track | null | undefined): boolean {
+    if (!track) return false;
+    if (track.source === 'local') return true;
+
+    const normalizedUri = normalizeComparableUri(track.uri);
+    return normalizedUri.startsWith('content://')
+        || normalizedUri.startsWith('/data/')
+        || normalizedUri.startsWith('/storage/')
+        || normalizedUri.startsWith('/mnt/')
+        || normalizedUri.startsWith('/');
+}
+
+function hasStableLocalTrackIdentity(track: Track | null | undefined): boolean {
+    if (!track) return false;
+    if (!isLikelyLocalTrack(track)) return true;
+
+    const normalizedUri = normalizeComparableUri(track.uri);
+    const hasStableUri = normalizedUri.startsWith('content://')
+        || normalizedUri.startsWith('/storage/')
+        || normalizedUri.startsWith('/mnt/')
+        || normalizedUri.startsWith('/data/')
+        || normalizedUri.startsWith('/');
+
+    const normalizedId = normalizeTrackValue(track.id);
+    const hasStableId = /^ms_\d+$/.test(normalizedId)
+        || /^track_[a-f0-9]+$/.test(normalizedId)
+        || /^tidal_/.test(normalizedId);
+
+    return hasStableUri || hasStableId;
+}
+
+function findBestLibraryTrackMatch(track: Track): Track | null {
+    const libraryTracks = useLibraryStore.getState().tracks;
+    if (libraryTracks.size === 0) return null;
+    if (!hasStableLocalTrackIdentity(track)) return null;
+
+    const idMatch = hasMeaningfulTrackValue(track.id) ? libraryTracks.get(track.id) : undefined;
+    if (idMatch) return idMatch;
+
+    const normalizedUri = normalizeComparableUri(track.uri);
+    if (normalizedUri) {
+        for (const candidate of libraryTracks.values()) {
+            if (normalizeComparableUri(candidate.uri) === normalizedUri) {
+                return candidate;
+            }
+        }
+    }
+
+    return null;
+}
+
+function preferMeaningfulString(primary?: string | null, fallback?: string | null): string {
+    return hasMeaningfulTrackValue(primary) ? String(primary) : String(fallback ?? '');
+}
+
+function mergeTrackWithCatalog(track: Track): Track {
+    const shouldResolveCatalog = isLikelyLocalTrack(track);
+    const catalogTrack = shouldResolveCatalog ? findBestLibraryTrackMatch(track) : null;
+    if (!catalogTrack) return track;
+
+    return {
+        ...track,
+        ...catalogTrack,
+        id: track.id || catalogTrack.id,
+        uri: track.uri || catalogTrack.uri,
+        title: preferMeaningfulString(track.title, catalogTrack.title),
+        artist: preferMeaningfulString(track.artist, catalogTrack.artist),
+        album: preferMeaningfulString(track.album, catalogTrack.album),
+        artwork: catalogTrack.artwork || track.artwork,
+        artworkThumb: catalogTrack.artworkThumb || track.artworkThumb,
+        duration: track.duration || catalogTrack.duration,
+    };
+}
+
 const artworkHydrationByAlbum = new Map<string, Promise<void>>();
 
 function getAlbumKey(track: Track): string {
@@ -157,21 +368,81 @@ function isSameAlbumTrack(a: Track, b: Track): boolean {
 }
 
 function mergeWithLibraryTrack(track: Track): Track {
-    const libraryTrack = useLibraryStore.getState().tracks.get(track.id);
-    if (!libraryTrack) return track;
+    return mergeTrackWithCatalog(track);
+}
 
-    return {
-        ...track,
-        ...libraryTrack,
-        id: track.id,
-        uri: track.uri || libraryTrack.uri,
-        artwork: libraryTrack.artwork || track.artwork,
-        artworkThumb: libraryTrack.artworkThumb || track.artworkThumb,
-    };
+// URI index for batch merges -- built once per call to avoid O(n^2) iteration.
+// For single-track lookups, findBestLibraryTrackMatch() is used directly (O(1) ID hit or O(n) URI scan).
+let _libraryUriIndex: Map<string, Track> | null = null;
+let _libraryUriIndexRevision = -1;
+
+function getOrBuildLibraryUriIndex(): Map<string, Track> {
+    const libraryState = useLibraryStore.getState();
+    const revision = (libraryState as any).catalogRevision ?? 0;
+    if (_libraryUriIndex && _libraryUriIndexRevision === revision) {
+        return _libraryUriIndex;
+    }
+    const index = new Map<string, Track>();
+    for (const t of libraryState.tracks.values()) {
+        const normalized = normalizeComparableUri(t.uri);
+        if (normalized) index.set(normalized, t);
+    }
+    _libraryUriIndex = index;
+    _libraryUriIndexRevision = revision;
+    return index;
 }
 
 function mergeQueueWithLibraryTracks(queue: Track[]): Track[] {
-    return queue.map(mergeWithLibraryTrack);
+    // Fast path: library is empty, nothing to merge
+    const libraryTracks = useLibraryStore.getState().tracks;
+    if (libraryTracks.size === 0) return queue;
+
+    // Pre-build URI index once for the entire batch (O(n) instead of O(n^2))
+    const uriIndex = getOrBuildLibraryUriIndex();
+
+    return queue.map(track => {
+        if (!isLikelyLocalTrack(track)) return track;
+
+        // 1. Fast ID lookup (O(1))
+        if (hasMeaningfulTrackValue(track.id)) {
+            const idMatch = libraryTracks.get(track.id);
+            if (idMatch) {
+                return {
+                    ...track,
+                    ...idMatch,
+                    id: track.id || idMatch.id,
+                    uri: track.uri || idMatch.uri,
+                    title: preferMeaningfulString(track.title, idMatch.title),
+                    artist: preferMeaningfulString(track.artist, idMatch.artist),
+                    album: preferMeaningfulString(track.album, idMatch.album),
+                    artwork: idMatch.artwork || track.artwork,
+                    artworkThumb: idMatch.artworkThumb || track.artworkThumb,
+                    duration: track.duration || idMatch.duration,
+                };
+            }
+        }
+
+        // 2. URI index lookup (O(1) with pre-built index)
+        if (!hasStableLocalTrackIdentity(track)) return track;
+        const normalizedUri = normalizeComparableUri(track.uri);
+        if (!normalizedUri) return track;
+
+        const uriMatch = uriIndex.get(normalizedUri);
+        if (!uriMatch) return track;
+
+        return {
+            ...track,
+            ...uriMatch,
+            id: track.id || uriMatch.id,
+            uri: track.uri || uriMatch.uri,
+            title: preferMeaningfulString(track.title, uriMatch.title),
+            artist: preferMeaningfulString(track.artist, uriMatch.artist),
+            album: preferMeaningfulString(track.album, uriMatch.album),
+            artwork: uriMatch.artwork || track.artwork,
+            artworkThumb: uriMatch.artworkThumb || track.artworkThumb,
+            duration: track.duration || uriMatch.duration,
+        };
+    });
 }
 
 function resolvePreferredArtworkForEngineMerge(nextTrack: Track, currentStoreTrack: Track): string | undefined {
@@ -364,17 +635,32 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
     play: async (track, queue) => {
         const effectiveTrack = mergeWithLibraryTrack(track);
-        const sourceQueue = queue && queue.length > 0
+        const rawSourceQueue = queue && queue.length > 0
             ? mergeQueueWithLibraryTracks(queue)
             : [effectiveTrack];
+        const playableQueue = sanitizePlayableQueue(
+            rawSourceQueue,
+            Math.max(0, rawSourceQueue.findIndex(t => t.id === effectiveTrack.id))
+        );
 
-        armExpectedEngineTrack(effectiveTrack.id);
-        void hydrateAlbumArtworkOnDemand(effectiveTrack);
+        if (playableQueue.filteredCount > 0) {
+            console.warn('[PlayerStore] Filtered non-playable tracks from playback queue:', playableQueue.filteredCount);
+        }
+
+        if (playableQueue.queue.length === 0) {
+            console.warn('[PlayerStore] Refusing to play: queue does not contain native-playable tracks');
+            set({ isPlaying: false, isLoading: false, pendingTrackPreview: null });
+            return;
+        }
+
+        const sourceQueue = playableQueue.queue;
+        const effectivePlayableTrack = sourceQueue[playableQueue.queueIndex] ?? sourceQueue[0];
+
+        armExpectedEngineTrack(effectivePlayableTrack.id);
+        void hydrateAlbumArtworkOnDemand(effectivePlayableTrack);
         get().positionShared.value = 0;
 
-        const selectedIndex = sourceQueue.length > 0
-            ? Math.max(0, sourceQueue.findIndex(t => t.id === effectiveTrack.id))
-            : 0;
+        const selectedIndex = Math.max(0, playableQueue.queueIndex);
         const boundedLinearContext = createBoundedLinearPlaybackContext(sourceQueue, selectedIndex);
         linearPlaybackContextQueue = boundedLinearContext.queue;
         console.log('[PlayerStore] Playback context prepared:', {
@@ -391,15 +677,15 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
         // Single atomic update to avoid multiple subscription flushes.
         set(state => {
-            const filteredRecent = state.recentlyPlayed.filter(t => t.id !== effectiveTrack.id);
-            const nextRecent = [effectiveTrack, ...filteredRecent].slice(0, MAX_RECENT);
+            const filteredRecent = state.recentlyPlayed.filter(t => t.id !== effectivePlayableTrack.id);
+            const nextRecent = [effectivePlayableTrack, ...filteredRecent].slice(0, MAX_RECENT);
 
             return {
-                currentTrack: effectiveTrack,
+                currentTrack: effectivePlayableTrack,
                 pendingTrackPreview: null,
                 isPlaying: true,
                 isLoading: true,
-                duration: effectiveTrack.duration,
+                duration: effectivePlayableTrack.duration,
                 position: 0,
                 queue: nextQueue,
                 queueIndex,
@@ -415,7 +701,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                 set({ isPlaying: false, isLoading: false, pendingTrackPreview: null });
             });
         } else {
-            AudioEngine.play(effectiveTrack).catch(error => {
+            AudioEngine.play(effectivePlayableTrack).catch(error => {
                 console.error('[PlayerStore] play error:', error);
                 set({ isPlaying: false, isLoading: false, pendingTrackPreview: null });
             });
@@ -462,13 +748,27 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     },
 
     setQueue: (tracks, startIndex = 0) => {
-        const boundedLinearContext = createBoundedLinearPlaybackContext(tracks, startIndex);
+        const sanitized = sanitizePlayableQueue(tracks, startIndex);
+        if (sanitized.filteredCount > 0) {
+            console.warn('[PlayerStore] Filtered non-playable tracks from queue state:', sanitized.filteredCount);
+        }
+        const boundedLinearContext = createBoundedLinearPlaybackContext(sanitized.queue, sanitized.queueIndex);
         linearPlaybackContextQueue = boundedLinearContext.queue;
         const { queue, queueIndex } = normalizeQueueWindow(linearPlaybackContextQueue, boundedLinearContext.focusIndex);
         set({ queue, queueIndex });
     },
 
     addToQueue: (track) => {
+        if (!isTrackPlayable(track)) {
+            console.warn('[PlayerStore] Ignored non-playable track added to queue:', {
+                id: track.id,
+                uri: track.uri,
+                source: track.source,
+                cloudOnly: track.cloudOnly,
+            });
+            return;
+        }
+
         const { queue, queueIndex } = get();
         const maxLinearContextItems = getLinearContextLimit();
         linearPlaybackContextQueue = [...linearPlaybackContextQueue, track];
@@ -523,7 +823,13 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     },
 
     replaceQueue: async (tracks, startIndex = 0) => {
-        if (tracks.length === 0) {
+        const sanitized = sanitizePlayableQueue(tracks, startIndex);
+
+        if (sanitized.filteredCount > 0) {
+            console.warn('[PlayerStore] Filtered non-playable tracks while replacing queue:', sanitized.filteredCount);
+        }
+
+        if (sanitized.queue.length === 0) {
             linearPlaybackContextQueue = [];
             set({ queue: [], queueIndex: -1 });
             return;
@@ -531,7 +837,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
         const wasPlaying = get().isPlaying;
         const previousPosition = get().position;
-        const boundedLinearContext = createBoundedLinearPlaybackContext(tracks, startIndex);
+        const boundedLinearContext = createBoundedLinearPlaybackContext(sanitized.queue, sanitized.queueIndex);
         linearPlaybackContextQueue = boundedLinearContext.queue;
         const { queue: normalizedQueue, queueIndex: safeIndex } = normalizeQueueWindow(linearPlaybackContextQueue, boundedLinearContext.focusIndex);
         const targetTrack = normalizedQueue[safeIndex];
@@ -782,20 +1088,28 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                 if (currentStoreTrack && !nextTrack && currentState.isPlaying) {
                     // Ignore empty track report while playing (likely a brief transition state in native)
                 } else {
+                    if (nextTrack && isLikelyLocalTrack(nextTrack) && !hasStableLocalTrackIdentity(nextTrack) && currentState.isPlaying) {
+                        // Ignore local payloads without stable identity; they often carry stale/default metadata.
+                        return;
+                    }
+
                     // Preserve enriched metadata (like lazily loaded artwork) when
                     // native engine reports the same track id without those fields.
                     if (currentStoreTrack && nextTrack && currentStoreTrack.id === nextTrack.id) {
+                        const catalogResolvedTrack = mergeTrackWithCatalog(nextTrack);
                         const mergedTrack = {
-                            ...nextTrack,
-                            title: nextTrack.title || currentStoreTrack.title,
-                            artist: nextTrack.artist || currentStoreTrack.artist,
-                            album: nextTrack.album || currentStoreTrack.album,
-                            artwork: resolvePreferredArtworkForEngineMerge(nextTrack, currentStoreTrack),
-                            duration: nextTrack.duration || currentStoreTrack.duration,
-                            format: nextTrack.format || currentStoreTrack.format,
-                            sampleRate: nextTrack.sampleRate || currentStoreTrack.sampleRate,
-                            bitDepth: nextTrack.bitDepth || currentStoreTrack.bitDepth,
-                            quality: nextTrack.quality || currentStoreTrack.quality,
+                            ...catalogResolvedTrack,
+                            id: preferMeaningfulString(catalogResolvedTrack.id, currentStoreTrack.id),
+                            uri: preferMeaningfulString(catalogResolvedTrack.uri, currentStoreTrack.uri),
+                            title: preferMeaningfulString(catalogResolvedTrack.title, currentStoreTrack.title),
+                            artist: preferMeaningfulString(catalogResolvedTrack.artist, currentStoreTrack.artist),
+                            album: preferMeaningfulString(catalogResolvedTrack.album, currentStoreTrack.album),
+                            artwork: resolvePreferredArtworkForEngineMerge(catalogResolvedTrack, currentStoreTrack),
+                            duration: catalogResolvedTrack.duration || currentStoreTrack.duration,
+                            format: catalogResolvedTrack.format || currentStoreTrack.format,
+                            sampleRate: catalogResolvedTrack.sampleRate || currentStoreTrack.sampleRate,
+                            bitDepth: catalogResolvedTrack.bitDepth || currentStoreTrack.bitDepth,
+                            quality: catalogResolvedTrack.quality || currentStoreTrack.quality,
                         };
 
                         const hasChanges = Object.keys(mergedTrack).some(
@@ -807,6 +1121,10 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                         }
                         nextState.pendingTrackPreview = null;
                     } else if (nextTrack && (!currentStoreTrack || currentStoreTrack.id !== nextTrack.id)) {
+                        const catalogResolvedTrack = mergeTrackWithCatalog(nextTrack);
+                        if (shouldIgnoreEngineTrackDowngrade(currentStoreTrack, catalogResolvedTrack, currentState.isPlaying)) {
+                            return;
+                        }
                         // Engine auto-advanced to a different track (end of song, auto-next, or
                         // the user's manual skip was acknowledged by the engine).
                         // Always accept this Ã¢â‚¬â€ we've already validated it via shouldAcceptEngineTrackId.
@@ -817,22 +1135,41 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
                         nextState.pendingTrackPreview = null;
                         // Prefer the richer track object from our store queue (has artwork, metadata, etc.)
                         const storeQueue = currentState.queue;
-                        const storeQueueIndex = storeQueue.findIndex(t => t.id === nextTrack.id);
+                        const storeQueueIndex = findBestQueueMatchIndex(storeQueue, catalogResolvedTrack);
                         if (storeQueueIndex >= 0) {
-                            // Track found in our visual queue Ã¢â‚¬â€ use store's richer version
+                            // Track found in our visual queue - use store's richer version.
+                            // CRITICAL FIX: storeQueue[storeQueueIndex] is spread LAST so its
+                            // rich metadata (title, artist, album, artwork) wins over the engine's
+                            // sparse payload. On low-end devices the PlaybackActiveTrackChanged
+                            // event fires with partial data AFTER the store already has the correct
+                            // track set -- never regress rich metadata with engine's sparse data.
                             const richTrack = {
-                                ...nextTrack,
+                                ...catalogResolvedTrack,
                                 ...storeQueue[storeQueueIndex],
+                                uri: storeQueue[storeQueueIndex].uri || catalogResolvedTrack.uri,
+                                id: storeQueue[storeQueueIndex].id || catalogResolvedTrack.id,
                             };
                             nextState.currentTrack = richTrack;
                             nextState.queueIndex = storeQueueIndex;
                         } else {
+                            const localUnresolvedMismatch =
+                                !!currentStoreTrack
+                                && currentState.isPlaying
+                                && isLikelyLocalTrack(currentStoreTrack)
+                                && isLikelyLocalTrack(catalogResolvedTrack)
+                                && !hasStableLocalTrackIdentity(catalogResolvedTrack);
+
+                            if (localUnresolvedMismatch) {
+                                // Ignore transient local payloads that cannot be mapped to queue/catalog safely.
+                                return;
+                            }
+
                             // Track NOT in visual queue (auto-advance from native order after reorder).
                             // Accept the engine's track as-is; next manual navigation will re-sync.
-                            nextState.currentTrack = nextTrack;
+                            nextState.currentTrack = catalogResolvedTrack;
                         }
                     } else if (nextTrack) {
-                        nextState.currentTrack = nextTrack;
+                        nextState.currentTrack = mergeTrackWithCatalog(nextTrack);
                     }
                 }
             }

@@ -38,6 +38,8 @@ export function ProgressSlider({
 }: ProgressSliderProps) {
     const { theme } = useTheme();
     const positionShared = usePlayerStore(s => s.positionShared);
+    // JS-thread position used only for accessibility — never .value during render
+    const positionMs = usePlayerStore(s => s.position);
 
     // Use provided colors or fall back to theme
     const colors = {
@@ -120,6 +122,22 @@ export function ProgressSlider({
                     onLayout={(e) => {
                         sliderWidth.value = e.nativeEvent.layout.width;
                     }}
+                    accessible={true}
+                    accessibilityRole="adjustable"
+                    accessibilityLabel="Progreso de la canción"
+                    accessibilityValue={{
+                        min: 0,
+                        max: 100,
+                        now: Math.round((duration > 0 ? positionMs / duration : 0) * 100),
+                        text: `${formatDuration(positionMs)} de ${formatDuration(duration)}`,
+                    }}
+                    onAccessibilityAction={(event) => {
+                        if (event.nativeEvent.actionName === 'increment') {
+                            onSeek(Math.min(duration, positionMs + 10000));
+                        } else if (event.nativeEvent.actionName === 'decrement') {
+                            onSeek(Math.max(0, positionMs - 10000));
+                        }
+                    }}
                 >
                     {/* Track background */}
                     <View style={[styles.track, { backgroundColor: colors.inactive }]}>
@@ -140,6 +158,7 @@ export function ProgressSlider({
                             { backgroundColor: colors.active },
                             thumbStyle,
                         ]}
+                        importantForAccessibility="no"
                     />
                 </View>
             </GestureDetector>

@@ -1,4 +1,4 @@
-﻿/**
+/**
  * TrackListItem - Single track row for lists
  * 
  * Performance notes:
@@ -103,15 +103,12 @@ function LibraryTrackListItemInner({
     const animatedTitleStyle = useAnimatedStyle(() => ({
         color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurface.value,
     }));
+    const animatedPlayingIconStyle = useAnimatedStyle(() => ({
+        opacity: isPlaying ? 1 : 0.72,
+    }));
     const animatedSubtleStyle = useAnimatedStyle(() => ({
         color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurface.value,
-        opacity: isPlaying ? 0.85 : 0.65,
-    }));
-    const animatedPlayingIconStyle = useAnimatedStyle(() => ({
-        opacity: 0.9,
-    }));
-    const animatedFavoriteStyle = useAnimatedStyle(() => ({
-        opacity: 0.9,
+        opacity: isPlaying ? 0.88 : 0.72,
     }));
     const animatedLibraryIconProps = useAnimatedProps(() => ({
         color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurfaceVariant.value,
@@ -139,6 +136,9 @@ function LibraryTrackListItemInner({
                 unstable_pressDelay={80}
                 onPress={() => onPress(track)}
                 android_ripple={{ color: theme.colors.primary + '15' }}
+                accessibilityRole="button"
+                accessibilityLabel={`${track.title} por ${track.artist}${isPlaying ? ', reproduciéndose ahora' : ''}`}
+                accessibilityState={{ selected: isPlaying }}
                 style={({ pressed }) => [
                     styles.pressableInner,
                     { paddingHorizontal: contentPaddingHorizontal },
@@ -203,7 +203,7 @@ function LibraryTrackListItemInner({
                             name="Heart"
                             size={12}
                             animatedProps={animatedFavoriteProps}
-                            style={[{ marginLeft: 6, opacity: 0.9 }, animatedFavoriteStyle]}
+                            style={[{ marginLeft: 6, opacity: 0.9 }]}
                         />
                     ) : null}
                     {optionsAccessory ? (
@@ -362,7 +362,7 @@ function DefaultTrackListItemInner({
     }));
     const animatedSubtleStyle = useAnimatedStyle(() => ({
         color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurface.value,
-        opacity: isPlaying ? 0.85 : 0.65,
+        opacity: isPlaying ? 0.88 : 0.72,
     }));
     const animatedIndexStyle = useAnimatedStyle(() => ({
         color: isPlaying ? aC.onPrimaryContainer.value : aC.onSurfaceVariant.value,
@@ -429,6 +429,9 @@ function DefaultTrackListItemInner({
                 unstable_pressDelay={80}
                 onPress={() => onPress(track)}
                 android_ripple={{ color: theme.colors.primary + '15' }}
+                accessibilityRole="button"
+                accessibilityLabel={`${track.title} por ${track.artist}${isPlaying ? ', reproduciéndose ahora' : ''}`}
+                accessibilityState={{ selected: isPlaying }}
                 style={({ pressed }) => [
                     styles.pressableInner,
                     { paddingHorizontal: contentPaddingHorizontal },

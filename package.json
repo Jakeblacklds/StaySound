@@ -6,6 +6,8 @@
     "start": "expo start",
     "android": "expo run:android",
     "android:dev": "cross-env APP_VARIANT=development expo run:android",
+    "android:build:debug": "cd android && gradlew.bat app:assembleDevDebug",
+    "android:build:release": "cd android && gradlew.bat app:assembleProdRelease",
     "ios": "expo run:ios",
     "web": "expo start --web",
     "video:remotion": "remotion studio remotion/Root.tsx",

@@ -1,4 +1,4 @@
-/**
+﻿/**
  * AudioEngine - Unified audio controller for StaySound
  *
  * Uses react-native-track-player as the primary playback engine for:
@@ -192,25 +192,35 @@ class AudioEngineClass {
                 const index = event?.index;
 
                 if (track) {
-                    const normalized: Track = {
+                    // Build a minimal normalized track from the engine payload.
+                    // NOTE: Native track payloads (especially from MediaStore) often have:
+                    //   - Empty or filename-based title/artist/album
+                    //   - No source field (breaks isLikelyLocalTrack detection)
+                    //   - No dateAdded (stamping Date.now() causes false 'has changes' diffs)
+                    // We immediately resolve against the player store queue to get rich metadata.
+                    const sparseNormalized: Track = {
                         id: track.id?.toString() || '',
                         uri: track.url,
-                        title: track.title || 'Unknown',
-                        artist: track.artist || 'Unknown',
-                        album: track.album || 'Unknown',
+                        title: track.title || '',
+                        artist: track.artist || '',
+                        album: track.album || '',
                         artwork: track.artwork as string | undefined,
                         duration: (track.duration || 0) * 1000,
                         format: (track as any).format,
                         sampleRate: (track as any).sampleRate,
                         bitDepth: (track as any).bitDepth,
                         quality: (track as any).quality,
-                        dateAdded: Date.now(),
+                        dateAdded: (track as any).dateAdded ?? 0,
                     };
+                    // Resolve against the store queue to get full metadata before propagating.
+                    // This prevents low-end device race conditions where the engine event fires
+                    // with sparse data after the store already has the rich track set by play().
+                    const normalized = this.resolveNotificationTrack(sparseNormalized) ?? sparseNormalized;
                     this.currentState.currentTrack = normalized;
                     this.currentState.queueIndex = index ?? -1;
-                    this.currentState.duration = normalized.duration;
+                    this.currentState.duration = normalized.duration || sparseNormalized.duration;
                     this.currentState.position = 0;
-                    void TrackPlayerService.updateNowPlayingTrackMetadata(this.resolveNotificationTrack(normalized));
+                    void TrackPlayerService.updateNowPlayingTrackMetadata(this.resolveNotificationTrack(sparseNormalized));
                 } else {
                     const [activeTrack, activeIndex] = await Promise.all([
                         TrackPlayerService.getCurrentTrack(),
@@ -279,6 +289,31 @@ class AudioEngineClass {
     private progressRequestInFlight = false;
     private lastProgressPull = 0;
     private lastManualSeekTime = 0;
+    private postSeekSyncTimeout: ReturnType<typeof setTimeout> | null = null;
+
+    private async syncProgressSnapshot(options: { updateStorePosition?: boolean; emitStateChange?: boolean } = {}): Promise<void> {
+        const { updateStorePosition = false, emitStateChange = false } = options;
+        const progress = await TrackPlayerService.getProgress();
+        this.lastProgressPull = Date.now();
+        this.currentState.position = progress.position * 1000;
+        this.currentState.duration = progress.duration * 1000;
+        this.currentState.buffered = progress.buffered * 1000;
+
+        const { usePlayerStore } = require('../stores/playerStore');
+        const playerStore = usePlayerStore.getState();
+        if (playerStore.positionShared) {
+            playerStore.positionShared.value = this.currentState.position;
+        }
+
+        if (updateStorePosition) {
+            this.lastPositionZustandUpdate = this.lastProgressPull;
+            playerStore.setPosition(this.currentState.position);
+        }
+
+        if (emitStateChange) {
+            this.callbacks.onStateChange?.({ ...this.currentState });
+        }
+    }
 
     /**
      * Start interval to update position
@@ -315,18 +350,10 @@ class AudioEngineClass {
             this.progressRequestInFlight = true;
 
             try {
-                const progress = await TrackPlayerService.getProgress();
-                this.lastProgressPull = Date.now();
-                this.currentState.position = progress.position * 1000;
-                this.currentState.duration = progress.duration * 1000;
-                this.currentState.buffered = progress.buffered * 1000;
+                await this.syncProgressSnapshot();
 
                 // ─── PATH 1: UI THREAD (every tick, zero React re-renders) ───
                 // positionShared drives the animated progress bar directly on the UI thread.
-                const positionShared = usePlayerStore.getState().positionShared;
-                if (positionShared) {
-                    positionShared.value = this.currentState.position;
-                }
 
                 // ─── PATH 2: ZUSTAND position only (1x/sec, for time-label text) ───
                 // The time label selector uses Math.floor(s.position / 1000) so it only
@@ -449,16 +476,30 @@ class AudioEngineClass {
         this.lastManualSeekTime = Date.now();
         await TrackPlayerService.seekTo(positionMs / 1000);
         this.currentState.position = positionMs;
+        this.lastProgressPull = 0;
+        this.lastPositionZustandUpdate = 0;
 
         // Update positionShared immediately (visual feedback without waiting for next tick)
         const { usePlayerStore } = require('../stores/playerStore');
-        const positionShared = usePlayerStore.getState().positionShared;
+        const playerStore = usePlayerStore.getState();
+        const positionShared = playerStore.positionShared;
         if (positionShared) {
             positionShared.value = positionMs;
         }
+        playerStore.setPosition(positionMs);
+
+        if (this.postSeekSyncTimeout) {
+            clearTimeout(this.postSeekSyncTimeout);
+        }
+        this.postSeekSyncTimeout = setTimeout(() => {
+            this.postSeekSyncTimeout = null;
+            void this.syncProgressSnapshot({ updateStorePosition: true, emitStateChange: true }).catch(() => {
+                // Ignore post-seek sync errors; the regular polling loop will recover.
+            });
+        }, 250);
 
         // On seek, update Zustand position so the text label is correct after seek
-        this.callbacks.onStateChange?.(this.currentState);
+        this.callbacks.onStateChange?.({ ...this.currentState });
         console.log('[AudioEngine] Seeked to:', positionMs);
     }
 
@@ -582,6 +623,10 @@ class AudioEngineClass {
         if (this.positionInterval) {
             clearInterval(this.positionInterval);
             this.positionInterval = null;
+        }
+        if (this.postSeekSyncTimeout) {
+            clearTimeout(this.postSeekSyncTimeout);
+            this.postSeekSyncTimeout = null;
         }
         await TrackPlayerService.destroyTrackPlayer();
         console.log('[AudioEngine] Destroyed');

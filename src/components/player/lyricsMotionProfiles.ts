@@ -5,8 +5,8 @@ export type LyricsMotionOption = {
     label: string;
     icon: string;
 };
-export const DEFAULT_LYRICS_MOTION_OPTION_ID: LyricsMotionOption['id'] = 'stardust';
-export const DEFAULT_LYRICS_MOTION_PROFILE: KaraokeMotionProfile = 'cosmic';
+export const DEFAULT_LYRICS_MOTION_OPTION_ID: LyricsMotionOption['id'] = 'silk';
+export const DEFAULT_LYRICS_MOTION_PROFILE: KaraokeMotionProfile = 'velvet';
 export const LYRICS_MOTION_OPTIONS: LyricsMotionOption[] = [
     { id: 'stardust', nativeProfile: 'cosmic', label: 'stardust', icon: 'star-four-points' },
     { id: 'aurora', nativeProfile: 'ambient', label: 'aurora', icon: 'aurora' },

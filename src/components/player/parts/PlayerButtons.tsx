@@ -23,12 +23,20 @@ export function AnimatedPlayerButton({
     onPress,
     style,
     children,
+    accessibilityLabel,
+    accessibilityRole,
+    accessibilityState,
+    accessibilityHint,
 }: {
     variant: PlayerVariant;
     kind: PlayerButtonKind;
     onPress: () => void;
     style?: StyleProp<ViewStyle>;
     children: React.ReactNode;
+    accessibilityLabel?: string;
+    accessibilityRole?: 'button' | 'togglebutton';
+    accessibilityState?: { selected?: boolean; disabled?: boolean };
+    accessibilityHint?: string;
 }) {
     const pressed = useSharedValue(0);
 
@@ -64,6 +72,10 @@ export function AnimatedPlayerButton({
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
             style={[style, pressStyle]}
+            accessibilityLabel={accessibilityLabel}
+            accessibilityRole={accessibilityRole ?? 'button'}
+            accessibilityState={accessibilityState}
+            accessibilityHint={accessibilityHint}
         >
             {children}
         </AnimatedPressable>
@@ -140,23 +152,33 @@ export function AnimatedFavoriteButton({
     const particles = Array.from({ length: 8 });
 
     return (
-        <View style={[style, { alignItems: 'center', justifyContent: 'center' }]}>
-            {particles.map((_, i) => (
-                <Particle
-                    key={i}
-                    index={i}
-                    count={particles.length}
-                    progress={particleProgress}
-                    color={activeColor}
-                />
-            ))}
-            <Animated.View style={animatedStyle}>
+        <View
+            style={[style, { alignItems: 'center', justifyContent: 'center' }]}
+            accessible={true}
+            accessibilityRole="button"
+            accessibilityLabel={isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
+            accessibilityState={{ selected: isFavorite }}
+        >
+            {/* Particles are decorative — hidden from accessibility tree */}
+            <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
+                {particles.map((_, i) => (
+                    <Particle
+                        key={i}
+                        index={i}
+                        count={particles.length}
+                        progress={particleProgress}
+                        color={activeColor}
+                    />
+                ))}
+            </View>
+            <Animated.View style={animatedStyle} importantForAccessibility="no">
                 <IconButton
                     icon={isFavorite ? 'heart' : 'heart-outline'}
                     size={size}
                     iconColor={isFavorite ? activeColor : inactiveColor}
                     onPress={handlePress}
                     style={{ margin: 0 }}
+                    accessibilityElementsHidden
                 />
             </Animated.View>
         </View>

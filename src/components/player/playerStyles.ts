@@ -152,10 +152,11 @@ export const playerStyles = StyleSheet.create({
     playingFromLabel: {
         ...typeScale.micro,
         letterSpacing: 1.2,
-        opacity: 0.5,
+        opacity: 0.42,
     },
     albumLabelImmersive: {
         ...typeScale.caption,
+        fontWeight: '600',
         marginTop: 4,
     },
     artworkSectionImmersive: {
@@ -260,7 +261,7 @@ export const playerStyles = StyleSheet.create({
         ...typeScale.bodyStrong,
         fontSize: 16,
         lineHeight: 22,
-        opacity: 0.8,
+        opacity: 0.75,
         marginTop: 4,
     },
     techMetaImmersive: {
@@ -315,11 +316,20 @@ export const playerStyles = StyleSheet.create({
         borderRadius: 24,
         justifyContent: 'center',
         alignItems: 'center',
+        // Ensure minimum 44dp tap target via hitSlop on parent
+        minWidth: 44,
+        minHeight: 44,
     },
     navBtnImmersive: {
         width: 56,
         height: 56,
         borderRadius: 28,
+        justifyContent: 'center',
+        alignItems: 'center',
+    },
+    playContainer: {
+        width: 104,
+        height: 104,
         justifyContent: 'center',
         alignItems: 'center',
     },
@@ -329,11 +339,20 @@ export const playerStyles = StyleSheet.create({
         borderRadius: 36,
         justifyContent: 'center',
         alignItems: 'center',
-        elevation: 6,
-        shadowColor: '#000',
-        shadowOffset: { width: 0, height: 4 },
-        shadowOpacity: 0.2,
-        shadowRadius: 8,
+        zIndex: 2,
+    },
+    playGlow: {
+        position: 'absolute',
+        width: 104,
+        height: 104,
+        borderRadius: 52,
+        zIndex: 1,
+    },
+    artworkShadowStyle: {
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.55,
+        shadowRadius: 24,
+        elevation: 20,
     },
     bottomActionsImmersive: {
         flexDirection: 'row',
@@ -391,6 +410,28 @@ export const playerStyles = StyleSheet.create({
         ...typeScale.micro,
         color: '#FFFFFF',
         letterSpacing: 0.8,
+    },
+    phraseLyricsRoot: {
+        flex: 1,
+    },
+    phraseLyricsScroll: {
+        flex: 1,
+    },
+    phraseLyricsContent: {
+        paddingTop: 132,
+        paddingBottom: 220,
+        paddingHorizontal: 26,
+    },
+    phraseLinePressable: {
+        paddingVertical: 10,
+    },
+    phraseLineText: {
+        ...typeScale.titleLarge,
+        fontSize: 31,
+        lineHeight: 39,
+        textAlign: 'center',
+        letterSpacing: -0.35,
+        fontWeight: '700',
     },
     lyricsIslandsLayer: {
         position: 'absolute',

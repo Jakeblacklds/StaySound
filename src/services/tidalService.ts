@@ -28,6 +28,12 @@ import {
   searchDabBetaTracks,
 } from "./dabService";
 import { getDabBaseUrl, isDabBaseUrl } from "./dabAuthService";
+import {
+  clearRemoteMirrorCatalogCache,
+  getRemoteMirrorCatalog,
+  MirrorProvider,
+  RemoteMirrorCatalogEntry,
+} from "./mirrorCatalogService";
 
 const MONOCHROME_UPTIME_URLS = [
   "https://tidal-uptime.jiffy-puffs-1j.workers.dev/",
@@ -89,11 +95,19 @@ export const TIDAL_MIRROR_NAMES: Record<string, string> = {
 };
 
 let currentBaseIndex = 0;
+export type TidalMirrorCapability = "search" | "stream" | "download";
 export type TidalMirrorAvailability = {
   status: "available" | "slow" | "unavailable";
   latencyMs?: number;
   checkedAt: number;
   statusCode?: number;
+  provider: MirrorProvider;
+  supportsSearch: boolean;
+  supportsStream: boolean;
+  supportsDownload: boolean;
+  priority?: number;
+  lastError?: string | null;
+  source: "supabase" | "uptime" | "probe" | "static";
 };
 
 const TIDAL_ARTWORK_BASE = "https://resources.tidal.com/images";
@@ -114,10 +128,15 @@ const inflightMirrorChecks = new Map<
 >();
 type TidalMirrorCategory = "api" | "streaming";
 type DynamicMirrorEntry = { url?: string; version?: string };
+type TidalMirrorCatalogEntry = RemoteMirrorCatalogEntry & {
+  source: "supabase" | "uptime" | "static";
+};
 type DynamicMirrorCatalog = {
-  api: string[];
-  streaming: string[];
+  api: TidalMirrorCatalogEntry[];
+  streaming: TidalMirrorCatalogEntry[];
+  all: TidalMirrorCatalogEntry[];
   fetchedAt: number;
+  source: "supabase" | "uptime" | "static";
 };
 type MirrorJsonResult<T> = {
   data: T;
@@ -351,6 +370,49 @@ function getExtensionFromMime(mimeType?: string, codecs?: string): string {
     return "m4a";
   if (m.includes("mpeg") || m.includes("mp3")) return "mp3";
   return "flac"; // fallback
+}
+
+function getExtensionFromUrl(url?: string | null): string | null {
+  if (!url) return null;
+
+  try {
+    const pathname = new URL(url).pathname.toLowerCase();
+    if (pathname.endsWith(".flac")) return "flac";
+    if (pathname.endsWith(".m4a") || pathname.endsWith(".mp4")) return "m4a";
+    if (pathname.endsWith(".mp3")) return "mp3";
+  } catch {
+    const normalized = String(url).toLowerCase();
+    if (normalized.includes(".flac")) return "flac";
+    if (normalized.includes(".m4a") || normalized.includes(".mp4")) return "m4a";
+    if (normalized.includes(".mp3")) return "mp3";
+  }
+
+  return null;
+}
+
+function resolveDownloadExtension(
+  manifest: ParsedManifest,
+  sourceUrl?: string | null,
+): "flac" | "m4a" | "mp3" {
+  if (manifest.isSegmented && (manifest.mimeType ?? "").toLowerCase().includes("mp4")) {
+    return "m4a";
+  }
+
+  if (sourceUrl && isFlacSource(sourceUrl, manifest)) {
+    return "flac";
+  }
+
+  const urlBasedExtension = getExtensionFromUrl(sourceUrl ?? manifest.manifestUrl);
+  if (urlBasedExtension === "flac" || urlBasedExtension === "m4a" || urlBasedExtension === "mp3") {
+    return urlBasedExtension;
+  }
+
+  const mimeBasedExtension = getExtensionFromMime(manifest.mimeType, manifest.codecs);
+  if (mimeBasedExtension === "flac" || mimeBasedExtension === "m4a" || mimeBasedExtension === "mp3") {
+    return mimeBasedExtension;
+  }
+
+  return "m4a";
 }
 
 function getSafEntityName(uri: string): string {
@@ -669,12 +731,22 @@ async function probeMirrorAvailability(
       latencyMs,
       checkedAt: Date.now(),
       statusCode: response.status,
+      provider: inferMirrorProvider(baseUrl),
+      supportsSearch: true,
+      supportsStream: true,
+      supportsDownload: true,
+      source: "probe",
     };
   } catch {
     return {
       status: "unavailable",
       latencyMs: Date.now() - startedAt,
       checkedAt: Date.now(),
+      provider: inferMirrorProvider(baseUrl),
+      supportsSearch: true,
+      supportsStream: true,
+      supportsDownload: true,
+      source: "probe",
     };
   } finally {
     cleanup();
@@ -685,12 +757,41 @@ export async function getTidalMirrorAvailability(
   mirrors: string[],
   options: { force?: boolean } = {},
 ): Promise<Record<string, TidalMirrorAvailability>> {
+  let catalog: DynamicMirrorCatalog | null = null;
+  try {
+    catalog = await loadDynamicMirrorCatalog();
+  } catch {
+    catalog = null;
+  }
+
+  const catalogByBaseUrl = new Map(
+    (catalog?.all ?? []).map((entry) => [entry.baseUrl, entry] as const),
+  );
   const now = Date.now();
   const uniqueMirrors = mirrors.filter(
     (mirror, index, all) => all.indexOf(mirror) === index,
   );
   const results = await Promise.all(
     uniqueMirrors.map(async (mirror) => {
+      const remoteEntry = catalogByBaseUrl.get(mirror);
+      if (remoteEntry && catalog?.source === "supabase" && !options.force) {
+        return [
+          mirror,
+          {
+            status: remoteEntry.status,
+            latencyMs: remoteEntry.latencyMs,
+            checkedAt: remoteEntry.lastCheckedAt ?? catalog.fetchedAt,
+            provider: remoteEntry.provider,
+            supportsSearch: remoteEntry.supportsSearch,
+            supportsStream: remoteEntry.supportsStream,
+            supportsDownload: remoteEntry.supportsDownload,
+            priority: remoteEntry.priority,
+            lastError: remoteEntry.lastError ?? null,
+            source: remoteEntry.source,
+          } satisfies TidalMirrorAvailability,
+        ] as const;
+      }
+
       const cached = mirrorAvailabilityCache.get(mirror);
       if (
         !options.force &&
@@ -707,8 +808,19 @@ export async function getTidalMirrorAvailability(
 
       const request = probeMirrorAvailability(mirror)
         .then((result) => {
-          mirrorAvailabilityCache.set(mirror, result);
-          return result;
+          const merged: TidalMirrorAvailability = {
+            ...result,
+            provider: remoteEntry?.provider ?? result.provider,
+            supportsSearch: remoteEntry?.supportsSearch ?? result.supportsSearch,
+            supportsStream: remoteEntry?.supportsStream ?? result.supportsStream,
+            supportsDownload:
+              remoteEntry?.supportsDownload ?? result.supportsDownload,
+            priority: remoteEntry?.priority,
+            lastError: remoteEntry?.lastError ?? null,
+            source: remoteEntry ? remoteEntry.source : result.source,
+          };
+          mirrorAvailabilityCache.set(mirror, merged);
+          return merged;
         })
         .finally(() => {
           inflightMirrorChecks.delete(mirror);
@@ -726,10 +838,19 @@ export function markTidalMirrorUnavailable(
   baseUrl: string,
   statusCode?: number,
 ): void {
+  const cached = mirrorAvailabilityCache.get(baseUrl);
   mirrorAvailabilityCache.set(baseUrl, {
+    provider: cached?.provider ?? inferMirrorProvider(baseUrl),
     status: "unavailable",
     checkedAt: Date.now(),
     statusCode,
+    latencyMs: cached?.latencyMs,
+    supportsSearch: cached?.supportsSearch ?? true,
+    supportsStream: cached?.supportsStream ?? true,
+    supportsDownload: cached?.supportsDownload ?? true,
+    priority: cached?.priority,
+    lastError: cached?.lastError ?? null,
+    source: cached?.source ?? "probe",
   });
 }
 
@@ -865,19 +986,143 @@ function isHtmlResponse(contentType: string | null, body: string): boolean {
   );
 }
 
-function normalizeMirrorEntries(
+function inferMirrorProvider(baseUrl: string): MirrorProvider {
+  return isDabBaseUrl(baseUrl) ? "dab" : "tidal";
+}
+
+function createCatalogEntry(
+  baseUrl: string,
+  source: "supabase" | "uptime" | "static",
+  partial: Partial<RemoteMirrorCatalogEntry> = {},
+): TidalMirrorCatalogEntry {
+  return {
+    baseUrl,
+    provider: partial.provider ?? inferMirrorProvider(baseUrl),
+    enabled: partial.enabled ?? true,
+    priority: partial.priority ?? 999,
+    supportsSearch: partial.supportsSearch ?? true,
+    supportsStream: partial.supportsStream ?? true,
+    supportsDownload: partial.supportsDownload ?? true,
+    status: partial.status ?? "available",
+    latencyMs: partial.latencyMs,
+    lastCheckedAt: partial.lastCheckedAt,
+    lastError: partial.lastError ?? null,
+    source,
+  };
+}
+
+function mergeCatalogEntry(
+  existing: TidalMirrorCatalogEntry | undefined,
+  next: TidalMirrorCatalogEntry,
+): TidalMirrorCatalogEntry {
+  if (!existing) return next;
+
+  return {
+    ...existing,
+    ...next,
+    supportsSearch: existing.supportsSearch || next.supportsSearch,
+    supportsStream: existing.supportsStream || next.supportsStream,
+    supportsDownload: existing.supportsDownload || next.supportsDownload,
+    priority: Math.min(existing.priority, next.priority),
+    enabled: existing.enabled || next.enabled,
+  };
+}
+
+function entriesToCatalog(
+  entries: TidalMirrorCatalogEntry[],
+  source: "supabase" | "uptime" | "static",
+): DynamicMirrorCatalog {
+  const sorted = [...entries].sort((left, right) => left.priority - right.priority);
+  return {
+    api: sorted.filter((entry) => entry.supportsSearch),
+    streaming: sorted.filter(
+      (entry) => entry.supportsStream || entry.supportsDownload,
+    ),
+    all: sorted,
+    fetchedAt: Date.now(),
+    source,
+  };
+}
+
+function buildStaticMirrorCatalog(): DynamicMirrorCatalog {
+  const combined = new Map<string, TidalMirrorCatalogEntry>();
+
+  STATIC_GENERIC_TIDAL_API_BASES.forEach((baseUrl, index) => {
+    combined.set(
+      baseUrl,
+      mergeCatalogEntry(
+        combined.get(baseUrl),
+        createCatalogEntry(baseUrl, "static", {
+          priority: 100 + index * 10,
+          supportsSearch: true,
+          supportsStream: false,
+          supportsDownload: false,
+        }),
+      ),
+    );
+  });
+
+  STATIC_GENERIC_STREAMING_BASES.forEach((baseUrl, index) => {
+    combined.set(
+      baseUrl,
+      mergeCatalogEntry(
+        combined.get(baseUrl),
+        createCatalogEntry(baseUrl, "static", {
+          priority: 200 + index * 10,
+          supportsSearch: false,
+          supportsStream: true,
+          supportsDownload: true,
+        }),
+      ),
+    );
+  });
+
+  [
+    "https://dabmusic.xyz/api",
+    "https://beta.dabmusic.xyz",
+  ].forEach((baseUrl, index) => {
+    combined.set(
+      baseUrl,
+      mergeCatalogEntry(
+        combined.get(baseUrl),
+        createCatalogEntry(baseUrl, "static", {
+          provider: "dab",
+          priority: 10 + index * 10,
+          supportsSearch: true,
+          supportsStream: true,
+          supportsDownload: true,
+        }),
+      ),
+    );
+  });
+
+  return entriesToCatalog(Array.from(combined.values()), "static");
+}
+
+function normalizeUptimeEntries(
   entries: DynamicMirrorEntry[] | undefined,
-): string[] {
+  capability: TidalMirrorCapability,
+  offset: number,
+): TidalMirrorCatalogEntry[] {
   if (!Array.isArray(entries)) return [];
 
   return entries
-    .map((entry) =>
-      typeof entry?.url === "string"
-        ? entry.url.trim().replace(/\/+$/, "")
-        : "",
-    )
-    .filter(Boolean)
-    .filter((url, index, all) => all.indexOf(url) === index);
+    .map((entry, index) => {
+      const baseUrl =
+        typeof entry?.url === "string"
+          ? entry.url.trim().replace(/\/+$/, "")
+          : "";
+      if (!baseUrl) return null;
+
+      return createCatalogEntry(baseUrl, "uptime", {
+        priority: offset + index * 10,
+        supportsSearch: capability === "search",
+        supportsStream: capability === "stream",
+        supportsDownload:
+          capability === "download" || capability === "stream",
+      });
+    })
+    .filter((entry): entry is TidalMirrorCatalogEntry => Boolean(entry));
 }
 
 async function fetchDynamicMirrorCatalogFrom(
@@ -896,14 +1141,22 @@ async function fetchDynamicMirrorCatalogFrom(
       streaming?: DynamicMirrorEntry[];
     };
 
-    const api = normalizeMirrorEntries(payload.api);
-    const streaming = normalizeMirrorEntries(payload.streaming);
+    const combined = new Map<string, TidalMirrorCatalogEntry>();
+    const apiEntries = normalizeUptimeEntries(payload.api, "search", 300);
+    const streamingEntries = normalizeUptimeEntries(
+      payload.streaming,
+      "stream",
+      600,
+    );
 
-    return {
-      api,
-      streaming: streaming.length > 0 ? streaming : api,
-      fetchedAt: Date.now(),
-    };
+    [...apiEntries, ...streamingEntries].forEach((entry) => {
+      combined.set(
+        entry.baseUrl,
+        mergeCatalogEntry(combined.get(entry.baseUrl), entry),
+      );
+    });
+
+    return entriesToCatalog(Array.from(combined.values()), "uptime");
   } finally {
     cleanup();
   }
@@ -920,10 +1173,26 @@ async function loadDynamicMirrorCatalog(): Promise<DynamicMirrorCatalog> {
   }
 
   dynamicMirrorCatalogPromise = (async () => {
+    try {
+      const remoteEntries = await getRemoteMirrorCatalog();
+      if (remoteEntries.length > 0) {
+        const remoteCatalog = entriesToCatalog(
+          remoteEntries.map((entry) =>
+            createCatalogEntry(entry.baseUrl, "supabase", entry),
+          ),
+          "supabase",
+        );
+        dynamicMirrorCatalogCache = remoteCatalog;
+        return remoteCatalog;
+      }
+    } catch (error) {
+      console.warn("[TidalService] Failed to fetch mirror catalog from Supabase:", error);
+    }
+
     for (const url of MONOCHROME_UPTIME_URLS) {
       try {
         const catalog = await fetchDynamicMirrorCatalogFrom(url);
-        if (catalog.api.length > 0 || catalog.streaming.length > 0) {
+        if (catalog.all.length > 0) {
           dynamicMirrorCatalogCache = catalog;
           return catalog;
         }
@@ -935,11 +1204,7 @@ async function loadDynamicMirrorCatalog(): Promise<DynamicMirrorCatalog> {
       }
     }
 
-    const fallbackCatalog: DynamicMirrorCatalog = {
-      api: STATIC_GENERIC_TIDAL_API_BASES,
-      streaming: STATIC_GENERIC_STREAMING_BASES,
-      fetchedAt: Date.now(),
-    };
+    const fallbackCatalog = buildStaticMirrorCatalog();
     dynamicMirrorCatalogCache = fallbackCatalog;
     return fallbackCatalog;
   })().finally(() => {
@@ -951,16 +1216,100 @@ async function loadDynamicMirrorCatalog(): Promise<DynamicMirrorCatalog> {
 
 async function getFallbackBases(
   category: TidalMirrorCategory,
+  capability: TidalMirrorCapability =
+    category === "streaming" ? "stream" : "search",
 ): Promise<string[]> {
   const catalog = await loadDynamicMirrorCatalog();
-  const preferred = category === "streaming" ? catalog.streaming : catalog.api;
+  const preferred =
+    category === "streaming"
+      ? catalog.streaming.filter((entry) =>
+          capability === "download"
+            ? entry.supportsDownload
+            : entry.supportsStream,
+        )
+      : catalog.api.filter((entry) => entry.supportsSearch);
   if (preferred.length > 0) {
-    return preferred;
+    return preferred.map((entry) => entry.baseUrl);
   }
 
   return category === "streaming"
     ? STATIC_GENERIC_STREAMING_BASES
     : STATIC_GENERIC_TIDAL_API_BASES;
+}
+
+async function getCatalogEntryByBaseUrl(
+  baseUrl: string,
+): Promise<TidalMirrorCatalogEntry | null> {
+  const normalized = baseUrl.trim().replace(/\/+$/, "");
+  if (!normalized) return null;
+
+  try {
+    const catalog = await loadDynamicMirrorCatalog();
+    return (
+      catalog.all.find((entry) => entry.baseUrl === normalized) ?? null
+    );
+  } catch {
+    return null;
+  }
+}
+
+function isCapabilitySupported(
+  entry: TidalMirrorCatalogEntry | null,
+  capability: TidalMirrorCapability,
+): boolean {
+  if (!entry) return true;
+  if (capability === "stream") return entry.supportsStream;
+  if (capability === "download") return entry.supportsDownload;
+  return entry.supportsSearch;
+}
+
+function capabilityErrorMessage(capability: TidalMirrorCapability): string {
+  if (capability === "download") {
+    return "El mirror seleccionado no soporta descargas en este momento.";
+  }
+
+  if (capability === "stream") {
+    return "El mirror seleccionado no soporta reproduccion en este momento.";
+  }
+
+  return "El mirror seleccionado no soporta busqueda y metadata en este momento.";
+}
+
+export async function getTidalMirrorOptions(
+  options: { force?: boolean } = {},
+): Promise<string[]> {
+  const pinnedMirrors = [
+    "https://dabmusic.xyz/api",
+    "https://beta.dabmusic.xyz",
+  ];
+
+  try {
+    const catalog = options.force
+      ? await (async () => {
+          dynamicMirrorCatalogCache = null;
+          mirrorAvailabilityCache.clear();
+          clearRemoteMirrorCatalogCache();
+          return await loadDynamicMirrorCatalog();
+        })()
+      : await loadDynamicMirrorCatalog();
+    if (catalog.all.length > 0) {
+      return Array.from(
+        new Set([
+          ...pinnedMirrors,
+          ...catalog.all.map((entry) => entry.baseUrl),
+        ]),
+      );
+    }
+  } catch {
+    // Ignore and fall back to static values below.
+  }
+
+  return Array.from(
+    new Set([
+      ...pinnedMirrors,
+      ...TIDAL_API_BASES,
+    ]),
+  );
 }
 
 async function parseJsonResponse<T>(
@@ -985,17 +1334,25 @@ async function fetchJson<T>(
   options: {
     ignoreManualMirror?: boolean;
     category?: TidalMirrorCategory;
+    capability?: TidalMirrorCapability;
   } = {},
 ): Promise<T> {
   const { tidalMirror } = useSettingsStore.getState();
   let lastError: Error | null = null;
   const category = options.category ?? "api";
-  const fallbackBases = await getFallbackBases(category);
+  const capability =
+    options.capability ?? (category === "streaming" ? "stream" : "search");
+  const fallbackBases = await getFallbackBases(category, capability);
   const startBaseIndex =
     fallbackBases.length > 0 ? currentBaseIndex % fallbackBases.length : 0;
 
   // If user selected a specific mirror, try it first
   if (!options.ignoreManualMirror && tidalMirror && tidalMirror !== "auto") {
+    const manualEntry = await getCatalogEntryByBaseUrl(tidalMirror);
+    if (!isCapabilitySupported(manualEntry, capability)) {
+      throw new Error(capabilityErrorMessage(capability));
+    }
+
     const url = `${tidalMirror}${path}`;
     const { signal, cleanup } = withTimeoutSignal(timeoutMs);
     try {
@@ -1067,12 +1424,20 @@ async function fetchJsonWithMirror<T>(
   options: {
     ignoreManualMirror?: boolean;
     category?: TidalMirrorCategory;
+    capability?: TidalMirrorCapability;
   } = {},
 ): Promise<MirrorJsonResult<T>> {
   const { tidalMirror } = useSettingsStore.getState();
   const category = options.category ?? "api";
+  const capability =
+    options.capability ?? (category === "streaming" ? "stream" : "search");
 
   if (!options.ignoreManualMirror && tidalMirror && tidalMirror !== "auto") {
+    const manualEntry = await getCatalogEntryByBaseUrl(tidalMirror);
+    if (!isCapabilitySupported(manualEntry, capability)) {
+      throw new Error(capabilityErrorMessage(capability));
+    }
+
     const url = `${tidalMirror}${path}`;
     const { signal, cleanup } = withTimeoutSignal(timeoutMs);
 
@@ -1095,7 +1460,7 @@ async function fetchJsonWithMirror<T>(
     }
   }
 
-  const fallbackBases = await getFallbackBases(category);
+  const fallbackBases = await getFallbackBases(category, capability);
   let lastError: Error | null = null;
   const startBaseIndex =
     fallbackBases.length > 0 ? currentBaseIndex % fallbackBases.length : 0;
@@ -1440,11 +1805,14 @@ function parseYearFromReleaseDate(releaseDate?: string): number | undefined {
 }
 
 function normalizeArtistItem(item: TidalArtistApiResponse): TidalArtist {
+  const picture = item.picture || undefined;
+  const artworkUrl = getArtworkUrl(picture);
+
   return {
     id: item.id,
     name: item.name,
-    picture: item.picture ?? undefined,
-    artworkUrl: getArtworkUrl(item.picture ?? undefined),
+    picture: typeof picture === "string" ? picture : undefined,
+    artworkUrl,
     popularity: item.popularity,
   };
 }
@@ -1649,7 +2017,14 @@ function toLibraryTrack(tidalTrack: TidalTrack, uri: string): Track {
 }
 
 export function getArtworkUrl(coverUuid?: string | null): string | undefined {
-  if (!coverUuid) return undefined;
+  if (
+    !coverUuid ||
+    coverUuid === "00000000-0000-0000-0000-000000000000" ||
+    coverUuid === "null"
+  )
+    return undefined;
+  if (coverUuid.startsWith("http")) return coverUuid;
+
   const normalized = coverUuid.replace(/-/g, "/");
   return `${TIDAL_ARTWORK_BASE}/${normalized}/640x640.jpg`;
 }
@@ -1990,11 +2365,19 @@ export async function getTidalArtistInfo(
         throw new Error("Artista no encontrado");
       }
 
+      const coverVariants = response.cover as
+        | Record<string, string | undefined>
+        | undefined;
+      const artworkCandidate =
+        coverVariants?.["750"] ||
+        coverVariants?.["640"] ||
+        coverVariants?.["480"];
       return {
         ...normalizeArtistItem(apiArtist),
         artworkUrl:
-          response.cover?.["750"] ||
-          getArtworkUrl(apiArtist.picture ?? undefined),
+          (typeof artworkCandidate === "string" && artworkCandidate.startsWith("http")) 
+            ? artworkCandidate 
+            : getArtworkUrl(artworkCandidate || apiArtist.picture),
       };
     } catch (error) {
       if (
@@ -2092,10 +2475,14 @@ export async function getTidalArtistDetail(
 
 export async function getTidalTrackManifest(
   tidalId: number,
-  quality: TidalQuality = "HI_RES_LOSSLESS",
-  options: { ignoreManualMirror?: boolean } = {},
+  quality: TidalQuality = "MP3",
+  options: {
+    ignoreManualMirror?: boolean;
+    capability?: "stream" | "download";
+  } = {},
 ): Promise<ParsedManifest> {
   const manifestQuality = quality === "MP3" ? "HIGH" : quality;
+  const capability = options.capability ?? "stream";
   const formatParams = new URLSearchParams();
   if (manifestQuality === "HIGH") {
     formatParams.append("formats", "HEAACV1");
@@ -2119,7 +2506,7 @@ export async function getTidalTrackManifest(
       : null;
   const fallbackBases = manualMirror
     ? [manualMirror]
-    : await getFallbackBases("streaming");
+    : await getFallbackBases("streaming", capability);
   const startBaseIndex =
     fallbackBases.length > 0 ? currentBaseIndex % fallbackBases.length : 0;
   let lastError: Error | null = null;
@@ -2134,6 +2521,7 @@ export async function getTidalTrackManifest(
         {
           ignoreManualMirror: true,
           category: "streaming",
+          capability,
         },
       );
 
@@ -2232,7 +2620,7 @@ export async function getTidalTrackManifest(
 
 export async function downloadTidalTrack(
   tidalTrack: TidalTrack,
-  targetQuality: TidalQuality = "LOSSLESS",
+  targetQuality: TidalQuality = "MP3",
   options: DownloadOptions = {},
 ): Promise<Track> {
   const canUseDabRescue = shouldRescueWithDabBeta();
@@ -2328,16 +2716,22 @@ export async function downloadTidalTrack(
   let manifest: ParsedManifest;
   try {
     try {
-      manifest = await getTidalTrackManifest(tidalTrack.id, targetQuality);
+      manifest = await getTidalTrackManifest(tidalTrack.id, targetQuality, {
+        capability: "download",
+      });
     } catch (error) {
       console.warn(
         `[TidalService] Quality ${targetQuality} failed, falling back to LOSSLESS/HIGH`,
         error,
       );
       try {
-        manifest = await getTidalTrackManifest(tidalTrack.id, "LOSSLESS");
+        manifest = await getTidalTrackManifest(tidalTrack.id, "LOSSLESS", {
+          capability: "download",
+        });
       } catch {
-        manifest = await getTidalTrackManifest(tidalTrack.id, "HIGH");
+        manifest = await getTidalTrackManifest(tidalTrack.id, "HIGH", {
+          capability: "download",
+        });
       }
     }
   } catch (error) {
@@ -2352,44 +2746,13 @@ export async function downloadTidalTrack(
     return await downloadFromDabBeta();
   }
 
-  const extension =
-    manifest.isSegmented &&
-    (manifest.mimeType ?? "").toLowerCase().includes("mp4")
-      ? "m4a"
-      : getExtensionFromMime(manifest.mimeType, manifest.codecs);
-  const filename = `${baseFilename}.${extension}`;
-
-  if (Platform.OS === "android") {
-    const existingPublicUri = await findExistingPublicTrackUri(filename);
-    if (existingPublicUri) {
-      await persistMetadataInPublicDownloads(tidalTrack, baseFilename);
-      if (tidalTrack.artworkUrl) {
-        await persistArtworkInPublicDownloads(
-          tidalTrack.artworkUrl,
-          tidalTrack.artist,
-          tidalTrack.album,
-        );
-      }
-      options.onProgress?.(1);
-      return toLibraryTrack(tidalTrack, existingPublicUri);
-    }
-  }
-
-  await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
-
-  const outputUri = getOutputUri(baseFilename, extension);
-  const outputExists = await FileSystem.getInfoAsync(outputUri);
-  if (outputExists.exists) {
-    // Redownloading/repairing if called (or if platform doesn't support easy re-use)
-    await FileSystem.deleteAsync(outputUri, { idempotent: true });
-  }
-
   let sourceUrl = getDirectUrl(manifest);
   if (!sourceUrl && manifest.quality !== "HIGH" && manifest.quality !== "LOW") {
     try {
       const fallbackManifest = await getTidalTrackManifest(
         tidalTrack.id,
         "HIGH",
+        { capability: "download" },
       );
       sourceUrl = getDirectUrl(fallbackManifest);
       if (sourceUrl || fallbackManifest.isSegmented)
@@ -2419,6 +2782,34 @@ export async function downloadTidalTrack(
         "No se encontró una URL de descarga directa para este track.",
       );
     }
+  }
+
+  const extension = resolveDownloadExtension(manifest, sourceUrl);
+  const filename = `${baseFilename}.${extension}`;
+
+  if (Platform.OS === "android") {
+    const existingPublicUri = await findExistingPublicTrackUri(filename);
+    if (existingPublicUri) {
+      await persistMetadataInPublicDownloads(tidalTrack, baseFilename);
+      if (tidalTrack.artworkUrl) {
+        await persistArtworkInPublicDownloads(
+          tidalTrack.artworkUrl,
+          tidalTrack.artist,
+          tidalTrack.album,
+        );
+      }
+      options.onProgress?.(1);
+      return toLibraryTrack(tidalTrack, existingPublicUri);
+    }
+  }
+
+  await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
+
+  const outputUri = getOutputUri(baseFilename, extension);
+  const outputExists = await FileSystem.getInfoAsync(outputUri);
+  if (outputExists.exists) {
+    // Redownloading/repairing if called (or if platform doesn't support easy re-use)
+    await FileSystem.deleteAsync(outputUri, { idempotent: true });
   }
 
   const enrichedTrack: TidalTrack = {
@@ -2547,8 +2938,10 @@ export async function createTidalStreamTrack(
   tidalTrack: TidalTrack,
 ): Promise<Track> {
   const preferredQuality = useSettingsStore.getState().tidalDownloadQuality;
+  const shouldPreferDabStream =
+    isSelectedDabSource() || shouldRescueWithDabBeta();
 
-  if (isSelectedDabSource()) {
+  if (shouldPreferDabStream) {
     try {
       const streamInfo = await getDabBetaStreamInfo(
         tidalTrack,
@@ -2557,26 +2950,27 @@ export async function createTidalStreamTrack(
       return buildCloudStreamTrackFromStreamInfo(tidalTrack, streamInfo);
     } catch (dabError) {
       console.warn(
-        "[TidalService] DAB stream failed, retrying via generic mirrors:",
+        "[TidalService] Preferred DAB stream failed, retrying via generic mirrors:",
         dabError,
       );
 
       let manifest: ParsedManifest;
       try {
         try {
-          manifest = await getTidalTrackManifest(
-            tidalTrack.id,
-            preferredQuality,
-            { ignoreManualMirror: true },
-          );
+          manifest = await getTidalTrackManifest(tidalTrack.id, preferredQuality, {
+            ignoreManualMirror: true,
+            capability: "stream",
+          });
         } catch {
           manifest = await getTidalTrackManifest(tidalTrack.id, "LOSSLESS", {
             ignoreManualMirror: true,
+            capability: "stream",
           });
         }
       } catch {
         manifest = await getTidalTrackManifest(tidalTrack.id, "HIGH", {
           ignoreManualMirror: true,
+          capability: "stream",
         });
       }
 
@@ -2585,7 +2979,7 @@ export async function createTidalStreamTrack(
         const fallbackManifest = await getTidalTrackManifest(
           tidalTrack.id,
           "HIGH",
-          { ignoreManualMirror: true },
+          { ignoreManualMirror: true, capability: "stream" },
         );
         streamUrl = getPlayableUrl(fallbackManifest);
         manifest = fallbackManifest;
@@ -2741,6 +3135,72 @@ export async function createTidalStreamTrack(
   };
 }
 
+function decodeBase64ToBytes(base64Value: string): Uint8Array {
+  const decoded = decodeBase64(base64Value);
+  const bytes = new Uint8Array(decoded.length);
+
+  for (let index = 0; index < decoded.length; index++) {
+    bytes[index] = decoded.charCodeAt(index) & 0xff;
+  }
+
+  return bytes;
+}
+
+function bytesIncludeAscii(bytes: Uint8Array, value: string): boolean {
+  if (!value || bytes.length < value.length) return false;
+
+  for (let offset = 0; offset <= bytes.length - value.length; offset++) {
+    let matched = true;
+    for (let index = 0; index < value.length; index++) {
+      if (bytes[offset + index] !== value.charCodeAt(index)) {
+        matched = false;
+        break;
+      }
+    }
+
+    if (matched) return true;
+  }
+
+  return false;
+}
+
+function hasIsoBmffHeader(bytes: Uint8Array): boolean {
+  if (bytes.length < 8) return false;
+
+  const knownBoxes = new Set([
+    "ftyp",
+    "styp",
+    "moov",
+    "moof",
+    "mdat",
+  ]);
+
+  for (let offset = 0; offset <= bytes.length - 8; offset++) {
+    const boxType = String.fromCharCode(
+      bytes[offset + 4],
+      bytes[offset + 5],
+      bytes[offset + 6],
+      bytes[offset + 7],
+    );
+
+    if (knownBoxes.has(boxType)) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
+function hasMp3FrameSync(bytes: Uint8Array): boolean {
+  for (let index = 0; index < bytes.length - 1; index++) {
+    if (bytes[index] === 0xff && (bytes[index + 1] & 0xe0) === 0xe0) {
+      return true;
+    }
+  }
+
+  return false;
+}
+
 export async function isValidAudioFile(
   uri: string,
   extension: string,
@@ -2749,19 +3209,22 @@ export async function isValidAudioFile(
     const base64Prefix = await FileSystem.readAsStringAsync(uri, {
       encoding: FileSystem.EncodingType.Base64,
       position: 0,
-      length: 12,
+      length: 96,
     } as never);
 
-    const decodedPrefix = decodeBase64(base64Prefix);
+    const prefixBytes = decodeBase64ToBytes(base64Prefix);
 
-    if (extension === "flac") return decodedPrefix.startsWith("fLaC");
-    if (extension === "m4a") return decodedPrefix.includes("ftyp");
-    if (extension === "mp3")
-      return (
-        decodedPrefix.startsWith("ID3") ||
-        decodedPrefix.includes("\xff\xfb") ||
-        decodedPrefix.includes("\xff\xf3")
-      );
+    if (extension === "flac") {
+      return bytesIncludeAscii(prefixBytes, "fLaC");
+    }
+
+    if (extension === "m4a") {
+      return hasIsoBmffHeader(prefixBytes);
+    }
+
+    if (extension === "mp3") {
+      return bytesIncludeAscii(prefixBytes, "ID3") || hasMp3FrameSync(prefixBytes);
+    }
 
     return true; // fallback
   } catch {
@@ -2776,6 +3239,7 @@ export async function getTidalTrackRecommendations(
     const response = await fetchJson<TidalRecommendationsApiResponse>(
       `/recommendations/?id=${trackId}`,
       REQUEST_TIMEOUT_MS,
+      isSelectedDabSource() ? { ignoreManualMirror: true } : undefined,
     );
     const items = response.items || response.data?.items || [];
     return items.map(normalizeSearchItem);
@@ -2795,6 +3259,7 @@ export async function getTidalSimilarArtists(
     const response = await fetchJson<TidalSimilarArtistsApiResponse>(
       `/artist/similar/?id=${artistId}`,
       REQUEST_TIMEOUT_MS,
+      isSelectedDabSource() ? { ignoreManualMirror: true } : undefined,
     );
     const items =
       response.artists || response.data?.artists || response.items || [];
@@ -2816,6 +3281,7 @@ export async function getTidalSimilarAlbums(
     const response = await fetchJson<TidalSimilarAlbumsApiResponse>(
       `/album/similar/?id=${albumId}`,
       REQUEST_TIMEOUT_MS,
+      isSelectedDabSource() ? { ignoreManualMirror: true } : undefined,
     );
     const items =
       response.albums || response.data?.albums || response.items || [];

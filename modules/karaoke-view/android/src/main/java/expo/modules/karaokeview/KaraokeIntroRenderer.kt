@@ -21,7 +21,7 @@ internal class KaraokeIntroRenderer(private val density: Float) {
     private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
-        textSize = 24f * density
+        textSize = 26f * density
     }
     
     private val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
@@ -71,7 +71,7 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         if (visibility <= 0.01f) return
 
         val centerX = layout.width / 2f
-        val centerY = layout.height * 0.22f
+        val centerY = layout.height * 0.32f
         val density = layout.density
 
         // Colors
@@ -125,12 +125,12 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         layout: KaraokeIntroLayout
     ) {
         val pulse = (sin(currentTimeMs / 450f) + 1f) * 0.5f
-        val baseRadius = 140f * density * (0.9f + 0.1f * pulse + 0.2f * progress)
+        val baseRadius = 140f * density * (0.85f + 0.1f * pulse + 0.15f * progress)
         
         // Define a radial gradient for a soft "glow" behavior
         val colors = intArrayOf(
-            Color.argb((32f * visibility).toInt(), r, g, b),
-            Color.argb((8f * visibility).toInt(), r, g, b),
+            Color.argb((22f * visibility).toInt(), r, g, b),
+            Color.argb((6f * visibility).toInt(), r, g, b),
             Color.TRANSPARENT
         )
         val radialShader = RadialGradient(cx, cy, baseRadius, colors, null, Shader.TileMode.CLAMP)

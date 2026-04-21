@@ -144,9 +144,17 @@ function SharedPlayerShellInner() {
     const actionSheetVisible = useUIStore(s => s.actionSheetVisible);
     const confirmModalVisible = useUIStore(s => s.confirmModalVisible);
 
-    const displayTrack = pendingTrackPreview ?? currentTrack;
+    const canUsePendingPreview = Boolean(pendingTrackPreview) && (
+        !currentTrack
+        || currentTrack.id === pendingTrackPreview?.id
+        || currentTrack.source === 'tidal'
+        || currentTrack.source === 'tidal_stream'
+        || currentTrack.source === 'spotify'
+        || Boolean(currentTrack.cloudOnly)
+    );
+    const displayTrack = canUsePendingPreview ? pendingTrackPreview : currentTrack;
     const hasBlockingOverlay = actionSheetVisible || confirmModalVisible;
-    const shouldShowTidalLoading = Boolean(pendingTrackPreview)
+    const shouldShowTidalLoading = canUsePendingPreview
         || (isLoading && (currentTrack?.source === 'tidal' || currentTrack?.source === 'tidal_stream'));
     const [isTrackSwitching, setIsTrackSwitching] = useState(false);
     const [shellInteractive, setShellInteractive] = useState(true);

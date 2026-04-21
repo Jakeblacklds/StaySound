@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { FileSystemStorage } from '../services/storage';
 import {
+    authenticateDabAccount,
     clearDabSessionCache,
     hydrateDabSession,
     loginDabAccount,
@@ -20,6 +21,7 @@ interface DabAuthState {
 
 interface DabAuthActions {
     bootstrap: () => Promise<void>;
+    authenticate: (email: string, password: string, usernameHint?: string) => Promise<void>;
     login: (email: string, password: string) => Promise<void>;
     register: (username: string, email: string, password: string) => Promise<void>;
     signOut: () => Promise<void>;
@@ -69,6 +71,31 @@ export const useDabAuthStore = create<DabAuthStore>()(
                         status: 'unauthenticated',
                         session: null,
                     });
+                }
+            },
+
+            authenticate: async (email: string, password: string, usernameHint?: string) => {
+                const normalizedEmail = normalizeEmail(email);
+                const normalizedPassword = password.trim();
+                const normalizedUsernameHint = usernameHint?.trim();
+
+                if (!normalizedEmail || !normalizedPassword) {
+                    throw new Error('Escribe correo y contrasena para continuar.');
+                }
+
+                set({ isLoggingIn: true });
+                try {
+                    const session = await authenticateDabAccount(
+                        normalizedEmail,
+                        normalizedPassword,
+                        normalizedUsernameHint,
+                    );
+                    set({
+                        session,
+                        status: 'authenticated',
+                    });
+                } finally {
+                    set({ isLoggingIn: false });
                 }
             },
 

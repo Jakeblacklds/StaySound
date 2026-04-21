@@ -1,4 +1,4 @@
-﻿/**
+/**
  * LibraryScreen - Main library view with tabs for songs, albums, artists, playlists
  */
 
@@ -13,9 +13,18 @@ import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo } from 'react';
-import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Searchbar, Text } from 'react-native-paper';
-import Animated, { FadeIn, FadeOut, useAnimatedStyle } from 'react-native-reanimated';
+import Animated, {
+    Easing,
+    FadeIn,
+    FadeOut,
+    LinearTransition,
+    interpolate,
+    useAnimatedStyle,
+    useSharedValue,
+    withTiming
+} from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type LibraryTab = 'songs' | 'albums' | 'artists';
@@ -44,9 +53,13 @@ export default function LibraryScreen() {
     const contentEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 140, duration: 280, translateY: 0 });
     const [tab, setTab] = React.useState<LibraryTab>('songs');
     const [searchQuery, setSearchQuery] = React.useState('');
+    const [isSearchExpanded, setIsSearchExpanded] = React.useState(false);
     const [isAlphabetScrubbing, setIsAlphabetScrubbing] = React.useState(false);
     const deferredSearchQuery = useDeferredValue(searchQuery);
     const lightweightMode = useSettingsStore(s => s.lightweightMode);
+    const searchInputRef = React.useRef<any>(null);
+    const searchProgress = useSharedValue(0);
+    const { width: windowWidth } = useWindowDimensions();
 
     const libraryTabs = useMemo(
         () => [
@@ -207,6 +220,27 @@ export default function LibraryScreen() {
     }, [searchQuery, tab]);
 
     useEffect(() => {
+        if (!isSearchExpanded && searchQuery) {
+            setIsSearchExpanded(true);
+        }
+    }, [isSearchExpanded, searchQuery]);
+
+    useEffect(() => {
+        searchProgress.value = withTiming(isSearchExpanded ? 1 : 0, {
+            duration: isSearchExpanded ? 320 : 220,
+            easing: isSearchExpanded ? Easing.bezier(0.22, 1, 0.36, 1) : Easing.bezier(0.4, 0, 1, 1),
+        });
+    }, [isSearchExpanded, searchProgress]);
+
+    useEffect(() => {
+        if (!isSearchExpanded) return;
+        const task = InteractionManager.runAfterInteractions(() => {
+            searchInputRef.current?.focus?.();
+        });
+        return () => task.cancel();
+    }, [isSearchExpanded]);
+
+    useEffect(() => {
         return () => {
             if (rafScrollRef.current !== null) {
                 cancelAnimationFrame(rafScrollRef.current);
@@ -243,10 +277,12 @@ export default function LibraryScreen() {
 
     const renderAlbumItem = useCallback(({ item }: { item: Album }) => (
         <Pressable
+            accessibilityRole="button"
+            accessibilityLabel={`Álbum ${item.name} de ${item.artist}`}
             onPress={() => handleAlbumPress(item)}
             style={({ pressed }) => [
                 styles.albumRow,
-                { borderColor: `${theme.colors.outline}22` },
+                { borderColor: `${theme.colors.outline}40` },
                 pressed && styles.albumRowPressed,
             ]}
         >
@@ -351,11 +387,40 @@ export default function LibraryScreen() {
 
     const aC = useAnimatedColors();
     const animBg = useAnimatedStyle(() => ({ backgroundColor: aC.background.value }));
+    const animSearchbarBg = useAnimatedStyle(() => ({ backgroundColor: aC.surfaceVariant.value + 'A6' }));
+    const searchExpandedWidth = Math.min(Math.max(194, windowWidth - (screenPadding * 2) - 96), 290);
+    const searchAccordionStyle = useAnimatedStyle(() => ({
+        width: interpolate(searchProgress.value, [0, 1], [48, searchExpandedWidth]),
+    }));
+    const searchButtonIconStyle = useAnimatedStyle(() => ({
+        opacity: 1 - searchProgress.value,
+        transform: [{ scale: interpolate(searchProgress.value, [0, 1], [1, 0.82]) }],
+    }));
+    const searchInputShellStyle = useAnimatedStyle(() => ({
+        opacity: searchProgress.value,
+        transform: [{ translateX: interpolate(searchProgress.value, [0, 1], [16, 0]) }],
+    }));
+
+    const openSearch = useCallback(() => {
+        setIsSearchExpanded(true);
+    }, []);
+
+    const closeSearch = useCallback(() => {
+        setSearchQuery('');
+        setIsSearchExpanded(false);
+        searchInputRef.current?.blur?.();
+    }, []);
+
+    const handleSearchBlur = useCallback(() => {
+        if (searchQuery.trim().length > 0) return;
+        setIsSearchExpanded(false);
+    }, [searchQuery]);
 
     return (
         <Animated.View style={[styles.container, animBg]}>
             <SafeAreaView style={styles.container} edges={['top']}>
                 <Animated.View
+                    layout={LinearTransition.duration(240).easing(Easing.bezier(0.22, 1, 0.36, 1))}
                     style={[
                         headerEntryStyle,
                         {
@@ -376,47 +441,87 @@ export default function LibraryScreen() {
                         >
                             {t('library.title')}
                         </Text>
-                        <Searchbar
-                            placeholder={t('library.searchPlaceholder')}
-                            value={searchQuery}
-                            onChangeText={setSearchQuery}
-                            style={[styles.searchbar, { backgroundColor: theme.colors.surfaceVariant + 'A6', borderColor: 'transparent' }]}
-                            iconColor={theme.colors.primary}
-                        />
+                        <Animated.View style={[styles.searchAccordion, searchAccordionStyle]}>
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={t('library.searchPlaceholder')}
+                                onPress={openSearch}
+                                style={[
+                                    styles.searchToggleButton,
+                                    { backgroundColor: theme.colors.surfaceVariant }
+                                ]}
+                            >
+                                <Animated.View pointerEvents="none" style={searchButtonIconStyle}>
+                                    <Text style={[styles.searchToggleGlyph, { color: theme.colors.primary }]}>⌕</Text>
+                                </Animated.View>
+                            </Pressable>
+
+                            <Animated.View
+                                pointerEvents={isSearchExpanded ? 'auto' : 'none'}
+                                style={[styles.searchInputShell, styles.searchbar, animSearchbarBg, searchInputShellStyle]}
+                            >
+                                <Searchbar
+                                    ref={searchInputRef}
+                                    placeholder={t('library.searchPlaceholder')}
+                                    value={searchQuery}
+                                    onChangeText={setSearchQuery}
+                                    onBlur={handleSearchBlur}
+                                    style={styles.searchbarInner}
+                                    iconColor={theme.colors.primary}
+                                    traileringIcon="close"
+                                    onTraileringIconPress={closeSearch}
+                                />
+                            </Animated.View>
+                        </Animated.View>
                     </Animated.View>
                 </Animated.View>
 
-                <Animated.View
-                    style={[styles.tabSection, { paddingHorizontal: screenPadding }, tabsEntryStyle]}
-                >
-                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-                        {libraryTabs.map(item => {
-                            const selected = tab === item.value;
+                {!isSearchExpanded ? (
+                    <Animated.View
+                        entering={FadeIn.duration(220)}
+                        exiting={FadeOut.duration(150)}
+                        layout={LinearTransition.duration(220).easing(Easing.bezier(0.22, 1, 0.36, 1))}
+                        style={[styles.tabSection, { paddingHorizontal: screenPadding }, tabsEntryStyle]}
+                    >
+                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
+                            {libraryTabs.map(item => {
+                                const selected = tab === item.value;
 
-                            return (
-                                <Pressable
-                                    key={item.value}
-                                    style={[
-                                        styles.tabButton,
-                                        selected ? { backgroundColor: theme.colors.primaryContainer + '56' } : null
-                                    ]}
-                                    onPress={() => setTab(item.value)}
-                                >
-                                    <Text
-                                        style={{
-                                            color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant,
-                                            fontWeight: selected ? '700' : '500',
-                                        }}
+                                return (
+                                    <Pressable
+                                        key={item.value}
+                                        accessibilityRole="tab"
+                                        accessibilityState={{ selected }}
+                                        accessibilityLabel={item.label}
+                                        style={[
+                                            styles.tabButton,
+                                            selected ? { backgroundColor: theme.colors.primaryContainer + '80' } : null
+                                        ]}
+                                        onPress={() => setTab(item.value)}
                                     >
-                                        {item.label}
-                                    </Text>
-                                </Pressable>
-                            );
-                        })}
-                    </ScrollView>
-                </Animated.View>
+                                        <Text
+                                            style={{
+                                                color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                                                fontWeight: selected ? '700' : '500',
+                                            }}
+                                        >
+                                            {item.label}
+                                        </Text>
+                                        {selected ? (
+                                            <View style={[
+                                                styles.tabIndicator,
+                                                { backgroundColor: theme.colors.primary }
+                                            ]} />
+                                        ) : null}
+                                    </Pressable>
+                                );
+                            })}
+                        </ScrollView>
+                    </Animated.View>
+                ) : null}
 
                 <Animated.View
+                    layout={LinearTransition.duration(220).easing(Easing.bezier(0.22, 1, 0.36, 1))}
                     style={[styles.content, contentEntryStyle]}
                 >
                     {tab === 'songs' ? (
@@ -531,14 +636,53 @@ const styles = StyleSheet.create({
     header: {
         paddingTop: 10,
         paddingBottom: 8,
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'space-between',
+        gap: 14,
     },
     title: {
         fontWeight: 'bold',
+        flex: 1,
     },
+    searchAccordion: {
+        height: 48,
+        position: 'relative',
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+        flexShrink: 0,
+    },
+    searchToggleButton: {
+        position: 'absolute',
+        right: 0,
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    searchToggleGlyph: {
+        fontSize: 22,
+        lineHeight: 22,
+        fontWeight: '600',
+    },
+    searchInputShell: {
+        position: 'absolute',
+        right: 0,
+        left: 0,
+    },
+    // Outer Animated.View wrapper — receives animated background color
     searchbar: {
-        marginTop: 8,
-        borderRadius: 14,
+        borderRadius: 24,
+        overflow: 'hidden',
+        justifyContent: 'center',
+    },
+    // Inner Paper Searchbar — transparent so outer wrapper controls bg
+    searchbarInner: {
+        height: 48,
+        backgroundColor: 'transparent',
         elevation: 0,
+        borderColor: 'transparent',
     },
     tabRow: {
         gap: 8,
@@ -553,9 +697,18 @@ const styles = StyleSheet.create({
         minWidth: 96,
         borderRadius: 14,
         paddingHorizontal: 14,
-        paddingVertical: 10,
+        paddingVertical: 13,
         alignItems: 'center',
         justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    tabIndicator: {
+        position: 'absolute',
+        bottom: 0,
+        left: 14,
+        right: 14,
+        height: 2.5,
+        borderRadius: 2,
     },
     content: {
         flex: 1,
@@ -570,7 +723,7 @@ const styles = StyleSheet.create({
     albumRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        paddingVertical: 10,
+        paddingVertical: 11,
         borderBottomWidth: StyleSheet.hairlineWidth,
     },
     albumRowPressed: {
@@ -579,7 +732,7 @@ const styles = StyleSheet.create({
     albumArtworkWrap: {
         width: 72,
         height: 72,
-        borderRadius: 16,
+        borderRadius: 14,
         overflow: 'hidden',
         alignItems: 'center',
         justifyContent: 'center',
@@ -599,6 +752,7 @@ const styles = StyleSheet.create({
     },
     albumRowSubtitle: {
         marginTop: 4,
+        opacity: 0.78,
     },
     masonryWrapper: {
         flex: 1,

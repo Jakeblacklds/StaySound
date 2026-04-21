@@ -49,6 +49,50 @@ export function hydrateDabSession(_session: DabAuthSession | null) {
 export function clearDabSessionCache() {
 }
 
+function normalizeErrorMessage(error: unknown): string {
+    if (error instanceof Error) {
+        return error.message.trim().toLowerCase();
+    }
+
+    if (typeof error === 'string') {
+        return error.trim().toLowerCase();
+    }
+
+    return '';
+}
+
+function isExistingAccountError(error: unknown): boolean {
+    const message = normalizeErrorMessage(error);
+    if (!message) return false;
+
+    return [
+        'already exists',
+        'already registered',
+        'already taken',
+        'already in use',
+        'email already',
+        'username already',
+        'user already',
+        'account already',
+        'email exists',
+        'username exists',
+        'user exists',
+        'account exists',
+        'correo ya',
+        'usuario ya',
+        'cuenta ya',
+        'ya existe',
+        'ya registrado',
+        'ya registrada',
+        'ya esta en uso',
+        'ya está en uso',
+        'duplicate',
+        'conflict',
+        'taken',
+        'in use',
+    ].some(token => message.includes(token));
+}
+
 async function parseError(response: Response) {
     try {
         const data = await response.json() as { error?: string; message?: string };
@@ -162,6 +206,26 @@ export async function registerDabAccount(username: string, email: string, passwo
     }
 
     return await loginDabAccount(normalizedEmail, normalizedPassword, normalizedUsername);
+}
+
+export async function authenticateDabAccount(email: string, password: string, usernameHint?: string): Promise<DabAuthSession> {
+    const normalizedEmail = email.trim().toLowerCase();
+    const normalizedPassword = password.trim();
+    const normalizedUsername = usernameHint?.trim() || getUsernameFromEmail(normalizedEmail);
+
+    try {
+        return await loginDabAccount(normalizedEmail, normalizedPassword, normalizedUsername);
+    } catch (loginError) {
+        try {
+            return await registerDabAccount(normalizedUsername, normalizedEmail, normalizedPassword);
+        } catch (registerError) {
+            if (isExistingAccountError(registerError)) {
+                throw loginError;
+            }
+
+            throw registerError;
+        }
+    }
 }
 
 export async function validateDabSession(session: DabAuthSession): Promise<DabAuthSession> {

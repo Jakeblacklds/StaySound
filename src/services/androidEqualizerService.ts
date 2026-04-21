@@ -55,6 +55,10 @@ type RawNativeBand = NonNullable<NativeEqualizerCapabilities['bands']>[number];
 const nativeEqualizerModule: NativeEqualizerModule | null =
     Platform.OS === 'android' ? NativeModules.StaySoundEqualizer ?? null : null;
 
+let syncInFlightPromise: Promise<EqualizerCapabilities | null> | null = null;
+let lastSyncedAudioSessionId: number | null = null;
+let lastAppliedBandsSignature = '';
+
 export function isAndroidEqualizerAvailable(): boolean {
     return Platform.OS === 'android' && nativeEqualizerModule != null;
 }
@@ -80,34 +84,57 @@ export async function refreshAndroidEqualizerCapabilities(forceAttach = false): 
 
 export async function syncAndroidEqualizerFromSettings(): Promise<EqualizerCapabilities | null> {
     if (!nativeEqualizerModule) return null;
+    if (syncInFlightPromise) return syncInFlightPromise;
 
-    const store = useSettingsStore.getState();
-    const { equalizer } = store;
+    syncInFlightPromise = (async () => {
+        const store = useSettingsStore.getState();
+        const { equalizer } = store;
 
-    if (!equalizer.enabled || equalizer.mode === 'off') {
-        await nativeEqualizerModule.release();
+        if (!equalizer.enabled || equalizer.mode === 'off') {
+            await nativeEqualizerModule.release();
+            lastSyncedAudioSessionId = null;
+            lastAppliedBandsSignature = '';
+            return refreshAndroidEqualizerCapabilities(false);
+        }
+
+        if (equalizer.mode === 'system') {
+            await nativeEqualizerModule.release();
+            lastSyncedAudioSessionId = null;
+            lastAppliedBandsSignature = '';
+            return refreshAndroidEqualizerCapabilities(false);
+        }
+
+        const attached = normalizeCapabilities(await nativeEqualizerModule.attachToCurrentSession());
+        store.setEqualizerCapabilities(attached);
+
+        if (!attached.attached || attached.audioSessionId == null || attached.bands.length === 0) {
+            return attached;
+        }
+
+        const mergedBandLevels = mergeStoredBandLevels(attached.bands, equalizer.bandLevels);
+        store.setEqualizerBandLevels(mergedBandLevels);
+
+        const nextBandsSignature = JSON.stringify(mergedBandLevels);
+        const shouldReapplyBands =
+            attached.audioSessionId !== lastSyncedAudioSessionId
+            || nextBandsSignature !== lastAppliedBandsSignature;
+
+        if (!shouldReapplyBands) {
+            return attached;
+        }
+
+        await nativeEqualizerModule.setEnabled(true);
+        await applyBandLevelsToNative(attached.bands, mergedBandLevels);
+        lastSyncedAudioSessionId = attached.audioSessionId;
+        lastAppliedBandsSignature = nextBandsSignature;
+
         return refreshAndroidEqualizerCapabilities(false);
-    }
+    })()
+        .finally(() => {
+            syncInFlightPromise = null;
+        });
 
-    if (equalizer.mode === 'system') {
-        await nativeEqualizerModule.release();
-        return refreshAndroidEqualizerCapabilities(false);
-    }
-
-    const attached = normalizeCapabilities(await nativeEqualizerModule.attachToCurrentSession());
-    store.setEqualizerCapabilities(attached);
-
-    if (!attached.attached || attached.audioSessionId == null || attached.bands.length === 0) {
-        return attached;
-    }
-
-    await nativeEqualizerModule.setEnabled(true);
-
-    const mergedBandLevels = mergeStoredBandLevels(attached.bands, equalizer.bandLevels);
-    store.setEqualizerBandLevels(mergedBandLevels);
-    await applyBandLevelsToNative(attached.bands, mergedBandLevels);
-
-    return refreshAndroidEqualizerCapabilities(false);
+    return syncInFlightPromise;
 }
 
 export async function setAndroidEqualizerMode(mode: EqualizerMode): Promise<EqualizerCapabilities | null> {

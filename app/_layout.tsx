@@ -59,8 +59,6 @@ export default function RootLayout() {
 }
 
 function AudioSync() {
-  const next = usePlayerStore(state => state.next);
-
   useEffect(() => {
     import('@/src/services/database').then(m => m.getDatabase());
   }, []);
@@ -106,11 +104,8 @@ function AudioSync() {
           trackId: audioState.currentTrack?.id,
         };
       },
-      onTrackEnd: () => {
-        void next();
-      },
     });
-  }, [next]);
+  }, []);
 
   return null;
 }

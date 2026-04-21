@@ -421,14 +421,14 @@ const styles = StyleSheet.create({
     },
     gridCardTitle: {
         color: '#FFFFFF',
-        ...typeScale.bodyLarge,
+        ...typeScale.body,
         fontWeight: '800',
         fontSize: 15,
         lineHeight: 18,
     },
     gridCardSubtitle: {
         color: 'rgba(255,255,255,0.7)',
-        ...typeScale.bodyMedium,
+        ...typeScale.body,
         fontSize: 12,
         marginTop: 4,
     },

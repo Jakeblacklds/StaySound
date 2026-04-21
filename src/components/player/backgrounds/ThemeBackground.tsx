@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
 import { StyleSheet, View } from 'react-native';
+import { Image } from 'expo-image';
 import Animated, {
     Easing,
     SharedValue,
@@ -14,7 +15,6 @@ import Animated, {
 import { AlbumColors } from '../../../services/colorExtractor';
 
 interface ThemeBackgroundProps {
-
     colors: AlbumColors;
     animColors?: {
         primary: SharedValue<string>;
@@ -30,19 +30,38 @@ interface ThemeBackgroundProps {
 }
 
 export function ThemeBackground({ colors, animColors, artwork, isVisible, expansion, lightweight }: ThemeBackgroundProps) {
-    if (lightweight) {
-        return (
-            <View style={StyleSheet.absoluteFill}>
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]} />
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.08)' }]} />
-            </View>
-        );
-    }
+    const bgStyle = useAnimatedStyle(() => ({
+        backgroundColor: animColors ? animColors.background.value : colors.background,
+        opacity: interpolate(expansion?.value ?? 0, [0, 1], [0.1, 0.62]),
+    }));
 
     return (
         <View style={StyleSheet.absoluteFill}>
+            {/* Base color to prevent flickering */}
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]} />
+            
+            {/* Atmospheric Artwork Blur */}
+            {artwork && (
+                <View style={StyleSheet.absoluteFill}>
+                    <Image
+                        source={{ uri: artwork }}
+                        style={[StyleSheet.absoluteFill, { transform: [{ scale: 3 }] }]}
+                        blurRadius={80}
+                        contentFit="cover"
+                        transition={1200}
+                    />
+                    {/* Darkening overlay for the artwork blur */}
+                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
+                </View>
+            )}
+
             <FluidGradients colors={colors} animColors={animColors} isVisible={isVisible} expansion={expansion} lightweight={lightweight} />
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: lightweight ? 'rgba(0,0,0,0.06)' : 'rgba(0,0,0,0.1)' }]} />
+            
+            {/* Fog of color transitioning between songs */}
+            <Animated.View style={[StyleSheet.absoluteFill, bgStyle]} pointerEvents="none" />
+            
+            {/* Finisher subtle darkening for readability */}
+            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.12)' }]} pointerEvents="none" />
         </View>
     );
 }
@@ -75,12 +94,11 @@ function FluidGradients({ colors, animColors, isVisible, expansion, lightweight 
                 });
             } else {
                 anim.value = withRepeat(withTiming(1, {
-                    duration: 24000,
+                    duration: 32000, // Even slower, more majestic movement
                     easing: Easing.inOut(Easing.sin)
                 }), -1, true);
             }
         } else {
-            // Cancel animation entirely for performance
             cancelAnimation(anim);
             anim.value = 0;
         }
@@ -88,29 +106,30 @@ function FluidGradients({ colors, animColors, isVisible, expansion, lightweight 
 
     const blob1Style = useAnimatedStyle(() => ({
         transform: [
-            { translateX: interpolate(expansion?.value ?? 0, [0, 1], [72, Math.sin(phase.value) * 138], 'clamp') },
-            { translateY: interpolate(expansion?.value ?? 0, [0, 1], [-28, Math.cos(phase.value) * 78], 'clamp') },
-            { scale: interpolate(expansion?.value ?? 0, [0, 0.2, 1], [0.72, lightweight ? 0.8 : 0.86, lightweight ? 0.92 : 1], 'clamp') },
+            { translateX: interpolate(expansion?.value ?? 0, [0, 1], [72, Math.sin(phase.value) * 150], 'clamp') },
+            { translateY: interpolate(expansion?.value ?? 0, [0, 1], [-28, Math.cos(phase.value) * 85], 'clamp') },
+            { scale: interpolate(expansion?.value ?? 0, [0, 0.2, 1], [0.72, 1.2, 1.5], 'clamp') },
         ],
-        backgroundColor: animColors ? animColors.primary.value + '20' : colors.primary + '20',
-        opacity: interpolate(expansion?.value ?? 0, [0, 0.08, 0.45, 1], [0, 0.16, lightweight ? 0.48 : 0.72, lightweight ? 0.62 : 0.88], 'clamp'),
+        // Boosted presence from +20 (12%) to +40 (25%) or +50 (31%)
+        backgroundColor: animColors ? animColors.primary.value + '40' : colors.primary + '40',
+        opacity: interpolate(expansion?.value ?? 0, [0, 0.08, 1], [0, 0.4, lightweight ? 0.6 : 0.85], 'clamp'),
     }));
 
     const blob2Style = useAnimatedStyle(() => ({
         transform: [
-            { translateX: interpolate(expansion?.value ?? 0, [0, 1], [-54, Math.cos(phase.value) * 112], 'clamp') },
-            { translateY: interpolate(expansion?.value ?? 0, [0, 1], [40, Math.sin(phase.value) * 92], 'clamp') },
-            { scale: interpolate(expansion?.value ?? 0, [0, 0.2, 1], [0.76, lightweight ? 0.82 : 0.88, lightweight ? 0.9 : 1], 'clamp') },
+            { translateX: interpolate(expansion?.value ?? 0, [0, 1], [-54, Math.cos(phase.value) * 125], 'clamp') },
+            { translateY: interpolate(expansion?.value ?? 0, [0, 1], [40, Math.sin(phase.value) * 105], 'clamp') },
+            { scale: interpolate(expansion?.value ?? 0, [0, 0.2, 1], [0.76, 1.1, 1.4], 'clamp') },
         ],
-        backgroundColor: animColors ? animColors.secondary.value + '1A' : colors.secondary + '1A',
-        opacity: interpolate(expansion?.value ?? 0, [0, 0.1, 0.5, 1], [0, 0.12, lightweight ? 0.4 : 0.62, lightweight ? 0.54 : 0.82], 'clamp'),
+        backgroundColor: animColors ? animColors.secondary.value + '35' : colors.secondary + '35',
+        opacity: interpolate(expansion?.value ?? 0, [0, 0.1, 1], [0, 0.35, lightweight ? 0.55 : 0.75], 'clamp'),
     }));
 
     const blob3Style = useAnimatedStyle(() => ({
-        backgroundColor: animColors ? animColors.primary.value + '0D' : colors.primary + '0D',
-        opacity: interpolate(expansion?.value ?? 0, [0.12, 0.4, 1], [0, lightweight ? 0.1 : 0.18, lightweight ? 0.14 : 0.22], 'clamp'),
+        backgroundColor: animColors ? animColors.primary.value + '25' : colors.primary + '25',
+        opacity: interpolate(expansion?.value ?? 0, [0.12, 1], [0, lightweight ? 0.25 : 0.35], 'clamp'),
         transform: [
-            { scale: interpolate(expansion?.value ?? 0, [0, 1], [0.88, lightweight ? 0.95 : 1], 'clamp') },
+            { scale: interpolate(expansion?.value ?? 0, [0, 1], [0.88, 1.6], 'clamp') },
         ],
     }));
 
@@ -127,26 +146,26 @@ const styles = StyleSheet.create({
     blobBase: { position: 'absolute' },
     blobPrimary: {
         position: 'absolute',
-        top: '12%',
-        left: '6%',
-        width: 400,
-        height: 400,
-        borderRadius: 200,
+        top: '5%',
+        left: '-10%',
+        width: 500,
+        height: 500,
+        borderRadius: 250,
     },
     blobSecondary: {
         position: 'absolute',
-        bottom: '16%',
-        right: '6%',
-        width: 380,
-        height: 380,
-        borderRadius: 190,
+        bottom: '5%',
+        right: '-10%',
+        width: 450,
+        height: 450,
+        borderRadius: 225,
     },
     blobAmbient: {
         position: 'absolute',
-        top: '42%',
-        left: '18%',
-        width: 520,
-        height: 520,
-        borderRadius: 260,
+        top: '35%',
+        left: '10%',
+        width: 600,
+        height: 600,
+        borderRadius: 300,
     },
 });

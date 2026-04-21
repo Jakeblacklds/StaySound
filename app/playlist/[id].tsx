@@ -226,9 +226,9 @@ export default function PlaylistDetailScreen() {
     setSnackbarVisible(true);
   }, []);
 
-  const handleCloudTrackPlay = useCallback(async (track: Track) => {
-    await playResolvedRemoteTrack(track, playableTracks);
-  }, [playableTracks]);
+  const handleCloudTrackPlay = useCallback(async (track: Track, queue?: Track[]) => {
+    await playResolvedRemoteTrack(track, queue);
+  }, []);
 
   const handleCloudTrackDownload = useCallback(async (track: Track) => {
     const busyKey = track.spotifyId ?? String(track.tidalId ?? track.id);
@@ -257,13 +257,13 @@ export default function PlaylistDetailScreen() {
     if (playableTracks.length > 0) {
       const firstTrack = playableTracks[0];
       if (firstTrack.cloudOnly) {
-        void playResolvedRemoteTrack(firstTrack, playableTracks);
+        void handleCloudTrackPlay(firstTrack, playableTracks);
         return;
       }
 
       play(firstTrack, playableTracks);
     }
-  }, [play, playableTracks]);
+  }, [handleCloudTrackPlay, play, playableTracks]);
 
   const handleAddToQueue = useCallback((track: Track) => {
     if (track.cloudOnly) {
@@ -287,13 +287,13 @@ export default function PlaylistDetailScreen() {
       const randomIndex = Math.floor(Math.random() * playableTracks.length);
       const targetTrack = playableTracks[randomIndex];
       if (targetTrack.cloudOnly) {
-        void playResolvedRemoteTrack(targetTrack, playableTracks);
+        void handleCloudTrackPlay(targetTrack, playableTracks);
         return;
       }
 
       play(targetTrack, playableTracks);
     }
-  }, [play, playableTracks, shuffleEnabled, toggleShuffle]);
+  }, [handleCloudTrackPlay, play, playableTracks, shuffleEnabled, toggleShuffle]);
 
   const handleLibraryTrackPress = useCallback((track: Track) => {
     const queue = filteredLibraryTracks.length > 0 ? filteredLibraryTracks : libraryTracks;

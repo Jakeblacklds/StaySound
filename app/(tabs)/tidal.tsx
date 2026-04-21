@@ -6,6 +6,7 @@ import {
     getTidalAlbumDetail,
     getTidalArtistInfo,
     getTidalMirrorAvailability,
+    getTidalMirrorOptions,
     getTidalSimilarArtists,
     getTidalTrackRecommendations,
     isValidAudioFile,
@@ -275,6 +276,24 @@ function formatMirrorStatus(availability?: TidalMirrorAvailability): string {
     return 'No disponible ahora';
 }
 
+function formatMirrorCapabilities(availability?: TidalMirrorAvailability): string {
+    if (!availability) return 'Busqueda ?, Stream ?, Descarga ?';
+    const search = availability.supportsSearch ? 'Busqueda OK' : 'Busqueda KO';
+    const stream = availability.supportsStream ? 'Stream OK' : 'Stream KO';
+    const download = availability.supportsDownload ? 'Descarga OK' : 'Descarga KO';
+    return `${search} · ${stream} · ${download}`;
+}
+
+function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
+    const pinnedMirrors = [
+        'https://dabmusic.xyz/api',
+        'https://beta.dabmusic.xyz',
+    ];
+
+    return [...pinnedMirrors, ...availableMirrors.slice(0, 3)]
+        .filter((mirror, index, all) => availableMirrors.includes(mirror) && all.indexOf(mirror) === index);
+}
+
 export default function TidalScreen() {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
@@ -348,11 +367,15 @@ export default function TidalScreen() {
     }, []);
 
     const handleMirrorChange = (mirror: string) => {
+        const availability = mirrorAvailability[mirror];
         setTidalMirror(mirror);
         setShowMirrorModal(false);
 
         if (mirror !== 'auto') {
             showNotification(`Fuente seleccionada: ${TIDAL_MIRROR_NAMES[mirror]}`, 'success');
+            if (availability && (!availability.supportsSearch || !availability.supportsStream || !availability.supportsDownload)) {
+                showNotification(formatMirrorCapabilities(availability), 'warning');
+            }
         } else {
             showNotification('Modo automático activado', 'info');
         }
@@ -709,7 +732,7 @@ export default function TidalScreen() {
                         {track.title}
                     </Text>
                     <View style={styles.metaRow}>
-                        <Text numberOfLines={1} style={[typeScale.bodySmall, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
+                    <Text numberOfLines={1} style={[typeScale.body, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
                             {track.artist}
                         </Text>
                         <View style={[styles.qualityPill, { backgroundColor: withAlpha(theme.colors.onSurfaceVariant, '0A'), paddingHorizontal: 6, borderRadius: 4 }]}>
@@ -721,7 +744,7 @@ export default function TidalScreen() {
                 </View>
                 
                 <View style={styles.trackRowActions}>
-                    <Text style={[typeScale.bodySmall, { color: theme.colors.onSurfaceVariant, marginRight: 12 }]}>
+                    <Text style={[typeScale.body, { color: theme.colors.onSurfaceVariant, marginRight: 12 }]}>
                         {formatTrackDuration(track.durationMs)}
                     </Text>
                     <DownloadAnimatedButton
@@ -742,20 +765,13 @@ export default function TidalScreen() {
     // MasonryGrid and MasonryGridCard are defined at module level above
 
     const [isFocused, setIsFocused] = useState(false);
-    const availableMirrors = useMemo(
-        () => [
-            'https://dabmusic.xyz/api',
-            'https://beta.dabmusic.xyz',
-            ...TIDAL_API_BASES,
-        ].filter((mirror, index, all) => all.indexOf(mirror) === index),
-        [],
-    );
+    const [availableMirrors, setAvailableMirrors] = useState<string[]>(() => [
+        'https://dabmusic.xyz/api',
+        'https://beta.dabmusic.xyz',
+        ...TIDAL_API_BASES,
+    ].filter((mirror, index, all) => all.indexOf(mirror) === index));
     const recommendedMirrors = useMemo(
-        () => availableMirrors.filter(mirror => [
-            'https://hifi.geeked.wtf',
-            'https://beta.dabmusic.xyz',
-            'https://dabmusic.xyz/api',
-        ].includes(mirror)),
+        () => getPrimaryMirrorOptions(availableMirrors),
         [availableMirrors],
     );
     const legacyMirrors = useMemo(
@@ -769,12 +785,14 @@ export default function TidalScreen() {
     const refreshMirrorAvailability = useCallback(async (force = false) => {
         setIsRefreshingMirrors(true);
         try {
-            const nextAvailability = await getTidalMirrorAvailability(availableMirrors, { force });
+            const nextMirrors = await getTidalMirrorOptions({ force });
+            setAvailableMirrors(nextMirrors);
+            const nextAvailability = await getTidalMirrorAvailability(nextMirrors, { force });
             setMirrorAvailability(nextAvailability);
         } finally {
             setIsRefreshingMirrors(false);
         }
-    }, [availableMirrors]);
+    }, []);
 
     useEffect(() => {
         void refreshMirrorAvailability(false);
@@ -1310,6 +1328,9 @@ export default function TidalScreen() {
                                             <Text variant="labelSmall" style={{ color: statusColor, marginTop: 4 }}>
                                                 {formatMirrorStatus(availability)}
                                             </Text>
+                                            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+                                                {formatMirrorCapabilities(availability)}
+                                            </Text>
                                         </View>
                                         {tidalMirror === mirror && (
                                             <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
@@ -1367,6 +1388,9 @@ export default function TidalScreen() {
                                             </Text>
                                             <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>
                                                 {mirror.replace('https://', '')}
+                                            </Text>
+                                            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+                                                {formatMirrorCapabilities(availability)}
                                             </Text>
                                         </View>
                                         {tidalMirror === mirror && (

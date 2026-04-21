@@ -110,6 +110,8 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, presen
     return (
         <Pressable
             onPress={() => onPress(artist)}
+            accessibilityRole="button"
+            accessibilityLabel={`Artista ${artist.name}, ${artist.albumCount} álbum${artist.albumCount !== 1 ? 's' : ''}`}
             style={({ pressed }) => [
                 containerStyle,
                 isMasonry && styles.masonryContainer,
@@ -139,10 +141,11 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, presen
                             style={StyleSheet.absoluteFill}
                         />
                     ) : null}
+                    {/* Theme-aware gradient — adapts to dynamic palette and light/dark mode */}
                     <LinearGradient
                         colors={isMasonry
-                            ? ['transparent', 'rgba(8,11,18,0.14)', 'rgba(8,11,18,0.64)']
-                            : ['transparent', 'rgba(0,0,0,0.3)', 'rgba(0,0,0,0.85)']}
+                            ? ['transparent', `${theme.colors.background}2A`, `${theme.colors.background}B8`]
+                            : ['transparent', `${theme.colors.background}55`, `${theme.colors.background}E0`]}
                         style={StyleSheet.absoluteFill}
                         start={{ x: 0, y: 0 }}
                         end={{ x: 0, y: 1 }}

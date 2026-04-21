@@ -20,9 +20,10 @@ import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { usePathname, useRouter } from 'expo-router';
 import { KaraokeView } from 'karaoke-view';
 import React, { useCallback, useRef, useState } from 'react';
-import { BackHandler, Dimensions, Pressable, StyleSheet, View, processColor } from 'react-native';
+import { BackHandler, Dimensions, Pressable, ScrollView, StyleSheet, View, processColor, Share } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Button, IconButton, Text } from 'react-native-paper';
+import { useUIStore } from '@/src/stores/uiStore';
 import Animated, {
     Easing,
     Extrapolation,
@@ -81,6 +82,12 @@ const LYRICS_MOTION_PROFILE_STORAGE_KEY = 'lyrics-motion-profile-v1';
 const LYRICS_KEEP_AWAKE_TAG = 'StaySoundLyricsView';
 
 type LyricsOffsetCacheMap = Record<string, number>;
+type PhraseLyricLine = {
+    id: string;
+    text: string;
+    startMs: number;
+    endMs: number;
+};
 
 function normalizeLyricsOffsetKeyPart(value?: string | null) {
     return (value ?? '').trim().toLowerCase().replace(/\s+/g, ' ');
@@ -158,6 +165,54 @@ function normalizeArtistSearchValue(value?: string | null) {
         .trim();
 }
 
+function buildPhraseLyricsLines(lyricsJson: KaraokeLyricsJSON | null): PhraseLyricLine[] {
+    if (!lyricsJson?.lyrics?.length) return [];
+
+    const lines: PhraseLyricLine[] = [];
+    const foregroundLyrics = lyricsJson.lyrics.filter(word => !word.bg);
+    let currentWords: typeof foregroundLyrics = [];
+
+    const flushLine = () => {
+        if (!currentWords.length) return;
+        const text = currentWords
+            .map(word => `${word.w}${word.sp ? ' ' : ''}`)
+            .join('')
+            .trim();
+        if (!text) {
+            currentWords = [];
+            return;
+        }
+
+        const startMs = Math.max(0, Math.round(currentWords[0].s * 1000));
+        const endMs = Math.max(startMs, Math.round(currentWords[currentWords.length - 1].e * 1000));
+        lines.push({
+            id: `${startMs}-${lines.length}`,
+            text,
+            startMs,
+            endMs,
+        });
+        currentWords = [];
+    };
+
+    for (const word of foregroundLyrics) {
+        currentWords.push(word);
+        if (word.n) flushLine();
+    }
+
+    flushLine();
+    return lines;
+}
+
+function getActivePhraseLineIndex(lines: PhraseLyricLine[], currentTimeMs: number) {
+    if (!lines.length) return -1;
+    for (let index = lines.length - 1; index >= 0; index -= 1) {
+        if (currentTimeMs >= lines[index].startMs) {
+            return index;
+        }
+    }
+    return 0;
+}
+
 type PlayerQueueOverlayLayerProps = {
     visible: boolean;
     currentTrackId: string;
@@ -187,6 +242,10 @@ type AnimatedPressableProps = {
     style?: any;
     pressedScale?: number;
     children: React.ReactNode;
+    accessibilityRole?: string;
+    accessibilityLabel?: string;
+    accessibilityState?: object;
+    accessibilityHint?: string;
 };
 
 function AnimatedPressable({
@@ -194,6 +253,10 @@ function AnimatedPressable({
     style,
     pressedScale = 0.93,
     children,
+    accessibilityRole,
+    accessibilityLabel,
+    accessibilityState,
+    accessibilityHint,
 }: AnimatedPressableProps) {
     const pressScale = useSharedValue(1);
 
@@ -211,7 +274,16 @@ function AnimatedPressable({
 
     return (
         <Animated.View style={pressStyle}>
-            <Pressable onPress={onPress} onPressIn={handlePressIn} onPressOut={handlePressOut} style={style}>
+            <Pressable
+                onPress={onPress}
+                onPressIn={handlePressIn}
+                onPressOut={handlePressOut}
+                style={style}
+                accessibilityRole={accessibilityRole as any}
+                accessibilityLabel={accessibilityLabel}
+                accessibilityState={accessibilityState as any}
+                accessibilityHint={accessibilityHint}
+            >
                 {children}
             </Pressable>
         </Animated.View>
@@ -279,6 +351,94 @@ const PlayerQueueOverlayLayer = React.memo(function PlayerQueueOverlayLayer({
             onDragEnd={handleQueueDragEnd}
             loadMore={loadMoreQueue}
         />
+    );
+});
+
+type PhraseLyricsViewProps = {
+    lyrics: KaraokeLyricsJSON;
+    currentTimeMs: number;
+    activeColor: string;
+    inactiveColor: string;
+    secondaryTextColor: string;
+    onSeek: (timeMs: number) => void;
+};
+
+const PhraseLyricsView = React.memo(function PhraseLyricsView({
+    lyrics,
+    currentTimeMs,
+    activeColor,
+    inactiveColor,
+    secondaryTextColor,
+    onSeek,
+}: PhraseLyricsViewProps) {
+    const scrollRef = React.useRef<ScrollView | null>(null);
+    const lineLayoutsRef = React.useRef<Record<number, { y: number; height: number }>>({});
+    const [containerHeight, setContainerHeight] = React.useState(0);
+
+    const lines = React.useMemo(() => buildPhraseLyricsLines(lyrics), [lyrics]);
+    const activeLineIndex = React.useMemo(
+        () => getActivePhraseLineIndex(lines, currentTimeMs),
+        [currentTimeMs, lines]
+    );
+
+    React.useEffect(() => {
+        const activeLayout = lineLayoutsRef.current[activeLineIndex];
+        if (!activeLayout || !scrollRef.current || containerHeight <= 0) return;
+
+        const targetY = Math.max(0, activeLayout.y - containerHeight * 0.28 + activeLayout.height * 0.15);
+        scrollRef.current.scrollTo({ y: targetY, animated: true });
+    }, [activeLineIndex, containerHeight]);
+
+    return (
+        <View
+            style={styles.phraseLyricsRoot}
+            onLayout={event => setContainerHeight(event.nativeEvent.layout.height)}
+        >
+            <ScrollView
+                ref={scrollRef}
+                style={styles.phraseLyricsScroll}
+                contentContainerStyle={styles.phraseLyricsContent}
+                showsVerticalScrollIndicator={false}
+                scrollEventThrottle={16}
+            >
+                {lines.map((line, index) => {
+                    const distance = activeLineIndex < 0 ? index : Math.abs(index - activeLineIndex);
+                    const isActive = index === activeLineIndex;
+                    const isPast = activeLineIndex >= 0 && index < activeLineIndex;
+                    const lineColor = isActive
+                        ? activeColor
+                        : isPast
+                            ? secondaryTextColor
+                            : inactiveColor;
+
+                    return (
+                        <Pressable
+                            key={line.id}
+                            onPress={() => onSeek(line.startMs)}
+                            onLayout={event => {
+                                lineLayoutsRef.current[index] = event.nativeEvent.layout;
+                            }}
+                            style={styles.phraseLinePressable}
+                        >
+                            <Text
+                                style={[
+                                    styles.phraseLineText,
+                                    {
+                                        color: lineColor,
+                                        opacity: isActive ? 1 : Math.max(0.36, 0.8 - distance * 0.14),
+                                        transform: [{ scale: isActive ? 1 : Math.max(0.94, 1 - distance * 0.025) }],
+                                        textShadowColor: isActive ? withAlpha(activeColor, 0.18) : 'transparent',
+                                        textShadowRadius: isActive ? 14 : 0,
+                                    },
+                                ]}
+                            >
+                                {line.text}
+                            </Text>
+                        </Pressable>
+                    );
+                })}
+            </ScrollView>
+        </View>
     );
 });
 
@@ -800,13 +960,21 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
         ),
         [accentColor, lyricsBaseSurface, lyricsTextColor, theme.colors.primary]
     );
+    const lyricsHighlightColor = React.useMemo(
+        () => ensureColorContrast(
+            mixHexColors(protectedAccentColor, lyricsTextColor, 0.1),
+            lyricsBaseSurface,
+            { minRatio: 5.1, targetColor: lyricsTextColor }
+        ),
+        [lyricsBaseSurface, lyricsTextColor, protectedAccentColor]
+    );
     const protectedGlowColor = React.useMemo(
         () => ensureColorContrast(
-            mixHexColors(protectedAccentColor, lyricsTextColor, 0.22),
+            mixHexColors(lyricsHighlightColor, lyricsTextColor, 0.28),
             lyricsBaseSurface,
             { minRatio: 5.4, targetColor: lyricsTextColor }
         ),
-        [lyricsBaseSurface, lyricsTextColor, protectedAccentColor]
+        [lyricsBaseSurface, lyricsHighlightColor, lyricsTextColor]
     );
     const protectedInactiveColor = React.useMemo(
         () => ensureColorContrast(
@@ -982,19 +1150,32 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                     ]}
                 />
                 <View style={styles.fullScreenLyricsHeader}>
-                    <IconButton icon="close-circle" size={36} iconColor={lyricsTextColor} onPress={onClose} />
+                    <IconButton
+                        icon="close-circle"
+                        size={36}
+                        iconColor={lyricsTextColor}
+                        onPress={onClose}
+                        accessibilityRole="button"
+                        accessibilityLabel="Cerrar letras"
+                    />
                     <View style={styles.lyricsModeContainer}>
                         {hasSyncedLyrics && lrcLyrics && (
                             <View style={[styles.lyricsModeSwitcher, { backgroundColor: modeSwitcherBackground }]}>
                                 <Pressable
                                     onPress={() => setLyricsMode('synced')}
                                     style={[styles.modeTab, lyricsMode === 'synced' && styles.modeTabActive, lyricsMode === 'synced' && { backgroundColor: modeTabActiveBackground }]}
+                                    accessibilityRole="tab"
+                                    accessibilityLabel="Letras sincronizadas"
+                                    accessibilityState={{ selected: lyricsMode === 'synced' }}
                                 >
                                     <Text style={[styles.modeTabText, { color: lyricsMode === 'synced' ? protectedAccentColor : secondaryLyricsTextColor }]}>SINCRONIZADAS</Text>
                                 </Pressable>
                                 <Pressable
                                     onPress={() => setLyricsMode('lrc')}
                                     style={[styles.modeTab, lyricsMode === 'lrc' && styles.modeTabActive, lyricsMode === 'lrc' && { backgroundColor: modeTabActiveBackground }]}
+                                    accessibilityRole="tab"
+                                    accessibilityLabel="Letras LRC"
+                                    accessibilityState={{ selected: lyricsMode === 'lrc' }}
                                 >
                                     <Text style={[styles.modeTabText, { color: lyricsMode === 'lrc' ? protectedAccentColor : secondaryLyricsTextColor }]}>LRC</Text>
                                 </Pressable>
@@ -1004,23 +1185,34 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                 </View>
                 {displayLyrics ? (
                     <Animated.View style={[{ flex: 1 }, lyricsTransitionStyle]}>
-                        <KaraokeView
-                            style={{ flex: 1 }}
-                            lyrics={displayLyrics.lyrics}
-                            currentTimeMs={Math.max(0, nativePositionMs + lyricsTimingOffsetMs)}
-                            isPlaying={isPlaying}
-                            fontSize={29}
-                            isLineByLine={lyricsMode === 'lrc'}
-                            enableSeekOnTap={true}
-                            activeColor={processColor(protectedAccentColor)}
-                            inactiveColor={processColor(protectedInactiveColor)}
-                            glowColor={processColor(protectedGlowColor)}
-                            enableSpectralParticles={colors.isDark}
-                            motionProfile={appliedMotionProfile}
-                            introTitle={currentTrack?.title ?? displayLyrics?.meta?.song}
-                            introSubtitle={currentTrack?.artist ?? displayLyrics?.meta?.artist}
-                            onSeek={({ nativeEvent }) => seek(nativeEvent.timeMs)}
-                        />
+                        {lyricsMode === 'lrc' ? (
+                            <PhraseLyricsView
+                                lyrics={displayLyrics}
+                                currentTimeMs={Math.max(0, nativePositionMs + lyricsTimingOffsetMs)}
+                                activeColor={lyricsHighlightColor}
+                                inactiveColor={protectedInactiveColor}
+                                secondaryTextColor={secondaryLyricsTextColor}
+                                onSeek={timeMs => seek(timeMs)}
+                            />
+                        ) : (
+                            <KaraokeView
+                                style={{ flex: 1 }}
+                                lyrics={displayLyrics.lyrics}
+                                currentTimeMs={Math.max(0, nativePositionMs + lyricsTimingOffsetMs)}
+                                isPlaying={isPlaying}
+                                fontSize={29}
+                                isLineByLine={false}
+                                enableSeekOnTap={false}
+                                activeColor={processColor(lyricsHighlightColor)}
+                                inactiveColor={processColor(protectedInactiveColor)}
+                                glowColor={processColor(protectedGlowColor)}
+                                enableSpectralParticles={colors.isDark}
+                                motionProfile={appliedMotionProfile}
+                                introTitle={currentTrack?.title ?? displayLyrics?.meta?.song}
+                                introSubtitle={currentTrack?.artist ?? displayLyrics?.meta?.artist}
+                                onSeek={({ nativeEvent }) => seek(nativeEvent.timeMs)}
+                            />
+                        )}
                         <View style={[styles.lyricsIslandsLayer, { bottom: Math.max(insets.bottom + 10, 16) }]}>
                             <View
                                 style={[
@@ -1031,20 +1223,36 @@ const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                                     },
                                 ]}
                             >
-                                <AnimatedPressable style={styles.lyricsTimingAction} onPress={() => applyLyricsOffsetStep(-50)}>
+                                <AnimatedPressable
+                                    style={styles.lyricsTimingAction}
+                                    onPress={() => applyLyricsOffsetStep(-50)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Retrasar letra 50ms"
+                                >
                                     <Text style={[styles.lyricsTimingActionText, { color: secondaryLyricsTextColor }]}>-50</Text>
                                 </AnimatedPressable>
-                                <AnimatedPressable style={styles.lyricsTimingReset} onPress={() => setLyricsTimingOffsetMs(0)} pressedScale={0.95}>
+                                <AnimatedPressable
+                                    style={styles.lyricsTimingReset}
+                                    onPress={() => setLyricsTimingOffsetMs(0)}
+                                    pressedScale={0.95}
+                                    accessibilityRole="button"
+                                    accessibilityLabel={`Sincronización actual: ${lyricsTimingOffsetMs > 0 ? '+' : ''}${lyricsTimingOffsetMs}ms. Toca para restablecer`}
+                                >
                                     <Text style={[styles.lyricsTimingValue, { color: protectedAccentColor }]}>
                                         {lyricsTimingOffsetMs > 0 ? `+${lyricsTimingOffsetMs}` : lyricsTimingOffsetMs}ms
                                     </Text>
                                 </AnimatedPressable>
-                                <AnimatedPressable style={styles.lyricsTimingAction} onPress={() => applyLyricsOffsetStep(50)}>
+                                <AnimatedPressable
+                                    style={styles.lyricsTimingAction}
+                                    onPress={() => applyLyricsOffsetStep(50)}
+                                    accessibilityRole="button"
+                                    accessibilityLabel="Adelantar letra 50ms"
+                                >
                                     <Text style={[styles.lyricsTimingActionText, { color: secondaryLyricsTextColor }]}>+50</Text>
                                 </AnimatedPressable>
                             </View>
 
-                            {hasMultipleSyncedLyricsOptions ? (
+                            {hasMultipleSyncedLyricsOptions && lyricsMode === 'synced' ? (
                                 <AnimatedPressable
                                     onPress={handleCycleSyncedLyricsOption}
                                     style={[
@@ -1181,6 +1389,26 @@ export function FullPlayer() {
     const shuffleEnabled = usePlayerStore(state => state.shuffleEnabled);
     const repeatMode = usePlayerStore(state => state.repeatMode);
 
+    // Track-switching & seek debounce: prevents icon flicker during track changes or seeking.
+    // When the track ID changes we hold isPlayingVisual=true for 800ms.
+    // We also hold it true if isLoading=true (e.g. buffering after a seek).
+    const [isTrackSwitching, setIsTrackSwitching] = useState(false);
+    const lastTrackIdRef = useRef<string | null>(null);
+    const isPlayingVisual = isPlaying || isTrackSwitching || isLoading;
+
+    React.useEffect(() => {
+        const newId = currentTrack?.id ?? null;
+        if (newId && newId !== lastTrackIdRef.current) {
+            lastTrackIdRef.current = newId;
+            setIsTrackSwitching(true);
+            const timer = setTimeout(() => setIsTrackSwitching(false), 800);
+            return () => clearTimeout(timer);
+        }
+    }, [currentTrack?.id]);
+
+    // Animated glow progress (0 = paused, 1 = playing) — drives smooth opacity/scale
+    const playGlowProgress = useSharedValue(0);
+
     // Actions
     const togglePlayPause = usePlayerStore(state => state.togglePlayPause);
     const next = usePlayerStore(state => state.next);
@@ -1198,7 +1426,7 @@ export function FullPlayer() {
     const activeVariant = (theme.components?.player?.variant as any) || playerVariant;
     const lightweightMode = config.lightweightMode;
     const shouldResolveDynamicColors = isVisible;
-    const playerArtworkUri = currentTrack?.artwork || currentTrack?.artworkThumb;
+    const playerArtworkUri = currentTrack?.artworkThumb || currentTrack?.artwork;
     const { colors: albumColors, animated: animColors } = useDynamicColorsWithOptions(playerArtworkUri, {
         enabled: shouldResolveDynamicColors && performanceProfile.enableDynamicColors,
     });
@@ -1336,6 +1564,75 @@ export function FullPlayer() {
         }
     }, [lightweightMode, showLyrics]);
 
+    const handleAlbumPress = useCallback(async () => {
+        const albumName = currentTrack?.album?.trim();
+        const albumId = currentTrack?.albumId?.trim();
+        if (!albumName || !albumId) return;
+
+        setPlayerVisible(false);
+        router.navigate({
+            pathname: '/tidal-album/[id]',
+            params: { id: albumId, name: albumName },
+        });
+    }, [currentTrack?.album, currentTrack?.albumId, router, setPlayerVisible]);
+
+    const handleShareSong = useCallback(async () => {
+        if (!currentTrack) return;
+        try {
+            await Share.share({
+                message: `Check out ${currentTrack.title} by ${currentTrack.artist} on StaySound!`,
+                title: 'StaySound Shared Track',
+            });
+        } catch (error) {
+            console.error('[FullPlayer] Error sharing:', error);
+        }
+    }, [currentTrack]);
+
+    const openActionSheet = useUIStore(s => s.openActionSheet);
+
+    function handleOpenMoreOptions() {
+        if (!currentTrack) return;
+
+        openActionSheet({
+            title: currentTrack.title,
+            subtitle: currentTrack.artist,
+            track: currentTrack,
+            actions: [
+                {
+                    label: 'Ir al Artista',
+                    icon: 'account-music',
+                    onPress: handleArtistPress,
+                },
+                {
+                    label: 'Ir al Álbum',
+                    icon: 'album',
+                    onPress: handleAlbumPress,
+                },
+                {
+                    label: 'Añadir a Playlist',
+                    icon: 'playlist-plus',
+                    onPress: () => {
+                        // TODO: Implement Playlist Selector Modal
+                    },
+                },
+                {
+                    label: 'Ecualizador',
+                    icon: 'equalizer',
+                    onPress: () => {
+                        setPlayerVisible(false);
+                        // @ts-ignore
+                        router.push('/equalizer');
+                    },
+                },
+                {
+                    label: 'Compartir canción',
+                    icon: 'share-variant',
+                    onPress: handleShareSong,
+                },
+            ],
+        });
+    }
+
     const handleArtistPress = useCallback(async () => {
         const artistName = currentTrack?.artist?.trim();
         if (!artistName || artistNavigationInFlightRef.current) return;
@@ -1450,11 +1747,11 @@ export function FullPlayer() {
             transform: [{ scale }],
             opacity: interpolate(p, [0, 0.18, 0.32, 1], [0, 0, 1, 1], Extrapolation.CLAMP),
             // Shadow Properties (No overflow hidden here)
-            elevation: interpolate(artworkProgress, [0, 1], [0, 24], Extrapolation.CLAMP),
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: interpolate(artworkProgress, [0, 1], [0, 12], Extrapolation.CLAMP) },
-            shadowOpacity: interpolate(artworkProgress, [0, 1], [0, 0.4], Extrapolation.CLAMP),
-            shadowRadius: interpolate(artworkProgress, [0, 1], [0, 24], Extrapolation.CLAMP),
+            elevation: interpolate(p, [0, 1], [0, 20], Extrapolation.CLAMP),
+            shadowColor: playerAnimColors.primary.value,
+            shadowOffset: { width: 0, height: interpolate(p, [0, 1], [0, 16], Extrapolation.CLAMP) },
+            shadowOpacity: interpolate(p, [0, 1], [0, 0.55], Extrapolation.CLAMP),
+            shadowRadius: interpolate(p, [0, 1], [0, 24], Extrapolation.CLAMP),
         };
     });
 
@@ -1538,13 +1835,14 @@ export function FullPlayer() {
     const qualityBadgeInk = getContrastingInk(qualityBadge.tone);
 
     const commonProps = {
-        track, isPlaying, shuffleEnabled, repeatMode, isFavorite, accentColor, textColor, onPrimaryColor,
+        track, isPlaying: isPlayingVisual, shuffleEnabled, repeatMode, isFavorite, accentColor, textColor, onPrimaryColor,
         qualityBadge, qualityBadgeInk, trackTechLabel, shuffleIcon, repeatIcon, playIcon, pauseIcon, nextIcon, previousIcon,
         onClose: () => setPlayerVisible(false), onToggleLyrics: () => setShowLyrics(!showLyrics),
         onArtistPress: handleArtistPress,
         onOpenQueue: handleOpenQueue, onToggleFavorite: () => toggleFavorite(track.id),
         onToggleShuffle: toggleShuffle, onCycleRepeatMode: cycleRepeatMode,
         onPlayPause: togglePlayPause, onNext: next, onPrevious: previous, onSeek: seek,
+        onOpenMoreOptions: handleOpenMoreOptions,
         textStyle, accentTextStyle, accentBgStyle, ARTWORK_SIZE,
         showLyrics, isLyricsExpanded, topInset: Math.max(insets.top + 12, 28)
     };

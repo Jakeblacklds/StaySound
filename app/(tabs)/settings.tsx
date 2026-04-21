@@ -1,5 +1,6 @@
 ﻿import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
 import { useAuthStore, useDabAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
+import { TidalMirrorAvailability, getTidalMirrorAvailability, getTidalMirrorOptions } from '@/src/services/tidalService';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
 import { useUIStore } from '@/src/stores/uiStore';
 import { useI18n } from '@/src/i18n';
@@ -20,6 +21,37 @@ import ColorPicker, { HueSlider, Panel1, Swatches } from 'reanimated-color-picke
 // â”€â”€â”€ Worklet-safe bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 // reanimated-color-picker calls onChange/onComplete on the UI thread.
 // We must use runOnJS to dispatch state updates back to the JS thread.
+
+function formatMirrorSummary(availability?: TidalMirrorAvailability): string {
+    if (!availability) return 'Verificando disponibilidad...';
+
+    const state = availability.status === 'available'
+        ? 'Disponible'
+        : availability.status === 'slow'
+            ? 'Lento'
+            : 'No disponible';
+    const suffix = availability.latencyMs ? ` (${availability.latencyMs} ms)` : '';
+    return `${state}${suffix}`;
+}
+
+function formatMirrorCapabilities(availability?: TidalMirrorAvailability): string {
+    if (!availability) return 'Busqueda ?, Stream ?, Descarga ?';
+
+    const search = availability.supportsSearch ? 'Busqueda OK' : 'Busqueda KO';
+    const stream = availability.supportsStream ? 'Stream OK' : 'Stream KO';
+    const download = availability.supportsDownload ? 'Descarga OK' : 'Descarga KO';
+    return `${search} · ${stream} · ${download}`;
+}
+
+function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
+    const pinnedMirrors = [
+        'https://dabmusic.xyz/api',
+        'https://beta.dabmusic.xyz',
+    ];
+
+    return [...pinnedMirrors, ...availableMirrors.slice(0, 3)]
+        .filter((mirror, index, all) => availableMirrors.includes(mirror) && all.indexOf(mirror) === index);
+}
 
 export default function SettingsScreen() {
     const {
@@ -47,6 +79,12 @@ export default function SettingsScreen() {
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showMirrorModal, setShowMirrorModal] = useState(false);
     const [showLegacyMirrors, setShowLegacyMirrors] = useState(false);
+    const [availableMirrors, setAvailableMirrors] = useState<string[]>(() => [
+        'https://dabmusic.xyz/api',
+        'https://beta.dabmusic.xyz',
+        ...TIDAL_API_BASES,
+    ].filter((mirror, index, all) => all.indexOf(mirror) === index));
+    const [mirrorAvailability, setMirrorAvailability] = useState<Record<string, TidalMirrorAvailability>>({});
 
     const {
         language, setLanguage,
@@ -81,15 +119,47 @@ export default function SettingsScreen() {
     const showNotification = useNotificationStore(s => s.showNotification);
 
     const handleMirrorChange = (mirror: string) => {
+        const availability = mirrorAvailability[mirror];
         setTidalMirror(mirror);
         setShowMirrorModal(false);
 
         if (mirror !== 'auto') {
             showNotification(t('settings.notification.mirrorSelected', { name: TIDAL_MIRROR_NAMES[mirror] }), 'success');
+            if (availability && (!availability.supportsSearch || !availability.supportsStream || !availability.supportsDownload)) {
+                showNotification(formatMirrorCapabilities(availability), 'warning');
+            }
         } else {
             showNotification(t('settings.notification.autoMirror'), 'info');
         }
     };
+
+    useEffect(() => {
+        let cancelled = false;
+
+        const loadMirrorState = async (force = false) => {
+            const nextMirrors = await getTidalMirrorOptions({ force });
+            const nextAvailability = await getTidalMirrorAvailability(nextMirrors, { force });
+            if (cancelled) return;
+            setAvailableMirrors(nextMirrors);
+            setMirrorAvailability(nextAvailability);
+        };
+
+        void loadMirrorState(false);
+
+        return () => {
+            cancelled = true;
+        };
+    }, []);
+
+    useEffect(() => {
+        if (!showMirrorModal) return;
+        void (async () => {
+            const nextMirrors = await getTidalMirrorOptions({ force: true });
+            const nextAvailability = await getTidalMirrorAvailability(nextMirrors, { force: true });
+            setAvailableMirrors(nextMirrors);
+            setMirrorAvailability(nextAvailability);
+        })();
+    }, [showMirrorModal]);
 
     useEffect(() => {
         setHexInput(config.accentColor);
@@ -230,16 +300,12 @@ export default function SettingsScreen() {
     } satisfies Record<TidalQuality, { title: string; desc: string; adv: string; icon: string }>;
 
     const recommendedMirrors = useMemo(
-        () => [
-            'https://hifi.geeked.wtf',
-            'https://beta.dabmusic.xyz',
-            'https://dabmusic.xyz/api',
-        ],
-        [],
+        () => getPrimaryMirrorOptions(availableMirrors),
+        [availableMirrors],
     );
     const legacyMirrors = useMemo(
-        () => TIDAL_API_BASES.filter(mirror => !recommendedMirrors.includes(mirror)),
-        [recommendedMirrors],
+        () => availableMirrors.filter(mirror => !recommendedMirrors.includes(mirror)),
+        [availableMirrors, recommendedMirrors],
     );
     const qualityModalOptions = useMemo(
         () => ['LOSSLESS', 'MP3', 'HI_RES_LOSSLESS', 'LOW'] as TidalQuality[],
@@ -802,37 +868,49 @@ export default function SettingsScreen() {
                                 </View>
                             </Pressable>
 
-                            {recommendedMirrors.map((mirror) => (
-                                <Pressable
-                                    key={mirror}
-                                    onPress={() => handleMirrorChange(mirror)}
-                                    style={[
-                                        styles.qualityOption,
-                                        {
-                                            backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
-                                            borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
-                                            borderWidth: 1,
-                                            borderRadius: 12,
-                                            padding: 16
-                                        }
-                                    ]}
-                                >
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                        <MaterialCommunityIcons name="server" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
-                                        <View style={{ flex: 1 }}>
-                                            <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
-                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                            </Text>
-                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                {mirror.replace('https://', '')}
-                                            </Text>
+                            {recommendedMirrors.map((mirror) => {
+                                const availability = mirrorAvailability[mirror];
+                                const isUnavailable = availability?.status === 'unavailable';
+
+                                return (
+                                    <Pressable
+                                        key={mirror}
+                                        onPress={() => handleMirrorChange(mirror)}
+                                        style={[
+                                            styles.qualityOption,
+                                            {
+                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
+                                                borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
+                                                borderWidth: 1,
+                                                borderRadius: 12,
+                                                padding: 16,
+                                                opacity: isUnavailable ? 0.6 : 1,
+                                            }
+                                        ]}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                            <MaterialCommunityIcons name="server" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
+                                            <View style={{ flex: 1 }}>
+                                                <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
+                                                    {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                                                </Text>
+                                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                                    {mirror.replace('https://', '')}
+                                                </Text>
+                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+                                                    {formatMirrorSummary(availability)}
+                                                </Text>
+                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+                                                    {formatMirrorCapabilities(availability)}
+                                                </Text>
+                                            </View>
+                                            {tidalMirror === mirror && (
+                                                <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
+                                            )}
                                         </View>
-                                        {tidalMirror === mirror && (
-                                            <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
-                                        )}
-                                    </View>
-                                </Pressable>
-                            ))}
+                                    </Pressable>
+                                );
+                            })}
 
                             <Button
                                 mode="text"
@@ -844,38 +922,48 @@ export default function SettingsScreen() {
                                 {showLegacyMirrors ? 'Ocultar otros servidores' : 'Mostrar otros servidores'}
                             </Button>
 
-                            {showLegacyMirrors ? legacyMirrors.map((mirror) => (
-                                <Pressable
-                                    key={mirror}
-                                    onPress={() => handleMirrorChange(mirror)}
-                                    style={[
-                                        styles.qualityOption,
-                                        {
-                                            backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
-                                            borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
-                                            borderWidth: 1,
-                                            borderRadius: 12,
-                                            padding: 16,
-                                            opacity: 0.88,
-                                        }
-                                    ]}
-                                >
-                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                        <MaterialCommunityIcons name="server-outline" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
-                                        <View style={{ flex: 1 }}>
-                                            <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
-                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                            </Text>
-                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                {mirror.replace('https://', '')}
-                                            </Text>
+                            {showLegacyMirrors ? legacyMirrors.map((mirror) => {
+                                const availability = mirrorAvailability[mirror];
+
+                                return (
+                                    <Pressable
+                                        key={mirror}
+                                        onPress={() => handleMirrorChange(mirror)}
+                                        style={[
+                                            styles.qualityOption,
+                                            {
+                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
+                                                borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
+                                                borderWidth: 1,
+                                                borderRadius: 12,
+                                                padding: 16,
+                                                opacity: 0.88,
+                                            }
+                                        ]}
+                                    >
+                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
+                                            <MaterialCommunityIcons name="server-outline" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
+                                            <View style={{ flex: 1 }}>
+                                                <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
+                                                    {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                                                </Text>
+                                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                                                    {mirror.replace('https://', '')}
+                                                </Text>
+                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
+                                                    {formatMirrorSummary(availability)}
+                                                </Text>
+                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
+                                                    {formatMirrorCapabilities(availability)}
+                                                </Text>
+                                            </View>
+                                            {tidalMirror === mirror && (
+                                                <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
+                                            )}
                                         </View>
-                                        {tidalMirror === mirror && (
-                                            <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
-                                        )}
-                                    </View>
-                                </Pressable>
-                            )) : null}
+                                    </Pressable>
+                                );
+                            }) : null}
                         </ScrollView>
                     </View>
                 </View>

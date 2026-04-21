@@ -24,6 +24,48 @@ import { Track } from "../types/audio";
 let isInitialized = false;
 let initializationPromise: Promise<boolean> | null = null;
 
+function hasSupportedPlaybackUriScheme(uri: string): boolean {
+  return (
+    uri.startsWith("content://") ||
+    uri.startsWith("file://") ||
+    uri.startsWith("http://") ||
+    uri.startsWith("https://") ||
+    uri.startsWith("/") ||
+    /^[a-z]:[\\/]/i.test(uri)
+  );
+}
+
+function normalizePlaybackUri(uri: string): string {
+  const trimmed = uri.trim();
+  if (!trimmed) return trimmed;
+
+  if (
+    trimmed.startsWith("content://") ||
+    trimmed.startsWith("file://") ||
+    trimmed.startsWith("http://") ||
+    trimmed.startsWith("https://")
+  ) {
+    return trimmed;
+  }
+
+  if (trimmed.startsWith("/")) {
+    return `file://${trimmed}`;
+  }
+
+  return trimmed;
+}
+
+export function isTrackPlayable(track: Track | null | undefined): boolean {
+  const uri = track?.uri?.trim();
+  if (!track || !uri || track.cloudOnly) return false;
+
+  if (uri.startsWith("spotify://") || uri.startsWith("cloud://")) {
+    return false;
+  }
+
+  return hasSupportedPlaybackUriScheme(uri);
+}
+
 function normalizeArtworkUri(value?: string | null): string | undefined {
   const uri = value?.trim();
   if (!uri) return undefined;
@@ -75,6 +117,7 @@ function getNativeStreamDescriptor(track: Track): {
 } {
   const uri = track.uri.trim().toLowerCase();
   const format = (track.format ?? "").trim().toLowerCase();
+  const codec = (track.codec ?? "").trim().toLowerCase();
 
   if (uri.includes(".m3u8") || format === "hls") {
     return {
@@ -90,16 +133,65 @@ function getNativeStreamDescriptor(track: Track): {
     };
   }
 
+  // Local/MediaStore URIs frequently hide file extensions (content://.../media/<id>).
+  // Provide a MIME hint from known format/codec metadata so ExoPlayer can parse reliably.
+  if (
+    format === "flac" ||
+    codec.includes("flac") ||
+    uri.includes(".flac")
+  ) {
+    return { contentType: "audio/flac" };
+  }
+
+  if (
+    format === "mp3" ||
+    codec.includes("mp3") ||
+    codec.includes("mpeg") ||
+    uri.includes(".mp3")
+  ) {
+    return { contentType: "audio/mpeg" };
+  }
+
+  if (
+    format === "aac" ||
+    format === "m4a" ||
+    codec.includes("aac") ||
+    uri.includes(".m4a") ||
+    uri.includes(".mp4")
+  ) {
+    return { contentType: "audio/mp4" };
+  }
+
+  if (format === "wav" || uri.includes(".wav")) {
+    return { contentType: "audio/wav" };
+  }
+
+  if (
+    format === "ogg" ||
+    format === "opus" ||
+    codec.includes("opus") ||
+    uri.includes(".ogg") ||
+    uri.includes(".opus")
+  ) {
+    return { contentType: "audio/ogg" };
+  }
+
   return {};
 }
 
 function buildNativeTrack(track: Track, options?: { artwork?: string }): any {
+  if (!isTrackPlayable(track)) {
+    throw new Error(
+      `[TrackPlayer] Unsupported track URI for native playback: ${track.uri || "<empty>"}`,
+    );
+  }
+
   const streamDescriptor = getNativeStreamDescriptor(track);
 
   return {
     id: track.id,
     mediaId: track.id,
-    url: track.uri,
+    url: normalizePlaybackUri(track.uri),
     type: streamDescriptor.type,
     contentType: streamDescriptor.contentType,
     title: track.title || "Unknown Title",
@@ -203,6 +295,12 @@ export async function playTrack(track: Track): Promise<void> {
   }
 
   try {
+    if (!isTrackPlayable(track)) {
+      throw new Error(
+        `[TrackPlayer] Cannot play track with unsupported URI: ${track.uri || "<empty>"}`,
+      );
+    }
+
     // CRITICAL BUG FIX: reset() ensures the native queue is completely empty.
     // load() can sometimes preserve metadata from previous sessions on buggy Android versions.
     await TrackPlayer.reset();
@@ -237,9 +335,44 @@ export async function playQueue(
   try {
     if (tracks.length === 0) return;
 
+    const safeRequestedIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
+    const indexedTracks = tracks.map((track, index) => ({ track, index }));
+    const unsupportedTracks = indexedTracks
+      .filter(({ track }) => !isTrackPlayable(track))
+      .map(({ track }) => track);
+    if (unsupportedTracks.length > 0) {
+      console.warn(
+        "[TrackPlayer] Filtering unsupported native tracks from queue:",
+        unsupportedTracks.map((track) => ({
+          id: track.id,
+          uri: track.uri,
+          source: track.source,
+          cloudOnly: track.cloudOnly,
+        })),
+      );
+    }
+
+    const playableEntries = indexedTracks.filter(({ track }) => isTrackPlayable(track));
+    const playableTracks = playableEntries.map(({ track }) => track);
+    if (playableTracks.length === 0) {
+      throw new Error("[TrackPlayer] Queue does not contain any playable tracks");
+    }
+
+    let normalizedStartIndex = playableEntries.findIndex(
+      ({ track }) => track.id === tracks[safeRequestedIndex]?.id,
+    );
+    if (normalizedStartIndex < 0) {
+      normalizedStartIndex = playableEntries.findIndex(
+        ({ index }) => index > safeRequestedIndex,
+      );
+    }
+    if (normalizedStartIndex < 0) {
+      normalizedStartIndex = Math.min(safeRequestedIndex, playableTracks.length - 1);
+    }
+
     await TrackPlayer.reset();
 
-    const trackPlayerTracks = tracks.map((track) =>
+    const trackPlayerTracks = playableTracks.map((track) =>
       buildNativeTrack(track, {
         artwork: resolveArtworkForQueue(track),
       }),
@@ -247,7 +380,7 @@ export async function playQueue(
 
     const safeIndex = Math.max(
       0,
-      Math.min(startIndex, trackPlayerTracks.length - 1),
+      Math.min(normalizedStartIndex, trackPlayerTracks.length - 1),
     );
 
     await TrackPlayer.add(trackPlayerTracks);
@@ -255,11 +388,11 @@ export async function playQueue(
       await TrackPlayer.skip(safeIndex);
     }
     await TrackPlayer.play();
-    await updateNowPlayingTrackMetadata(tracks[safeIndex] ?? null);
+    await updateNowPlayingTrackMetadata(playableTracks[safeIndex] ?? null);
 
     console.log(
       "[TrackPlayer] Playing queue, starting at:",
-      tracks[safeIndex]?.title,
+      playableTracks[safeIndex]?.title,
       {
         queueSize: trackPlayerTracks.length,
         nativeArtworkItems: trackPlayerTracks.filter((track) => !!track.artwork)
@@ -528,9 +661,9 @@ export async function getCurrentTrack(): Promise<Track | null> {
     return {
       id: track.id?.toString() || "",
       uri: track.url,
-      title: track.title || "Unknown",
-      artist: track.artist || "Unknown",
-      album: track.album || "Unknown",
+      title: track.title || "",
+      artist: track.artist || "",
+      album: track.album || "",
       artwork: track.artwork as string | undefined,
       duration: (track.duration || 0) * 1000,
       format: (track as any).format,

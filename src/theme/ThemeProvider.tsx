@@ -4,38 +4,9 @@ import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors } from '../services/colorExtractor';
 import { useSettingsStore } from '../stores/settingsStore';
 import { Theme, ThemeMode, ThemeStyle } from '../types/theme';
+import { ensureColorContrast, mixHexColors, pickReadableColor } from '../utils/colorContrast';
 import { material3Dark, material3Light } from './styles/material3';
 import { generateM3Palette, generateManualAccentPalette, SchemeVariant } from './utils';
-
-function parseHexColor(value: string) {
-    const hex = value.trim().replace('#', '');
-    if (hex.length < 6) return null;
-
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-
-    if ([r, g, b].some(Number.isNaN)) return null;
-    return { r, g, b };
-}
-
-function toHex({ r, g, b }: { r: number; g: number; b: number }) {
-    const channel = (value: number) => Math.max(0, Math.min(255, Math.round(value))).toString(16).padStart(2, '0');
-    return `#${channel(r)}${channel(g)}${channel(b)}`;
-}
-
-function mixHexColors(from: string, to: string, amount: number) {
-    const source = parseHexColor(from);
-    const target = parseHexColor(to);
-    if (!source || !target) return from;
-
-    const t = Math.max(0, Math.min(1, amount));
-    return toHex({
-        r: source.r + (target.r - source.r) * t,
-        g: source.g + (target.g - source.g) * t,
-        b: source.b + (target.b - source.b) * t,
-    });
-}
 
 const themes: Record<ThemeStyle, { dark: Theme; light: Theme }> = {
     material3: { dark: material3Dark, light: material3Light },
@@ -57,6 +28,138 @@ const DEFAULT_ANIM_COLORS = {
     onSurfaceVariant: '#9BAAC4',
     onBackground: '#E8EEF9',
 };
+
+function buildReadableLightDynamicColors(
+    selectedTheme: Theme,
+    m3Colors: Theme['colors'],
+    dynamicPalette: AlbumColors,
+) {
+    const background = mixHexColors(selectedTheme.colors.background, m3Colors.background, 0.18);
+    const surface = mixHexColors(selectedTheme.colors.surface, m3Colors.surface, 0.26);
+    const surfaceVariantBase = mixHexColors(selectedTheme.colors.surfaceVariant, m3Colors.surfaceVariant, 0.58);
+    const surfaceVariant = ensureColorContrast(surfaceVariantBase, surface, {
+        minRatio: 1.14,
+        targetColor: selectedTheme.colors.onSurface,
+        fallbackColor: selectedTheme.colors.surfaceVariant,
+    });
+    const primary = ensureColorContrast(m3Colors.primary, surface, {
+        minRatio: 4.8,
+        targetColor: selectedTheme.colors.onBackground,
+        fallbackColor: selectedTheme.colors.primary,
+    });
+    const secondary = ensureColorContrast(m3Colors.secondary, surface, {
+        minRatio: 4.5,
+        targetColor: selectedTheme.colors.onBackground,
+        fallbackColor: selectedTheme.colors.secondary,
+    });
+    const primaryContainerBase = mixHexColors(m3Colors.primaryContainer, dynamicPalette.primary, 0.08);
+    const primaryContainer = ensureColorContrast(primaryContainerBase, surface, {
+        minRatio: 1.2,
+        targetColor: selectedTheme.colors.onSurface,
+        fallbackColor: m3Colors.primaryContainer,
+    });
+    const secondaryContainerBase = mixHexColors(
+        m3Colors.secondaryContainer ?? selectedTheme.colors.secondaryContainer,
+        dynamicPalette.secondary,
+        0.06,
+    );
+    const secondaryContainer = ensureColorContrast(secondaryContainerBase, surface, {
+        minRatio: 1.16,
+        targetColor: selectedTheme.colors.onSurface,
+        fallbackColor: selectedTheme.colors.secondaryContainer,
+    });
+    const tertiaryContainerBase = mixHexColors(
+        m3Colors.tertiaryContainer ?? selectedTheme.colors.surfaceVariant,
+        dynamicPalette.primary,
+        0.05,
+    );
+    const tertiaryContainer = ensureColorContrast(tertiaryContainerBase, surface, {
+        minRatio: 1.16,
+        targetColor: selectedTheme.colors.onSurface,
+        fallbackColor: m3Colors.tertiaryContainer ?? selectedTheme.colors.surfaceVariant,
+    });
+    const outline = ensureColorContrast(
+        mixHexColors(m3Colors.outline, selectedTheme.colors.outline, 0.45),
+        surface,
+        {
+            minRatio: 2.2,
+            targetColor: selectedTheme.colors.onSurfaceVariant,
+            fallbackColor: selectedTheme.colors.outline,
+        }
+    );
+
+    const onBackground = ensureColorContrast(selectedTheme.colors.onBackground, background, {
+        minRatio: 9,
+        targetColor: selectedTheme.colors.onBackground,
+        fallbackColor: selectedTheme.colors.onBackground,
+    });
+    const onSurface = ensureColorContrast(selectedTheme.colors.onSurface, surface, {
+        minRatio: 9,
+        targetColor: selectedTheme.colors.onSurface,
+        fallbackColor: selectedTheme.colors.onSurface,
+    });
+    const onSurfaceVariant = ensureColorContrast(m3Colors.onSurfaceVariant, surfaceVariant, {
+        minRatio: 5.2,
+        targetColor: selectedTheme.colors.onSurface,
+        fallbackColor: selectedTheme.colors.onSurfaceVariant,
+    });
+    const onPrimary = pickReadableColor(primary, [
+        m3Colors.onPrimary,
+        selectedTheme.colors.onPrimary,
+        onBackground,
+    ]);
+    const onSecondary = pickReadableColor(secondary, [
+        m3Colors.onSecondary,
+        selectedTheme.colors.onSecondary,
+        onBackground,
+    ]);
+    const onPrimaryContainer = pickReadableColor(primaryContainer, [
+        m3Colors.onPrimaryContainer,
+        selectedTheme.colors.onPrimaryContainer,
+        onSurface,
+        onBackground,
+    ]);
+    const onSecondaryContainer = pickReadableColor(secondaryContainer, [
+        m3Colors.onSecondaryContainer,
+        selectedTheme.colors.onSurface,
+        onBackground,
+    ]);
+    const onTertiary = m3Colors.tertiary
+        ? pickReadableColor(m3Colors.tertiary, [
+            m3Colors.onTertiary,
+            selectedTheme.colors.onPrimary,
+            onBackground,
+        ])
+        : undefined;
+    const onTertiaryContainer = pickReadableColor(tertiaryContainer, [
+        m3Colors.onTertiaryContainer,
+        selectedTheme.colors.onSurface,
+        onBackground,
+    ]);
+
+    return {
+        ...selectedTheme.colors,
+        ...m3Colors,
+        background,
+        surface,
+        surfaceVariant,
+        primary,
+        onPrimary,
+        primaryContainer,
+        onPrimaryContainer,
+        secondary,
+        onSecondary,
+        secondaryContainer,
+        onSecondaryContainer,
+        tertiaryContainer,
+        onTertiary,
+        onTertiaryContainer,
+        outline,
+        onBackground,
+        onSurface,
+        onSurfaceVariant,
+    };
+}
 
 export type AnimatedColors = {
     primary: ReturnType<typeof useSharedValue<string>>;
@@ -158,18 +261,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
                         onSurfaceVariant: dynamicPalette.onSurface,
                     };
                 } else {
-                    finalColors = {
-                        ...selectedTheme.colors,
-                        ...m3Colors,
-                        background: mixHexColors(selectedTheme.colors.background, dynamicPalette.background, 0.06),
-                        surface: mixHexColors(selectedTheme.colors.surface, dynamicPalette.background, 0.08),
-                        surfaceVariant: mixHexColors(selectedTheme.colors.surfaceVariant, dynamicPalette.background, 0.14),
-                        primaryContainer: mixHexColors(m3Colors.primaryContainer, dynamicPalette.primary, 0.14),
-                        secondaryContainer: mixHexColors(m3Colors.secondaryContainer ?? selectedTheme.colors.secondaryContainer, dynamicPalette.secondary, 0.12),
-                        onSurface: selectedTheme.colors.onSurface,
-                        onSurfaceVariant: selectedTheme.colors.onSurfaceVariant,
-                        onBackground: selectedTheme.colors.onBackground,
-                    };
+                    finalColors = buildReadableLightDynamicColors(selectedTheme, m3Colors, dynamicPalette);
                 }
             } else {
                 finalColors = { ...selectedTheme.colors, ...m3Colors };

@@ -86,6 +86,10 @@ module.exports = {
                 anonKey: process.env.EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY || '',
                 allowedEmails: process.env.EXPO_PUBLIC_ALLOWED_LOGIN_EMAILS || '',
             },
+            mirrorCatalog: {
+                url: process.env.EXPO_PUBLIC_MIRROR_SUPABASE_URL || process.env.EXPO_PUBLIC_AUTH_SUPABASE_URL || '',
+                anonKey: process.env.EXPO_PUBLIC_MIRROR_SUPABASE_ANON_KEY || process.env.EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY || '',
+            },
             dabBeta: {
                 baseUrl: process.env.EXPO_PUBLIC_DAB_BETA_BASE_URL || 'https://dabmusic.xyz',
             },

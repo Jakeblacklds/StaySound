@@ -46,7 +46,7 @@ export type SettingsStore = SettingsState & SettingsActions;
 
 const initialState: SettingsState = {
     language: 'es',
-    tidalDownloadQuality: 'HI_RES_LOSSLESS',
+    tidalDownloadQuality: 'MP3',
     tidalMirror: 'auto',
     style: 'material3',
     mode: 'system',
