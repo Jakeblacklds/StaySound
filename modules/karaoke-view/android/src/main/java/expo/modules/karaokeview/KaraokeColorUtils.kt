@@ -13,6 +13,54 @@ internal fun blendColors(from: Int, to: Int, amount: Float): Int {
     )
 }
 
+private fun linearizedChannel(channel: Int): Float {
+    val normalized = channel.coerceIn(0, 255) / 255f
+    return if (normalized <= 0.04045f) {
+        normalized / 12.92f
+    } else {
+        Math.pow(((normalized + 0.055f) / 1.055f).toDouble(), 2.4).toFloat()
+    }
+}
+
+internal fun relativeLuminance(color: Int): Float {
+    val r = linearizedChannel(Color.red(color))
+    val g = linearizedChannel(Color.green(color))
+    val b = linearizedChannel(Color.blue(color))
+    return (0.2126f * r) + (0.7152f * g) + (0.0722f * b)
+}
+
+internal fun contrastRatio(foreground: Int, background: Int): Float {
+    val lumA = relativeLuminance(foreground) + 0.05f
+    val lumB = relativeLuminance(background) + 0.05f
+    val lighter = maxOf(lumA, lumB)
+    val darker = minOf(lumA, lumB)
+    return lighter / darker
+}
+
+internal fun ensureContrast(color: Int, background: Int, minRatio: Float): Int {
+    if (contrastRatio(color, background) >= minRatio) return color
+
+    val bgIsDark = relativeLuminance(background) < 0.35f
+    val target = if (bgIsDark) Color.WHITE else Color.BLACK
+
+    var lower = 0f
+    var upper = 1f
+    var best = color
+    repeat(9) {
+        val blend = (lower + upper) / 2f
+        val candidate = blendColors(color, target, blend)
+        val ratio = contrastRatio(candidate, background)
+        if (ratio >= minRatio) {
+            best = candidate
+            upper = blend
+        } else {
+            lower = blend
+        }
+    }
+
+    return best
+}
+
 internal fun getProfileGlowColor(profile: MotionProfile, glowColor: Int): Int {
     val tint = when (profile) {
         MotionProfile.AMBIENT -> Color.rgb(100, 220, 255)

@@ -4,13 +4,10 @@ import { Image } from 'expo-image';
 import Animated, {
     Easing,
     SharedValue,
-    cancelAnimation,
     interpolate,
     useAnimatedStyle,
-    useDerivedValue,
     useSharedValue,
-    withRepeat,
-    withTiming
+    withTiming,
 } from 'react-native-reanimated';
 import { AlbumColors } from '../../../services/colorExtractor';
 
@@ -27,45 +24,108 @@ interface ThemeBackgroundProps {
     isVisible?: boolean;
     expansion?: SharedValue<number>;
     lightweight?: boolean;
+    isDark?: boolean;
 }
 
-export function ThemeBackground({ colors, animColors, artwork, isVisible, expansion, lightweight }: ThemeBackgroundProps) {
+// ─── Keyframe definitions ────────────────────────────────────────────────────
+// All declared outside the component so they are created only once.
+
+/** Slow-drift for the artwork blur layer: subtle scale + slight translate */
+const artworkDrift = {
+    '0%':   { transform: [{ scale: 1.80 }, { translateX: 0 },   { translateY: 0 }] },
+    '25%':  { transform: [{ scale: 1.86 }, { translateX: 18 },  { translateY: -12 }] },
+    '50%':  { transform: [{ scale: 1.82 }, { translateX: 0 },   { translateY: -24 }] },
+    '75%':  { transform: [{ scale: 1.88 }, { translateX: -18 }, { translateY: -12 }] },
+    '100%': { transform: [{ scale: 1.80 }, { translateX: 0 },   { translateY: 0 }] },
+};
+
+/** Lightweight version: only scale, no translate */
+const artworkDriftLight = {
+    '0%':   { transform: [{ scale: 1.80 }] },
+    '50%':  { transform: [{ scale: 1.86 }] },
+    '100%': { transform: [{ scale: 1.80 }] },
+};
+
+/** Primary blob drift — top-left to center-right */
+const blobPrimaryDrift = {
+    '0%':   { transform: [{ translateX: 0 },   { translateY: 0 },   { scale: 1.00 }] },
+    '33%':  { transform: [{ translateX: 24 },  { translateY: -18 }, { scale: 1.08 }] },
+    '66%':  { transform: [{ translateX: -12 }, { translateY: 20 },  { scale: 0.95 }] },
+    '100%': { transform: [{ translateX: 0 },   { translateY: 0 },   { scale: 1.00 }] },
+};
+
+/** Secondary blob drift — bottom-right to center-left */
+const blobSecondaryDrift = {
+    '0%':   { transform: [{ translateX: 0 },   { translateY: 0 },   { scale: 1.00 }] },
+    '40%':  { transform: [{ translateX: -20 }, { translateY: 16 },  { scale: 1.06 }] },
+    '70%':  { transform: [{ translateX: 16 },  { translateY: -20 }, { scale: 0.96 }] },
+    '100%': { transform: [{ translateX: 0 },   { translateY: 0 },   { scale: 1.00 }] },
+};
+
+export function ThemeBackground({ colors, animColors, artwork, isVisible, expansion, lightweight, isDark = true }: ThemeBackgroundProps) {
+    // Fade the whole layer in with expansion
     const bgStyle = useAnimatedStyle(() => ({
-        backgroundColor: animColors ? animColors.background.value : colors.background,
-        opacity: interpolate(expansion?.value ?? 0, [0, 1], [0.1, 0.62]),
+        opacity: interpolate(expansion?.value ?? 1, [0, 0.35, 1], [0, 0.2, 1], 'clamp'),
     }));
 
     return (
-        <View style={StyleSheet.absoluteFill}>
-            {/* Base color to prevent flickering */}
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: colors.background }]} />
-            
-            {/* Atmospheric Artwork Blur */}
-            {artwork && (
+        <Animated.View style={[StyleSheet.absoluteFill, bgStyle]} pointerEvents="none">
+            {/* Artwork-derived atmospheric blur — the core visual */}
+            {artwork ? (
                 <View style={StyleSheet.absoluteFill}>
-                    <Image
-                        source={{ uri: artwork }}
-                        style={[StyleSheet.absoluteFill, { transform: [{ scale: 3 }] }]}
-                        blurRadius={80}
-                        contentFit="cover"
-                        transition={1200}
+                    {/* Heavily blurred album art scaled up to fill the screen — now always drifting */}
+                    <Animated.View
+                        style={[
+                            StyleSheet.absoluteFill,
+                            {
+                                // Reanimated v4 CSS keyframe animation — runs 100% on UI thread,
+                                // zero JS overhead. Paused when not visible to save GPU.
+                                animationName: lightweight ? artworkDriftLight : artworkDrift,
+                                animationDuration: lightweight ? '28000ms' : '22000ms',
+                                animationTimingFunction: 'ease-in-out',
+                                animationIterationCount: 'infinite',
+                                animationDirection: 'alternate',
+                                animationFillMode: 'both',
+                                animationPlayState: isVisible ? 'running' : 'paused',
+                            },
+                        ]}
+                    >
+                        <Image
+                            source={{ uri: artwork }}
+                            style={StyleSheet.absoluteFill}
+                            blurRadius={isDark ? 72 : 60}
+                            contentFit="cover"
+                            transition={1400}
+                            cachePolicy="memory-disk"
+                        />
+                    </Animated.View>
+                    {/* Tint overlay — keeps colors vibrant but controlled */}
+                    <View
+                        style={[
+                            StyleSheet.absoluteFill,
+                            { backgroundColor: isDark ? 'rgba(0,0,0,0.38)' : 'rgba(255,255,255,0.44)' },
+                        ]}
                     />
-                    {/* Darkening overlay for the artwork blur */}
-                    <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.45)' }]} />
                 </View>
+            ) : (
+                /* Fallback: animated color fog from dynamic palette */
+                <ColorFog colors={colors} animColors={animColors} isDark={isDark} isVisible={isVisible} lightweight={lightweight} />
             )}
 
-            <FluidGradients colors={colors} animColors={animColors} isVisible={isVisible} expansion={expansion} lightweight={lightweight} />
-            
-            {/* Fog of color transitioning between songs */}
-            <Animated.View style={[StyleSheet.absoluteFill, bgStyle]} pointerEvents="none" />
-            
-            {/* Finisher subtle darkening for readability */}
-            <View style={[StyleSheet.absoluteFill, { backgroundColor: 'rgba(0,0,0,0.12)' }]} pointerEvents="none" />
-        </View>
+            {/* Soft readability scrim */}
+            <View
+                style={[
+                    StyleSheet.absoluteFill,
+                    { backgroundColor: isDark ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.08)' },
+                ]}
+            />
+        </Animated.View>
     );
 }
 
+// ─── ColorFog ────────────────────────────────────────────────────────────────
+// Fallback without artwork: two animated blobs that drift and pulse using
+// Reanimated v4 CSS keyframes — no withRepeat, no JS callbacks per frame.
 interface SubComponentProps {
     colors: AlbumColors;
     animColors?: {
@@ -75,97 +135,87 @@ interface SubComponentProps {
         accent: SharedValue<string>;
         text: SharedValue<string>;
     };
+    isDark?: boolean;
     isVisible?: boolean;
-    expansion?: SharedValue<number>;
     lightweight?: boolean;
 }
 
-function FluidGradients({ colors, animColors, isVisible, expansion, lightweight }: SubComponentProps) {
-    const anim = useSharedValue(0);
-    const phase = useDerivedValue(() => anim.value * Math.PI * 2);
+function ColorFog({ colors, animColors, isDark = true, isVisible, lightweight }: SubComponentProps) {
+    // Opacity only — fades in once on mount
+    const fogOpacity = useSharedValue(0);
 
     useEffect(() => {
-        if (isVisible) {
-            if (lightweight) {
-                cancelAnimation(anim);
-                anim.value = withTiming(0.18, {
-                    duration: 420,
-                    easing: Easing.out(Easing.quad),
-                });
-            } else {
-                anim.value = withRepeat(withTiming(1, {
-                    duration: 32000, // Even slower, more majestic movement
-                    easing: Easing.inOut(Easing.sin)
-                }), -1, true);
-            }
-        } else {
-            cancelAnimation(anim);
-            anim.value = 0;
-        }
-    }, [isVisible, lightweight]);
+        fogOpacity.value = withTiming(1, { duration: 800, easing: Easing.out(Easing.quad) });
+    }, []);
 
-    const blob1Style = useAnimatedStyle(() => ({
-        transform: [
-            { translateX: interpolate(expansion?.value ?? 0, [0, 1], [72, Math.sin(phase.value) * 150], 'clamp') },
-            { translateY: interpolate(expansion?.value ?? 0, [0, 1], [-28, Math.cos(phase.value) * 85], 'clamp') },
-            { scale: interpolate(expansion?.value ?? 0, [0, 0.2, 1], [0.72, 1.2, 1.5], 'clamp') },
-        ],
-        // Boosted presence from +20 (12%) to +40 (25%) or +50 (31%)
-        backgroundColor: animColors ? animColors.primary.value + '40' : colors.primary + '40',
-        opacity: interpolate(expansion?.value ?? 0, [0, 0.08, 1], [0, 0.4, lightweight ? 0.6 : 0.85], 'clamp'),
+    const fog1Style = useAnimatedStyle(() => ({
+        opacity: fogOpacity.value * (isDark ? 0.55 : 0.45),
+        backgroundColor: animColors ? animColors.primary.value : colors.primary,
     }));
 
-    const blob2Style = useAnimatedStyle(() => ({
-        transform: [
-            { translateX: interpolate(expansion?.value ?? 0, [0, 1], [-54, Math.cos(phase.value) * 125], 'clamp') },
-            { translateY: interpolate(expansion?.value ?? 0, [0, 1], [40, Math.sin(phase.value) * 105], 'clamp') },
-            { scale: interpolate(expansion?.value ?? 0, [0, 0.2, 1], [0.76, 1.1, 1.4], 'clamp') },
-        ],
-        backgroundColor: animColors ? animColors.secondary.value + '35' : colors.secondary + '35',
-        opacity: interpolate(expansion?.value ?? 0, [0, 0.1, 1], [0, 0.35, lightweight ? 0.55 : 0.75], 'clamp'),
+    const fog2Style = useAnimatedStyle(() => ({
+        opacity: fogOpacity.value * (isDark ? 0.42 : 0.32),
+        backgroundColor: animColors ? animColors.secondary.value : colors.secondary,
     }));
 
-    const blob3Style = useAnimatedStyle(() => ({
-        backgroundColor: animColors ? animColors.primary.value + '25' : colors.primary + '25',
-        opacity: interpolate(expansion?.value ?? 0, [0.12, 1], [0, lightweight ? 0.25 : 0.35], 'clamp'),
-        transform: [
-            { scale: interpolate(expansion?.value ?? 0, [0, 1], [0.88, 1.6], 'clamp') },
-        ],
-    }));
+    const blobDuration = lightweight ? '20000ms' : '14000ms';
+    const blob2Duration = lightweight ? '26000ms' : '18000ms';
+    const playState = isVisible ? 'running' : 'paused';
 
     return (
-        <View pointerEvents="none" style={StyleSheet.absoluteFill}>
-            <Animated.View style={[styles.blobPrimary, blob1Style]} />
-            <Animated.View style={[styles.blobSecondary, blob2Style]} />
-            <Animated.View style={[styles.blobAmbient, blob3Style]} />
+        <View style={StyleSheet.absoluteFill} pointerEvents="none">
+            <Animated.View
+                style={[
+                    styles.fogPrimary,
+                    fog1Style,
+                    {
+                        animationName: blobPrimaryDrift,
+                        animationDuration: blobDuration,
+                        animationTimingFunction: 'ease-in-out',
+                        animationIterationCount: 'infinite',
+                        animationDirection: 'alternate',
+                        animationFillMode: 'both',
+                        animationPlayState: playState,
+                    },
+                ]}
+            />
+            <Animated.View
+                style={[
+                    styles.fogSecondary,
+                    fog2Style,
+                    {
+                        animationName: blobSecondaryDrift,
+                        animationDuration: blob2Duration,
+                        animationTimingFunction: 'ease-in-out',
+                        animationIterationCount: 'infinite',
+                        animationDirection: 'alternate',
+                        animationFillMode: 'both',
+                        animationDelay: '-4000ms',
+                        animationPlayState: playState,
+                    },
+                ]}
+            />
         </View>
     );
 }
 
 const styles = StyleSheet.create({
-    blobBase: { position: 'absolute' },
-    blobPrimary: {
+    fogPrimary: {
         position: 'absolute',
-        top: '5%',
-        left: '-10%',
-        width: 500,
-        height: 500,
-        borderRadius: 250,
+        top: '-10%',
+        left: '-20%',
+        width: '100%',
+        height: '70%',
+        borderBottomRightRadius: 999,
+        borderBottomLeftRadius: 400,
     },
-    blobSecondary: {
+    fogSecondary: {
         position: 'absolute',
-        bottom: '5%',
-        right: '-10%',
-        width: 450,
-        height: 450,
-        borderRadius: 225,
-    },
-    blobAmbient: {
-        position: 'absolute',
-        top: '35%',
-        left: '10%',
-        width: 600,
-        height: 600,
-        borderRadius: 300,
+        bottom: '-10%',
+        right: '-20%',
+        width: '90%',
+        height: '65%',
+        borderTopLeftRadius: 999,
+        borderTopRightRadius: 400,
     },
 });

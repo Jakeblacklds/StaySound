@@ -203,9 +203,7 @@ export const playerStyles = StyleSheet.create({
     },
     lyricsFallbackState: {
         flex: 1,
-        alignItems: 'center',
         justifyContent: 'center',
-        paddingHorizontal: 32,
         backgroundColor: 'transparent',
     },
     lyricsFallbackTitle: {

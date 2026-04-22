@@ -123,27 +123,25 @@ internal class KaraokeLineRenderer {
         val transitionEase = callbacks.smootherStep(transitionProgress)
 
         val scale = when {
-            relativeIndex == 0 -> 1.001f
-            relativeIndex == 1 -> 0.93f + 0.071f * transitionEase
-            else -> 0.93f
+            relativeIndex == 0 -> 1.0f
+            relativeIndex == 1 -> 0.94f + 0.06f * transitionEase
+            else -> 0.94f
         }
         val baseAlpha = when {
-            relativeIndex == 0 -> 204
-            relativeIndex == 1 -> (172 + 34 * transitionEase).toInt()
-            isBelowActive && distance == 2 -> 126
-            isBelowActive -> 96
-            isAboveActive && distance == 1 -> 108
-            isAboveActive && distance == 2 -> 88
-            isAboveActive -> 74
-            else -> 132
-        }.coerceIn(54, 255)
+            relativeIndex == 0  -> 210
+            relativeIndex == 1  -> (175 + 35 * transitionEase).toInt()
+            isBelowActive && distance == 2 -> 130
+            isBelowActive       -> 95
+            isAboveActive && distance == 1 -> 110
+            isAboveActive && distance == 2 -> 82
+            isAboveActive       -> 62
+            else                -> 140
+        }.coerceIn(50, 255)
+        // No setShadowLayer blur — only soft BlurMaskFilter for lines far below (2+)
         val blurRadius = when {
-            relativeIndex == 0 -> 0f
-            relativeIndex == 1 -> (3.1f * config.density) * (1f - 0.5f * transitionEase)
-            isBelowActive && distance == 2 -> 6.2f * config.density
-            isBelowActive -> 8.8f * config.density
-            isAboveActive -> 0f
-            else -> 2f * config.density
+            isBelowActive && distance == 2 -> 3.5f * config.density
+            isBelowActive && distance >= 3 -> 5.5f * config.density
+            else -> 0f
         }
         val highlightAlpha = when {
             relativeIndex == 0 -> 255
@@ -166,22 +164,14 @@ internal class KaraokeLineRenderer {
         canvas.save()
         canvas.scale(scale, scale, config.marginLeft, line.y + line.focusCenterYOffset)
         config.basePaint.alpha = baseAlpha
+        // Apply subtle BlurMaskFilter only to lines that are far below active
+        // (never use setShadowLayer on basePaint — it produces low-quality system blur)
         if (blurRadius > 0f) {
-            val textColor = config.basePaint.color
-            config.basePaint.setShadowLayer(
-                blurRadius,
-                0f,
-                0f,
-                Color.argb(
-                    (baseAlpha * 0.92f).toInt().coerceIn(0, 210),
-                    Color.red(textColor),
-                    Color.green(textColor),
-                    Color.blue(textColor),
-                )
-            )
+            config.basePaint.maskFilter = BlurMaskFilter(blurRadius, BlurMaskFilter.Blur.NORMAL)
         } else {
-            config.basePaint.clearShadowLayer()
+            config.basePaint.maskFilter = null
         }
+        config.basePaint.clearShadowLayer()
 
         val completedWordCount = if (isActive || isPast) {
             line.words.count { currentTimeMs >= it.endMs }
@@ -210,6 +200,7 @@ internal class KaraokeLineRenderer {
             if (isActive && index < completedWordCount) continue
             callbacks.drawWord(canvas, line, word, config.basePaint)
         }
+        config.basePaint.maskFilter = null
         config.basePaint.clearShadowLayer()
 
         if (isActive || isPast) {

@@ -2,89 +2,19 @@ package expo.modules.karaokeview.motionprofiles
 
 import android.graphics.Color
 import android.graphics.Paint
-import android.graphics.Path
 import expo.modules.karaokeview.KaraokeAccentContext
 import expo.modules.karaokeview.KaraokeContinuousContext
 import expo.modules.karaokeview.MotionProfileRenderer
 import expo.modules.karaokeview.blendColors
-import kotlin.math.cos
-import kotlin.math.sin
 
 class PulseProfileRenderer : MotionProfileRenderer {
-    override fun drawAccent(ctx: KaraokeAccentContext) {
-        drawPulseRings(ctx)
-    }
 
+    // No per-word accent — the sinusoidal crest was not wanted.
+    override fun drawAccent(ctx: KaraokeAccentContext) = Unit
+
+    /** Bouncing ball that arcs between words, leaving a glowing arc trail behind it. */
     override fun drawContinuous(ctx: KaraokeContinuousContext) {
         drawBouncingBallTrails(ctx)
-    }
-
-    private fun drawPulseRings(ctx: KaraokeAccentContext) {
-        if (ctx.glowProgress < 0.05f || ctx.words.isEmpty()) return
-
-        val baseY = ctx.line.y + ctx.words.minOf { it.yOffset } + ctx.rowHeight * 0.88f + ctx.translateY
-        val waveColor = blendColors(ctx.glowColor, Color.rgb(80, 255, 200), 0.24f)
-        val crestColor = blendColors(ctx.glowColor, Color.rgb(200, 255, 240), 0.30f)
-        val leftBound = ctx.marginLeft + ctx.words.first().xOffset
-        val rightBound = ctx.marginLeft + ctx.words.last().xOffset + ctx.words.last().width
-        val clampedSweepX = ctx.sweepX.coerceIn(leftBound, rightBound)
-        val trailLength = (ctx.rowHeight * 2.2f).coerceAtLeast(48f * ctx.density)
-        val startX = (clampedSweepX - trailLength).coerceAtLeast(leftBound)
-        if (clampedSweepX <= startX + ctx.density * 2f) return
-
-        val seed = (ctx.words.first().startMs % 997L).toFloat() * 0.013f
-        val omega = 0.00502f
-        val pathWidth = clampedSweepX - startX
-        val k = 6.28318f / (pathWidth * 2.4f).coerceAtLeast(1f)
-        val amplitude = ctx.rowHeight * (0.08f + ctx.glowProgress * 0.05f)
-        val waveAlpha = (40f + ctx.glowProgress * 72f).toInt().coerceIn(0, 118)
-
-        val wavePath = Path()
-        val sampleCount = 32
-        for (s in 0..sampleCount) {
-            val t = s.toFloat() / sampleCount.toFloat()
-            val x = startX + pathWidth * t
-            val theta = k * (x - startX) - omega * ctx.currentTimeMs + seed
-            val sinSq = (1f - cos(2f * theta)) * 0.5f
-            val y = baseY - amplitude * (sinSq * 2f - 1f)
-            if (s == 0) wavePath.moveTo(x, y) else wavePath.lineTo(x, y)
-        }
-
-        ctx.sparklePaint.style = Paint.Style.STROKE
-        ctx.sparklePaint.strokeCap = Paint.Cap.ROUND
-        ctx.sparklePaint.strokeJoin = Paint.Join.ROUND
-        ctx.sparklePaint.strokeWidth = ctx.density * (1.4f + ctx.glowProgress * 0.6f)
-        ctx.sparklePaint.color = waveColor
-        ctx.sparklePaint.alpha = waveAlpha
-        ctx.sparklePaint.setShadowLayer(
-            ctx.density * (4.5f + ctx.glowProgress * 3f),
-            0f,
-            0f,
-            Color.argb((waveAlpha * 1.4f).toInt().coerceIn(0, 140), Color.red(waveColor), Color.green(waveColor), Color.blue(waveColor))
-        )
-        ctx.canvas.drawPath(wavePath, ctx.sparklePaint)
-
-        val headTheta = k * pathWidth - omega * ctx.currentTimeMs + seed
-        val headSinSq = (1f - cos(2f * headTheta)) * 0.5f
-        val headY = baseY - amplitude * (headSinSq * 2f - 1f)
-        val headAlpha = (70f + ctx.glowProgress * 80f).toInt().coerceIn(0, 160)
-        ctx.sparklePaint.style = Paint.Style.FILL
-        ctx.sparklePaint.color = crestColor
-        ctx.sparklePaint.alpha = headAlpha
-        ctx.sparklePaint.setShadowLayer(
-            ctx.density * (6f + ctx.glowProgress * 4f),
-            0f,
-            0f,
-            Color.argb((headAlpha * 1.3f).toInt().coerceIn(0, 170), Color.red(crestColor), Color.green(crestColor), Color.blue(crestColor))
-        )
-        val rx = ctx.density * (2.6f + ctx.glowProgress * 0.8f)
-        val ry = ctx.density * (1.8f + ctx.glowProgress * 0.5f)
-        ctx.canvas.drawOval(clampedSweepX - rx, headY - ry, clampedSweepX + rx, headY + ry, ctx.sparklePaint)
-
-        ctx.sparklePaint.clearShadowLayer()
-        ctx.sparklePaint.alpha = 255
-        ctx.sparklePaint.style = Paint.Style.FILL
-        ctx.sparklePaint.strokeJoin = Paint.Join.MITER
     }
 
     private fun drawBouncingBallTrails(ctx: KaraokeContinuousContext) {
@@ -120,7 +50,10 @@ class PulseProfileRenderer : MotionProfileRenderer {
             for (i in rowWords.indices) {
                 val w = rowWords[i]
                 val x0 = ctx.marginLeft + w.xOffset
-                val x1 = if (i < rowWords.lastIndex) ctx.marginLeft + rowWords[i + 1].xOffset else ctx.marginLeft + w.xOffset + w.width
+                val x1 = if (i < rowWords.lastIndex)
+                    ctx.marginLeft + rowWords[i + 1].xOffset
+                else
+                    ctx.marginLeft + w.xOffset + w.width
                 val launchMs = w.startMs
                 val landMs = if (i < rowWords.lastIndex) rowWords[i + 1].startMs else w.endMs
                 if (landMs <= launchMs) continue
@@ -143,6 +76,7 @@ class PulseProfileRenderer : MotionProfileRenderer {
             val trailStartMs = (ctx.currentTimeMs - trailDuration / 3L).coerceAtLeast(rowStartMs)
             val trailEndMs = ctx.currentTimeMs.coerceAtMost(rowEndMs)
 
+            // ---- Arc trail ----
             if (trailEndMs > trailStartMs) {
                 ctx.sparklePaint.style = Paint.Style.STROKE
                 ctx.sparklePaint.strokeCap = Paint.Cap.ROUND
@@ -174,9 +108,9 @@ class PulseProfileRenderer : MotionProfileRenderer {
                             ctx.sparklePaint.strokeWidth = ctx.density * (1.0f + vis * 1.4f)
                             ctx.sparklePaint.setShadowLayer(
                                 ctx.density * (3f + vis * 3f),
-                                0f,
-                                0f,
-                                Color.argb((alpha + 20).coerceIn(0, 140), Color.red(trailColor), Color.green(trailColor), Color.blue(trailColor))
+                                0f, 0f,
+                                Color.argb((alpha + 20).coerceIn(0, 140),
+                                    Color.red(trailColor), Color.green(trailColor), Color.blue(trailColor))
                             )
                             ctx.canvas.drawLine(prevX, prevY, sx, sy, ctx.sparklePaint)
                         }
@@ -187,6 +121,7 @@ class PulseProfileRenderer : MotionProfileRenderer {
                 }
             }
 
+            // ---- Ball + floor shadow ----
             if (ctx.currentTimeMs <= rowEndMs && currentArc != null) {
                 val (headX, headY) = evalArc(currentArc, ctx.currentTimeMs)
 
@@ -200,9 +135,9 @@ class PulseProfileRenderer : MotionProfileRenderer {
                 ctx.sparklePaint.alpha = ballAlpha
                 ctx.sparklePaint.setShadowLayer(
                     ctx.density * (6f + 5f * height01),
-                    0f,
-                    0f,
-                    Color.argb((ballAlpha * 1.2f).toInt().coerceIn(0, 240), Color.red(ballColor), Color.green(ballColor), Color.blue(ballColor))
+                    0f, 0f,
+                    Color.argb((ballAlpha * 1.2f).toInt().coerceIn(0, 240),
+                        Color.red(ballColor), Color.green(ballColor), Color.blue(ballColor))
                 )
                 ctx.canvas.drawCircle(headX, headY, ballRadius, ctx.sparklePaint)
 
@@ -213,10 +148,8 @@ class PulseProfileRenderer : MotionProfileRenderer {
                     ctx.sparklePaint.clearShadowLayer()
                     ctx.sparklePaint.alpha = shadowAlpha
                     ctx.canvas.drawOval(
-                        headX - shadowRx,
-                        floorY - shadowRy,
-                        headX + shadowRx,
-                        floorY + shadowRy,
+                        headX - shadowRx, floorY - shadowRy,
+                        headX + shadowRx, floorY + shadowRy,
                         ctx.sparklePaint
                     )
                 }

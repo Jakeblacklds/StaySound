@@ -13,7 +13,7 @@ import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo } from 'react';
-import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Searchbar, Text } from 'react-native-paper';
 import Animated, {
     Easing,
@@ -59,7 +59,6 @@ export default function LibraryScreen() {
     const lightweightMode = useSettingsStore(s => s.lightweightMode);
     const searchInputRef = React.useRef<any>(null);
     const searchProgress = useSharedValue(0);
-    const { width: windowWidth } = useWindowDimensions();
 
     const libraryTabs = useMemo(
         () => [
@@ -388,17 +387,22 @@ export default function LibraryScreen() {
     const aC = useAnimatedColors();
     const animBg = useAnimatedStyle(() => ({ backgroundColor: aC.background.value }));
     const animSearchbarBg = useAnimatedStyle(() => ({ backgroundColor: aC.surfaceVariant.value + 'A6' }));
-    const searchExpandedWidth = Math.min(Math.max(194, windowWidth - (screenPadding * 2) - 96), 290);
-    const searchAccordionStyle = useAnimatedStyle(() => ({
-        width: interpolate(searchProgress.value, [0, 1], [48, searchExpandedWidth]),
-    }));
-    const searchButtonIconStyle = useAnimatedStyle(() => ({
+    // Icon inside the circle — search glyph fades out, X fades in
+    const searchGlyphStyle = useAnimatedStyle(() => ({
         opacity: 1 - searchProgress.value,
-        transform: [{ scale: interpolate(searchProgress.value, [0, 1], [1, 0.82]) }],
+        transform: [{ scale: interpolate(searchProgress.value, [0, 1], [1, 0.6]) }],
+        position: 'absolute',
     }));
+    const closeGlyphStyle = useAnimatedStyle(() => ({
+        opacity: searchProgress.value,
+        transform: [{ scale: interpolate(searchProgress.value, [0, 1], [0.6, 1]) }],
+        position: 'absolute',
+    }));
+    // Search input rail: slides in from the right when expanding
     const searchInputShellStyle = useAnimatedStyle(() => ({
         opacity: searchProgress.value,
-        transform: [{ translateX: interpolate(searchProgress.value, [0, 1], [16, 0]) }],
+        transform: [{ translateX: interpolate(searchProgress.value, [0, 1], [20, 0]) }],
+        // pointerEvents handled via the wrapper View
     }));
 
     const openSearch = useCallback(() => {
@@ -420,7 +424,6 @@ export default function LibraryScreen() {
         <Animated.View style={[styles.container, animBg]}>
             <SafeAreaView style={styles.container} edges={['top']}>
                 <Animated.View
-                    layout={LinearTransition.duration(240).easing(Easing.bezier(0.22, 1, 0.36, 1))}
                     style={[
                         headerEntryStyle,
                         {
@@ -441,24 +444,68 @@ export default function LibraryScreen() {
                         >
                             {t('library.title')}
                         </Text>
-                        <Animated.View style={[styles.searchAccordion, searchAccordionStyle]}>
-                            <Pressable
-                                accessibilityRole="button"
-                                accessibilityLabel={t('library.searchPlaceholder')}
-                                onPress={openSearch}
-                                style={[
-                                    styles.searchToggleButton,
-                                    { backgroundColor: theme.colors.surfaceVariant }
-                                ]}
-                            >
-                                <Animated.View pointerEvents="none" style={searchButtonIconStyle}>
-                                    <Text style={[styles.searchToggleGlyph, { color: theme.colors.primary }]}>⌕</Text>
-                                </Animated.View>
-                            </Pressable>
+                    </Animated.View>
+                </Animated.View>
 
+                <Animated.View
+                    layout={LinearTransition.duration(220).easing(Easing.bezier(0.22, 1, 0.36, 1))}
+                    style={[styles.tabSection, { paddingHorizontal: screenPadding }, tabsEntryStyle]}
+                >
+                    <View style={styles.tabSectionRow}>
+                        {/* LEFT SLOT — tabs pill row OR search input */}
+                        <View style={styles.tabSlot}>
+                            {/* Tabs are always mounted; hidden via opacity/pointer when search is open */}
+                            <Animated.View
+                                pointerEvents={isSearchExpanded ? 'none' : 'auto'}
+                                entering={FadeIn.duration(220)}
+                                exiting={FadeOut.duration(150)}
+                                style={[styles.tabsFadeWrap, isSearchExpanded && styles.tabsFadeHidden]}
+                            >
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
+                                    {libraryTabs.map(item => {
+                                        const selected = tab === item.value;
+                                        return (
+                                            <Pressable
+                                                key={item.value}
+                                                accessibilityRole="tab"
+                                                accessibilityState={{ selected }}
+                                                accessibilityLabel={item.label}
+                                                style={[
+                                                    styles.tabButton,
+                                                    selected ? { backgroundColor: theme.colors.primaryContainer + '80' } : null
+                                                ]}
+                                                onPress={() => setTab(item.value)}
+                                            >
+                                                <Text
+                                                    style={{
+                                                        color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant,
+                                                        fontWeight: selected ? '700' : '500',
+                                                    }}
+                                                >
+                                                    {item.label}
+                                                </Text>
+                                                {selected ? (
+                                                    <View style={[
+                                                        styles.tabIndicator,
+                                                        { backgroundColor: theme.colors.primary }
+                                                    ]} />
+                                                ) : null}
+                                            </Pressable>
+                                        );
+                                    })}
+                                </ScrollView>
+                            </Animated.View>
+
+                            {/* Search input rail — overlays the tab row when open */}
                             <Animated.View
                                 pointerEvents={isSearchExpanded ? 'auto' : 'none'}
-                                style={[styles.searchInputShell, styles.searchbar, animSearchbarBg, searchInputShellStyle]}
+                                style={[
+                                    styles.searchInputRail,
+                                    styles.searchbar,
+                                    styles.searchInputAbsolute,
+                                    animSearchbarBg,
+                                    searchInputShellStyle,
+                                ]}
                             >
                                 <Searchbar
                                     ref={searchInputRef}
@@ -468,57 +515,31 @@ export default function LibraryScreen() {
                                     onBlur={handleSearchBlur}
                                     style={styles.searchbarInner}
                                     iconColor={theme.colors.primary}
-                                    traileringIcon="close"
-                                    onTraileringIconPress={closeSearch}
                                 />
                             </Animated.View>
-                        </Animated.View>
-                    </Animated.View>
+                        </View>
+
+                        {/* RIGHT CIRCLE — always visible; shows ⌕ or ✕ */}
+                        <View style={styles.searchAccordion}>
+                            <Pressable
+                                accessibilityRole="button"
+                                accessibilityLabel={isSearchExpanded ? 'Cerrar búsqueda' : t('library.searchPlaceholder')}
+                                onPress={isSearchExpanded ? closeSearch : openSearch}
+                                style={[
+                                    styles.searchToggleButton,
+                                    { backgroundColor: theme.colors.surfaceVariant }
+                                ]}
+                            >
+                                <Animated.View pointerEvents="none" style={searchGlyphStyle}>
+                                    <Text style={[styles.searchToggleGlyph, { color: theme.colors.primary }]}>⌕</Text>
+                                </Animated.View>
+                                <Animated.View pointerEvents="none" style={closeGlyphStyle}>
+                                    <Text style={[styles.searchToggleGlyph, { color: theme.colors.primary }]}>✕</Text>
+                                </Animated.View>
+                            </Pressable>
+                        </View>
+                    </View>
                 </Animated.View>
-
-                {!isSearchExpanded ? (
-                    <Animated.View
-                        entering={FadeIn.duration(220)}
-                        exiting={FadeOut.duration(150)}
-                        layout={LinearTransition.duration(220).easing(Easing.bezier(0.22, 1, 0.36, 1))}
-                        style={[styles.tabSection, { paddingHorizontal: screenPadding }, tabsEntryStyle]}
-                    >
-                        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-                            {libraryTabs.map(item => {
-                                const selected = tab === item.value;
-
-                                return (
-                                    <Pressable
-                                        key={item.value}
-                                        accessibilityRole="tab"
-                                        accessibilityState={{ selected }}
-                                        accessibilityLabel={item.label}
-                                        style={[
-                                            styles.tabButton,
-                                            selected ? { backgroundColor: theme.colors.primaryContainer + '80' } : null
-                                        ]}
-                                        onPress={() => setTab(item.value)}
-                                    >
-                                        <Text
-                                            style={{
-                                                color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant,
-                                                fontWeight: selected ? '700' : '500',
-                                            }}
-                                        >
-                                            {item.label}
-                                        </Text>
-                                        {selected ? (
-                                            <View style={[
-                                                styles.tabIndicator,
-                                                { backgroundColor: theme.colors.primary }
-                                            ]} />
-                                        ) : null}
-                                    </Pressable>
-                                );
-                            })}
-                        </ScrollView>
-                    </Animated.View>
-                ) : null}
 
                 <Animated.View
                     layout={LinearTransition.duration(220).easing(Easing.bezier(0.22, 1, 0.36, 1))}
@@ -636,27 +657,37 @@ const styles = StyleSheet.create({
     header: {
         paddingTop: 10,
         paddingBottom: 8,
-        flexDirection: 'row',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        gap: 14,
     },
     title: {
         fontWeight: 'bold',
+    },
+    tabSectionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 10,
+    },
+    tabSlot: {
         flex: 1,
+        minHeight: 48,
+        justifyContent: 'center',
+    },
+    tabsFadeWrap: {
+        flex: 1,
+    },
+    tabsFadeHidden: {
+        opacity: 0,
     },
     searchAccordion: {
         height: 48,
         position: 'relative',
-        alignItems: 'flex-end',
+        alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
+        width: 48,
     },
     searchToggleButton: {
-        position: 'absolute',
-        right: 0,
-        width: 48,
-        height: 48,
+        width: '100%',
+        height: '100%',
         borderRadius: 24,
         alignItems: 'center',
         justifyContent: 'center',
@@ -666,10 +697,16 @@ const styles = StyleSheet.create({
         lineHeight: 22,
         fontWeight: '600',
     },
-    searchInputShell: {
+    searchInputRail: {
+        width: '100%',
+    },
+    // Positions the search input on top of the tab row so layout never shifts
+    searchInputAbsolute: {
         position: 'absolute',
-        right: 0,
         left: 0,
+        right: 0,
+        top: 0,
+        bottom: 0,
     },
     // Outer Animated.View wrapper — receives animated background color
     searchbar: {
@@ -687,7 +724,7 @@ const styles = StyleSheet.create({
     tabRow: {
         gap: 8,
         paddingHorizontal: 2,
-        paddingRight: 8,
+        paddingRight: 4,
     },
     tabSection: {
         paddingTop: 6,

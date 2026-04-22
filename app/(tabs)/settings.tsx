@@ -1,4 +1,4 @@
-﻿import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
+import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
 import { useAuthStore, useDabAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
 import { TidalMirrorAvailability, getTidalMirrorAvailability, getTidalMirrorOptions } from '@/src/services/tidalService';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
@@ -13,12 +13,12 @@ import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, Divider, List, Switch, Text, TextInput } from 'react-native-paper';
+import { ActivityIndicator, Button, Divider, IconButton, List, Switch, Text, TextInput } from 'react-native-paper';
 import { runOnJS } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ColorPicker, { HueSlider, Panel1, Swatches } from 'reanimated-color-picker';
 
-// â”€â”€â”€ Worklet-safe bridge â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+// ——————————————————————————————————————————————————————————————————————————————
 // reanimated-color-picker calls onChange/onComplete on the UI thread.
 // We must use runOnJS to dispatch state updates back to the JS thread.
 
@@ -307,55 +307,50 @@ export default function SettingsScreen() {
         () => availableMirrors.filter(mirror => !recommendedMirrors.includes(mirror)),
         [availableMirrors, recommendedMirrors],
     );
+
     const qualityModalOptions = useMemo(
         () => ['LOSSLESS', 'MP3', 'HI_RES_LOSSLESS', 'LOW'] as TidalQuality[],
         [],
     );
-
-    const sectionSurfaceStyle = {
-        backgroundColor: 'transparent' as const,
-        borderColor: 'transparent',
-        borderWidth: 0,
-    };
 
     return (
         <ScrollView
             style={[styles.container, { backgroundColor: theme.colors.background }]}
             contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
         >
-            <View style={styles.heroCard}>
-                <Text variant="headlineMedium" style={{ color: theme.colors.onBackground, fontWeight: '800' }}>
-                    {t('settings.section.appearance')}
+            {/* Hero Section */}
+            <View style={styles.heroSection}>
+                <Text variant="displaySmall" style={[styles.heroTitle, { color: theme.colors.onBackground }]}>
+                    Ajustes
+                </Text>
+                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, opacity: 0.7 }}>
+                    Personaliza tu experiencia StaySound
                 </Text>
             </View>
 
             {/* Profile Section */}
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                {t('settings.section.profile')}
-            </Text>
-
-            <View style={[styles.section, sectionSurfaceStyle]}>
-                <View style={styles.profileItem}>
-                    <Pressable onPress={handlePickImage} style={styles.avatarWrapper}>
-                        <View style={[styles.avatarCircle, { borderColor: theme.colors.outline + '30', backgroundColor: theme.colors.surfaceVariant }]}>
+            <SectionGroup theme={theme}>
+                <View style={styles.profileHeader}>
+                    <Pressable onPress={handlePickImage} style={styles.avatarContainer}>
+                        <View style={[styles.avatarCircle, { borderColor: theme.colors.primary + '40', backgroundColor: theme.colors.surfaceVariant }]}>
                             {userAvatarUri ? (
                                 <Image source={{ uri: userAvatarUri }} style={styles.avatarImage} />
                             ) : (
                                 <View style={[styles.avatarPlaceholder, { backgroundColor: theme.colors.primaryContainer }]}>
-                                    <Text style={{ color: theme.colors.primary, fontSize: 24, fontWeight: '800' }}>
+                                    <Text style={{ color: theme.colors.primary, fontSize: 32, fontWeight: '800' }}>
                                         {userName ? userName.charAt(0).toUpperCase() : 'U'}
                                     </Text>
                                 </View>
                             )}
-                            <View style={[styles.editBadge, { backgroundColor: theme.colors.primary, borderColor: theme.colors.surface }]}>
-                                <MaterialCommunityIcons name="pencil" size={12} color={theme.colors.onPrimary} />
+                            <View style={[styles.avatarBadge, { backgroundColor: theme.colors.primary }]}>
+                                <MaterialCommunityIcons name="camera" size={14} color={theme.colors.onPrimary} />
                             </View>
                         </View>
                     </Pressable>
 
-                    <View style={styles.profileInfo}>
+                    <View style={styles.profileMeta}>
                         {editingName ? (
-                            <View style={styles.nameEditRow}>
+                            <View style={styles.nameEditGroup}>
                                 <TextInput
                                     value={tempName}
                                     onChangeText={setTempName}
@@ -364,138 +359,101 @@ export default function SettingsScreen() {
                                     autoFocus
                                     style={{ flex: 1, backgroundColor: 'transparent' }}
                                     placeholder={t('settings.profile.namePlaceholder')}
+                                    outlineColor={theme.colors.outline}
+                                    activeOutlineColor={theme.colors.primary}
                                 />
-                                <Button onPress={handleSaveName} mode="contained" compact style={{ marginLeft: 8 }}>
-                                    âœ“
-                                </Button>
+                                <IconButton
+                                    icon="check"
+                                    mode="contained"
+                                    containerColor={theme.colors.primary}
+                                    iconColor={theme.colors.onPrimary}
+                                    onPress={handleSaveName}
+                                    size={20}
+                                />
                             </View>
                         ) : (
-                            <Pressable onPress={() => { setTempName(userName); setEditingName(true); }} style={styles.nameRow}>
-                                <Text variant="titleLarge" style={{ color: theme.colors.onSurface, fontWeight: '700' }}>
-                                    {userName || 'StaySound'}
+                            <Pressable onPress={() => { setTempName(userName); setEditingName(true); }} style={styles.nameActionRow}>
+                                <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, fontWeight: '800' }}>
+                                    {userName || 'StaySound User'}
                                 </Text>
-                                <MaterialCommunityIcons name="pencil-outline" size={16} color={theme.colors.primary} style={{ marginLeft: 8 }} />
+                                <MaterialCommunityIcons name="pencil-circle" size={20} color={theme.colors.primary} style={{ marginLeft: 8 }} />
                             </Pressable>
                         )}
-                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
+                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, opacity: 0.8 }}>
                             {t('settings.profile.tapToEdit')}
                         </Text>
                     </View>
                 </View>
-            </View>
+            </SectionGroup>
 
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                Cuenta
-            </Text>
-
-            <View style={[styles.section, sectionSurfaceStyle]}>
+            {/* Account Management */}
+            <SectionGroup title="Cuentas" theme={theme}>
                 <List.Item
-                    title={appSession?.email || 'Cuenta principal'}
-                    description={appSession
-                        ? 'Sesion activa en StaySound.'
-                        : 'No hay una sesion principal activa.'}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="account-circle-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    title={appSession?.email || 'Cuenta de Invitado'}
+                    description={appSession ? 'Sesion principal activa' : 'Sin cuenta vinculada'}
+                    left={(props) => <MaterialCommunityIcons name="shield-account-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={appSession ? () => (
+                        <IconButton icon="logout" iconColor={theme.colors.error} onPress={handleMainSignOut} />
+                    ) : undefined}
                 />
-                {appSession ? (
-                    <>
-                        <Divider />
-                        <List.Item
-                            title="Cerrar sesion de StaySound"
-                            description="Cierra la cuenta principal de esta app en el dispositivo."
-                            titleStyle={{ color: theme.colors.onSurface }}
-                            descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                            left={(props) => <MaterialCommunityIcons name="logout-variant" size={24} color={theme.colors.error} style={props.style} />}
-                            onPress={handleMainSignOut}
-                        />
-                    </>
-                ) : null}
-            </View>
-
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                DAB
-            </Text>
-
-            <View style={[styles.section, sectionSurfaceStyle]}>
+                
+                <Divider style={styles.cardDivider} />
+                
                 <List.Item
-                    title={dabSession ? (dabSession.username || dabSession.email) : 'Cuenta no conectada'}
-                    description={dabSession
-                        ? `Sesion activa con ${dabSession.email}`
-                        : dabStatus === 'loading'
-                            ? 'Validando sesion de DAB...'
-                            : 'Conecta o crea una cuenta personal para usar DAB.'}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="account-music-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    title="Digital Audio Bridge (DAB)"
+                    description={dabSession ? `Conectado como ${dabSession.username || dabSession.email}` : 'Conecta tu cuenta para streaming'}
+                    left={(props) => <MaterialCommunityIcons name="bridge" size={24} color={theme.colors.secondary} style={props.style} />}
                     right={() => (
-                        <Button mode={dabSession ? 'outlined' : 'contained'} compact onPress={handleOpenDabAuth}>
-                            {dabSession ? 'Gestionar' : 'Conectar'}
+                        <Button mode={dabSession ? 'text' : 'contained-tonal'} onPress={dabSession ? handleDabSignOut : handleOpenDabAuth}>
+                            {dabSession ? 'Cerrar' : 'Conectar'}
                         </Button>
                     )}
                 />
-                {dabSession ? (
-                    <>
-                        <Divider />
-                        <List.Item
-                            title="Cerrar sesion de DAB"
-                            description="Borra la sesion local y deja de usar esta cuenta en el dispositivo."
-                            titleStyle={{ color: theme.colors.onSurface }}
-                            descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                            left={(props) => <MaterialCommunityIcons name="logout" size={24} color={theme.colors.error} style={props.style} />}
-                            onPress={() => { void handleDabSignOut(); }}
-                        />
-                    </>
-                ) : null}
-            </View>
+            </SectionGroup>
 
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                {t('settings.section.language')}
-            </Text>
-
-            <View style={[styles.section, styles.sectionLoose, sectionSurfaceStyle]}>
-                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant }}>
-                    {t('settings.language.desc', { language: currentLanguageLabel })}
-                </Text>
-                <View style={styles.languageRow}>
-                    {([
-                        { value: 'es', label: t('settings.language.spanish') },
-                        { value: 'en', label: t('settings.language.english') },
-                    ] as const).map((option) => {
-                        const selected = language === option.value;
-                        return (
-                            <Pressable
-                                key={option.value}
-                                onPress={() => setLanguage(option.value)}
-                                style={[
-                                    styles.languageButton,
-                                    {
-                                        backgroundColor: selected ? `${theme.colors.primary}15` : 'transparent',
-                                        borderColor: selected ? theme.colors.primary : `${theme.colors.outline}55`,
-                                    },
-                                ]}
-                            >
-                                <Text style={{ color: selected ? theme.colors.primary : theme.colors.onSurface, fontWeight: selected ? '700' : '500' }}>
-                                    {option.label}
-                                </Text>
-                            </Pressable>
-                        );
-                    })}
+            {/* Locale Settings */}
+            <SectionGroup title={t('settings.section.language')} theme={theme}>
+                <View style={styles.languageContainer}>
+                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
+                        {t('settings.language.desc', { language: currentLanguageLabel })}
+                    </Text>
+                    <View style={styles.languageSwitcher}>
+                        {([
+                            { value: 'es', label: 'Español' },
+                            { value: 'en', label: 'English' },
+                        ] as const).map((option) => {
+                            const isSelected = language === option.value;
+                            return (
+                                <Pressable
+                                    key={option.value}
+                                    onPress={() => setLanguage(option.value)}
+                                    style={[
+                                        styles.langBubble,
+                                        {
+                                            backgroundColor: isSelected ? theme.colors.primary : 'transparent',
+                                            borderColor: isSelected ? theme.colors.primary : theme.colors.outline + '40',
+                                        },
+                                    ]}
+                                >
+                                    <Text style={{ 
+                                        color: isSelected ? theme.colors.onPrimary : theme.colors.onSurface, 
+                                        fontWeight: isSelected ? '700' : '500' 
+                                    }}>
+                                        {option.label}
+                                    </Text>
+                                </Pressable>
+                            );
+                        })}
+                    </View>
                 </View>
-            </View>
+            </SectionGroup>
 
-            {/* Appearance Section */}
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                {t('settings.section.appearance')}
-            </Text>
-
-            <View style={[styles.section, sectionSurfaceStyle]}>
+            {/* General Display */}
+            <SectionGroup title="Personalización" theme={theme}>
                 <List.Item
                     title={t('settings.appearance.darkMode')}
                     description={config.mode === 'system' ? t('settings.appearance.followSystem') : isDark ? t('settings.appearance.on') : t('settings.appearance.off')}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="brightness-4" size={24} color={theme.colors.primary} style={props.style} />}
+                    left={(props) => <MaterialCommunityIcons name="moon-waning-crescent" size={24} color={theme.colors.primary} style={props.style} />}
                     right={() => (
                         <Switch
                             value={isDark}
@@ -503,13 +461,11 @@ export default function SettingsScreen() {
                         />
                     )}
                 />
-                <Divider />
+                <Divider style={styles.cardDivider} />
                 <List.Item
                     title={t('settings.appearance.dynamicColors')}
-                    description={t('settings.appearance.dynamicColorsDesc')}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="palette-swatch-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    description="Colores basados en tu musica"
+                    left={(props) => <MaterialCommunityIcons name="auto-fix" size={24} color={theme.colors.primary} style={props.style} />}
                     right={() => (
                         <Switch
                             value={config.dynamicColors}
@@ -517,13 +473,11 @@ export default function SettingsScreen() {
                         />
                     )}
                 />
-                <Divider />
+                <Divider style={styles.cardDivider} />
                 <List.Item
                     title={t('settings.appearance.lightweightMode')}
-                    description={t('settings.appearance.lightweightModeDesc')}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="speedometer-slow" size={24} color={theme.colors.primary} style={props.style} />}
+                    description="Optimiza para dispositivos lentos"
+                    left={(props) => <MaterialCommunityIcons name="leaf-outline" size={24} color={theme.colors.primary} style={props.style} />}
                     right={() => (
                         <Switch
                             value={config.lightweightMode}
@@ -531,62 +485,47 @@ export default function SettingsScreen() {
                         />
                     )}
                 />
-            </View>
+            </SectionGroup>
 
-            {/* Theme Style section removed as only Material 3 is supported */}
-
-            {/* Color Selection - Only for Material 3 without Dynamic Colors */}
+            {/* Custom Color Picking */}
             {config.style === 'material3' && !config.dynamicColors && (
-                <>
-                    <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                        {t('settings.section.themeColors')}
-                    </Text>
-
-                    <View style={[styles.section, styles.sectionLoose, sectionSurfaceStyle]}>
-
-                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
-                            {t('settings.theme.suggestions')}
+                <SectionGroup title={t('settings.section.themeColors')} theme={theme}>
+                    <View style={styles.colorSelectionBody}>
+                        <Text variant="labelSmall" style={styles.colorSectionLabel}>
+                            Preajustes recomendados
                         </Text>
-
-                        <View style={styles.colorPresetsRow}>
+                        <View style={styles.colorGrid}>
                             {colorPresets.map((color) => (
                                 <Pressable
                                     key={color}
                                     onPress={() => setAccentColor(color)}
                                     style={[
-                                        styles.colorCircle,
+                                        styles.colorDot,
                                         { backgroundColor: color },
                                         config.accentColor === color && {
-                                            borderWidth: 2.5,
                                             borderColor: theme.colors.onSurface,
-                                            transform: [{ scale: 1.12 }]
+                                            borderWidth: 2,
+                                            transform: [{ scale: 1.1 }]
                                         }
                                     ]}
                                 />
                             ))}
                         </View>
 
-                        <Divider style={{ marginVertical: 20 }} />
-
-                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
-                            {t('settings.theme.customColor')}
-                        </Text>
+                        <Divider style={[styles.cardDivider, { marginVertical: 16 }]} />
 
                         <Pressable
-                            style={[styles.colorBox, { borderColor: `${theme.colors.outline}88` }]}
-                            onPress={() => {
-                                setTempColor(config.accentColor);
-                                setHexInput(config.accentColor);
-                                setShowPicker(true);
-                            }}
+                            style={[styles.customColorTile, { backgroundColor: theme.colors.surfaceVariant + '30' }]}
+                            onPress={() => setShowPicker(true)}
                         >
-                            <View style={styles.colorBoxLeft}>
-                                <View style={[styles.colorSwatch, { backgroundColor: config.accentColor }]} />
-                                <Text style={{ color: theme.colors.onSurface, fontWeight: '600', letterSpacing: 0.5 }}>
-                                    {config.accentColor.toUpperCase()}
-                                </Text>
+                            <View style={styles.customColorInfo}>
+                                <View style={[styles.colorPreview, { backgroundColor: config.accentColor }]} />
+                                <View>
+                                    <Text variant="labelLarge" style={{ fontWeight: '700' }}>Color personalizado</Text>
+                                    <Text variant="bodySmall">{config.accentColor.toUpperCase()}</Text>
+                                </View>
                             </View>
-                            <MaterialCommunityIcons name="palette-outline" size={24} color={theme.colors.primary} />
+                            <MaterialCommunityIcons name="palette-swatch" size={24} color={theme.colors.primary} />
                         </Pressable>
 
                         {/* Bottom-sheet modal color picker */}
@@ -598,7 +537,6 @@ export default function SettingsScreen() {
                         >
                             <View style={styles.modalOverlay}>
                                 <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
-                                    {/* Fixed header */}
                                     <View style={styles.modalHeader}>
                                         <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
                                             {t('settings.theme.chooseColor')}
@@ -608,14 +546,7 @@ export default function SettingsScreen() {
                                         </Pressable>
                                     </View>
 
-                                    {/* Scrollable body */}
-                                    <ScrollView
-                                        showsVerticalScrollIndicator={false}
-                                        keyboardShouldPersistTaps="handled"
-                                        contentContainerStyle={{ gap: 16 }}
-                                        style={{ flexGrow: 0 }}
-                                        nestedScrollEnabled
-                                    >
+                                    <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 16 }} style={{ flexGrow: 0 }}>
                                         <ColorPicker
                                             value={tempColor}
                                             onComplete={onColorPickerComplete}
@@ -623,105 +554,36 @@ export default function SettingsScreen() {
                                         >
                                             <Panel1 style={styles.pickerPanel} />
                                             <HueSlider style={styles.pickerSlider} />
-                                            <Swatches
-                                                colors={colorPresets}
-                                                style={styles.swatches}
-                                                swatchStyle={styles.swatchItem}
-                                            />
+                                            <Swatches colors={colorPresets} style={styles.swatches} swatchStyle={styles.swatchItem} />
                                         </ColorPicker>
 
-                                        {/* â”€â”€ Palette Preview â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */}
                                         {previewPalette && (
                                             <View style={styles.palettePreview}>
-                                                <Text variant="labelSmall" style={[styles.paletteLabel, { color: theme.colors.onSurfaceVariant }]}>
-                                                    {t('settings.theme.generatedPalette')}
-                                                </Text>
-
-                                                {([
-                                                    {
-                                                        label: t('settings.theme.palette.primary'),
-                                                        chips: [
-                                                            { name: 'Primary', bg: previewPalette.primary, fg: previewPalette.onPrimary },
-                                                            { name: 'Container', bg: previewPalette.primaryContainer, fg: previewPalette.onPrimaryContainer },
-                                                        ],
-                                                    },
-                                                    {
-                                                        label: t('settings.theme.palette.secondary'),
-                                                        chips: [
-                                                            { name: 'Secondary', bg: previewPalette.secondary, fg: previewPalette.onSecondary },
-                                                            { name: 'Container', bg: previewPalette.secondaryContainer, fg: previewPalette.onSecondaryContainer },
-                                                        ],
-                                                    },
-                                                    {
-                                                        label: t('settings.theme.palette.tertiary'),
-                                                        chips: [
-                                                            { name: 'Tertiary', bg: previewPalette.tertiary, fg: previewPalette.onTertiary },
-                                                            { name: 'Container', bg: previewPalette.tertiaryContainer, fg: previewPalette.onTertiaryContainer },
-                                                        ],
-                                                    },
-                                                    {
-                                                        label: t('settings.theme.palette.surfaces'),
-                                                        chips: [
-                                                            { name: 'Background', bg: previewPalette.background, fg: previewPalette.onBackground },
-                                                            { name: 'Surface', bg: previewPalette.surface, fg: previewPalette.onSurface },
-                                                            { name: 'Variant', bg: previewPalette.surfaceVariant, fg: previewPalette.onSurfaceVariant },
-                                                        ],
-                                                    },
-                                                    {
-                                                        label: t('settings.theme.palette.outlineError'),
-                                                        chips: [
-                                                            { name: 'Outline', bg: previewPalette.outline, fg: previewPalette.onBackground },
-                                                            { name: t('settings.theme.palette.variant'), bg: previewPalette.outlineVariant ?? previewPalette.outline, fg: previewPalette.onBackground },
-                                                            { name: 'Error', bg: previewPalette.error, fg: previewPalette.onError },
-                                                        ],
-                                                    },
-                                                ] as { label: string; chips: { name: string; bg: string; fg: string }[] }[]).map((group) => (
-                                                    <View key={group.label} style={styles.paletteGroup}>
-                                                        <Text style={[styles.paletteGroupLabel, { color: theme.colors.onSurfaceVariant }]}>
-                                                            {group.label}
-                                                        </Text>
-                                                        <View style={styles.paletteRow}>
-                                                            {group.chips.map((chip) => (
-                                                                <View
-                                                                    key={chip.name}
-                                                                    style={[styles.paletteChip, { backgroundColor: chip.bg }]}
-                                                                >
-                                                                    <Text style={[styles.paletteChipLabel, { color: chip.fg }]}>
-                                                                        {chip.name}
-                                                                    </Text>
-                                                                    <Text style={[styles.paletteChipHex, { color: chip.fg }]}>
-                                                                        {chip.bg?.toUpperCase()}
-                                                                    </Text>
-                                                                </View>
-                                                            ))}
-                                                        </View>
+                                                <Text variant="labelSmall" style={styles.paletteLabel}>Paleta generada</Text>
+                                                <View style={styles.paletteRow}>
+                                                    <View style={[styles.paletteChip, { backgroundColor: previewPalette.primary }]}>
+                                                        <Text style={{ color: previewPalette.onPrimary, fontSize: 10 }}>Primary</Text>
                                                     </View>
-                                                ))}
+                                                    <View style={[styles.paletteChip, { backgroundColor: previewPalette.secondary }]}>
+                                                        <Text style={{ color: previewPalette.onSecondary, fontSize: 10 }}>Secondary</Text>
+                                                    </View>
+                                                    <View style={[styles.paletteChip, { backgroundColor: previewPalette.tertiary }]}>
+                                                        <Text style={{ color: previewPalette.onTertiary, fontSize: 10 }}>Tertiary</Text>
+                                                    </View>
+                                                </View>
                                             </View>
                                         )}
 
                                         <View style={styles.hexRow}>
                                             <TextInput
-                                                label="Hex"
+                                                label="HEX"
                                                 value={hexInput.toUpperCase()}
-                                                onChangeText={(text) => {
-                                                    setHexInput(text);
-                                                    if (text.length === 7 && text.startsWith('#')) {
-                                                        setTempColor(text);
-                                                    }
-                                                }}
+                                                onChangeText={setHexInput}
                                                 mode="outlined"
                                                 dense
-                                                style={{ flex: 1, backgroundColor: 'transparent' }}
-                                                outlineColor={theme.colors.outline}
-                                                activeOutlineColor={theme.colors.primary}
-                                                textColor={theme.colors.onSurface}
+                                                style={{ flex: 1 }}
                                             />
-                                            <Button
-                                                mode="contained"
-                                                onPress={applyColor}
-                                                style={styles.applyBtn}
-                                            >
+                                            <Button mode="contained" onPress={applyColor} style={styles.applyBtn}>
                                                 {t('common.apply')}
                                             </Button>
                                         </View>
@@ -729,492 +591,337 @@ export default function SettingsScreen() {
                                 </View>
                             </View>
                         </Modal>
-
-                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 12 }}>
-                            {t('settings.theme.interfaceAdapts')}
-                        </Text>
                     </View>
-                </>
+                </SectionGroup>
             )}
 
-            {/* Playback Section */}
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                {t('settings.section.playback')}
-            </Text>
-
-            <View style={[styles.section, sectionSurfaceStyle]}>
+            {/* Audio & Engine */}
+            <SectionGroup title="Audio & Motor" theme={theme}>
                 <List.Item
                     title={t('settings.playback.equalizer')}
-                    description={
-                        equalizer.mode === 'system'
-                            ? t('equalizer.status.deviceControlled')
-                            : equalizer.mode === 'app'
-                                ? (equalizerCapabilities?.attached
-                                    ? t('equalizer.status.staysoundReady')
-                                    : t('equalizer.status.waitingForPlayback'))
-                                : t('settings.playback.equalizerDesc')
-                    }
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="tune" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
+                    description={equalizer.mode === 'system' ? 'Controlado por el sistema' : 'Motor DSP de StaySound'}
+                    left={(props) => <MaterialCommunityIcons name="tune-variant" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => router.push('/equalizer')}
                 />
-                <Divider />
+                <Divider style={styles.cardDivider} />
                 <List.Item
-                    title={t('settings.playback.timer')}
-                    description={t('common.disabled')}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="timer-outline" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
-                />
-            </View>
-
-            {/* Library Section */}
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                {t('settings.section.library')}
-            </Text>
-
-            <View style={[styles.section, sectionSurfaceStyle]}>
-                <List.Item
-                    title={t('settings.library.scanMusic')}
-                    description={isScanning ? t('settings.library.scanning') : t('settings.library.scanSummary', { count: trackCount, lastScan })}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
-                    left={(props) => <MaterialCommunityIcons name="magnify-scan" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => isScanning
-                        ? <ActivityIndicator size="small" color={theme.colors.primary} />
-                        : <MaterialCommunityIcons name="refresh" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />
-                    }
+                    title="Biblioteca de Musica"
+                    description={isScanning ? 'Escaneando archivos...' : `${trackCount} pistas encontradas`}
+                    left={(props) => <MaterialCommunityIcons name="folder-music-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={() => isScanning ? <ActivityIndicator size="small" /> : <MaterialCommunityIcons name="refresh" size={20} color={theme.colors.primary} />}
                     onPress={handleScan}
                     disabled={isScanning}
                 />
-            </View>
+            </SectionGroup>
 
-            {/* Tidal Section */}
-            <Text variant="titleSmall" style={[styles.sectionHeader, { color: theme.colors.primary }]}>
-                {t('settings.section.downloads')}
-            </Text>
-
-            <View style={[styles.section, sectionSurfaceStyle]}>
+            {/* Downloads & Quality */}
+            <SectionGroup title="Descargas" theme={theme}>
                 <List.Item
-                    title={t('settings.downloads.quality')}
+                    title="Calidad de Descarga"
                     description={qualityDescription[tidalDownloadQuality]}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
                     left={(props) => <MaterialCommunityIcons name="download-circle-outline" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
+                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => setShowQualityModal(true)}
                 />
-                <Divider />
+                <Divider style={styles.cardDivider} />
                 <List.Item
-                    title={t('settings.downloads.server')}
-                    description={TIDAL_MIRROR_NAMES[tidalMirror] || t('common.custom')}
-                    titleStyle={{ color: theme.colors.onSurface }}
-                    descriptionStyle={{ color: theme.colors.onSurfaceVariant }}
+                    title="Servidor de Contenido"
+                    description={TIDAL_MIRROR_NAMES[tidalMirror] || 'Automatico'}
                     left={(props) => <MaterialCommunityIcons name="server-network" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={20} color={theme.colors.onSurfaceVariant} style={props.style} />}
+                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => setShowMirrorModal(true)}
                 />
-            </View>
+            </SectionGroup>
 
-            {/* Mirror Selection Modal */}
-            <Modal
-                visible={showMirrorModal}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowMirrorModal(false)}
-            >
+            {/* Modals for Quality and Mirror */}
+            <Modal visible={showQualityModal} transparent animationType="fade" onRequestClose={() => setShowQualityModal(false)}>
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, maxHeight: '80%' }]}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
                         <View style={styles.modalHeader}>
-                            <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
-                                {t('settings.downloads.serverTitle')}
-                            </Text>
-                            <Pressable onPress={() => setShowMirrorModal(false)} hitSlop={12}>
-                                <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
-                            </Pressable>
+                            <Text variant="titleLarge">Calidad de audio</Text>
+                            <IconButton icon="close" onPress={() => setShowQualityModal(false)} />
                         </View>
-
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
-                            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
-                                {t('settings.downloads.serverHint')}
-                            </Text>
-
-                            <Pressable
-                                onPress={() => handleMirrorChange('auto')}
-                                style={[
-                                    styles.qualityOption,
-                                    {
-                                        backgroundColor: tidalMirror === 'auto' ? `${theme.colors.primary}15` : 'transparent',
-                                        borderColor: tidalMirror === 'auto' ? theme.colors.primary : `${theme.colors.outline}33`,
-                                        borderWidth: 1,
-                                        borderRadius: 12,
-                                        padding: 16
-                                    }
-                                ]}
-                            >
-                                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                    <MaterialCommunityIcons name="auto-fix" size={24} color={tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurfaceVariant} />
-                                    <View style={{ flex: 1 }}>
-                                        <Text variant="titleMedium" style={{ color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface }}>
-                                            {t('settings.downloads.autoRecommended')}
-                                        </Text>
-                                        <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                            {t('settings.downloads.autoDescription')}
-                                        </Text>
+                        <ScrollView contentContainerStyle={{ gap: 12 }}>
+                            {qualityModalOptions.map(q => (
+                                <Pressable 
+                                    key={q} 
+                                    onPress={() => { setTidalDownloadQuality(q); setShowQualityModal(false); }}
+                                    style={[styles.qualityOption, { borderColor: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.outline + '20', borderWidth: 1, borderRadius: 16, padding: 16, backgroundColor: tidalDownloadQuality === q ? theme.colors.primary + '10' : 'transparent' }]}
+                                >
+                                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 16 }}>
+                                        <MaterialCommunityIcons name={qualityDetails[q].icon as any} size={24} color={tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurfaceVariant} />
+                                        <View style={{ flex: 1 }}>
+                                            <Text variant="titleMedium" style={{ color: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurface }}>{qualityDetails[q].title}</Text>
+                                            <Text variant="bodySmall">{qualityDetails[q].desc}</Text>
+                                        </View>
+                                        {tidalDownloadQuality === q && <MaterialCommunityIcons name="check-circle" size={20} color={theme.colors.primary} />}
                                     </View>
-                                </View>
-                            </Pressable>
-
-                            {recommendedMirrors.map((mirror) => {
-                                const availability = mirrorAvailability[mirror];
-                                const isUnavailable = availability?.status === 'unavailable';
-
-                                return (
-                                    <Pressable
-                                        key={mirror}
-                                        onPress={() => handleMirrorChange(mirror)}
-                                        style={[
-                                            styles.qualityOption,
-                                            {
-                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
-                                                borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
-                                                borderWidth: 1,
-                                                borderRadius: 12,
-                                                padding: 16,
-                                                opacity: isUnavailable ? 0.6 : 1,
-                                            }
-                                        ]}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                            <MaterialCommunityIcons name="server" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
-                                            <View style={{ flex: 1 }}>
-                                                <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
-                                                    {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                                </Text>
-                                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                    {mirror.replace('https://', '')}
-                                                </Text>
-                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                                                    {formatMirrorSummary(availability)}
-                                                </Text>
-                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
-                                                    {formatMirrorCapabilities(availability)}
-                                                </Text>
-                                            </View>
-                                            {tidalMirror === mirror && (
-                                                <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
-                                            )}
-                                        </View>
-                                    </Pressable>
-                                );
-                            })}
-
-                            <Button
-                                mode="text"
-                                compact
-                                onPress={() => setShowLegacyMirrors(value => !value)}
-                                textColor={theme.colors.primary}
-                                style={{ alignSelf: 'flex-start', marginTop: 4 }}
-                            >
-                                {showLegacyMirrors ? 'Ocultar otros servidores' : 'Mostrar otros servidores'}
-                            </Button>
-
-                            {showLegacyMirrors ? legacyMirrors.map((mirror) => {
-                                const availability = mirrorAvailability[mirror];
-
-                                return (
-                                    <Pressable
-                                        key={mirror}
-                                        onPress={() => handleMirrorChange(mirror)}
-                                        style={[
-                                            styles.qualityOption,
-                                            {
-                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}15` : 'transparent',
-                                                borderColor: tidalMirror === mirror ? theme.colors.primary : `${theme.colors.outline}33`,
-                                                borderWidth: 1,
-                                                borderRadius: 12,
-                                                padding: 16,
-                                                opacity: 0.88,
-                                            }
-                                        ]}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                            <MaterialCommunityIcons name="server-outline" size={24} color={tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant} />
-                                            <View style={{ flex: 1 }}>
-                                                <Text variant="titleMedium" style={{ color: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurface }}>
-                                                    {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                                </Text>
-                                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                    {mirror.replace('https://', '')}
-                                                </Text>
-                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 4 }}>
-                                                    {formatMirrorSummary(availability)}
-                                                </Text>
-                                                <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
-                                                    {formatMirrorCapabilities(availability)}
-                                                </Text>
-                                            </View>
-                                            {tidalMirror === mirror && (
-                                                <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
-                                            )}
-                                        </View>
-                                    </Pressable>
-                                );
-                            }) : null}
+                                </Pressable>
+                            ))}
                         </ScrollView>
                     </View>
                 </View>
             </Modal>
 
-            {/* Quality Selection Modal */}
-            <Modal
-                visible={showQualityModal}
-                transparent
-                animationType="fade"
-                onRequestClose={() => setShowQualityModal(false)}
-            >
+            <Modal visible={showMirrorModal} transparent animationType="fade" onRequestClose={() => setShowMirrorModal(false)}>
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, maxHeight: '80%' }]}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
                         <View style={styles.modalHeader}>
-                            <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
-                                {t('settings.downloads.audioQualityTitle')}
-                            </Text>
-                            <Pressable onPress={() => setShowQualityModal(false)} hitSlop={12}>
-                                <MaterialCommunityIcons name="close" size={24} color={theme.colors.onSurfaceVariant} />
-                            </Pressable>
+                            <Text variant="titleLarge">Servidor de Tidal</Text>
+                            <IconButton icon="close" onPress={() => setShowMirrorModal(false)} />
                         </View>
-
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12 }}>
-                            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
-                                {t('settings.downloads.audioQualityHint')}
-                            </Text>
-
-                            {qualityModalOptions.map((q) => {
-                                const details = qualityDetails[q];
-
-                                return (
-                                    <Pressable
-                                        key={q}
-                                        onPress={() => {
-                                            setTidalDownloadQuality(q);
-                                            setShowQualityModal(false);
-                                        }}
-                                        style={[
-                                            styles.qualityOption,
-                                            {
-                                                backgroundColor: tidalDownloadQuality === q ? `${theme.colors.primary}15` : 'transparent',
-                                                borderColor: tidalDownloadQuality === q ? theme.colors.primary : `${theme.colors.outline}33`,
-                                                borderWidth: 1,
-                                                borderRadius: 12,
-                                                padding: 16
-                                            }
-                                        ]}
-                                    >
-                                        <View style={{ flexDirection: 'row', alignItems: 'center', gap: 12 }}>
-                                            <MaterialCommunityIcons name={details.icon as any} size={24} color={tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurfaceVariant} />
-                                            <View style={{ flex: 1 }}>
-                                                <Text variant="titleMedium" style={{ color: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.onSurface }}>
-                                                    {details.title}
-                                                </Text>
-                                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                    {details.desc}
-                                                </Text>
-                                                <Text variant="labelSmall" style={{ color: theme.colors.primary, marginTop: 4, fontWeight: 'bold' }}>
-                                                    {details.adv}
-                                                </Text>
-                                            </View>
-                                            {tidalDownloadQuality === q && (
-                                                <MaterialCommunityIcons name="check" size={24} color={theme.colors.primary} />
-                                            )}
-                                        </View>
-                                    </Pressable>
-                                );
-                            })}
+                        <ScrollView contentContainerStyle={{ gap: 12 }}>
+                            <Pressable 
+                                onPress={() => handleMirrorChange('auto')}
+                                style={[styles.qualityOption, { borderColor: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.outline + '20', borderWidth: 1, borderRadius: 16, padding: 16, backgroundColor: tidalMirror === 'auto' ? theme.colors.primary + '10' : 'transparent' }]}
+                            >
+                                <Text variant="titleMedium">Automatico (Recomendado)</Text>
+                                <Text variant="bodySmall">Selecciona el servidor mas rapido cerca de ti.</Text>
+                            </Pressable>
+                            {recommendedMirrors.map(m => (
+                                <Pressable 
+                                    key={m} 
+                                    onPress={() => handleMirrorChange(m)}
+                                    style={[styles.qualityOption, { borderColor: tidalMirror === m ? theme.colors.primary : theme.colors.outline + '20', borderWidth: 1, borderRadius: 16, padding: 16, backgroundColor: tidalMirror === m ? theme.colors.primary + '10' : 'transparent' }]}
+                                >
+                                    <Text variant="titleMedium">{TIDAL_MIRROR_NAMES[m] || m}</Text>
+                                    <Text variant="labelSmall" style={{ opacity: 0.7 }}>{formatMirrorSummary(mirrorAvailability[m])}</Text>
+                                </Pressable>
+                            ))}
                         </ScrollView>
                     </View>
                 </View>
             </Modal>
 
-            {/* About */}
-            <View style={styles.about}>
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center' }}>
-                    StaySound v1.0.0
-                </Text>
-                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, textAlign: 'center', marginTop: 4 }}>
-                    {t('settings.about.madeWith')}
-                </Text>
+            <View style={styles.footer}>
+                <Image 
+                    source={require('@/assets/images/icon.png')} 
+                    style={styles.footerLogo}
+                    contentFit="contain"
+                />
+                <Text variant="labelLarge" style={{ fontWeight: '800', opacity: 0.9 }}>STAYSOUND v1.0.0</Text>
+                <Text variant="bodySmall" style={{ opacity: 0.5 }}>{t('settings.about.madeWith')}</Text>
             </View>
         </ScrollView>
     );
 }
 
+const SectionGroup = ({ title, children, theme }: { title?: string, children: React.ReactNode, theme: any }) => (
+    <View style={styles.sectionGroup}>
+        {title && (
+            <Text variant="labelSmall" style={[styles.sectionGroupTitle, { color: theme.colors.primary }]}>
+                {title}
+            </Text>
+        )}
+        <View style={[styles.sectionCard, { backgroundColor: theme.colors.surfaceVariant + '30', borderColor: theme.colors.outline + '15' }]}>
+            {children}
+        </View>
+    </View>
+);
+
 const styles = StyleSheet.create({
     container: { flex: 1 },
-    content: { padding: 16, paddingBottom: 120 },
-    heroCard: {
-        paddingHorizontal: 2,
-        paddingTop: 8,
-        paddingBottom: 4,
-        marginBottom: 12,
+    content: { padding: 16, paddingBottom: 140 },
+    
+    // Grid & Cards
+    sectionGroup: {
+        marginBottom: 28,
     },
-    sectionHeader: {
-        marginTop: 24,
-        marginBottom: 10,
-        marginLeft: 0,
-        fontWeight: '700',
+    sectionGroupTitle: {
+        marginLeft: 8,
+        marginBottom: 8,
+        fontWeight: '800',
         textTransform: 'uppercase',
-        letterSpacing: 0.8,
-        opacity: 0.92,
+        letterSpacing: 2,
+        fontSize: 11,
+        opacity: 0.7,
     },
-    section: {
-        borderRadius: 0,
+    sectionCard: {
+        borderRadius: 24,
+        overflow: 'hidden',
+        borderWidth: 1.5,
+    },
+    cardDivider: {
+        height: 1,
+        marginHorizontal: 16,
+        opacity: 0.3,
+    },
+
+    // Hero Header
+    heroSection: {
+        paddingTop: 12,
+        paddingBottom: 24,
+        paddingHorizontal: 8,
+    },
+    heroTitle: {
+        fontWeight: '900',
+        letterSpacing: -1,
+    },
+
+    // Profile Refined
+    profileHeader: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        padding: 20,
+    },
+    avatarContainer: {
+        position: 'relative',
+    },
+    avatarCircle: {
+        width: 84,
+        height: 84,
+        borderRadius: 30,
+        borderWidth: 2,
+        padding: 3,
         overflow: 'visible',
     },
-    sectionLoose: {
-        paddingVertical: 4,
+    avatarImage: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 24,
     },
-    languageRow: {
-        flexDirection: 'row',
-        gap: 12,
-    },
-    languageButton: {
-        flex: 1,
-        borderWidth: 1,
-        borderRadius: 12,
-        paddingVertical: 13,
+    avatarPlaceholder: {
+        width: '100%',
+        height: '100%',
+        borderRadius: 24,
         alignItems: 'center',
         justifyContent: 'center',
     },
-    colorPresetsRow: {
+    avatarBadge: {
+        position: 'absolute',
+        bottom: -4,
+        right: -4,
+        width: 28,
+        height: 28,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
+        borderWidth: 3,
+        borderColor: '#fff', 
+    },
+    profileMeta: {
+        flex: 1,
+        marginLeft: 20,
+    },
+    nameActionRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        marginBottom: 2,
+    },
+    nameEditGroup: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+    },
+
+    // Language switcher bubbles
+    languageContainer: {
+        padding: 16,
+    },
+    languageSwitcher: {
+        flexDirection: 'row',
+        gap: 10,
+    },
+    langBubble: {
+        flex: 1,
+        paddingVertical: 10,
+        borderRadius: 16,
+        borderWidth: 1,
+        alignItems: 'center',
+    },
+
+    // Color controls
+    colorSelectionBody: {
+        padding: 16,
+    },
+    colorSectionLabel: {
+        marginBottom: 12,
+        opacity: 0.6,
+        fontWeight: '700',
+    },
+    colorGrid: {
         flexDirection: 'row',
         flexWrap: 'wrap',
         gap: 12,
     },
-    colorCircle: {
-        width: 38,
-        height: 38,
-        borderRadius: 19,
+    colorDot: {
+        width: 42,
+        height: 42,
+        borderRadius: 21,
     },
-    colorBox: {
+    customColorTile: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        paddingHorizontal: 16,
-        paddingVertical: 14,
-        borderRadius: 12,
-        borderWidth: 1,
+        padding: 16,
+        borderRadius: 16,
     },
-    colorBoxLeft: {
+    customColorInfo: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 12,
+        gap: 14,
     },
-    colorSwatch: {
-        width: 28,
-        height: 28,
-        borderRadius: 14,
+    colorPreview: {
+        width: 32,
+        height: 32,
+        borderRadius: 10,
         borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.15)',
+        borderColor: 'rgba(255,255,255,0.2)',
     },
+
+    // Modals
     modalOverlay: {
         flex: 1,
-        backgroundColor: 'rgba(0,0,0,0.72)',
+        backgroundColor: 'rgba(0,0,0,0.8)',
         justifyContent: 'flex-end',
     },
     modalContent: {
-        borderTopLeftRadius: 28,
-        borderTopRightRadius: 28,
+        borderTopLeftRadius: 32,
+        borderTopRightRadius: 32,
         padding: 24,
-        paddingBottom: 48,
+        paddingBottom: 60,
         maxHeight: '90%',
-        gap: 12,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
     },
     modalHeader: {
         flexDirection: 'row',
         justifyContent: 'space-between',
         alignItems: 'center',
+        marginBottom: 20,
     },
-    pickerPanel: {
-        height: 200,
-        borderRadius: 20,
-    },
-    pickerSlider: {
-        height: 22,
-        borderRadius: 11,
-    },
-    swatches: {
-        justifyContent: 'space-between',
-    },
-    swatchItem: {
-        width: 30,
-        height: 30,
-        borderRadius: 15,
-    },
-    preview: {
-        height: 36,
-        borderRadius: 10,
-    },
-    // Palette preview
-    palettePreview: {
-        gap: 10,
-        paddingVertical: 4,
-    },
-    paletteLabel: {
-        letterSpacing: 1,
-        fontWeight: '700',
-        marginBottom: 2,
-        opacity: 0.7,
-    },
-    paletteGroup: {
+
+    // Picker
+    pickerPanel: { height: 220, borderRadius: 24 },
+    pickerSlider: { height: 24, borderRadius: 12, marginTop: 12 },
+    swatches: { marginTop: 16 },
+    swatchItem: { width: 34, height: 34, borderRadius: 17 },
+
+    // Footer
+    footer: {
+        paddingTop: 40,
+        paddingBottom: 60,
+        alignItems: 'center',
         gap: 4,
     },
-    paletteGroupLabel: {
-        fontSize: 10,
-        fontWeight: '600',
-        letterSpacing: 0.5,
-        opacity: 0.6,
-        marginBottom: 2,
+    footerLogo: {
+        width: 48,
+        height: 48,
+        marginBottom: 8,
+        opacity: 0.8,
     },
-    paletteRow: {
-        flexDirection: 'row',
-        gap: 6,
-        flexWrap: 'wrap',
-    },
-    paletteChip: {
-        flex: 1,
-        minWidth: 80,
-        borderRadius: 12,
-        paddingVertical: 8,
-        paddingHorizontal: 10,
-        gap: 2,
-    },
-    paletteChipLabel: {
-        fontSize: 10,
-        fontWeight: '700',
-        letterSpacing: 0.2,
-    },
-    paletteChipHex: {
-        fontSize: 9,
-        fontFamily: 'monospace',
-        opacity: 0.85,
-    },
-    hexRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 12,
-        marginTop: 4,
-    },
-    applyBtn: {
-        borderRadius: 14,
-    },
-    qualityOption: {
-        marginVertical: 4,
-    },
+
+    // Legacy or needed refs
+    palettePreview: { gap: 10, paddingVertical: 4 },
+    paletteLabel: { letterSpacing: 1, fontWeight: '700', opacity: 0.7 },
+    paletteGroup: { gap: 4 },
+    paletteGroupLabel: { fontSize: 10, fontWeight: '600', opacity: 0.6 },
+    paletteRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
+    paletteChip: { flex: 1, minWidth: 80, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 10, gap: 2 },
+    paletteChipLabel: { fontSize: 10, fontWeight: '700' },
+    paletteChipHex: { fontSize: 9, fontFamily: 'monospace' },
+    hexRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
+    applyBtn: { borderRadius: 16 },
+    qualityOption: { marginVertical: 4 },
     about: {
         marginTop: 40,
         alignItems: 'center',
@@ -1227,24 +934,6 @@ const styles = StyleSheet.create({
     avatarWrapper: {
         marginRight: 20,
     },
-    avatarCircle: {
-        width: 80,
-        height: 80,
-        borderRadius: 24,
-        borderWidth: 1,
-        overflow: 'hidden',
-        position: 'relative',
-    },
-    avatarImage: {
-        width: '100%',
-        height: '100%',
-    },
-    avatarPlaceholder: {
-        width: '100%',
-        height: '100%',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
     editBadge: {
         position: 'absolute',
         bottom: 0,
@@ -1255,9 +944,6 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 2,
-    },
-    profileInfo: {
-        flex: 1,
     },
     nameRow: {
         flexDirection: 'row',

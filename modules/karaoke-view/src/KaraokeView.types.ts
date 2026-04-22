@@ -49,6 +49,12 @@ export interface KaraokeViewProps extends ViewProps {
     /** Color for the glow effect */
     glowColor?: any;
 
+    /** Background color of the player — used to tint the ambient background orbs */
+    backgroundColor?: any;
+
+    /** Enables the slow animated orb background behind the lyrics (default: true) */
+    enableAmbientBackground?: boolean;
+
     /** Whether to highlight the entire line instantly (LRCLIB mode) */
     isLineByLine?: boolean;
 

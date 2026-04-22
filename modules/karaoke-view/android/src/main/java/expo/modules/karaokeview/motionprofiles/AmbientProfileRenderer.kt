@@ -6,62 +6,61 @@ import expo.modules.karaokeview.KaraokeAccentContext
 import expo.modules.karaokeview.KaraokeContinuousContext
 import expo.modules.karaokeview.MotionProfileRenderer
 import expo.modules.karaokeview.blendColors
+import kotlin.math.sin
 
+/**
+ * Aurora profile — Apple Music-style minimal accent.
+ * Only renders on sustained notes (≥ 600 ms), exactly like Apple's
+ * held-note breath effect: a single, very soft shimmer dot that
+ * breathes underneath the sweeping word. No ripples, no radial rings.
+ */
 class AmbientProfileRenderer : MotionProfileRenderer {
     override fun drawAccent(ctx: KaraokeAccentContext) {
-        if (ctx.glowProgress < 0.05f || ctx.words.isEmpty()) return
-
-        val centerY = ctx.line.y + ctx.words.minOf { it.yOffset } + ctx.rowHeight * 0.34f + ctx.translateY
-        val auroraColor = blendColors(ctx.glowColor, Color.rgb(100, 220, 255), 0.28f)
-        ctx.sparklePaint.style = Paint.Style.STROKE
-        ctx.sparklePaint.strokeCap = Paint.Cap.ROUND
-        ctx.sparklePaint.color = auroraColor
-
-        val rippleCount = 3
-        val cycleDurationMs = 900f
-        val phaseOffset = ctx.currentTimeMs % cycleDurationMs.toLong()
-
-        for (i in 0 until rippleCount) {
-            val ringPhase = ((phaseOffset + i * (cycleDurationMs / rippleCount)) % cycleDurationMs) / cycleDurationMs
-            val expandProgress = ringPhase.coerceIn(0f, 1f)
-            val maxRadius = ctx.rowHeight * (0.6f + ctx.glowProgress * 0.4f)
-            val radius = maxRadius * expandProgress
-            val fadeAlpha = (1f - expandProgress) * (1f - expandProgress)
-            val alpha = (fadeAlpha * (40f + ctx.glowProgress * 55f)).toInt().coerceIn(0, 80)
-            if (alpha <= 2) continue
-
-            ctx.sparklePaint.alpha = alpha
-            ctx.sparklePaint.strokeWidth = ctx.density * (2.8f - expandProgress * 1.8f).coerceAtLeast(0.6f)
-            ctx.sparklePaint.setShadowLayer(
-                ctx.density * (6f + ctx.glowProgress * 4f),
-                0f,
-                0f,
-                Color.argb((alpha * 1.6f).toInt().coerceIn(0, 100), Color.red(auroraColor), Color.green(auroraColor), Color.blue(auroraColor))
-            )
-
-            ctx.canvas.drawOval(
-                ctx.sweepX - radius * 1.3f,
-                centerY - radius * 0.8f,
-                ctx.sweepX + radius * 1.3f,
-                centerY + radius * 0.8f,
-                ctx.sparklePaint
-            )
-        }
-
-        ctx.sparklePaint.style = Paint.Style.FILL
-        val dotAlpha = (50f + ctx.glowProgress * 60f).toInt().coerceIn(0, 100)
-        ctx.sparklePaint.alpha = dotAlpha
-        ctx.sparklePaint.setShadowLayer(
-            ctx.density * 8f,
-            0f,
-            0f,
-            Color.argb((dotAlpha * 1.8f).toInt().coerceIn(0, 130), Color.red(auroraColor), Color.green(auroraColor), Color.blue(auroraColor))
-        )
-        ctx.canvas.drawCircle(ctx.sweepX, centerY, ctx.density * (2.2f + ctx.glowProgress * 1.5f), ctx.sparklePaint)
-        ctx.sparklePaint.clearShadowLayer()
-        ctx.sparklePaint.alpha = 255
-        ctx.sparklePaint.style = Paint.Style.FILL
+        drawHeldNoteBreath(ctx)
     }
 
     override fun drawContinuous(ctx: KaraokeContinuousContext) = Unit
+
+    private fun drawHeldNoteBreath(ctx: KaraokeAccentContext) {
+        if (ctx.glowProgress < 0.08f || ctx.words.isEmpty()) return
+
+        // Only trigger on sustained (long) notes — ≥ 600 ms total duration.
+        val totalDuration = ctx.words.maxOf { it.endMs } - ctx.words.minOf { it.startMs }
+        if (totalDuration < 600L) return
+
+        // How long the note has been held (0 → 1 over the first 400 ms)
+        val heldProgress = ((ctx.currentTimeMs - ctx.words.minOf { it.startMs }).toFloat() / 400f)
+            .coerceIn(0f, 1f)
+
+        // Soft breath oscillation (~0.9 Hz)
+        val breath = (sin(ctx.currentTimeMs * 0.0055f) * 0.5f + 0.5f)
+
+        val centerY = ctx.line.y + ctx.words.minOf { it.yOffset } + ctx.rowHeight * 0.5f + ctx.translateY
+
+        // Single soft aura — radius breathes gently
+        val auraRadius = ctx.rowHeight * (0.22f + breath * 0.08f + ctx.glowProgress * 0.10f) *
+            heldProgress
+        val auraAlpha = ((12f + ctx.glowProgress * 18f) * heldProgress).toInt().coerceIn(0, 36)
+        if (auraAlpha <= 1) return
+
+        val auraColor = blendColors(ctx.glowColor, Color.WHITE, 0.15f)
+
+        ctx.sparklePaint.style = Paint.Style.FILL
+        ctx.sparklePaint.color = auraColor
+        ctx.sparklePaint.alpha = auraAlpha
+        ctx.sparklePaint.clearShadowLayer()
+        ctx.canvas.drawCircle(ctx.sweepX, centerY, auraRadius, ctx.sparklePaint)
+
+        // Tiny bright core — only when the note is well into being held
+        if (heldProgress > 0.5f && ctx.glowProgress > 0.25f) {
+            val coreAlpha = ((auraAlpha * 1.6f) * ((heldProgress - 0.5f) * 2f))
+                .toInt().coerceIn(0, 52)
+            val coreRadius = ctx.density * (1.4f + breath * 0.6f)
+            ctx.sparklePaint.alpha = coreAlpha
+            ctx.canvas.drawCircle(ctx.sweepX, centerY, coreRadius, ctx.sparklePaint)
+        }
+
+        ctx.sparklePaint.alpha = 255
+        ctx.sparklePaint.style = Paint.Style.FILL
+    }
 }

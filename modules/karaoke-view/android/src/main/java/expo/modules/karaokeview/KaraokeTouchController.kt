@@ -27,6 +27,11 @@ internal class KaraokeTouchController {
     private var isTap = true
     private var seekOnTapEnabled = false
 
+    // Fling physics
+    private val flingDecay = 0.88f          // velocity multiplied each frame (~60fps target)
+    private val flingMinSpeed = 0.5f         // px/frame below which fling stops
+    private val flingMaxSpeed = 48f          // px/frame cap to avoid over-shoot
+
     private val manualScrollTimeoutNs = 3_000_000_000L
     private val tapSlopPx: Float
 
@@ -41,11 +46,15 @@ internal class KaraokeTouchController {
     fun onFrame(nowNanos: Long) {
         if (isManualScrolling && nowNanos > manualScrollTimeoutNanos) {
             isManualScrolling = false
-            scrollVelocity = 0f
+            // Don't clear velocity here — let the fling coast after timeout
         }
 
-        if (!isManualScrolling && scrollVelocity != 0f) {
-            // Reserved for fling behavior after finger lift.
+        // Apply fling momentum when not actively touching
+        if (!isManualScrolling && abs(scrollVelocity) > flingMinSpeed) {
+            scrollY += scrollVelocity
+            targetScrollY = scrollY
+            scrollVelocity *= flingDecay
+            if (abs(scrollVelocity) < flingMinSpeed) scrollVelocity = 0f
         }
     }
 
@@ -100,7 +109,10 @@ internal class KaraokeTouchController {
             }
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
+                val wasDrag = !isTap
+
                 if (seekOnTapEnabled && isTap && event.actionMasked == MotionEvent.ACTION_UP) {
+                    // Tap-to-seek: reset manual scroll so auto-scroll resumes
                     handleTap(
                         x = event.x,
                         y = event.y,
@@ -108,9 +120,17 @@ internal class KaraokeTouchController {
                         layout = layout,
                         onSeek = onSeek,
                     )
-                } else {
+                    scrollVelocity = 0f
+                } else if (wasDrag) {
+                    // Manual drag ended — compute fling velocity and set timeout
+                    velocityTracker?.computeCurrentVelocity(16) // units per frame @60fps
+                    val vy = velocityTracker?.yVelocity ?: 0f
+                    scrollVelocity = vy.coerceIn(-flingMaxSpeed, flingMaxSpeed)
                     isManualScrolling = true
                     manualScrollTimeoutNanos = System.nanoTime() + manualScrollTimeoutNs
+                } else {
+                    // No-op tap with seekOnTap disabled — keep auto-scroll active
+                    scrollVelocity = 0f
                 }
 
                 velocityTracker?.recycle()

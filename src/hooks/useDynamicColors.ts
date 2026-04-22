@@ -8,7 +8,7 @@
  *
  * Performance notes:
  *   - react-native-image-colors has its own disk cache (key = URI).
- *   - We maintain an in-memory JS cache in colorExtractor.ts (50 entries).
+ *   - We maintain an in-memory JS cache in colorExtractor.ts (120 entries).
  *   - setDynamicPalette is stable (useCallback) so it never triggers
  *     extra re-renders of this hook.
  *   - The theme useMemo in ThemeProvider only re-runs when the palette changes.
@@ -19,15 +19,28 @@ import { Easing, useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors, getImageColors } from '../services/colorExtractor';
 import { useTheme } from '../theme/ThemeProvider';
 
-const DEFAULT_COLORS: AlbumColors = {
+// Neutral starting palettes — initialized to a light-neutral or dark-neutral
+// so that shared values don't force a dark flash before the first image loads.
+const DARK_DEFAULT: AlbumColors = {
     primary: '#6750A4',
     secondary: '#625B71',
-    background: '#080B12',
+    background: '#0F0D13',
     text: '#FFFFFF',
     onPrimary: '#FFFFFF',
     onSurface: '#FFFFFF',
     accent: '#6750A4',
     isDark: true,
+};
+
+const LIGHT_DEFAULT: AlbumColors = {
+    primary: '#6750A4',
+    secondary: '#9E8FCB',
+    background: '#F6F0FF',
+    text: '#000000',
+    onPrimary: '#FFFFFF',
+    onSurface: '#000000',
+    accent: '#6750A4',
+    isDark: false,
 };
 
 export function useDynamicColors(imageUri: string | undefined, options?: UseDynamicColorsOptions) {
@@ -40,6 +53,8 @@ interface UseDynamicColorsOptions {
 
 export function useDynamicColorsWithOptions(imageUri: string | undefined, options?: UseDynamicColorsOptions) {
     const { config, isDark, theme, setDynamicPalette } = useTheme();
+
+    // Theme-based fallback — adapts to light/dark app theme.
     const fallbackColors = useMemo<AlbumColors>(() => ({
         primary: theme.colors.primary,
         secondary: theme.colors.secondary,
@@ -50,18 +65,23 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
         accent: theme.colors.primary,
         isDark,
     }), [isDark, theme.colors.onPrimary, theme.colors.onSurface, theme.colors.primary, theme.colors.secondary, theme.colors.surface]);
+
     const [rawColors, setRawColors] = useState<AlbumColors>(fallbackColors);
     const [isLoading, setIsLoading] = useState(false);
     const enabled = options?.enabled ?? true;
 
-    // Shared values for smooth per-frame color transitions in the UI
-    const primary = useSharedValue(DEFAULT_COLORS.primary);
-    const secondary = useSharedValue(DEFAULT_COLORS.secondary);
-    const background = useSharedValue(DEFAULT_COLORS.background);
-    const accent = useSharedValue(DEFAULT_COLORS.accent);
-    const text = useSharedValue(DEFAULT_COLORS.text);
-    const onPrimary = useSharedValue(DEFAULT_COLORS.onPrimary);
-    const onSurface = useSharedValue(DEFAULT_COLORS.onSurface);
+    // Pick the correct default based on the current app theme so shared values
+    // start on the right side of the dark/light spectrum.
+    const startDefault = isDark ? DARK_DEFAULT : LIGHT_DEFAULT;
+
+    // Shared values for smooth per-frame color transitions in the UI.
+    const primary = useSharedValue(startDefault.primary);
+    const secondary = useSharedValue(startDefault.secondary);
+    const background = useSharedValue(startDefault.background);
+    const accent = useSharedValue(startDefault.accent);
+    const text = useSharedValue(startDefault.text);
+    const onPrimary = useSharedValue(startDefault.onPrimary);
+    const onSurface = useSharedValue(startDefault.onSurface);
 
     const animated = useMemo(() => ({
         primary,
@@ -95,7 +115,7 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
         if (!imageUri) {
             setRawColors(fallbackColors);
             animatePalette(fallbackColors);
-            // Reset theme to default colors when no artwork
+            // Reset theme to default colors when no artwork.
             if (config.dynamicColors) {
                 setDynamicPalette(fallbackColors);
             }

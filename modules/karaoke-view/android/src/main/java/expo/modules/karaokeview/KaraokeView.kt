@@ -136,7 +136,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var lineHeight = 0f
     private var fontSize = 0f
     private var marginLeft = 40f
-    private var fadeHeight = 120f
+    private var fadeHeight = 160f
     private var lineSpacing = 0f
     private var spaceWidth = 0f
     private var backgroundFontSize = 0f
@@ -149,8 +149,13 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var activeColor: Int = Color.WHITE
     private var inactiveColor: Int = Color.parseColor("#4DFFFFFF")
     private var glowColor: Int = Color.WHITE
+    private var backgroundColor: Int = Color.BLACK
     private var introTitle: String = ""
     private var introSubtitle: String = ""
+
+    // --- Ambient background ---
+    private var enableAmbientBackground = false // Disabled: handled on React side via drifting blurred artwork
+    private val ambientBackgroundRenderer = KaraokeAmbientBackgroundRenderer(resources.displayMetrics.density)
     private var firstLineStartMs: Long = 0L
 
     // --- Paints ---
@@ -206,7 +211,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     // --- Feather width for liquid effect ---
     private val FEATHER_PX: Float
     private val LEADING_GLOW_WIDTH_PX: Float
-    private val scrollAnchorRatio = 0.33f
+    private val scrollAnchorRatio = 0.28f
     private val hierarchyTransitionWindowMs = 700f
     private val backgroundRevealDurationMs = 450f
     private val backgroundFadeOutDurationMs = 420f
@@ -217,7 +222,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         fontSize = 30f * density
         lineHeight = 60f * density
         marginLeft = 24f * density
-        fadeHeight = 132f * density
+        fadeHeight = 180f * density
         lineSpacing = 30f * density
         backgroundFontSize = fontSize * 0.6f
         backgroundLineHeight = backgroundFontSize * 1.45f
@@ -235,6 +240,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         backgroundHighlightPaint.textSize = backgroundFontSize
         spaceWidth = basePaint.measureText(" ")
         backgroundSpaceWidth = backgroundBasePaint.measureText(" ")
+        applyReadablePalette()
 
         setBackgroundColor(Color.TRANSPARENT)
         setLayerType(LAYER_TYPE_HARDWARE, null)
@@ -308,29 +314,48 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     fun setActiveColor(color: Int) {
         activeColor = color
-        highlightPaint.color = color
-        backgroundHighlightPaint.color = color
+        applyReadablePalette()
         invalidate()
     }
 
     fun setInactiveColor(color: Int) {
         inactiveColor = color
-        basePaint.color = color
-        backgroundBasePaint.color = color
+        applyReadablePalette()
         invalidate()
     }
 
     fun setGlowColor(color: Int) {
         glowColor = color
-        highlightPaint.color = color
-        backgroundHighlightPaint.color = color
+        applyReadablePalette()
+        invalidate()
+    }
+
+    fun setPlayerBackgroundColor(color: Int) {
+        backgroundColor = color
+        applyReadablePalette()
+        invalidate()
+    }
+
+    fun setEnableAmbientBackground(enabled: Boolean) {
+        enableAmbientBackground = enabled
         invalidate()
     }
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        fadeShaderTop = LinearGradient(0f, 0f, 0f, fadeHeight, Color.TRANSPARENT, Color.BLACK, Shader.TileMode.CLAMP)
-        fadeShaderBottom = LinearGradient(0f, 0f, 0f, fadeHeight, Color.BLACK, Color.TRANSPARENT, Shader.TileMode.CLAMP)
+        // Multi-stop gradient for a premium cinematic fade (not cheap 2-stop)
+        fadeShaderTop = LinearGradient(
+            0f, 0f, 0f, fadeHeight,
+            intArrayOf(Color.TRANSPARENT, Color.argb(80, 0, 0, 0), Color.BLACK),
+            floatArrayOf(0f, 0.45f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        fadeShaderBottom = LinearGradient(
+            0f, 0f, 0f, fadeHeight,
+            intArrayOf(Color.BLACK, Color.argb(80, 0, 0, 0), Color.TRANSPARENT),
+            floatArrayOf(0f, 0.55f, 1f),
+            Shader.TileMode.CLAMP,
+        )
         precomputePositions()
     }
 
@@ -456,6 +481,20 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 touchController.targetScrollY = -(activeLine.y + activeLine.focusCenterYOffset) + height * scrollAnchorRatio
                 emitLineChangeIfNeeded(activeLineIndex)
             }
+        }
+
+        // --- Ambient animated background ---
+        // Drawn BEFORE the saveLayer so it sits under the edge-fade mask.
+        // Alpha is capped at 200 so it never competes with lyrics legibility.
+        if (enableAmbientBackground) {
+            ambientBackgroundRenderer.draw(
+                canvas = canvas,
+                currentTimeMs = currentTimeMs,
+                width = width,
+                height = height,
+                alpha = 200,
+                lightweight = !enableSpectralParticles,  // reuse the spectral-particles flag as a lightweight hint
+            )
         }
 
         // Main drawing layer (for edge fades)
@@ -1009,6 +1048,23 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private fun clearSpectralParticles() {
         particleSystem.clearSpectralParticles()
         retainedAccents.clearRetainedProfileAccents()
+    }
+
+    private fun applyReadablePalette() {
+        val readableActive = ensureContrast(activeColor, backgroundColor, 4.6f)
+        val readableInactive = ensureContrast(inactiveColor, backgroundColor, 2.35f)
+        val softenedGlowSource = blendColors(glowColor, readableActive, 0.38f)
+        val readableGlow = ensureContrast(softenedGlowSource, backgroundColor, 3.15f)
+
+        activeColor = readableActive
+        inactiveColor = readableInactive
+        glowColor = readableGlow
+
+        highlightPaint.color = readableActive
+        backgroundHighlightPaint.color = readableActive
+        basePaint.color = readableInactive
+        backgroundBasePaint.color = readableInactive
+        ambientBackgroundRenderer.setColors(readableGlow, backgroundColor)
     }
 
     companion object {

@@ -21,13 +21,13 @@ internal class KaraokeIntroRenderer(private val density: Float) {
     private val titlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
-        textSize = 26f * density
+        textSize = 24f * density
     }
     
     private val subtitlePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         textAlign = Paint.Align.CENTER
-        textSize = 15f * density
+        textSize = 13f * density
     }
 
     private val activeTitlePaint = Paint(titlePaint)
@@ -71,7 +71,10 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         if (visibility <= 0.01f) return
 
         val centerX = layout.width / 2f
-        val centerY = layout.height * 0.32f
+        // Position in the lower third — safely below the lyrics scroll area and the bottom fade zone.
+        // Lyrics anchor at ~28% and span downward; the bottom fade starts at ~(height - 180dp).
+        // Placing the title at 72% keeps it in clean visual space.
+        val centerY = layout.height * 0.72f
         val density = layout.density
 
         // Colors
@@ -82,9 +85,19 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         // 1. Draw Radial Background Aura (Replacing the "Box")
         drawBackgroundAura(canvas, centerX, centerY, visibility, progress, currentTimeMs, accentR, accentG, accentB, density, layout)
 
-        // 2. Setup text positions
-        val titleY = centerY - 2f * density
-        val subtitleY = centerY + 24f * density
+        // 2. Compute precise vertical positions using font metrics (no more guesswork)
+        val titleMetrics = titlePaint.fontMetrics
+        val subtitleMetrics = subtitlePaint.fontMetrics
+        val titleLineHeight = titleMetrics.descent - titleMetrics.ascent
+        val subtitleLineHeight = subtitleMetrics.descent - subtitleMetrics.ascent
+        val lineGap = 10f * density
+        val blockHeight = titleLineHeight + lineGap + subtitleLineHeight
+
+        // Center the block around centerY
+        val blockTop = centerY - blockHeight / 2f
+        // drawText baseline = top of block - ascent (ascent is negative)
+        val titleY = blockTop - titleMetrics.ascent
+        val subtitleY = blockTop + titleLineHeight + lineGap - subtitleMetrics.ascent
 
         // 3. Draw Base (Inactive) Text
         titlePaint.color = Color.argb((80f * visibility).toInt(), 255, 255, 255)
@@ -106,7 +119,9 @@ internal class KaraokeIntroRenderer(private val density: Float) {
             currentTimeMs = currentTimeMs,
             activeColor = state.activeColor,
             density = density,
-            layout = layout
+            layout = layout,
+            titleMetrics = titleMetrics,
+            subtitleMetrics = subtitleMetrics,
         )
 
         // 5. Orbital Particles (Replacing the "Count-down" feel)
@@ -151,13 +166,17 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         currentTimeMs: Long,
         activeColor: Int,
         density: Float,
-        layout: KaraokeIntroLayout
+        layout: KaraokeIntroLayout,
+        titleMetrics: Paint.FontMetrics,
+        subtitleMetrics: Paint.FontMetrics,
     ) {
         if (progress <= 0f) return
 
-        // Total vertical span of the intro text group
-        val totalTop = titleY - 30f * density
-        val totalBottom = subtitleY + 10f * density
+        // Use actual font metrics for precise bounds
+        val titleTop = titleY + titleMetrics.ascent
+        val subtitleBottom = subtitleY + subtitleMetrics.descent
+        val totalTop = titleTop - 4f * density
+        val totalBottom = subtitleBottom + 4f * density
         val heightRange = totalBottom - totalTop
         
         // The liquid level rises from bottom to top

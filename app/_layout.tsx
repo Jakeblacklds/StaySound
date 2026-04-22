@@ -1,4 +1,4 @@
-﻿import FontAwesome from '@expo/vector-icons/FontAwesome';
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { router, Stack, usePathname, useRootNavigationState } from 'expo-router';
@@ -8,7 +8,7 @@ import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper';
 import 'react-native-reanimated';
 
-import { FullPlayer, MiniPlayer } from '@/src/components/player';
+import { FullPlayer } from '@/src/components/player';
 import { scheduleAndroidAutoCatalogSync } from '@/src/services/androidAutoCatalogSync';
 import { refreshAndroidEqualizerCapabilities, syncAndroidEqualizerFromSettings } from '@/src/services/androidEqualizerService';
 import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
@@ -349,7 +349,7 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
             <ActionSheet />
             <ConfirmationModal />
             <GlobalNotification />
-            <MiniPlayer />
+
             {shouldMountFullPlayer ? <FullPlayer /> : null}
           </View>
         </GestureHandlerRootView>

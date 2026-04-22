@@ -85,6 +85,14 @@ class KaraokeViewModule : Module() {
                 color?.let { view.setGlowColor(it) }
             }
 
+            Prop("backgroundColor") { view: KaraokeView, color: Int? ->
+                color?.let { view.setPlayerBackgroundColor(it) }
+            }
+
+            Prop("enableAmbientBackground") { view: KaraokeView, value: Boolean? ->
+                view.setEnableAmbientBackground(value ?: true)
+            }
+
             Prop("isLineByLine") { view: KaraokeView, value: Boolean? ->
                 view.setIsLineByLine(value ?: false)
             }

@@ -1,7 +1,9 @@
 import { useDynamicColors } from '@/src/hooks';
+import { getMiniPlayerButtonColors } from '@/src/hooks/usePlayerColors';
 import { usePlayerStore } from '@/src/stores';
 import { useUIStore } from '@/src/stores/uiStore';
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
+import { mixHexColors } from '@/src/utils/colorContrast';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, Pressable, StyleSheet } from 'react-native';
@@ -35,95 +37,6 @@ const M3_EMPHASIZED_DECEL = Easing.bezier(0.05, 0.7, 0.1, 1.0);
 const EXPAND_DURATION = 400;
 const COLLAPSE_DURATION = 320;
 const TRACK_SWITCH_HOLD_MS = 700;
-
-type Rgb = { r: number; g: number; b: number };
-
-function parseHexColor(value?: string): Rgb | null {
-    if (!value) return null;
-    const hex = value.trim().replace('#', '');
-
-    if (hex.length === 3) {
-        const r = parseInt(hex[0] + hex[0], 16);
-        const g = parseInt(hex[1] + hex[1], 16);
-        const b = parseInt(hex[2] + hex[2], 16);
-        if ([r, g, b].some(Number.isNaN)) return null;
-        return { r, g, b };
-    }
-
-    if (hex.length >= 6) {
-        const r = parseInt(hex.slice(0, 2), 16);
-        const g = parseInt(hex.slice(2, 4), 16);
-        const b = parseInt(hex.slice(4, 6), 16);
-        if ([r, g, b].some(Number.isNaN)) return null;
-        return { r, g, b };
-    }
-
-    return null;
-}
-
-function toHex({ r, g, b }: Rgb): string {
-    const toByte = (n: number) => Math.max(0, Math.min(255, Math.round(n))).toString(16).padStart(2, '0');
-    return `#${toByte(r)}${toByte(g)}${toByte(b)}`;
-}
-
-function mixColor(from: Rgb, to: Rgb, amount: number): Rgb {
-    const t = Math.max(0, Math.min(1, amount));
-    return {
-        r: from.r + (to.r - from.r) * t,
-        g: from.g + (to.g - from.g) * t,
-        b: from.b + (to.b - from.b) * t,
-    };
-}
-
-function mixHexColors(from: string, to: string, amount: number): string {
-    const source = parseHexColor(from);
-    const target = parseHexColor(to);
-    if (!source || !target) return from;
-    return toHex(mixColor(source, target, amount));
-}
-
-function getLuminance(color?: string): number | null {
-    const rgb = parseHexColor(color);
-    if (!rgb) return null;
-
-    const channel = (value: number) => {
-        const normalized = value / 255;
-        return normalized <= 0.03928
-            ? normalized / 12.92
-            : ((normalized + 0.055) / 1.055) ** 2.4;
-    };
-
-    const r = channel(rgb.r);
-    const g = channel(rgb.g);
-    const b = channel(rgb.b);
-    return 0.2126 * r + 0.7152 * g + 0.0722 * b;
-}
-
-function withAlpha(color: string, alpha: string): string {
-    const rgb = parseHexColor(color);
-    if (!rgb) return color;
-    return `${toHex(rgb)}${alpha}`;
-}
-
-function getMiniPlayerButtonColors(baseColor: string, fallbackBorder: string) {
-    const baseRgb = parseHexColor(baseColor);
-    if (!baseRgb) {
-        return {
-            fill: withAlpha(baseColor, '24'),
-            border: withAlpha(fallbackBorder, '78'),
-        };
-    }
-
-    const luminance = getLuminance(baseColor) ?? 0.5;
-    const contrastTarget = luminance > 0.42
-        ? { r: 12, g: 16, b: 24 }
-        : { r: 255, g: 255, b: 255 };
-
-    return {
-        fill: withAlpha(toHex(mixColor(baseRgb, contrastTarget, 0.12)), '22'),
-        border: withAlpha(toHex(mixColor(baseRgb, contrastTarget, 0.68)), 'D6'),
-    };
-}
 
 function SharedPlayerShellInner() {
     const { theme, config, isDark } = useTheme();
@@ -194,11 +107,12 @@ function SharedPlayerShellInner() {
             return theme.colors.surface;
         }
 
-        if (isDark) {
-            return playerColors.background || theme.colors.surface;
-        }
-
-        return mixHexColors(theme.colors.surface, playerColors.background || theme.colors.surface, 0.08);
+        // In light mode, blend more aggressively (22%) so the album palette is visible.
+        return mixHexColors(
+            theme.colors.surface,
+            playerColors.background || theme.colors.surface,
+            isDark ? 1.0 : 0.22
+        );
     }, [isDark, playerColors.background, shouldUseThemePlayerColors, theme.colors.surface]);
 
     const routeProgress = useSharedValue(0);
@@ -269,10 +183,14 @@ function SharedPlayerShellInner() {
         const detailBottom = Math.max(insets.bottom + DETAIL_EXTRA_BOTTOM, DETAIL_EXTRA_BOTTOM);
         const collapseBtm = Math.max(insets.bottom + TAB_BAR_HEIGHT, 78);
 
+        // Use animated background in both modes for smooth palette transitions.
+        const animBg = playerAnimColors?.background?.value;
+        const staticBg = isDark
+            ? (playerColors.background || theme.colors.surface)
+            : miniPlayerSurfaceColor;
+
         return {
-            backgroundColor: isDark
-                ? (playerAnimColors?.background?.value || playerColors.background || theme.colors.surface)
-                : miniPlayerSurfaceColor,
+            backgroundColor: animBg || staticBg,
             bottom: interpolate(routeP, [0, 1], [collapseBtm, detailBottom], Extrapolation.CLAMP),
             left: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
             right: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
@@ -328,7 +246,7 @@ function SharedPlayerShellInner() {
     }));
     const artistAnimatedStyle = useAnimatedStyle(() => ({
         color: playerAnimColors?.text?.value || playerColors.text || theme.colors.onSurface,
-        opacity: isDark ? 0.74 : 0.68,
+        opacity: 0.72,
     }));
 
     const panGesture = useMemo(() => Gesture.Pan()

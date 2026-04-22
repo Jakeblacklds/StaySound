@@ -1,9 +1,9 @@
 import { Track } from '@/src/types/audio';
 import React, { useEffect } from 'react';
 import { Pressable, View } from 'react-native';
-import { IconButton, Text } from 'react-native-paper';
+import { Text } from 'react-native-paper';
 import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
-import { CustomIcon, IconName } from '../../ui';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AnimatedFavoriteButton, AnimatedPlayerButton } from '../parts/PlayerButtons';
 import { playerStyles as styles } from '../playerStyles';
 import { ProgressSlider } from '../ProgressSlider';
@@ -21,12 +21,12 @@ interface ImmersiveVariantProps {
     qualityBadge: { label: string; tone: string; };
     qualityBadgeInk: string;
     trackTechLabel: string;
-    shuffleIcon: IconName;
-    repeatIcon: IconName;
-    playIcon: IconName;
-    pauseIcon: IconName;
-    nextIcon: IconName;
-    previousIcon: IconName;
+    shuffleIcon: string;
+    repeatIcon: string;
+    playIcon: string;
+    pauseIcon: string;
+    nextIcon: string;
+    previousIcon: string;
     showLyrics: boolean;
     isLyricsExpanded: boolean;
     onClose: () => void;
@@ -73,7 +73,7 @@ const HeaderSection = React.memo(function HeaderSection({
                 accessibilityLabel="Minimizar reproductor"
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-                <IconButton icon="chevron-down" size={26} iconColor={textColor} accessibilityElementsHidden />
+                <MaterialCommunityIcons name="chevron-down" size={28} color={textColor} />
             </Pressable>
             <View style={styles.headerCenterImmersive}>
                 <Animated.Text style={[styles.playingFromLabel, textStyle]} accessibilityElementsHidden>
@@ -88,15 +88,8 @@ const HeaderSection = React.memo(function HeaderSection({
                     {album || 'Unknown Album'}
                 </Animated.Text>
             </View>
-            <Pressable
-                onPress={onOpenMoreOptions}
-                style={styles.headerBtnImmersive}
-                accessibilityRole="button"
-                accessibilityLabel="Más opciones"
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-            >
-                <IconButton icon="dots-vertical" size={24} iconColor={textColor} accessibilityElementsHidden />
-            </Pressable>
+            {/* Placeholder to maintain symmetric layout without 3-dots button */}
+            <View style={styles.headerBtnImmersive} />
         </View>
     );
 });
@@ -200,16 +193,6 @@ const TrackInfoSection = React.memo(function TrackInfoSection({
                     </View>
                 </View>
                 <View style={styles.trackActionsImmersive}>
-                    <IconButton
-                        icon={({ size, color }) => <CustomIcon name="Lyrics" size={size} color={color} forceDynamicColor />}
-                        size={28}
-                        onPress={onToggleLyrics}
-                        iconColor={showLyrics ? accentColor : textColor}
-                        style={{ margin: 0 }}
-                        accessibilityRole="button"
-                        accessibilityLabel={showLyrics ? 'Ocultar letras' : 'Mostrar letras'}
-                        accessibilityState={{ selected: showLyrics }}
-                    />
                     <AnimatedFavoriteButton
                         isFavorite={isFavorite}
                         onPress={onToggleFavorite}
@@ -288,11 +271,10 @@ const ControlsSection = React.memo(function ControlsSection({
                 accessibilityLabel={shuffleEnabled ? 'Desactivar aleatorio' : 'Activar aleatorio'}
                 accessibilityState={{ selected: shuffleEnabled }}
             >
-                <IconButton
-                    icon={({ size, color }) => <CustomIcon name={shuffleIcon} size={size} color={color} />}
+                <MaterialCommunityIcons
+                    name="shuffle"
                     size={24}
-                    iconColor={shuffleEnabled ? accentColor : textColor + '60'}
-                    accessibilityElementsHidden
+                    color={shuffleEnabled ? accentColor : textColor + '60'}
                 />
             </AnimatedPlayerButton>
 
@@ -303,11 +285,10 @@ const ControlsSection = React.memo(function ControlsSection({
                 onPress={onPrevious}
                 accessibilityLabel="Pista anterior"
             >
-                <IconButton
-                    icon={({ size, color }) => <CustomIcon name={previousIcon} size={size} color={color} forceDynamicColor />}
-                    size={36}
-                    iconColor={textColor}
-                    accessibilityElementsHidden
+                <MaterialCommunityIcons
+                    name="skip-previous"
+                    size={40}
+                    color={textColor}
                 />
             </AnimatedPlayerButton>
 
@@ -330,11 +311,10 @@ const ControlsSection = React.memo(function ControlsSection({
                     accessibilityState={{ selected: isPlaying }}
                 >
                     <View style={styles.flexCenter}>
-                        <IconButton
-                            icon={({ size, color }) => <CustomIcon name={isPlaying ? pauseIcon : playIcon} size={size} color={color} />}
-                            size={40}
-                            iconColor={onPrimaryColor}
-                            accessibilityElementsHidden
+                        <MaterialCommunityIcons
+                            name={isPlaying ? 'pause' : 'play'}
+                            size={44}
+                            color={onPrimaryColor}
                         />
                     </View>
                 </AnimatedPlayerButton>
@@ -347,11 +327,10 @@ const ControlsSection = React.memo(function ControlsSection({
                 onPress={onNext}
                 accessibilityLabel="Siguiente pista"
             >
-                <IconButton
-                    icon={({ size, color }) => <CustomIcon name={nextIcon} size={size} color={color} forceDynamicColor />}
-                    size={36}
-                    iconColor={textColor}
-                    accessibilityElementsHidden
+                <MaterialCommunityIcons
+                    name="skip-next"
+                    size={40}
+                    color={textColor}
                 />
             </AnimatedPlayerButton>
 
@@ -369,11 +348,10 @@ const ControlsSection = React.memo(function ControlsSection({
                 }
                 accessibilityState={{ selected: repeatMode !== 'off' }}
             >
-                <IconButton
-                    icon={({ size, color }) => <CustomIcon name={repeatIcon} size={size} color={color} />}
+                <MaterialCommunityIcons
+                    name={repeatMode === 'one' ? 'repeat-once' : 'repeat'}
                     size={24}
-                    iconColor={repeatMode !== 'off' ? accentColor : textColor + '60'}
-                    accessibilityElementsHidden
+                    color={repeatMode !== 'off' ? accentColor : textColor + '60'}
                 />
             </AnimatedPlayerButton>
         </View>
@@ -382,15 +360,38 @@ const ControlsSection = React.memo(function ControlsSection({
 
 type BottomActionsProps = {
     textColor: string;
+    accentColor: string;
+    showLyrics: boolean;
     onOpenQueue: () => void;
+    onToggleLyrics: () => void;
 };
 
 const BottomActions = React.memo(function BottomActions({
     textColor,
+    accentColor,
+    showLyrics,
     onOpenQueue,
+    onToggleLyrics,
 }: BottomActionsProps) {
     return (
         <View style={styles.bottomActionsImmersive}>
+            {/* Lyrics toggle — generic music-note icon */}
+            <Pressable
+                style={styles.bottomBtnImmersive}
+                onPress={onToggleLyrics}
+                accessibilityRole="button"
+                accessibilityLabel={showLyrics ? 'Ocultar letras' : 'Mostrar letras'}
+                accessibilityState={{ selected: showLyrics }}
+                hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
+            >
+                <MaterialCommunityIcons
+                    name="music-note-outline"
+                    size={26}
+                    color={showLyrics ? accentColor : textColor + '80'}
+                />
+            </Pressable>
+
+            {/* Queue */}
             <Pressable
                 style={styles.bottomBtnImmersive}
                 onPress={onOpenQueue}
@@ -398,11 +399,10 @@ const BottomActions = React.memo(function BottomActions({
                 accessibilityLabel="Ver cola de reproducción"
                 hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
             >
-                <IconButton
-                    icon={({ size, color }) => <CustomIcon name="Cola" size={size} color={color} />}
-                    size={22}
-                    iconColor={textColor + '80'}
-                    accessibilityElementsHidden
+                <MaterialCommunityIcons
+                    name="playlist-play"
+                    size={26}
+                    color={textColor + '80'}
                 />
             </Pressable>
         </View>
@@ -508,7 +508,10 @@ export function ImmersiveVariant({
 
             <BottomActions
                 textColor={textColor}
+                accentColor={accentColor}
+                showLyrics={showLyrics}
                 onOpenQueue={onOpenQueue}
+                onToggleLyrics={onToggleLyrics}
             />
         </View>
     );

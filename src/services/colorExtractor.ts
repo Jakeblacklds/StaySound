@@ -1,7 +1,9 @@
 /**
  * ColorExtractor - Extract dominant colors from album artwork
- * 
+ *
  * Uses react-native-image-colors to get palette colors for dynamic theming.
+ * Supports both dark and light mode: backgrounds are kept true to the artwork
+ * and only corrected at extreme values (near-pure black / near-pure white).
  */
 
 import { getColors, ImageColorsResult } from 'react-native-image-colors';
@@ -18,7 +20,7 @@ export interface AlbumColors {
     isDark: boolean;        // Is the background dark?
 }
 
-// Default colors when extraction fails
+// Default colors when extraction fails (dark, neutral)
 const DEFAULT_COLORS: AlbumColors = {
     primary: '#1DB954',
     secondary: '#191414',
@@ -31,7 +33,7 @@ const DEFAULT_COLORS: AlbumColors = {
 };
 
 /**
- * Calculate relative luminance of a hex color
+ * Calculate relative luminance of a hex color (WCAG formula)
  */
 function getLuminance(hex: string): number {
     const rgb = hexToRgb(hex);
@@ -58,15 +60,15 @@ function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
 }
 
 /**
- * Determine if a color is dark
+ * Determine if a color is perceptually dark (threshold at 0.179 per WCAG)
  */
 function isColorDark(hex: string): boolean {
-    return getLuminance(hex) < 0.45;
+    return getLuminance(hex) < 0.179;
 }
 
 /**
- * Adjust color brightness
- * Handles pure black by adding a base offset when brightening
+ * Adjust color brightness by a multiplicative factor.
+ * Handles pure black by adding a base offset when brightening.
  */
 function adjustBrightness(hex: string, factor: number): string {
     const rgb = hexToRgb(hex);
@@ -74,11 +76,9 @@ function adjustBrightness(hex: string, factor: number): string {
 
     const adjust = (c: number) => {
         if (factor > 1) {
-            // Brighten: ensure movement even from 0
             const offset = 30 * (factor - 1);
             return Math.min(255, Math.round(c * factor + offset));
         } else {
-            // Darken
             return Math.min(255, Math.max(0, Math.round(c * factor)));
         }
     };
@@ -89,14 +89,14 @@ function adjustBrightness(hex: string, factor: number): string {
 }
 
 /**
- * Get contrasting text color
+ * Get the best contrasting text color (#000 or #fff) for a given background.
  */
 function getContrastingTextColor(bgColor: string): string {
     return isColorDark(bgColor) ? '#FFFFFF' : '#000000';
 }
 
 /**
- * Extract colors from an image URI
+ * Extract colors from an image URI and return a full AlbumColors palette.
  */
 export async function extractColorsFromImage(imageUri: string): Promise<AlbumColors> {
     try {
@@ -118,7 +118,9 @@ export async function extractColorsFromImage(imageUri: string): Promise<AlbumCol
 }
 
 /**
- * Process the color extraction result based on platform
+ * Process the color extraction result based on platform.
+ * Supports both dark and light mode: backgrounds are kept true to the artwork
+ * and only nudged to avoid near-pure black / near-pure white extremes.
  */
 function processColorResult(result: ImageColorsResult): AlbumColors {
     let primary = DEFAULT_COLORS.primary;
@@ -126,10 +128,13 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
     let background = DEFAULT_COLORS.background;
 
     if (result.platform === 'android') {
-        // Try to get a non-black vibrant color first
-        primary = result.vibrant && getLuminance(result.vibrant) > 0.01 ? result.vibrant :
-            result.lightVibrant || result.dominant || DEFAULT_COLORS.primary;
+        // Prefer vibrant colors for primary; fall back to dominant.
+        primary = (result.vibrant && getLuminance(result.vibrant) > 0.008)
+            ? result.vibrant
+            : result.lightVibrant || result.dominant || DEFAULT_COLORS.primary;
         secondary = result.darkVibrant || result.muted || DEFAULT_COLORS.secondary;
+        // Use darkMuted when available (usually a true dark tone from artwork);
+        // fall back to dominant then our default.
         background = result.darkMuted || result.dominant || DEFAULT_COLORS.background;
     } else if (result.platform === 'ios') {
         primary = result.primary || DEFAULT_COLORS.primary;
@@ -137,42 +142,49 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
         background = result.background || DEFAULT_COLORS.background;
     }
 
-    // MANDATORY BACKGROUND DARKENING for immersive/glass look
-    // This ensures that even if extraction is "bright", the player UI stays readable
     const bgLuminance = getLuminance(background);
-    if (bgLuminance > 0.15) {
-        background = adjustBrightness(background, 0.1); // Force very dark
-    } else if (bgLuminance < 0.02) {
-        background = '#0F0D13'; // Use a standard deep charcoal instead of pure black for cleaner visuals
-    }
 
-    // ENSURE PRIMARY COLOR CONTRAST AGAINST BACKGROUND
-    // If primary is too dark and used on icons, it will be invisible.
+    // Only correct extreme values — let the artwork dictate the mood.
+    if (bgLuminance < 0.018) {
+        // Near-pure black → lift to a rich dark charcoal.
+        background = '#0F0D13';
+    } else if (bgLuminance > 0.88) {
+        // Near-pure white → pull back slightly.
+        background = adjustBrightness(background, 0.82);
+    }
+    // Mid-range (0.018–0.88) → keep as-is; covers both light and dark artworks.
+
+    // ----- Ensure primary has enough contrast against background -----
     let primaryLum = getLuminance(primary);
     const bgLum = getLuminance(background);
+    const contrastRatio = bgLum > primaryLum
+        ? (bgLum + 0.05) / (primaryLum + 0.05)
+        : (primaryLum + 0.05) / (bgLum + 0.05);
 
-    // If primary and background are both very dark (Delta < 0.1), boost primary
-    if (Math.abs(primaryLum - bgLum) < 0.1) {
+    if (contrastRatio < 1.8) {
+        // Primary and background are too similar — push primary in the right direction.
         if (bgLum < 0.5) {
-            primary = adjustBrightness(primary, 4); // Brighten primary significantly
+            primary = adjustBrightness(primary, 3.5);  // Dark bg → brighten primary
         } else {
-            primary = adjustBrightness(primary, 0.4); // Darken primary if bg is light
+            primary = adjustBrightness(primary, 0.35); // Light bg → darken primary
         }
+        primaryLum = getLuminance(primary);
     }
 
-    // Re-check luminance after adjustment
-    primaryLum = getLuminance(primary);
-    if (primaryLum < 0.15 && bgLum < 0.2) {
-        // Absolute fallback if it's still too dark
-        primary = '#BB86FC'; // Material Dark Purple as a pleasant fallback
+    // Final safety nets
+    if (primaryLum < 0.12 && bgLum < 0.2) {
+        // Still unreadably dark on a dark background → vibrant fallback
+        primary = '#BB86FC';
+    }
+    if (primaryLum > 0.85 && bgLum > 0.7) {
+        // Unreadably light on a light background → darken it
+        primary = adjustBrightness(primary, 0.3);
     }
 
     const isDark = isColorDark(background);
     const text = getContrastingTextColor(background);
     const onPrimary = getContrastingTextColor(primary);
-    const onSurface = getContrastingTextColor(background);
-
-    // Create a vibrant accent color
+    const onSurface = text;
     const accent = primary;
 
     return {
@@ -188,17 +200,17 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
 }
 
 /**
- * Create a gradient-friendly color pair
+ * Create a gradient-friendly color pair from an AlbumColors palette.
  */
 export function createGradientColors(colors: AlbumColors): [string, string] {
     return [
         colors.background,
-        adjustBrightness(colors.background, 0.6),
+        adjustBrightness(colors.background, colors.isDark ? 0.6 : 1.15),
     ];
 }
 
 /**
- * Generate a simple hash for cache key
+ * Generate a stable cache key for a URI.
  */
 function generateCacheKey(uri: string): string {
     if (uri.startsWith('data:')) {
@@ -215,7 +227,8 @@ function generateCacheKey(uri: string): string {
 }
 
 const colorCache = new Map<string, AlbumColors>();
-const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors';
+// v2: bumped to invalidate previous cache entries that used forced-dark backgrounds.
+const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors-v2';
 const MAX_PERSISTED_COLOR_CACHE = 120;
 let persistedColorCacheLoaded = false;
 let persistedColorCachePromise: Promise<void> | null = null;

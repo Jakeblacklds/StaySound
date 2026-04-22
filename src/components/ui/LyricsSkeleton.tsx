@@ -1,108 +1,172 @@
 import { useTheme } from '@/src/theme';
 import React, { useEffect } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
-import { Text } from 'react-native-paper';
+import { StyleSheet, View } from 'react-native';
 import Animated, {
     Easing,
+    FadeIn,
     interpolate,
     useAnimatedStyle,
     useSharedValue,
+    withDelay,
     withRepeat,
-    withTiming
+    withSequence,
+    withTiming,
 } from 'react-native-reanimated';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
-
 /**
- * LyricsSkeleton - Redesigned as an "Ambient Zen Loader"
- * Instead of ghost lines, it uses morphing ambient auras that feel like 
- * part of the app's fluid design language.
+ * LyricsSkeleton — Lyrics-style animated skeleton loader.
+ *
+ * Displays staggered, wave-pulsing placeholder bars that mimic
+ * real lyric lines (varied widths). Each bar animates with an
+ * independent staggered breathing effect, creating a living
+ * "wave" that sweeps left-to-right across lines.
+ *
+ * Consistent with Apple Music / Spotify loading states.
  */
-export const LyricsSkeleton = ({ isDownloading = false }: { isDownloading?: boolean }) => {
-    const { isDark } = useTheme();
-    const pulse = useSharedValue(0);
-    const drift = useSharedValue(0);
+
+const SKELETON_LINES = [
+    { width: '72%' },
+    { width: '55%' },
+    { width: '82%' },
+    { width: '48%' },
+    { width: '68%' },
+    { width: '38%' },
+    { width: '76%' },
+    { width: '52%' },
+    { width: '64%' },
+    { width: '44%' },
+];
+
+const WAVE_DURATION = 1600;
+const STAGGER_PER_LINE = 100; // ms between each line's wave peak
+
+function SkeletonLine({
+    widthPercent,
+    index,
+    isDark,
+}: {
+    widthPercent: string;
+    index: number;
+    isDark: boolean;
+}) {
+    const opacity = useSharedValue(0.3);
 
     useEffect(() => {
-        pulse.value = withRepeat(
-            withTiming(1, { duration: 2500, easing: Easing.inOut(Easing.sin) }),
-            -1,
-            true
+        // Each line starts its animation staggered, creating a ripple wave effect
+        opacity.value = withDelay(
+            index * STAGGER_PER_LINE,
+            withRepeat(
+                withSequence(
+                    withTiming(1, {
+                        duration: WAVE_DURATION * 0.5,
+                        easing: Easing.inOut(Easing.sin),
+                    }),
+                    withTiming(0.3, {
+                        duration: WAVE_DURATION * 0.5,
+                        easing: Easing.inOut(Easing.sin),
+                    })
+                ),
+                -1,
+                false
+            )
         );
-        drift.value = withRepeat(
-            withTiming(1, { duration: 5000, easing: Easing.inOut(Easing.sin) }),
-            -1,
-            true
-        );
-    }, []);
+    }, [index]);
 
-    const orbStyle = useAnimatedStyle(() => {
-        const scale = interpolate(pulse.value, [0, 1], [0.85, 1.15]);
-        const opacity = interpolate(pulse.value, [0, 1], [0.1, 0.22]);
-        const translateX = interpolate(drift.value, [0, 1], [-15, 15]);
-        const translateY = interpolate(drift.value, [0, 1], [-10, 10]);
-        
+    const animStyle = useAnimatedStyle(() => {
+        // Interpolate opacity into a visible color shift
+        const alpha = interpolate(opacity.value, [0.3, 1], [0.12, 0.45]);
         return {
-            transform: [{ scale }, { translateX }, { translateY }],
-            opacity,
+            opacity: opacity.value,
+            backgroundColor: isDark
+                ? `rgba(255,255,255,${alpha})`
+                : `rgba(0,0,0,${alpha})`,
         };
     });
-
-    const secondOrbStyle = useAnimatedStyle(() => {
-        const scale = interpolate(pulse.value, [0, 1], [1.1, 0.9]);
-        const opacity = interpolate(pulse.value, [0, 1], [0.08, 0.18]);
-        const translateX = interpolate(drift.value, [0, 1], [12, -12]);
-        const translateY = interpolate(drift.value, [0, 1], [8, -8]);
-        
-        return {
-            transform: [{ scale }, { translateX }, { translateY }],
-            opacity,
-        };
-    });
-
-    const statusStyle = useAnimatedStyle(() => {
-        return {
-            opacity: interpolate(pulse.value, [0, 0.5, 1], [0.3, 0.7, 0.3]),
-        };
-    });
-
-    const baseColor = isDark ? '#FFFFFF' : '#000000';
 
     return (
-        <View style={styles.container}>
-            <View style={styles.auraContainer}>
-                <Animated.View 
-                    style={[
-                        styles.orb, 
-                        orbStyle, 
-                        { backgroundColor: baseColor, width: SCREEN_WIDTH * 0.7, height: SCREEN_WIDTH * 0.7, borderRadius: (SCREEN_WIDTH * 0.7) / 2 }
-                    ]} 
-                />
-                <Animated.View 
-                    style={[
-                        styles.orb, 
-                        secondOrbStyle, 
-                        { backgroundColor: baseColor, width: SCREEN_WIDTH * 0.5, height: SCREEN_WIDTH * 0.5, borderRadius: (SCREEN_WIDTH * 0.5) / 2, top: '25%', left: '15%' }
-                    ]} 
-                />
+        <Animated.View
+            style={[
+                styles.skeletonLine,
+                animStyle,
+                { width: widthPercent },
+            ]}
+        />
+    );
+}
+
+// Animated dots for the status label: "Buscando letras..."
+function AnimatedDots({ color }: { color: string }) {
+    const dot1 = useSharedValue(0);
+    const dot2 = useSharedValue(0);
+    const dot3 = useSharedValue(0);
+
+    useEffect(() => {
+        const dotAnim = (sv: Animated.SharedValue<number>, delayMs: number) => {
+            sv.value = withDelay(
+                delayMs,
+                withRepeat(
+                    withSequence(
+                        withTiming(1, { duration: 400, easing: Easing.out(Easing.quad) }),
+                        withTiming(0, { duration: 400, easing: Easing.in(Easing.quad) }),
+                        withTiming(0, { duration: 400 }) // pause
+                    ),
+                    -1,
+                    false
+                )
+            );
+        };
+
+        dotAnim(dot1, 0);
+        dotAnim(dot2, 280);
+        dotAnim(dot3, 560);
+    }, []);
+
+    const d1Style = useAnimatedStyle(() => ({ opacity: interpolate(dot1.value, [0, 1], [0.25, 1]) }));
+    const d2Style = useAnimatedStyle(() => ({ opacity: interpolate(dot2.value, [0, 1], [0.25, 1]) }));
+    const d3Style = useAnimatedStyle(() => ({ opacity: interpolate(dot3.value, [0, 1], [0.25, 1]) }));
+
+    return (
+        <Animated.View style={styles.dotsRow}>
+            <Animated.Text style={[styles.dot, d1Style, { color }]}>●</Animated.Text>
+            <Animated.Text style={[styles.dot, d2Style, { color }]}>●</Animated.Text>
+            <Animated.Text style={[styles.dot, d3Style, { color }]}>●</Animated.Text>
+        </Animated.View>
+    );
+}
+
+export const LyricsSkeleton = ({ isDownloading = false }: { isDownloading?: boolean }) => {
+    const { isDark } = useTheme();
+
+    const labelColor = isDark ? 'rgba(255,255,255,0.55)' : 'rgba(0,0,0,0.45)';
+    const dotColor = isDark ? 'rgba(255,255,255,0.7)' : 'rgba(0,0,0,0.55)';
+
+    return (
+        <Animated.View
+            entering={FadeIn.duration(320).easing(Easing.out(Easing.quad))}
+            style={styles.container}
+        >
+            <View style={styles.linesContainer}>
+                {SKELETON_LINES.map((line, index) => (
+                    <SkeletonLine
+                        key={index}
+                        widthPercent={line.width}
+                        index={index}
+                        isDark={isDark}
+                    />
+                ))}
             </View>
 
-            {isDownloading && (
-                <Animated.View style={[styles.statusContainer, statusStyle]}>
-                    <Text style={styles.statusText}>Obteniendo letras...</Text>
-                    <View style={styles.statusBarContainer}>
-                        <View style={[styles.statusBar, { backgroundColor: baseColor, opacity: 0.1 }]} />
-                        <Animated.View 
-                            style={[
-                                styles.statusBarFill, 
-                                { backgroundColor: baseColor, width: '40%' },
-                                statusStyle
-                            ]} 
-                        />
-                    </View>
-                </Animated.View>
-            )}
-        </View>
+            {/* Status label: always visible during loading, regardless of isDownloading */}
+            <Animated.View
+                entering={FadeIn.delay(200).duration(400)}
+                style={styles.statusContainer}
+            >
+                <Animated.Text style={[styles.statusText, { color: labelColor }]}>
+                    {isDownloading ? 'Descargando letras' : 'Buscando letras'}
+                </Animated.Text>
+                <AnimatedDots color={dotColor} />
+            </Animated.View>
+        </Animated.View>
     );
 };
 
@@ -110,49 +174,40 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
         justifyContent: 'center',
-        alignItems: 'center',
+        alignItems: 'flex-start',
+        paddingHorizontal: 28,
+        paddingTop: 80, // clear the header area
         backgroundColor: 'transparent',
     },
-    auraContainer: {
-        position: 'relative',
-        width: SCREEN_WIDTH,
-        height: SCREEN_WIDTH,
-        justifyContent: 'center',
-        alignItems: 'center',
+    linesContainer: {
+        width: '100%',
+        gap: 24,
     },
-    orb: {
-        position: 'absolute',
-        // High blur is key for "Zen" feel, but since we can't easily use BlurView here 
-        // without complicating deps, we'll use a very soft opacity.
-        // If the project has BlurView, it's better to wrap this.
+    skeletonLine: {
+        height: 30,
+        borderRadius: 10,
     },
     statusContainer: {
-        position: 'absolute',
-        bottom: SCREEN_HEIGHT * 0.12,
+        marginTop: 40,
+        alignSelf: 'center',
+        flexDirection: 'row',
         alignItems: 'center',
+        gap: 8,
     },
     statusText: {
-        color: 'rgba(255,255,255,0.7)',
-        fontSize: 11,
-        fontWeight: '900',
-        letterSpacing: 2,
+        fontSize: 12,
+        fontWeight: '600',
+        letterSpacing: 1.8,
         textTransform: 'uppercase',
-        marginBottom: 12,
     },
-    statusBarContainer: {
-        width: 120,
-        height: 2,
-        position: 'relative',
+    dotsRow: {
+        flexDirection: 'row',
+        gap: 3,
+        alignItems: 'center',
+        marginTop: 1,
     },
-    statusBar: {
-        width: '100%',
-        height: '100%',
-        borderRadius: 1,
+    dot: {
+        fontSize: 6,
+        lineHeight: 10,
     },
-    statusBarFill: {
-        position: 'absolute',
-        height: '100%',
-        borderRadius: 1,
-        left: '30%', //Centered-ish
-    }
 });
