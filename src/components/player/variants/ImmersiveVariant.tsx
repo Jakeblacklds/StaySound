@@ -28,6 +28,7 @@ interface ImmersiveVariantProps {
     nextIcon: string;
     previousIcon: string;
     showLyrics: boolean;
+    lrcPreviewText?: string;
     isLyricsExpanded: boolean;
     onClose: () => void;
     onOpenMoreOptions: () => void;
@@ -73,14 +74,11 @@ const HeaderSection = React.memo(function HeaderSection({
                 accessibilityLabel="Minimizar reproductor"
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             >
-                <MaterialCommunityIcons name="chevron-down" size={28} color={textColor} />
+                <MaterialCommunityIcons name="chevron-down" size={32} color={textColor} />
             </Pressable>
             <View style={styles.headerCenterImmersive}>
-                <Animated.Text style={[styles.playingFromLabel, textStyle]} accessibilityElementsHidden>
-                    PLAYING FROM
-                </Animated.Text>
                 <Animated.Text
-                    style={[styles.albumLabelImmersive, accentTextStyle]}
+                    style={[styles.albumLabelImmersive, textStyle]}
                     numberOfLines={1}
                     accessibilityRole="text"
                     importantForAccessibility="yes"
@@ -88,8 +86,15 @@ const HeaderSection = React.memo(function HeaderSection({
                     {album || 'Unknown Album'}
                 </Animated.Text>
             </View>
-            {/* Placeholder to maintain symmetric layout without 3-dots button */}
-            <View style={styles.headerBtnImmersive} />
+            <Pressable
+                onPress={onOpenMoreOptions}
+                style={styles.headerBtnImmersive}
+                accessibilityRole="button"
+                accessibilityLabel="Más opciones"
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            >
+                <MaterialCommunityIcons name="dots-horizontal" size={28} color={textColor} />
+            </Pressable>
         </View>
     );
 });
@@ -117,7 +122,6 @@ const ArtworkSection = React.memo(function ArtworkSection({
 type TrackInfoSectionProps = {
     title: string;
     artist: string;
-    showLyrics: boolean;
     isLyricsExpanded: boolean;
     qualityBadge: { label: string; tone: string; };
     qualityBadgeInk: string;
@@ -127,15 +131,46 @@ type TrackInfoSectionProps = {
     textColor: string;
     textStyle: any;
     accentTextStyle: any;
-    onToggleLyrics: () => void;
+    lrcPreviewText?: string;
     onArtistPress: () => void;
     onToggleFavorite: () => void;
 };
 
+const LrcPreviewLine = React.memo(function LrcPreviewLine({
+    text,
+    textStyle,
+}: {
+    text?: string;
+    textStyle: any;
+}) {
+    const slide = useSharedValue(0);
+    const visibleText = text || '...';
+
+    useEffect(() => {
+        slide.value = 1;
+        slide.value = withTiming(0, {
+            duration: 260,
+            easing: Easing.out(Easing.cubic),
+        });
+    }, [slide, visibleText]);
+
+    const lineStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(slide.value, [0, 1], [1, 0]),
+        transform: [{ translateY: interpolate(slide.value, [0, 1], [0, 12]) }],
+    }));
+
+    return (
+        <View style={styles.lrcPreviewImmersive}>
+            <Animated.Text style={[styles.lrcPreviewText, textStyle, lineStyle]} numberOfLines={1}>
+                {visibleText}
+            </Animated.Text>
+        </View>
+    );
+});
+
 const TrackInfoSection = React.memo(function TrackInfoSection({
     title,
     artist,
-    showLyrics,
     isLyricsExpanded,
     qualityBadge,
     qualityBadgeInk,
@@ -145,7 +180,7 @@ const TrackInfoSection = React.memo(function TrackInfoSection({
     textColor,
     textStyle,
     accentTextStyle,
-    onToggleLyrics,
+    lrcPreviewText,
     onArtistPress,
     onToggleFavorite,
 }: TrackInfoSectionProps) {
@@ -191,6 +226,7 @@ const TrackInfoSection = React.memo(function TrackInfoSection({
                             {trackTechLabel}
                         </Animated.Text>
                     </View>
+                    <LrcPreviewLine text={lrcPreviewText} textStyle={textStyle} />
                 </View>
                 <View style={styles.trackActionsImmersive}>
                     <AnimatedFavoriteButton
@@ -213,12 +249,12 @@ type ControlsSectionProps = {
     accentColor: string;
     textColor: string;
     onPrimaryColor: string;
-    shuffleIcon: IconName;
-    repeatIcon: IconName;
-    playIcon: IconName;
-    pauseIcon: IconName;
-    nextIcon: IconName;
-    previousIcon: IconName;
+    shuffleIcon: string;
+    repeatIcon: string;
+    playIcon: string;
+    pauseIcon: string;
+    nextIcon: string;
+    previousIcon: string;
     accentBgStyle: any;
     onToggleShuffle: () => void;
     onCycleRepeatMode: () => void;
@@ -376,35 +412,37 @@ const BottomActions = React.memo(function BottomActions({
     return (
         <View style={styles.bottomActionsImmersive}>
             {/* Lyrics toggle — generic music-note icon */}
-            <Pressable
+            <AnimatedPlayerButton
+                variant="immersive"
+                kind="secondary"
                 style={styles.bottomBtnImmersive}
                 onPress={onToggleLyrics}
                 accessibilityRole="button"
                 accessibilityLabel={showLyrics ? 'Ocultar letras' : 'Mostrar letras'}
                 accessibilityState={{ selected: showLyrics }}
-                hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
             >
                 <MaterialCommunityIcons
                     name="music-note-outline"
                     size={26}
                     color={showLyrics ? accentColor : textColor + '80'}
                 />
-            </Pressable>
+            </AnimatedPlayerButton>
 
             {/* Queue */}
-            <Pressable
+            <AnimatedPlayerButton
+                variant="immersive"
+                kind="secondary"
                 style={styles.bottomBtnImmersive}
                 onPress={onOpenQueue}
                 accessibilityRole="button"
                 accessibilityLabel="Ver cola de reproducción"
-                hitSlop={{ top: 8, bottom: 8, left: 16, right: 16 }}
             >
                 <MaterialCommunityIcons
                     name="playlist-play"
                     size={26}
                     color={textColor + '80'}
                 />
-            </Pressable>
+            </AnimatedPlayerButton>
         </View>
     );
 });
@@ -429,6 +467,7 @@ export function ImmersiveVariant({
     nextIcon,
     previousIcon,
     showLyrics,
+    lrcPreviewText,
     isLyricsExpanded,
     onClose,
     onOpenMoreOptions,
@@ -463,56 +502,57 @@ export function ImmersiveVariant({
                 ARTWORK_SIZE={ARTWORK_SIZE}
             />
 
-            <TrackInfoSection
-                title={track.title}
-                artist={track.artist}
-                showLyrics={showLyrics}
-                isLyricsExpanded={isLyricsExpanded}
-                qualityBadge={qualityBadge}
-                qualityBadgeInk={qualityBadgeInk}
-                trackTechLabel={trackTechLabel}
-                isFavorite={isFavorite}
-                accentColor={accentColor}
-                textColor={textColor}
-                textStyle={textStyle}
-                accentTextStyle={accentTextStyle}
-                onToggleLyrics={onToggleLyrics}
-                onArtistPress={onArtistPress}
-                onToggleFavorite={onToggleFavorite}
-            />
+            <View style={styles.playerLowerStack}>
+                <TrackInfoSection
+                    title={track.title}
+                    artist={track.artist}
+                    lrcPreviewText={lrcPreviewText}
+                    isLyricsExpanded={isLyricsExpanded}
+                    qualityBadge={qualityBadge}
+                    qualityBadgeInk={qualityBadgeInk}
+                    trackTechLabel={trackTechLabel}
+                    isFavorite={isFavorite}
+                    accentColor={accentColor}
+                    textColor={textColor}
+                    textStyle={textStyle}
+                    accentTextStyle={accentTextStyle}
+                    onArtistPress={onArtistPress}
+                    onToggleFavorite={onToggleFavorite}
+                />
 
-            <View style={styles.progressSectionImmersive}>
-                <ProgressSlider duration={track.duration} onSeek={onSeek} activeColor={accentColor} />
+                <View style={styles.progressSectionImmersive}>
+                    <ProgressSlider duration={track.duration} onSeek={onSeek} activeColor={accentColor} />
+                </View>
+
+                <ControlsSection
+                    isPlaying={isPlaying}
+                    shuffleEnabled={shuffleEnabled}
+                    repeatMode={repeatMode}
+                    accentColor={accentColor}
+                    textColor={textColor}
+                    onPrimaryColor={onPrimaryColor}
+                    shuffleIcon={shuffleIcon}
+                    repeatIcon={repeatIcon}
+                    playIcon={playIcon}
+                    pauseIcon={pauseIcon}
+                    nextIcon={nextIcon}
+                    previousIcon={previousIcon}
+                    accentBgStyle={accentBgStyle}
+                    onToggleShuffle={onToggleShuffle}
+                    onCycleRepeatMode={onCycleRepeatMode}
+                    onPlayPause={onPlayPause}
+                    onNext={onNext}
+                    onPrevious={onPrevious}
+                />
+
+                <BottomActions
+                    textColor={textColor}
+                    accentColor={accentColor}
+                    showLyrics={showLyrics}
+                    onOpenQueue={onOpenQueue}
+                    onToggleLyrics={onToggleLyrics}
+                />
             </View>
-
-            <ControlsSection
-                isPlaying={isPlaying}
-                shuffleEnabled={shuffleEnabled}
-                repeatMode={repeatMode}
-                accentColor={accentColor}
-                textColor={textColor}
-                onPrimaryColor={onPrimaryColor}
-                shuffleIcon={shuffleIcon}
-                repeatIcon={repeatIcon}
-                playIcon={playIcon}
-                pauseIcon={pauseIcon}
-                nextIcon={nextIcon}
-                previousIcon={previousIcon}
-                accentBgStyle={accentBgStyle}
-                onToggleShuffle={onToggleShuffle}
-                onCycleRepeatMode={onCycleRepeatMode}
-                onPlayPause={onPlayPause}
-                onNext={onNext}
-                onPrevious={onPrevious}
-            />
-
-            <BottomActions
-                textColor={textColor}
-                accentColor={accentColor}
-                showLyrics={showLyrics}
-                onOpenQueue={onOpenQueue}
-                onToggleLyrics={onToggleLyrics}
-            />
         </View>
     );
 }

@@ -1,5 +1,6 @@
 import { CustomIcon, EmptyState, Skeleton } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
+import { SoulseekCompressedFallbackError } from '@/src/services/soulseekDownloadService';
 import { createTidalStreamTrack, getTidalAlbumDetail, isValidAudioFile } from '@/src/services/tidalService';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
@@ -22,9 +23,11 @@ function formatTrackDuration(ms: number): string {
 }
 
 export default function TidalAlbumScreen() {
-    const { id } = useLocalSearchParams<{ id: string }>();
+    const { id, source } = useLocalSearchParams<{ id: string; source?: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
+    const isSoulseekSource = source === 'soulseek';
+    const isQobuzSource = source === 'qobuz';
 
     const [albumDetail, setAlbumDetail] = useState<TidalAlbumDetail | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -33,11 +36,12 @@ export default function TidalAlbumScreen() {
     const {
         downloads,
         download,
+        downloadFromSoulseek,
         cancelDownload,
         isDownloaded,
         getDownloadedTrack,
         forgetDownloadedTrack,
-    } = useTidalDownload();
+    } = useTidalDownload({ qobuzOnly: isQobuzSource });
 
     const play = usePlayerStore(s => s.play);
     const currentPlayerTrack = usePlayerStore(s => s.currentTrack);
@@ -86,6 +90,46 @@ export default function TidalAlbumScreen() {
         };
     }, [id]);
 
+    const handleTrackDownload = useCallback(async (track: TidalTrack) => {
+        try {
+            const state = downloads.get(track.id);
+            if (state?.status === 'downloading') {
+                await cancelDownload(track.id);
+                return;
+            }
+
+            if (isSoulseekSource) {
+                try {
+                    await downloadFromSoulseek(track);
+                } catch (soulseekError) {
+                    if (soulseekError instanceof SoulseekCompressedFallbackError) {
+                        Alert.alert(
+                            'No hay FLAC',
+                            'Soulseek encontro MP3 para esta cancion.',
+                            [
+                                { text: 'Cancelar', style: 'cancel' },
+                                {
+                                    text: 'Descargar MP3',
+                                    onPress: () => {
+                                        void downloadFromSoulseek(track, { allowCompressedFallback: true });
+                                    },
+                                },
+                            ],
+                        );
+                        return;
+                    }
+                    throw soulseekError;
+                }
+                return;
+            }
+
+            await download(track);
+        } catch (downloadError) {
+            const message = downloadError instanceof Error ? downloadError.message : 'Error en descarga';
+            Alert.alert('Descarga fallida', message);
+        }
+    }, [cancelDownload, download, downloadFromSoulseek, downloads, isSoulseekSource]);
+
     const handleTidalPlay = useCallback(async (track: TidalTrack) => {
         setPendingTrackPreview({
             id: `tidal_pending_${track.id}`,
@@ -117,8 +161,21 @@ export default function TidalAlbumScreen() {
                 return;
             }
 
+            if (isSoulseekSource) {
+                await handleTrackDownload(track);
+                const localTrack = useLibraryStore.getState().tracks.get(`tidal_${track.id}`);
+                if (!localTrack) {
+                    throw new Error('No se pudo preparar el archivo local');
+                }
+                await play(localTrack, [localTrack]);
+                return;
+            }
+
             try {
-                const streamTrack = await createTidalStreamTrack(track);
+                const streamTrack = await createTidalStreamTrack(
+                    track,
+                    isQobuzSource ? { qobuzOnly: true } : {},
+                );
                 await play(streamTrack, [streamTrack]);
             } catch (streamError) {
                 const message = streamError instanceof Error ? streamError.message : '';
@@ -143,22 +200,7 @@ export default function TidalAlbumScreen() {
             const message = playError instanceof Error ? playError.message : 'No se pudo reproducir esta pista';
             Alert.alert('Error de reproduccion', message);
         }
-    }, [download, forgetDownloadedTrack, getDownloadedTrack, play, setPendingTrackPreview]);
-
-    const handleTidalDownload = useCallback(async (track: TidalTrack) => {
-        try {
-            const state = downloads.get(track.id);
-            if (state?.status === 'downloading') {
-                await cancelDownload(track.id);
-                return;
-            }
-
-            await download(track);
-        } catch (downloadError) {
-            const message = downloadError instanceof Error ? downloadError.message : 'Error en descarga';
-            Alert.alert('Descarga fallida', message);
-        }
-    }, [cancelDownload, download, downloads]);
+    }, [download, forgetDownloadedTrack, getDownloadedTrack, handleTrackDownload, isQobuzSource, isSoulseekSource, play, setPendingTrackPreview]);
 
     if (isLoading) {
         return (
@@ -300,7 +342,7 @@ export default function TidalAlbumScreen() {
                                     mode={downloaded ? 'contained' : 'contained-tonal'}
                                     onPress={(event) => {
                                         event.stopPropagation();
-                                        void handleTidalDownload(track);
+                                        void handleTrackDownload(track);
                                     }}
                                     style={{ minWidth: 94 }}
                                     icon={downloaded ? undefined : () => <CustomIcon name="Descargar" size={14} color={theme.colors.primary} />}

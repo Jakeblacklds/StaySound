@@ -1,7 +1,6 @@
 package expo.modules.karaokeview
 
 import android.graphics.*
-import kotlin.math.cos
 import kotlin.math.sin
 
 internal data class KaraokeIntroState(
@@ -33,14 +32,6 @@ internal class KaraokeIntroRenderer(private val density: Float) {
     private val activeTitlePaint = Paint(titlePaint)
     private val activeSubtitlePaint = Paint(subtitlePaint)
 
-    private val radialGlowPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-
-    private val orbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.FILL
-    }
-
     private val wavePath = Path()
 
     fun draw(
@@ -55,8 +46,6 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         val introEndMs = (state.firstLineStartMs - 150L).coerceAtLeast(300L)
         if (currentTimeMs >= introEndMs) return
 
-        val title = if (state.title.isNotBlank()) state.title else "Disfruta el intro"
-        val subtitle = if (state.subtitle.isNotBlank()) state.subtitle else "La música está por comenzar"
 
         // Timing variables
         val progress = (currentTimeMs.toFloat() / state.firstLineStartMs.toFloat()).coerceIn(0f, 1f)
@@ -70,6 +59,14 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         val visibility = (reveal * fadeOut).coerceIn(0f, 1f)
         if (visibility <= 0.01f) return
 
+        if (state.title.isBlank() && state.subtitle.isBlank()) {
+            drawIntroDots(canvas, currentTimeMs, state.activeColor, layout, visibility)
+            return
+        }
+
+        val title = state.title
+        val subtitle = state.subtitle
+
         val centerX = layout.width / 2f
         // Position in the lower third — safely below the lyrics scroll area and the bottom fade zone.
         // Lyrics anchor at ~28% and span downward; the bottom fade starts at ~(height - 180dp).
@@ -77,15 +74,7 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         val centerY = layout.height * 0.72f
         val density = layout.density
 
-        // Colors
-        val accentR = Color.red(state.activeColor)
-        val accentG = Color.green(state.activeColor)
-        val accentB = Color.blue(state.activeColor)
-
-        // 1. Draw Radial Background Aura (Replacing the "Box")
-        drawBackgroundAura(canvas, centerX, centerY, visibility, progress, currentTimeMs, accentR, accentG, accentB, density, layout)
-
-        // 2. Compute precise vertical positions using font metrics (no more guesswork)
+        // Compute precise vertical positions using font metrics (no more guesswork)
         val titleMetrics = titlePaint.fontMetrics
         val subtitleMetrics = subtitlePaint.fontMetrics
         val titleLineHeight = titleMetrics.descent - titleMetrics.ascent
@@ -99,14 +88,14 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         val titleY = blockTop - titleMetrics.ascent
         val subtitleY = blockTop + titleLineHeight + lineGap - subtitleMetrics.ascent
 
-        // 3. Draw Base (Inactive) Text
+        // Draw Base (Inactive) Text
         titlePaint.color = Color.argb((80f * visibility).toInt(), 255, 255, 255)
         subtitlePaint.color = Color.argb((60f * visibility).toInt(), 230, 230, 255)
         
         canvas.drawText(ellipsizeCenter(title, 32), centerX, titleY, titlePaint)
         canvas.drawText(ellipsizeCenter(subtitle, 42), centerX, subtitleY, subtitlePaint)
 
-        // 4. Draw Liquid (Active) Text Reveal (Replacing the "Bar")
+        // Draw Liquid (Active) Text Reveal
         drawLiquidReveal(
             canvas = canvas,
             centerX = centerX,
@@ -117,41 +106,13 @@ internal class KaraokeIntroRenderer(private val density: Float) {
             progress = progress,
             visibility = visibility,
             currentTimeMs = currentTimeMs,
-            activeColor = state.activeColor,
             density = density,
             layout = layout,
             titleMetrics = titleMetrics,
             subtitleMetrics = subtitleMetrics,
         )
 
-        // 5. Orbital Particles (Replacing the "Count-down" feel)
-        drawOrbitalEnergy(canvas, centerX, centerY, progress, visibility, currentTimeMs, accentR, accentG, accentB, density)
-    }
-
-    private fun drawBackgroundAura(
-        canvas: Canvas,
-        cx: Float,
-        cy: Float,
-        visibility: Float,
-        progress: Float,
-        currentTimeMs: Long,
-        r: Int, g: Int, b: Int,
-        density: Float,
-        layout: KaraokeIntroLayout
-    ) {
-        val pulse = (sin(currentTimeMs / 450f) + 1f) * 0.5f
-        val baseRadius = 140f * density * (0.85f + 0.1f * pulse + 0.15f * progress)
-        
-        // Define a radial gradient for a soft "glow" behavior
-        val colors = intArrayOf(
-            Color.argb((22f * visibility).toInt(), r, g, b),
-            Color.argb((6f * visibility).toInt(), r, g, b),
-            Color.TRANSPARENT
-        )
-        val radialShader = RadialGradient(cx, cy, baseRadius, colors, null, Shader.TileMode.CLAMP)
-        radialGlowPaint.shader = radialShader
-        
-        canvas.drawCircle(cx, cy, baseRadius, radialGlowPaint)
+        // Orbital particles intentionally removed.
     }
 
     private fun drawLiquidReveal(
@@ -164,7 +125,6 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         progress: Float,
         visibility: Float,
         currentTimeMs: Long,
-        activeColor: Int,
         density: Float,
         layout: KaraokeIntroLayout,
         titleMetrics: Paint.FontMetrics,
@@ -213,40 +173,35 @@ internal class KaraokeIntroRenderer(private val density: Float) {
         canvas.restore()
     }
 
-    private fun drawOrbitalEnergy(
-        canvas: Canvas,
-        cx: Float,
-        cy: Float,
-        progress: Float,
-        visibility: Float,
-        currentTimeMs: Long,
-        r: Int, g: Int, b: Int,
-        density: Float
-    ) {
-        // Two orbs that orbit the center and converge as progress -> 1
-        val rotation = currentTimeMs * 0.003f
-        val orbitRadius = (120f * density) * (1f - progress).coerceAtLeast(0.1f)
-        
-        for (i in 0..1) {
-            val angle = rotation + i * Math.PI.toFloat()
-            val orbX = cx + cos(angle) * orbitRadius
-            val orbY = cy + sin(angle) * orbitRadius
-            
-            val orbSize = (4f + 2f * sin(currentTimeMs / 300f + i)) * density * visibility
-            
-            // Outer glow
-            orbPaint.color = Color.argb((100f * visibility * (1f - progress * 0.5f)).toInt(), r, g, b)
-            canvas.drawCircle(orbX, orbY, orbSize * 2.5f, orbPaint)
-            
-            // Core
-            orbPaint.color = Color.argb((255f * visibility).toInt(), 255, 255, 255)
-            canvas.drawCircle(orbX, orbY, orbSize, orbPaint)
-        }
-    }
-
     private fun smootherStep(value: Float): Float {
         val t = value.coerceIn(0f, 1f)
         return t * t * t * (t * (t * 6f - 15f) + 10f)
+    }
+
+    private fun drawIntroDots(
+        canvas: Canvas,
+        currentTimeMs: Long,
+        color: Int,
+        layout: KaraokeIntroLayout,
+        visibility: Float,
+    ) {
+        val centerX = layout.width / 2f
+        val centerY = layout.height * 0.72f
+        val spacing = 13f * density
+        val baseRadius = 3.5f * density
+        activeTitlePaint.clearShadowLayer()
+
+        for (index in 0 until 3) {
+            val pulse = ((sin(currentTimeMs / 220f - index * 0.72f) + 1f) * 0.5f).coerceIn(0f, 1f)
+            val alpha = ((92f + pulse * 132f) * visibility).toInt().coerceIn(0, 255)
+            activeTitlePaint.color = Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
+            canvas.drawCircle(
+                centerX + (index - 1) * spacing,
+                centerY,
+                baseRadius + pulse * 1.2f * density,
+                activeTitlePaint,
+            )
+        }
     }
 
     private fun ellipsizeCenter(value: String, maxChars: Int): String {

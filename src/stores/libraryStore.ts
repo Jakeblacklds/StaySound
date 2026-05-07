@@ -316,8 +316,10 @@ export const useLibraryStore = create<LibraryStore>()(
 
                                 const existingTrack = filenameKey ? existingByFilename.get(filenameKey) : undefined;
 
-                                // Strip _filename before storing (it's a temporary scan-only field)
-                                const { _filename: _discard, ...cleanEnriched } = enriched;
+                                // Keep _filename on stored local tracks.
+                                // Playback fallback for MediaStore content:// IDs needs it to rebuild
+                                // a concrete file:///storage/... URI when the extractor fails on content://.
+                                const cleanEnriched = enriched;
 
                                 if (existingTrack) {
                                     // Found a match by filename -> fully restore metadata from the stored track.

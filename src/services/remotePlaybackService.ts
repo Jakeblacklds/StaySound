@@ -113,7 +113,17 @@ function toTidalTrackPayload(track: Track): TidalTrack | null {
 }
 
 export async function resolveRemoteTrackForPlayback(track: Track): Promise<Track> {
+    // ── Local files never need Tidal resolution ──────────────────────────────
+    // Soulseek tracks store a tidalId for library linking, but their URI is
+    // a local file path — not a cloud stream. Resolving them through Tidal
+    // would fire unnecessary network requests and fail.
     if (!track.cloudOnly) {
+        return track;
+    }
+
+    // Also skip if the URI is already a reachable local path (extra safety net)
+    const isLocalUri = track.uri && !(/^https?:\/\//i.test(track.uri));
+    if (isLocalUri) {
         return track;
     }
 

@@ -99,11 +99,18 @@ function normalizeQueueWindow(tracks: Track[], startIndex = 0): { queue: Track[]
     const safeIndex = Math.max(0, Math.min(startIndex, tracks.length - 1));
 
     if (tracks.length <= MAX_QUEUE_ITEMS) {
-        return { queue: tracks, queueIndex: safeIndex };
+        return { queue: [...tracks], queueIndex: safeIndex };
     }
 
-    const rotated = [...tracks.slice(safeIndex), ...tracks.slice(0, safeIndex)];
-    return { queue: rotated.slice(0, MAX_QUEUE_ITEMS), queueIndex: 0 };
+    const preferredStart = Math.max(0, safeIndex - LINEAR_CONTEXT_HISTORY_BUFFER);
+    const maxStart = Math.max(0, tracks.length - MAX_QUEUE_ITEMS);
+    const start = Math.min(preferredStart, maxStart);
+    const windowedQueue = tracks.slice(start, start + MAX_QUEUE_ITEMS);
+
+    return {
+        queue: windowedQueue,
+        queueIndex: safeIndex - start,
+    };
 }
 
 function createBoundedLinearPlaybackContext(tracks: Track[], focusIndex = 0): { queue: Track[]; focusIndex: number } {
@@ -159,6 +166,18 @@ function sanitizePlayableQueue(tracks: Track[], preferredIndex = 0): {
         queueIndex: nextQueueIndex,
         filteredCount,
     };
+}
+
+function moveQueueItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
+    const nextItems = [...items];
+    const [movedItem] = nextItems.splice(fromIndex, 1);
+
+    if (movedItem === undefined) {
+        return nextItems;
+    }
+
+    nextItems.splice(toIndex, 0, movedItem);
+    return nextItems;
 }
 
 function shouldAcceptEngineTrackId(nextTrackId: string | undefined, currentQueue: Track[]): boolean {
@@ -548,6 +567,7 @@ interface PlayerActions {
     removeFromQueue: (index: number) => void;
     clearQueue: () => void;
     replaceQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
+    reorderQueue: (fromIndex: number, toIndex: number) => Promise<void>;
     next: () => Promise<void>;
     previous: () => Promise<void>;
     skipTo: (index: number) => Promise<void>;
@@ -865,6 +885,27 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
         }
     },
 
+    reorderQueue: async (fromIndex, toIndex) => {
+        const { queue, queueIndex } = get();
+        if (queue.length === 0 || queueIndex < 0) {
+            return;
+        }
+
+        const safeFromIndex = Math.max(0, Math.min(fromIndex, queue.length - 1));
+        const safeToIndex = Math.max(0, Math.min(toIndex, queue.length - 1));
+
+        if (safeFromIndex === safeToIndex) {
+            return;
+        }
+
+        if (safeFromIndex <= queueIndex || safeToIndex <= queueIndex) {
+            return;
+        }
+
+        const reorderedQueue = moveQueueItem(queue, safeFromIndex, safeToIndex);
+        await get().replaceQueue(reorderedQueue, queueIndex);
+    },
+
     next: async () => {
         const { queue, queueIndex, repeatMode } = get();
 
@@ -915,7 +956,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     },
 
     previous: async () => {
-        const { queue, queueIndex, position } = get();
+        const { queue, queueIndex, position, repeatMode } = get();
 
         if (queue.length === 0) return;
 
@@ -928,7 +969,12 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
         // Go to previous
         let prevIndex = queueIndex - 1;
         if (prevIndex < 0) {
-            prevIndex = queue.length - 1; // Wrap to end
+            if (repeatMode === 'all' && queue.length > 1) {
+                prevIndex = queue.length - 1;
+            } else {
+                await get().seek(0);
+                return;
+            }
         }
 
         const targetTrack = queue[prevIndex];

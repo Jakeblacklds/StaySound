@@ -19,6 +19,7 @@ export interface NativeScanTrack {
 interface NativeLibraryIndexerModule {
   isAvailable(): boolean;
   scanTracks(folderPattern?: string): Promise<NativeScanTrack[]>;
+  resolveContentUriToFileUri(contentUri: string): Promise<string | null>;
 }
 
 const NativeModule = requireNativeModule<NativeLibraryIndexerModule>('LibraryIndexer');
@@ -29,4 +30,8 @@ export function isLibraryIndexerAvailable(): boolean {
 
 export async function scanTracksNative(folderPattern?: string): Promise<NativeScanTrack[]> {
   return NativeModule.scanTracks(folderPattern);
+}
+
+export async function resolveContentUriToFileUri(contentUri: string): Promise<string | null> {
+  return NativeModule.resolveContentUriToFileUri(contentUri);
 }

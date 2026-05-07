@@ -18,6 +18,7 @@ type MiniPlayerTrack = {
 type MiniPlayerShellProps = {
     variant: 'row' | 'overlay';
     track: MiniPlayerTrack;
+    showArtwork?: boolean;
     textColor: string;
     buttonFillColor: string;
     buttonBorderColor: string;
@@ -62,6 +63,7 @@ function MiniPlayerPauseIcon({ color, size = 24 }: { color: string; size?: numbe
 function MiniPlayerShellInner({
     variant,
     track,
+    showArtwork = true,
     textColor,
     buttonFillColor,
     buttonBorderColor,
@@ -136,7 +138,7 @@ function MiniPlayerShellInner({
                 <>
                     <Pressable onPress={onPress} style={styles.tappableArea}>
                         <View style={styles.rowArtworkWrap}>
-                            {track.artwork ? (
+                            {showArtwork && track.artwork ? (
                                 <Image
                                     source={{ uri: track.artwork }}
                                     style={styles.artwork}

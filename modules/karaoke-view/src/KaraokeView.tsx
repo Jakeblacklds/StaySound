@@ -27,7 +27,7 @@ const NativeView = Platform.OS === 'android'
  * />
  * ```
  */
-export function KaraokeView(props: KaraokeViewProps) {
+export const KaraokeView = React.forwardRef<any, KaraokeViewProps>(function KaraokeView(props, ref) {
     if (!NativeView) {
         // Fallback for iOS or web - show placeholder
         return (
@@ -39,5 +39,5 @@ export function KaraokeView(props: KaraokeViewProps) {
         );
     }
 
-    return <NativeView {...props} />;
-}
+    return <NativeView {...(props as any)} ref={ref as any} />;
+});

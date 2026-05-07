@@ -249,15 +249,26 @@ class AudioEngineClass {
 
         // Listen for errors
         const errorSub = TrackPlayerService.addEventListener(Event.PlaybackError, async (event) => {
-            console.error('[AudioEngine] Playback error:', event);
             const errorCode = String((event as { code?: string } | undefined)?.code ?? '').toLowerCase();
 
             if (errorCode === 'android-parsing-container-unsupported') {
+                const failedTrack = await TrackPlayerService.getCurrentTrack();
+                if (TrackPlayerService.shouldPersistRuntimeUnsupportedTrack(failedTrack)) {
+                    TrackPlayerService.markTrackAsUnsupported(failedTrack, event.message);
+                }
+                console.warn('[AudioEngine] Source parsing failed, skipping track:', {
+                    id: failedTrack?.id,
+                    uri: failedTrack?.uri,
+                    format: failedTrack?.format,
+                    codec: failedTrack?.codec,
+                    message: event.message,
+                });
                 this.callbacks.onError?.(new Error('Unsupported audio container on Android'));
                 await this.recoverFromUnsupportedTrackError();
                 return;
             }
 
+            console.error('[AudioEngine] Playback error:', event);
             this.callbacks.onError?.(new Error(event.message || 'Playback error'));
         });
         this.subscriptions.push(errorSub);
@@ -267,7 +278,7 @@ class AudioEngineClass {
         try {
             await TrackPlayerService.skipToNext();
             await TrackPlayerService.resume();
-            console.warn('[AudioEngine] Skipped unsupported track and resumed playback');
+            console.warn('[AudioEngine] Skipped unparseable source and resumed playback');
             return;
         } catch {
             // No next track available or skip failed.

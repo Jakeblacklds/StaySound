@@ -56,6 +56,28 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             this@KaraokeView.drawWordTranslated(canvas, line, word, paint, translateY)
         }
 
+        override fun drawCompletedWordWithLift(
+            canvas: Canvas,
+            line: LyricLine,
+            word: LyricWord,
+            paint: Paint,
+            rowHeight: Float,
+            finalLiftRatio: Float,
+            currentTimeMs: Long,
+            keepCharacterLift: Boolean,
+        ) {
+            this@KaraokeView.drawCompletedWordWithLift(
+                canvas = canvas,
+                line = line,
+                word = word,
+                paint = paint,
+                rowHeight = rowHeight,
+                finalLiftRatio = finalLiftRatio,
+                currentTimeMs = currentTimeMs,
+                keepCharacterLift = keepCharacterLift,
+            )
+        }
+
         override fun drawGrowableVisualWordWipeHighlight(
             canvas: Canvas,
             line: LyricLine,
@@ -104,6 +126,24 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             )
         }
 
+        override fun drawWordPreHighlight(
+            canvas: Canvas,
+            line: LyricLine,
+            word: LyricWord,
+            progress: Float,
+            paint: Paint,
+            rowHeight: Float,
+        ) {
+            this@KaraokeView.drawWordPreHighlight(
+                canvas = canvas,
+                line = line,
+                word = word,
+                progress = progress,
+                paint = paint,
+                rowHeight = rowHeight,
+            )
+        }
+
         override fun drawMotionAccent(
             canvas: Canvas,
             line: LyricLine,
@@ -136,6 +176,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var lineHeight = 0f
     private var fontSize = 0f
     private var marginLeft = 40f
+    private var marginRight = 64f
     private var fadeHeight = 160f
     private var lineSpacing = 0f
     private var spaceWidth = 0f
@@ -154,14 +195,15 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var introSubtitle: String = ""
 
     // --- Ambient background ---
-    private var enableAmbientBackground = false // Disabled: handled on React side via drifting blurred artwork
+    // Enabled by default; React can still disable it for lite mode.
+    private var enableAmbientBackground = true
     private val ambientBackgroundRenderer = KaraokeAmbientBackgroundRenderer(resources.displayMetrics.density)
     private var firstLineStartMs: Long = 0L
 
     // --- Paints ---
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
         // binimum relies on the platform UI stack; on Android the closest match is the sans-serif family.
-        typeface = Typeface.create("sans-serif", Typeface.BOLD)
+        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
         textAlign = Paint.Align.LEFT
     }
     private val highlightPaint = Paint(basePaint)
@@ -211,24 +253,29 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     // --- Feather width for liquid effect ---
     private val FEATHER_PX: Float
     private val LEADING_GLOW_WIDTH_PX: Float
-    private val scrollAnchorRatio = 0.28f
+    private val scrollAnchorRatio = 0.38f
     private val hierarchyTransitionWindowMs = 700f
     private val backgroundRevealDurationMs = 450f
     private val backgroundFadeOutDurationMs = 420f
     private val fireTrailFadeOutDurationMs = 520f
+    private val completedLiftShadowRadiusRatio = 0.034f
+    private val completedLiftShadowAlphaFactor = 0.09f
+    private val completedLiftShadowAlphaCap = 48
+    private val completedLiftShadowYOffsetRatio = -0.018f
 
     init {
         density = resources.displayMetrics.density
         fontSize = 30f * density
-        lineHeight = 60f * density
+        lineHeight = 47f * density
         marginLeft = 24f * density
+        marginRight = 58f * density
         fadeHeight = 180f * density
-        lineSpacing = 30f * density
+        lineSpacing = 14f * density
         backgroundFontSize = fontSize * 0.6f
         backgroundLineHeight = backgroundFontSize * 1.45f
         backgroundGap = fontSize * 0.2f
-        FEATHER_PX = 8f * density // Tight feather
-        LEADING_GLOW_WIDTH_PX = 18f * density
+        FEATHER_PX = 22f * density // Wider feather for organic liquid fill
+        LEADING_GLOW_WIDTH_PX = 24f * density
 
         basePaint.color = inactiveColor
         basePaint.textSize = fontSize
@@ -297,8 +344,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     fun setFontSize(size: Float) {
         fontSize = size * density
-        lineHeight = fontSize * 1.78f
-        lineSpacing = fontSize * 1.0f
+        lineHeight = fontSize * 1.44f
+        lineSpacing = fontSize * 0.46f
         backgroundFontSize = fontSize * 0.6f
         backgroundLineHeight = backgroundFontSize * 1.45f
         backgroundGap = fontSize * 0.2f
@@ -483,19 +530,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             }
         }
 
-        // --- Ambient animated background ---
-        // Drawn BEFORE the saveLayer so it sits under the edge-fade mask.
-        // Alpha is capped at 200 so it never competes with lyrics legibility.
-        if (enableAmbientBackground) {
-            ambientBackgroundRenderer.draw(
-                canvas = canvas,
-                currentTimeMs = currentTimeMs,
-                width = width,
-                height = height,
-                alpha = 200,
-                lightweight = !enableSpectralParticles,  // reuse the spectral-particles flag as a lightweight hint
-            )
-        }
+        // Background radial animation intentionally disabled.
 
         // Main drawing layer (for edge fades)
         val saveCount = canvas.saveLayer(0f, 0f, width.toFloat(), height.toFloat(), null)
@@ -667,19 +702,71 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         currentTimeMs: Long,
     ) {
         val wordX = marginLeft + word.xOffset
-        val wordTop = line.y + word.yOffset
-        val wordBottom = wordTop + rowHeight
-        val wordRight = wordX + word.width + FEATHER_PX * 2
-        val sweepX = wordX + word.width * progress
+        val clampedProgress = progress.coerceIn(0f, 1f)
+        val postEndSettle = smootherStep(((progress - 1f) / 0.35f).coerceIn(0f, 1f))
+        val sweepX = wordX + word.width * clampedProgress + FEATHER_PX * 2f * postEndSettle
+        val shouldRenderWipeShader = KaraokeHighlightStateMachine.shouldRenderWipeShader(progress)
 
-        canvas.save()
-        canvas.saveLayer(wordX - FEATHER_PX, wordTop - rowHeight, wordRight, wordBottom + rowHeight, null)
+        if (!shouldRenderWipeShader) {
+            if (useCharacterLift) {
+                drawWordCharactersWithLift(
+                    canvas = canvas,
+                    line = line,
+                    word = word,
+                    progress = progress.coerceAtLeast(0f),
+                    paint = paint,
+                    rowHeight = rowHeight,
+                    finalLiftRatio = finalLiftRatio,
+                )
+            } else {
+                drawWordTranslated(canvas, line, word, paint, -rowHeight * finalLiftRatio)
+            }
+
+            val wordDurationMs = word.endMs - word.startMs
+            if (wordDurationMs >= 900L) {
+                drawSweepGlowForWords(
+                    canvas = canvas,
+                    line = line,
+                    words = listOf(word),
+                    sweepX = sweepX,
+                    glowProgress = getSustainedGlowProgress(clampedProgress),
+                    paint = paint,
+                    rowHeight = rowHeight,
+                    translateY = -rowHeight * finalLiftRatio,
+                    currentTimeMs = currentTimeMs,
+                )
+            }
+            return
+        }
+
+        // Shader on the paint itself — no saveLayer/DST_IN, no visible boundary line.
+        // The bright text fades to transparent at sweepX; the dim base text underneath
+        // shows through organically, matching Apple Music's liquid fill look.
+        val endSoftness = smootherStep(((clampedProgress - 0.88f) / 0.12f).coerceIn(0f, 1f))
+        val fadeWidth = FEATHER_PX * (4f + 1.6f * endSoftness)
+        val r = Color.red(paint.color)
+        val g = Color.green(paint.color)
+        val b = Color.blue(paint.color)
+        val a = paint.alpha
+        val originalShader = paint.shader
+        paint.shader = LinearGradient(
+            sweepX - fadeWidth, 0f,
+            sweepX + fadeWidth * 0.25f, 0f,
+            intArrayOf(
+                Color.argb(a, r, g, b),
+                Color.argb(a, r, g, b),
+                Color.argb(0, r, g, b),
+            ),
+            floatArrayOf(0f, 0.60f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+
         if (useCharacterLift) {
             drawWordCharactersWithLift(
                 canvas = canvas,
                 line = line,
                 word = word,
-                progress = progress,
+                progress = progress.coerceAtLeast(0f),
                 paint = paint,
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
@@ -687,30 +774,144 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         } else {
             drawWordTranslated(canvas, line, word, paint, -rowHeight * finalLiftRatio)
         }
-        drawSweepGlowForWords(
-            canvas = canvas,
-            line = line,
-            words = listOf(word),
-            sweepX = sweepX,
-            glowProgress = progress,
-            paint = paint,
-            rowHeight = rowHeight,
-            translateY = -rowHeight * finalLiftRatio,
-            currentTimeMs = currentTimeMs,
-        )
 
-        val maskShader = LinearGradient(
-            sweepX - FEATHER_PX,
+        paint.shader = originalShader
+        // Keep stardust visible on short notes only for the cosmic profile.
+        // Long notes still use the stronger cross-theme glow path below.
+        val wordDurationMs = word.endMs - word.startMs
+        if (wordDurationMs < 900L && motionProfile == MotionProfile.COSMIC) {
+            paint.shader = null
+            drawProfileAccent(
+                canvas = canvas,
+                line = line,
+                words = listOf(word),
+                sweepX = sweepX,
+                glowProgress = clampedProgress.coerceAtLeast(0.24f),
+                rowHeight = rowHeight,
+                translateY = -rowHeight * finalLiftRatio,
+                currentTimeMs = currentTimeMs,
+            )
+            paint.shader = originalShader
+        }
+
+        // Glow for long-duration words (≥900ms) that don't qualify as growable.
+        // This is shared across all motion profiles.
+        if (wordDurationMs >= 900L) {
+            paint.shader = null
+            drawSweepGlowForWords(
+                canvas = canvas,
+                line = line,
+                words = listOf(word),
+                sweepX = sweepX,
+                glowProgress = getSustainedGlowProgress(clampedProgress),
+                paint = paint,
+                rowHeight = rowHeight,
+                translateY = -rowHeight * finalLiftRatio,
+                currentTimeMs = currentTimeMs,
+            )
+            paint.shader = originalShader
+        }
+    }
+
+    private fun drawWordPreHighlight(
+        canvas: Canvas,
+        line: LyricLine,
+        word: LyricWord,
+        progress: Float,
+        paint: Paint,
+        rowHeight: Float,
+    ) {
+        val wordX = marginLeft + word.xOffset
+        val wordTop = line.y + word.yOffset
+        val wordBottom = wordTop + rowHeight
+        val wordRight = wordX + word.width + FEATHER_PX * 2
+
+        // YouLyPlus pre-wipe-char:
+        // background-size = 0.75em, background-position from -0.75em to -0.375em.
+        val preBandWidth = (paint.textSize * 0.75f).coerceAtLeast(4f * density)
+        val preBandHalf = preBandWidth * 0.5f
+        val centerStart = wordX - paint.textSize * 0.375f
+        val centerEnd = wordX
+        val bandCenter = centerStart + (centerEnd - centerStart) * progress.coerceIn(0f, 1f)
+        val liftRatio = if (word.isBackground) 0.025f else 0.035f
+        val preLiftY = -rowHeight * liftRatio * smootherStep(progress)
+
+        canvas.save()
+        canvas.saveLayer(wordX - FEATHER_PX, wordTop - rowHeight, wordRight, wordBottom + rowHeight, null)
+        drawWordTranslated(canvas, line, word, paint, preLiftY)
+
+        val preMaskShader = LinearGradient(
+            bandCenter - preBandHalf,
             0f,
-            sweepX,
+            bandCenter + preBandHalf,
             0f,
-            intArrayOf(Color.BLACK, Color.TRANSPARENT),
-            null,
+            intArrayOf(Color.TRANSPARENT, Color.BLACK, Color.TRANSPARENT),
+            floatArrayOf(0f, 0.5f, 1f),
             Shader.TileMode.CLAMP,
         )
-        sweepMaskPaint.shader = maskShader
-        canvas.drawRect(wordX - FEATHER_PX, wordTop, wordRight, wordBottom + rowHeight, sweepMaskPaint)
+        sweepMaskPaint.shader = preMaskShader
+        canvas.drawRect(
+            wordX - FEATHER_PX,
+            wordTop - rowHeight,
+            wordRight,
+            wordBottom + rowHeight,
+            sweepMaskPaint,
+        )
         canvas.restore()
+        canvas.restore()
+    }
+
+    private fun drawCompletedWordWithLift(
+        canvas: Canvas,
+        line: LyricLine,
+        word: LyricWord,
+        paint: Paint,
+        rowHeight: Float,
+        finalLiftRatio: Float,
+        currentTimeMs: Long,
+        keepCharacterLift: Boolean,
+    ) {
+        // Keep completed words in lifted character style while this line stays active
+        // (including silent gap until next estrofa starts).
+        if (keepCharacterLift) {
+            val wordDurationMs = (word.endMs - word.startMs).coerceAtLeast(1L).toFloat()
+            val completedAgeMs = (currentTimeMs - word.endMs).coerceAtLeast(0L).toFloat()
+            val keepProgress = 1f + (completedAgeMs / wordDurationMs)
+            drawWordCharactersWithLift(
+                canvas = canvas,
+                line = line,
+                word = word,
+                progress = keepProgress,
+                paint = paint,
+                rowHeight = rowHeight,
+                finalLiftRatio = finalLiftRatio,
+            )
+            return
+        }
+
+        val originalAlpha = paint.alpha
+        val shadowAlpha = (originalAlpha * completedLiftShadowAlphaFactor)
+            .toInt()
+            .coerceIn(0, completedLiftShadowAlphaCap)
+
+        canvas.save()
+        canvas.translate(0f, -rowHeight * finalLiftRatio)
+        if (shadowAlpha > 0) {
+            paint.setShadowLayer(
+                rowHeight * completedLiftShadowRadiusRatio,
+                0f,
+                rowHeight * completedLiftShadowYOffsetRatio,
+                Color.argb(
+                    shadowAlpha,
+                    Color.red(glowColor),
+                    Color.green(glowColor),
+                    Color.blue(glowColor),
+                ),
+            )
+        }
+        drawWord(canvas, line, word, paint)
+        paint.clearShadowLayer()
+        paint.alpha = originalAlpha
         canvas.restore()
     }
 
@@ -726,6 +927,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         currentTimeMs: Long,
     ) {
         if (words.isEmpty()) return
+        val clampedProgress = progress.coerceIn(0f, 1f)
+        val shouldRenderWipeShader = KaraokeHighlightStateMachine.shouldRenderWipeShader(progress)
 
         val firstWord = words.first()
         val lastWord = words.last()
@@ -734,13 +937,48 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val wordBottom = line.y + words.maxOf { it.yOffset } + rowHeight
         val wordRight = marginLeft + lastWord.xOffset + lastWord.width + FEATHER_PX * 2
 
-        canvas.save()
-        canvas.saveLayer(wordLeft - FEATHER_PX, wordTop - rowHeight, wordRight, wordBottom + rowHeight, null)
+        if (!shouldRenderWipeShader) {
+            drawVisualWordCharactersWithLift(
+                canvas = canvas,
+                line = line,
+                words = words,
+                progress = progress.coerceAtLeast(0f),
+                paint = paint,
+                rowHeight = rowHeight,
+                finalLiftRatio = finalLiftRatio,
+                marginLeft = marginLeft,
+                density = density,
+                glowColor = glowColor,
+                smootherStep = ::smootherStep,
+            )
+            return
+        }
+
+        // Shader on the paint itself — no saveLayer/DST_IN needed.
+        val endSoftness = smootherStep(((clampedProgress - 0.88f) / 0.12f).coerceIn(0f, 1f))
+        val fadeWidth = FEATHER_PX * (4f + 1.6f * endSoftness)
+        val r = Color.red(paint.color)
+        val g = Color.green(paint.color)
+        val b = Color.blue(paint.color)
+        val a = paint.alpha
+        val originalShader = paint.shader
+        paint.shader = LinearGradient(
+            sweepX - fadeWidth, 0f,
+            sweepX + fadeWidth * 0.25f, 0f,
+            intArrayOf(
+                Color.argb(a, r, g, b),
+                Color.argb(a, r, g, b),
+                Color.argb(0, r, g, b),
+            ),
+            floatArrayOf(0f, 0.60f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+
         drawVisualWordCharactersWithLift(
             canvas = canvas,
             line = line,
             words = words,
-            progress = progress,
+            progress = progress.coerceAtLeast(0f),
             paint = paint,
             rowHeight = rowHeight,
             finalLiftRatio = finalLiftRatio,
@@ -749,31 +987,15 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             glowColor = glowColor,
             smootherStep = ::smootherStep,
         )
-        drawSweepGlowForWords(
-            canvas = canvas,
-            line = line,
-            words = words,
-            sweepX = sweepX,
-            glowProgress = progress,
-            paint = paint,
-            rowHeight = rowHeight,
-            translateY = -rowHeight * finalLiftRatio,
-            currentTimeMs = currentTimeMs,
-        )
 
-        val maskShader = LinearGradient(
-            sweepX - FEATHER_PX,
-            0f,
-            sweepX,
-            0f,
-            intArrayOf(Color.BLACK, Color.TRANSPARENT),
-            null,
-            Shader.TileMode.CLAMP,
-        )
-        sweepMaskPaint.shader = maskShader
-        canvas.drawRect(wordLeft - FEATHER_PX, wordTop, wordRight, wordBottom + rowHeight, sweepMaskPaint)
-        canvas.restore()
-        canvas.restore()
+        paint.shader = originalShader
+    }
+
+    private fun getSustainedGlowProgress(progress: Float): Float {
+        val t = progress.coerceIn(0f, 1f)
+        if (t <= 0f) return 0f
+        val eased = smootherStep(t)
+        return (0.22f + eased * 0.70f).coerceAtMost(0.92f)
     }
 
     private fun drawWordCharactersWithLift(
@@ -877,15 +1099,18 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val glowBandEnd = sweepX + profileGlowWidth * preset.glowBandEndScale
         val glowFadeWidth = profileGlowWidth * preset.glowFadeScale
         val originalAlpha = paint.alpha
+        val glowCoreAlpha = (glowAlpha * 0.78f).toInt().coerceIn(72, 178)
         val profileGlowColor = getProfileGlowColor(motionProfile, glowColor)
+        val baseGlowRadius = glowRadius * 0.58f
 
-        paint.alpha = glowAlpha
+        // Core first: keep letterforms bright/defined inside the glow band
+        paint.alpha = glowCoreAlpha
         paint.setShadowLayer(
-            glowRadius,
+            baseGlowRadius,
             0f,
             0f,
             Color.argb(
-                (glowAlpha * preset.glowShadowBoost).toInt().coerceIn(0, preset.glowShadowClamp),
+                (glowAlpha * 0.52f).toInt().coerceIn(0, (preset.glowShadowClamp * 0.72f).toInt()),
                 Color.red(profileGlowColor),
                 Color.green(profileGlowColor),
                 Color.blue(profileGlowColor)
@@ -903,16 +1128,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         for (word in words) {
             drawWord(canvas, line, word, paint)
         }
-        drawProfileAccent(
-            canvas = canvas,
-            line = line,
-            words = words,
-            sweepX = sweepX,
-            glowProgress = glowProgress,
-            rowHeight = rowHeight,
-            translateY = translateY,
-            currentTimeMs = currentTimeMs,
-        )
         canvas.translate(0f, -translateY)
 
         val glowMaskShader = LinearGradient(
@@ -961,21 +1176,19 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             density = density,
             glowColor = glowColor,
         )
-        if (motionProfile == MotionProfile.COSMIC) {
-            particleSystem.emitSpectralParticles(
-                enableSpectralParticles = enableSpectralParticles,
-                motionProfile = motionProfile,
-                currentTimeMs = currentTimeMs,
-                line = line,
-                words = words,
-                sweepX = sweepX,
-                glowProgress = glowProgress,
-                rowHeight = rowHeight,
-                translateY = translateY,
-                density = density,
-                glowColor = glowColor,
-            )
-        }
+        particleSystem.emitSpectralParticles(
+            enableSpectralParticles = enableSpectralParticles,
+            motionProfile = motionProfile,
+            currentTimeMs = currentTimeMs,
+            line = line,
+            words = words,
+            sweepX = sweepX,
+            glowProgress = glowProgress,
+            rowHeight = rowHeight,
+            translateY = translateY,
+            density = density,
+            glowColor = glowColor,
+        )
         profileRenderer.drawAccent(
             KaraokeAccentContext(
                 canvas = canvas,
@@ -1068,7 +1281,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     companion object {
-        private const val MAX_SPECTRAL_PARTICLES = 32
+        private const val MAX_SPECTRAL_PARTICLES = 128
         private const val MAX_RETAINED_PROFILE_ACCENTS = 128
     }
     // EDGE FADES
@@ -1100,6 +1313,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             config = LyricsLayoutConfig(
                 width = width,
                 marginLeft = marginLeft,
+                marginRight = marginRight,
                 lineHeight = lineHeight,
                 lineSpacing = lineSpacing,
                 spaceWidth = spaceWidth,

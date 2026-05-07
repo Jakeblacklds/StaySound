@@ -1,5 +1,6 @@
 import { CustomIcon, DownloadAnimatedButton, EmptyState, Skeleton, TrackListItem } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
+import { SoulseekCompressedFallbackError } from '@/src/services/soulseekDownloadService';
 import { createTidalStreamTrack, getTidalArtistDetail, isValidAudioFile } from '@/src/services/tidalService';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
@@ -19,10 +20,12 @@ const DEFAULT_VISIBLE_TOP_TRACKS = 8;
 const AnimatedBlurView = Animated.createAnimatedComponent(BlurView);
 
 export default function TidalArtistScreen() {
-    const { id, name } = useLocalSearchParams<{ id: string; name?: string }>();
+    const { id, name, source } = useLocalSearchParams<{ id: string; name?: string; source?: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
     const scrollY = useSharedValue(0);
+    const isSoulseekSource = source === 'soulseek';
+    const isQobuzSource = source === 'qobuz';
 
     const [artistDetail, setArtistDetail] = useState<TidalArtistDetail | null>(null);
     const [isLoading, setIsLoading] = useState(true);
@@ -32,11 +35,12 @@ export default function TidalArtistScreen() {
     const {
         downloads,
         download,
+        downloadFromSoulseek,
         cancelDownload,
         isDownloaded,
         getDownloadedTrack,
         forgetDownloadedTrack,
-    } = useTidalDownload();
+    } = useTidalDownload({ qobuzOnly: isQobuzSource });
 
     const play = usePlayerStore(s => s.play);
     const currentPlayerTrack = usePlayerStore(s => s.currentTrack);
@@ -107,6 +111,49 @@ export default function TidalArtistScreen() {
         opacity: interpolate(scrollY.value, [0, HEADER_HEIGHT * 0.38], [0, 0.38], 'clamp'),
     }));
 
+    const handleTrackDownload = useCallback(async (track: TidalTrack) => {
+        try {
+            const state = downloads.get(track.id);
+            if (isDownloaded(track.id) || state?.status === 'done') {
+                return;
+            }
+            if (state?.status === 'downloading') {
+                await cancelDownload(track.id);
+                return;
+            }
+
+            if (isSoulseekSource) {
+                try {
+                    await downloadFromSoulseek(track);
+                } catch (soulseekError) {
+                    if (soulseekError instanceof SoulseekCompressedFallbackError) {
+                        Alert.alert(
+                            'No hay FLAC',
+                            'Soulseek encontro MP3 para esta cancion.',
+                            [
+                                { text: 'Cancelar', style: 'cancel' },
+                                {
+                                    text: 'Descargar MP3',
+                                    onPress: () => {
+                                        void downloadFromSoulseek(track, { allowCompressedFallback: true });
+                                    },
+                                },
+                            ],
+                        );
+                        return;
+                    }
+                    throw soulseekError;
+                }
+                return;
+            }
+
+            await download(track);
+        } catch (downloadError) {
+            const message = downloadError instanceof Error ? downloadError.message : 'Error en descarga';
+            Alert.alert('Descarga fallida', message);
+        }
+    }, [cancelDownload, download, downloadFromSoulseek, downloads, isDownloaded, isSoulseekSource]);
+
     const handleTidalPlay = useCallback(async (track: TidalTrack) => {
         setPendingTrackPreview({
             id: `tidal_pending_${track.id}`,
@@ -138,8 +185,21 @@ export default function TidalArtistScreen() {
                 return;
             }
 
+            if (isSoulseekSource) {
+                await handleTrackDownload(track);
+                const localTrack = useLibraryStore.getState().tracks.get(`tidal_${track.id}`);
+                if (!localTrack) {
+                    throw new Error('No se pudo preparar el archivo local');
+                }
+                await play(localTrack, [localTrack]);
+                return;
+            }
+
             try {
-                const streamTrack = await createTidalStreamTrack(track);
+                const streamTrack = await createTidalStreamTrack(
+                    track,
+                    isQobuzSource ? { qobuzOnly: true } : {},
+                );
                 await play(streamTrack, [streamTrack]);
             } catch (streamError) {
                 const message = streamError instanceof Error ? streamError.message : '';
@@ -162,28 +222,17 @@ export default function TidalArtistScreen() {
             const message = playError instanceof Error ? playError.message : 'No se pudo reproducir esta pista';
             Alert.alert('Error', message);
         }
-    }, [download, forgetDownloadedTrack, getDownloadedTrack, play, setPendingTrackPreview]);
-
-    const handleTidalDownload = useCallback(async (track: TidalTrack) => {
-        try {
-            const state = downloads.get(track.id);
-            if (isDownloaded(track.id) || state?.status === 'done') {
-                return;
-            }
-            if (state?.status === 'downloading') {
-                await cancelDownload(track.id);
-                return;
-            }
-            await download(track);
-        } catch (downloadError) {
-            const message = downloadError instanceof Error ? downloadError.message : 'Error en descarga';
-            Alert.alert('Descarga fallida', message);
-        }
-    }, [cancelDownload, download, downloads, isDownloaded]);
+    }, [download, forgetDownloadedTrack, getDownloadedTrack, handleTrackDownload, isQobuzSource, isSoulseekSource, play, setPendingTrackPreview]);
 
     const openAlbum = useCallback((albumId: number) => {
-        router.push({ pathname: '/tidal-album/[id]', params: { id: String(albumId) } });
-    }, []);
+        router.push({
+            pathname: '/tidal-album/[id]',
+            params: {
+                id: String(albumId),
+                source: isSoulseekSource ? 'soulseek' : isQobuzSource ? 'qobuz' : 'tidal',
+            },
+        });
+    }, [isQobuzSource, isSoulseekSource]);
 
     const sortedAlbums = useMemo(() => {
         if (!artistDetail || !artistDetail.albums) return [];
@@ -341,7 +390,7 @@ export default function TidalArtistScreen() {
                                             visualStyle="library"
                                             isPlaying={isTrackActive}
                                             onPress={() => handleTidalPlay(track)}
-                                            onOptionsPress={downloaded ? undefined : () => handleTidalDownload(track)}
+                                            onOptionsPress={downloaded ? undefined : () => handleTrackDownload(track)}
                                             optionsIcon={downloaded ? 'Checkmark' : (isDownloading ? 'Pause' : 'Descargar')}
                                             optionsIconColor={downloaded ? theme.colors.primary : theme.colors.onSurfaceVariant}
                                             optionsBusy={isDownloading}
@@ -355,7 +404,7 @@ export default function TidalArtistScreen() {
                                                     }
                                                     progress={progress}
                                                     size={20}
-                                                    onPress={() => handleTidalDownload(track)}
+                                                    onPress={() => handleTrackDownload(track)}
                                                 />
                                             )}
                                         />

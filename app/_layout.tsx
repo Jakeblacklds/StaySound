@@ -10,6 +10,7 @@ import 'react-native-reanimated';
 
 import { FullPlayer } from '@/src/components/player';
 import { scheduleAndroidAutoCatalogSync } from '@/src/services/androidAutoCatalogSync';
+import { bootstrapAppUpdates } from '@/src/services/appUpdateService';
 import { refreshAndroidEqualizerCapabilities, syncAndroidEqualizerFromSettings } from '@/src/services/androidEqualizerService';
 import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
 import { ensureOnboardingMirrorPlaylist } from '@/src/services/onboardingTasteService';
@@ -211,6 +212,18 @@ function EqualizerBootstrap() {
   return null;
 }
 
+function AppUpdateBootstrap({ isAppReady }: { isAppReady: boolean }) {
+  useEffect(() => {
+    if (!isAppReady) {
+      return;
+    }
+
+    void bootstrapAppUpdates();
+  }, [isAppReady]);
+
+  return null;
+}
+
 function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
   const { theme, isDark } = useTheme();
   const authStatus = useAuthStore(state => state.status);
@@ -303,6 +316,7 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={styles.container}>
             <SessionBootstrap />
+            <AppUpdateBootstrap isAppReady={isAppReady} />
             <AndroidAutoCatalogBootstrap />
             <EqualizerBootstrap />
             <AudioSync />

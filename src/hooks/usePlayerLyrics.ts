@@ -148,14 +148,15 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
   useAnimatedReaction(
     () => {
       if (!visible) return -1;
-      return Math.floor(positionShared.value / 16) * 16;
+      const stepMs = lyricsMode === 'lrc' ? 32 : 48;
+      return Math.floor(positionShared.value / stepMs) * stepMs;
     },
     (current, previous) => {
       if (current >= 0 && current !== previous) {
-        runOnJS(updateNativePosition)(positionShared.value);
+        runOnJS(updateNativePosition)(current);
       }
     },
-    [positionShared, visible]
+    [lyricsMode, positionShared, visible]
   );
 
   const applyLyricsOffsetStep = useCallback((deltaMs: number) => {

@@ -1,9 +1,11 @@
-﻿import { CustomIcon, IconName } from '@/src/components/ui';
-import { typeScale, useAnimatedColors, useTheme } from '@/src/theme';
+import { useDynamicColors } from '@/src/hooks';
+import { usePlayerStore } from '@/src/stores';
+import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { ColorTokens } from '@/src/types/theme';
-import { pickReadableColor } from '@/src/utils/colorContrast';
+import { mixHexColors, pickReadableColor } from '@/src/utils/colorContrast';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
+import * as Haptics from 'expo-haptics';
 import React, { memo, useEffect, useMemo, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -15,12 +17,13 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { TAB_BAR_HEIGHT as BAR_HEIGHT } from '../player/playerLayout';
 
-const BAR_HEIGHT = 78;
 const H_INSET = 12;
-const PILL_W = 68;
-const PILL_H = 36;
+const PILL_W = 54;
+const PILL_H = 34;
 const ICON_SIZE = 28;
+const SEARCH_ICON_SIZE = ICON_SIZE;
 const LABEL_RISE = 18;
 const BAR_CONTENT_OFFSET = -2;
 const PILL_TOP = Math.round((BAR_HEIGHT - PILL_H) / 2);
@@ -46,7 +49,7 @@ function getTabColors(colors: ColorTokens) {
 
 type ItemProps = {
   label: string;
-  icon: IconName | 'magnify';
+  icon: string;
   focused: boolean;
   activeIconColor: string;
   mutedColor: string;
@@ -107,28 +110,11 @@ const TabItem = memo(function TabItem({
       </Animated.Text>
 
       <Animated.View style={[styles.iconArea, iconAnim]}>
-        {icon === 'magnify' ? (
-          <MaterialCommunityIcons
-            name="magnify"
-            size={ICON_SIZE}
-            color={focused ? activeIconColor : mutedColor}
-          />
-        ) : focused ? (
-          <CustomIcon
-            name={icon as IconName}
-            size={ICON_SIZE}
-            color={activeIconColor}
-            forceDynamicColor={false}
-            preserveColor={true}
-          />
-        ) : (
-          <CustomIcon
-            name={icon as IconName}
-            size={ICON_SIZE}
-            color={mutedColor}
-            forceDynamicColor={true}
-          />
-        )}
+        <MaterialCommunityIcons
+          name={icon as any}
+          size={ICON_SIZE}
+          color={focused ? activeIconColor : mutedColor}
+        />
       </Animated.View>
     </Pressable>
   );
@@ -139,10 +125,44 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
   descriptors,
   navigation,
 }: BottomTabBarProps) {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const insets = useSafeAreaInsets();
+  const performanceProfile = usePerformanceProfile();
   const aC = useAnimatedColors();
+  const expansion = usePlayerStore(state => state.expansion);
+  const currentTrack = usePlayerStore(state => state.currentTrack);
+  const pendingTrackPreview = usePlayerStore(state => state.pendingTrackPreview);
   const [barWidth, setBarWidth] = useState(0);
+
+  const navArtworkUri = currentTrack?.artworkThumb || pendingTrackPreview?.artwork || currentTrack?.artwork;
+  const { colors: albumColors, animated: navAnimColors } = useDynamicColors(navArtworkUri, {
+    enabled: performanceProfile.enableDynamicColors,
+  });
+  const shouldUseThemePlayerColors = !performanceProfile.enableDynamicColors;
+  const navPlayerColors = shouldUseThemePlayerColors
+    ? {
+      primary: theme.colors.primary,
+      secondary: theme.colors.secondary,
+      background: theme.colors.background,
+      text: theme.colors.onSurface,
+      onPrimary: theme.colors.onPrimary,
+      onSurface: theme.colors.onSurface,
+      accent: theme.colors.primary,
+      isDark,
+    }
+    : albumColors;
+  const navSurfaceColor = React.useMemo(() => {
+    if (shouldUseThemePlayerColors) {
+      return theme.colors.surface;
+    }
+
+    // Mirror SharedPlayerShell surface blending exactly to avoid visible seam.
+    return mixHexColors(
+      theme.colors.surface,
+      navPlayerColors.background || theme.colors.surface,
+      isDark ? 1.0 : 0.25
+    );
+  }, [isDark, navPlayerColors.background, shouldUseThemePlayerColors, theme.colors.surface]);
 
   const visibleRoutes = useMemo(
     () =>
@@ -186,9 +206,23 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
     backgroundColor: aC.primaryContainer?.value ?? theme.colors.primaryContainer,
   }));
 
-  const navBgStyle = useAnimatedStyle(() => ({
-    backgroundColor: aC.surface.value,
-  }));
+  const navBgStyle = useAnimatedStyle(() => {
+    const dynamicBackground = navAnimColors?.background?.value;
+    return {
+      backgroundColor: dynamicBackground || navSurfaceColor || aC.surface.value,
+    };
+  });
+
+  const tabBarContentStyle = useAnimatedStyle(() => {
+    const p = expansion?.value ?? 0;
+    // Slide out quickly (done by expansion=0.06) so it clears the view
+    // before the FullPlayer background is visible enough to create a seam.
+    const travel = interpolate(p, [0, 0.06, 1], [0, BAR_HEIGHT + insets.bottom + 12, BAR_HEIGHT + insets.bottom + 12]);
+
+    return {
+      transform: [{ translateY: travel }],
+    };
+  }, [insets.bottom, expansion]);
 
   const palette = getTabColors(theme.colors);
 
@@ -196,7 +230,8 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
     <View style={[styles.outer, { height: BAR_HEIGHT + insets.bottom }]} pointerEvents="box-none">
       <Animated.View style={[StyleSheet.absoluteFill, navBgStyle]} />
 
-      <View style={styles.itemsRow} onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}>
+      <Animated.View style={tabBarContentStyle}>
+        <View style={styles.itemsRow} onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}>
         {slotWidth > 0 && (
           <Animated.View
             pointerEvents="none"
@@ -221,18 +256,19 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
                 ? options.title
                 : route.name;
 
-          const iconName: IconName | 'magnify' =
+          const iconName =
             route.name === 'index'
-              ? 'Home'
+              ? (focused ? 'home' : 'home-outline')
               : route.name === 'library'
-                ? 'Library'
+                ? (focused ? 'music-box-multiple' : 'music-box-multiple-outline')
                 : route.name === 'playlists'
-                ? 'Playlist'
-                : route.name === 'tidal'
-                    ? 'magnify'
-                    : 'Ajustes';
+                  ? (focused ? 'playlist-music' : 'playlist-music-outline')
+                  : route.name === 'tidal'
+                    ? (focused ? 'magnify' : 'magnify')
+                    : (focused ? 'cog' : 'cog-outline');
 
           const onPress = () => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             const event = navigation.emit({
               type: 'tabPress',
               target: route.key,
@@ -262,9 +298,9 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
             </View>
           );
         })}
-      </View>
+        </View>
 
-      <View style={{ height: insets.bottom }} />
+      </Animated.View>
     </View>
   );
 });

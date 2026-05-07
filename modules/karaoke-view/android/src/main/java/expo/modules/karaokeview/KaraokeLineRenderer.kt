@@ -53,6 +53,16 @@ internal interface KaraokeLineRenderCallbacks {
         paint: Paint,
         translateY: Float,
     )
+    fun drawCompletedWordWithLift(
+        canvas: Canvas,
+        line: LyricLine,
+        word: LyricWord,
+        paint: Paint,
+        rowHeight: Float,
+        finalLiftRatio: Float,
+        currentTimeMs: Long,
+        keepCharacterLift: Boolean,
+    )
     fun drawGrowableVisualWordWipeHighlight(
         canvas: Canvas,
         line: LyricLine,
@@ -75,6 +85,14 @@ internal interface KaraokeLineRenderCallbacks {
         useCharacterLift: Boolean,
         currentTimeMs: Long,
     )
+    fun drawWordPreHighlight(
+        canvas: Canvas,
+        line: LyricLine,
+        word: LyricWord,
+        progress: Float,
+        paint: Paint,
+        rowHeight: Float,
+    )
     fun drawMotionAccent(
         canvas: Canvas,
         line: LyricLine,
@@ -86,6 +104,9 @@ internal interface KaraokeLineRenderCallbacks {
 }
 
 internal class KaraokeLineRenderer {
+    private val foregroundLiftRatio = 0.035f
+    private val backgroundLiftRatio = 0.025f
+
     private val lineSweepMaskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
     }
@@ -106,16 +127,30 @@ internal class KaraokeLineRenderer {
         val isActive = timeSec in lineStartSec..lineEndSec
         val isPast = timeSec > lineEndSec
         val relativeIndex = if (activeLineIndex >= 0) lineIndex - activeLineIndex else 0
-        val distance = abs(relativeIndex)
-        val isAboveActive = relativeIndex < 0
-        val isBelowActive = relativeIndex > 0
+        val postLineGraceMs = calculatePostLineGraceMs(line)
+        val timeSinceLineEndMs = (currentTimeMs - line.endMs).coerceAtLeast(0L)
+        val isFinishingAfterEnd = isPast && timeSinceLineEndMs < postLineGraceMs
+        val recedingAgeMs = if (isPast) {
+            (timeSinceLineEndMs - postLineGraceMs).coerceAtLeast(0L)
+        } else {
+            0L
+        }
+        val isRecedingFromActive = isPast &&
+            relativeIndex == -1 &&
+            recedingAgeMs < config.hierarchyTransitionWindowMs.toLong()
+        // Keep a line visually active while its own timing window is still active,
+        // and through its final lift/sweep settle.
+        val visualRelativeIndex = if (isActive || isFinishingAfterEnd) 0 else relativeIndex
+        val distance = abs(visualRelativeIndex)
+        val isAboveActive = visualRelativeIndex < 0
+        val isBelowActive = visualRelativeIndex > 0
         val transitionProgress = when {
             lineIndex == activeLineIndex + 1 -> {
                 val timeUntilStart = (line.startMs - currentTimeMs).toFloat()
                 (1f - (timeUntilStart / config.hierarchyTransitionWindowMs)).coerceIn(0f, 1f)
             }
             lineIndex == activeLineIndex - 1 -> {
-                val timeSinceEnd = (currentTimeMs - line.endMs).toFloat()
+                val timeSinceEnd = recedingAgeMs.toFloat()
                 (1f - (timeSinceEnd / config.hierarchyTransitionWindowMs)).coerceIn(0f, 1f)
             }
             else -> 0f
@@ -123,17 +158,20 @@ internal class KaraokeLineRenderer {
         val transitionEase = callbacks.smootherStep(transitionProgress)
 
         val scale = when {
-            relativeIndex == 0 -> 1.0f
-            relativeIndex == 1 -> 0.94f + 0.06f * transitionEase
+            visualRelativeIndex == 0 -> 1.0f
+            visualRelativeIndex == 1 -> 0.94f + 0.06f * transitionEase
+            // Fades from 1.0 → 0.94 as the line recedes above active.
+            isAboveActive && distance == 1 -> 1.0f - 0.06f * (1f - transitionEase)
             else -> 0.94f
         }
         val baseAlpha = when {
-            relativeIndex == 0  -> 210
-            relativeIndex == 1  -> (175 + 35 * transitionEase).toInt()
+            visualRelativeIndex == 0  -> 210
+            visualRelativeIndex == 1  -> (175 + 35 * transitionEase).toInt()
             isBelowActive && distance == 2 -> 130
             isBelowActive       -> 95
-            isAboveActive && distance == 1 -> 110
-            isAboveActive && distance == 2 -> 82
+            // Fades from 210 → 110 over the transition window after line ends.
+            isAboveActive && distance == 1 -> (210f - (210f - 110f) * (1f - transitionEase)).toInt()
+            isAboveActive && distance == 2 -> (110f - (110f - 82f) * (1f - transitionEase)).toInt()
             isAboveActive       -> 62
             else                -> 140
         }.coerceIn(50, 255)
@@ -144,16 +182,20 @@ internal class KaraokeLineRenderer {
             else -> 0f
         }
         val highlightAlpha = when {
-            relativeIndex == 0 -> 255
+            visualRelativeIndex == 0 -> 255
+            // Line just above active (distance=1): transitionEase goes 1→0 as time passes since it ended.
+            // So (1 - transitionEase) goes 0→1 → alpha fades from 255 down to 72 over the window.
+            isAboveActive && distance == 1 -> (255f - (255f - 72f) * (1f - transitionEase)).toInt()
+            // Two lines above: blend 72 → 46 as it recedes further.
+            isAboveActive && distance == 2 -> (72f - (72f - 46f) * (1f - transitionEase)).toInt()
+            isAboveActive -> 46
             isBelowActive && distance == 1 -> 182
             isBelowActive && distance == 2 -> 100
             isBelowActive -> 68
-            isAboveActive && distance == 1 -> 72
-            isAboveActive -> 46
             else -> 180
         }.coerceIn(24, 255)
         val highlightBlurRadius = when {
-            relativeIndex == 0 -> 0f
+            visualRelativeIndex == 0 -> 0f
             isBelowActive && distance == 1 -> 2.2f * config.density
             isBelowActive && distance == 2 -> 5f * config.density
             isBelowActive -> 7.2f * config.density
@@ -203,6 +245,12 @@ internal class KaraokeLineRenderer {
         config.basePaint.maskFilter = null
         config.basePaint.clearShadowLayer()
 
+        val isWithinGrace = isFinishingAfterEnd
+        val keepLineCharacterLift = lineIndex == activeLineIndex ||
+            isActive ||
+            isFinishingAfterEnd ||
+            isRecedingFromActive
+
         if (isActive || isPast) {
             if (!config.isLineByLine) {
                 drawSyncedHighlight(
@@ -210,6 +258,7 @@ internal class KaraokeLineRenderer {
                     line = line,
                     currentTimeMs = currentTimeMs,
                     isPast = isPast,
+                    keepCompletedCharacterLift = keepLineCharacterLift || isWithinGrace,
                     activeHighlightState = activeHighlightState,
                     lineHighlightAlpha = highlightAlpha,
                     lineHighlightBlurRadius = highlightBlurRadius,
@@ -217,7 +266,15 @@ internal class KaraokeLineRenderer {
                     callbacks = callbacks,
                 )
                 if (line.backgroundWords.isNotEmpty()) {
-                    drawBackgroundVocalLayer(canvas, line, currentTimeMs, config, callbacks)
+                    drawBackgroundVocalLayer(
+                        canvas = canvas,
+                        line = line,
+                        currentTimeMs = currentTimeMs,
+                        keepCompletedCharacterLift = keepLineCharacterLift || isWithinGrace,
+                        fadeOutDelayMs = postLineGraceMs,
+                        config = config,
+                        callbacks = callbacks,
+                    )
                 }
                 canvas.restore()
                 return
@@ -320,10 +377,41 @@ internal class KaraokeLineRenderer {
         }
 
         if (line.backgroundWords.isNotEmpty()) {
-            drawBackgroundVocalLayer(canvas, line, currentTimeMs, config, callbacks)
+            drawBackgroundVocalLayer(
+                canvas = canvas,
+                line = line,
+                currentTimeMs = currentTimeMs,
+                keepCompletedCharacterLift = lineIndex == activeLineIndex,
+                fadeOutDelayMs = 0L,
+                config = config,
+                callbacks = callbacks,
+            )
         }
 
         canvas.restore()
+    }
+
+    private fun calculatePostLineGraceMs(line: LyricLine): Long {
+        val mainSettleMs = calculateWordsSettleMs(line.words)
+        val backgroundSettleMs = calculateWordsSettleMs(line.backgroundWords)
+        return maxOf(mainSettleMs, backgroundSettleMs)
+            .coerceAtLeast(900L)
+            .coerceAtMost(2600L)
+    }
+
+    private fun calculateWordsSettleMs(words: List<LyricWord>): Long {
+        val lastWord = words.lastOrNull() ?: return 0L
+        val durationMs = (lastWord.endMs - lastWord.startMs).coerceAtLeast(1L)
+        val glyphCount = getDrawableGlyphCount(lastWord).coerceAtLeast(1)
+        return (durationMs * (0.55f + glyphCount * 0.09f)).toLong()
+    }
+
+    private fun getDrawableGlyphCount(word: LyricWord): Int {
+        return if (word.drawableGlyphCount > 0) {
+            word.drawableGlyphCount
+        } else {
+            word.text.count { !it.isWhitespace() }
+        }
     }
 
     private fun drawSyncedHighlight(
@@ -331,6 +419,7 @@ internal class KaraokeLineRenderer {
         line: LyricLine,
         currentTimeMs: Long,
         isPast: Boolean,
+        keepCompletedCharacterLift: Boolean,
         activeHighlightState: ActiveHighlightState?,
         lineHighlightAlpha: Int,
         lineHighlightBlurRadius: Float,
@@ -338,6 +427,19 @@ internal class KaraokeLineRenderer {
         callbacks: KaraokeLineRenderCallbacks,
     ) {
         val completedWordCount = line.words.count { currentTimeMs >= it.endMs }
+        val resolvedActiveHighlightState = activeHighlightState ?: run {
+            if (!keepCompletedCharacterLift || completedWordCount <= 0) {
+                null
+            } else {
+                buildHeldHighlightState(
+                    words = line.words,
+                    anchorIndex = (completedWordCount - 1).coerceIn(0, line.words.lastIndex),
+                    currentTimeMs = currentTimeMs,
+                    marginLeft = config.marginLeft,
+                    overshootPx = config.featherPx,
+                )
+            }
+        }
         config.highlightPaint.alpha = lineHighlightAlpha
         config.highlightPaint.maskFilter = if (lineHighlightBlurRadius > 0f) {
             BlurMaskFilter(lineHighlightBlurRadius, BlurMaskFilter.Blur.NORMAL)
@@ -345,14 +447,17 @@ internal class KaraokeLineRenderer {
             null
         }
 
-        val completedLimit = activeHighlightState?.completedLimit ?: completedWordCount
+        val completedLimit = resolvedActiveHighlightState?.completedLimit ?: completedWordCount
         for (index in 0 until completedLimit.coerceAtMost(line.words.size)) {
-            callbacks.drawWordTranslated(
+            callbacks.drawCompletedWordWithLift(
                 canvas = canvas,
                 line = line,
                 word = line.words[index],
                 paint = config.highlightPaint,
-                translateY = -config.lineHeight * 0.035f,
+                rowHeight = config.lineHeight,
+                finalLiftRatio = foregroundLiftRatio,
+                currentTimeMs = currentTimeMs,
+                keepCharacterLift = keepCompletedCharacterLift,
             )
         }
 
@@ -362,36 +467,47 @@ internal class KaraokeLineRenderer {
             words = line.words,
             currentTimeMs = currentTimeMs,
             rowHeight = config.lineHeight,
-            translateY = -config.lineHeight * 0.035f,
+            translateY = -config.lineHeight * foregroundLiftRatio,
         )
 
-        if (isPast || activeHighlightState == null) {
+        drawNextWordPreHighlight(
+            canvas = canvas,
+            line = line,
+            words = line.words,
+            activeHighlightState = resolvedActiveHighlightState,
+            currentTimeMs = currentTimeMs,
+            paint = config.highlightPaint,
+            rowHeight = config.lineHeight,
+            callbacks = callbacks,
+        )
+
+        if (resolvedActiveHighlightState == null || (isPast && !keepCompletedCharacterLift)) {
             config.highlightPaint.maskFilter = null
             return
         }
 
-        if (activeHighlightState.isGrowable) {
+        if (resolvedActiveHighlightState.isGrowable) {
             callbacks.drawGrowableVisualWordWipeHighlight(
                 canvas = canvas,
                 line = line,
-                words = line.words.slice(activeHighlightState.activeRange),
-                progress = activeHighlightState.progress,
-                sweepX = activeHighlightState.sweepX,
+                words = line.words.slice(resolvedActiveHighlightState.activeRange),
+                progress = resolvedActiveHighlightState.progress,
+                sweepX = resolvedActiveHighlightState.sweepX,
                 paint = config.highlightPaint,
                 rowHeight = config.lineHeight,
-                finalLiftRatio = 0.052f,
+                finalLiftRatio = foregroundLiftRatio,
                 currentTimeMs = currentTimeMs,
             )
         } else {
             callbacks.drawWordWipeHighlight(
                 canvas = canvas,
                 line = line,
-                word = line.words[activeHighlightState.activeWordIndex],
-                progress = activeHighlightState.progress,
+                word = line.words[resolvedActiveHighlightState.activeWordIndex],
+                progress = resolvedActiveHighlightState.progress,
                 paint = config.highlightPaint,
                 rowHeight = config.lineHeight,
-                finalLiftRatio = 0.052f,
-                useCharacterLift = false,
+                finalLiftRatio = foregroundLiftRatio,
+                useCharacterLift = true,
                 currentTimeMs = currentTimeMs,
             )
         }
@@ -402,6 +518,8 @@ internal class KaraokeLineRenderer {
         canvas: Canvas,
         line: LyricLine,
         currentTimeMs: Long,
+        keepCompletedCharacterLift: Boolean,
+        fadeOutDelayMs: Long,
         config: KaraokeLineRenderConfig,
         callbacks: KaraokeLineRenderCallbacks,
     ) {
@@ -409,23 +527,37 @@ internal class KaraokeLineRenderer {
 
         val revealProgress = ((currentTimeMs - line.startMs).toFloat() / config.backgroundRevealDurationMs).coerceIn(0f, 1f)
         val revealEase = smoothStep(revealProgress)
-        val fadeOutProgress = ((currentTimeMs - line.endMs).toFloat() / config.backgroundFadeOutDurationMs).coerceIn(0f, 1f)
+        val fadeOutStartMs = line.endMs + fadeOutDelayMs.coerceAtLeast(0L)
+        val fadeOutProgress = ((currentTimeMs - fadeOutStartMs).toFloat() / config.backgroundFadeOutDurationMs).coerceIn(0f, 1f)
         val fadeOutEase = 1f - smoothStep(fadeOutProgress)
         val layerVisibility = (revealEase * fadeOutEase).coerceIn(0f, 1f)
         if (layerVisibility <= 0.01f) return
 
         val completedWordCount = line.backgroundWords.count { currentTimeMs >= it.endMs }
         val activeHighlightState = buildActiveHighlightState(line.backgroundWords, currentTimeMs, config.marginLeft)
+        val resolvedActiveHighlightState = activeHighlightState ?: run {
+            if (!keepCompletedCharacterLift || completedWordCount <= 0) {
+                null
+            } else {
+                buildHeldHighlightState(
+                    words = line.backgroundWords,
+                    anchorIndex = (completedWordCount - 1).coerceIn(0, line.backgroundWords.lastIndex),
+                    currentTimeMs = currentTimeMs,
+                    marginLeft = config.marginLeft,
+                    overshootPx = config.featherPx,
+                )
+            }
+        }
 
         config.backgroundBasePaint.alpha = (188f * layerVisibility).toInt().coerceIn(0, 188)
         for ((index, word) in line.backgroundWords.withIndex()) {
-            if (activeHighlightState != null && index in activeHighlightState.activeRange) {
+            if (resolvedActiveHighlightState != null && index in resolvedActiveHighlightState.activeRange) {
                 callbacks.drawWordTail(
                     canvas = canvas,
                     line = line,
                     word = word,
                     paint = config.backgroundBasePaint,
-                    revealX = activeHighlightState.sweepX,
+                    revealX = resolvedActiveHighlightState.sweepX,
                     rowHeight = config.backgroundLineHeight,
                 )
                 continue
@@ -435,14 +567,17 @@ internal class KaraokeLineRenderer {
         }
 
         config.backgroundHighlightPaint.alpha = (255f * layerVisibility).toInt().coerceIn(0, 255)
-        val completedLimit = activeHighlightState?.completedLimit ?: completedWordCount
+        val completedLimit = resolvedActiveHighlightState?.completedLimit ?: completedWordCount
         for (index in 0 until completedLimit.coerceAtMost(line.backgroundWords.size)) {
-            callbacks.drawWordTranslated(
+            callbacks.drawCompletedWordWithLift(
                 canvas = canvas,
                 line = line,
                 word = line.backgroundWords[index],
                 paint = config.backgroundHighlightPaint,
-                translateY = -config.backgroundLineHeight * 0.025f,
+                rowHeight = config.backgroundLineHeight,
+                finalLiftRatio = backgroundLiftRatio,
+                currentTimeMs = currentTimeMs,
+                keepCharacterLift = keepCompletedCharacterLift,
             )
         }
 
@@ -455,32 +590,43 @@ internal class KaraokeLineRenderer {
             translateY = -config.backgroundLineHeight * 0.025f,
         )
 
-        if (activeHighlightState == null) {
+        drawNextWordPreHighlight(
+            canvas = canvas,
+            line = line,
+            words = line.backgroundWords,
+            activeHighlightState = resolvedActiveHighlightState,
+            currentTimeMs = currentTimeMs,
+            paint = config.backgroundHighlightPaint,
+            rowHeight = config.backgroundLineHeight,
+            callbacks = callbacks,
+        )
+
+        if (resolvedActiveHighlightState == null) {
             return
         }
 
-        if (activeHighlightState.isGrowable) {
+        if (resolvedActiveHighlightState.isGrowable) {
             callbacks.drawGrowableVisualWordWipeHighlight(
                 canvas = canvas,
                 line = line,
-                words = line.backgroundWords.slice(activeHighlightState.activeRange),
-                progress = activeHighlightState.progress,
-                sweepX = activeHighlightState.sweepX,
+                words = line.backgroundWords.slice(resolvedActiveHighlightState.activeRange),
+                progress = resolvedActiveHighlightState.progress,
+                sweepX = resolvedActiveHighlightState.sweepX,
                 paint = config.backgroundHighlightPaint,
                 rowHeight = config.backgroundLineHeight,
-                finalLiftRatio = 0.025f,
+                finalLiftRatio = backgroundLiftRatio,
                 currentTimeMs = currentTimeMs,
             )
         } else {
             callbacks.drawWordWipeHighlight(
                 canvas = canvas,
                 line = line,
-                word = line.backgroundWords[activeHighlightState.activeWordIndex],
-                progress = activeHighlightState.progress,
+                word = line.backgroundWords[resolvedActiveHighlightState.activeWordIndex],
+                progress = resolvedActiveHighlightState.progress,
                 paint = config.backgroundHighlightPaint,
                 rowHeight = config.backgroundLineHeight,
-                finalLiftRatio = 0.025f,
-                useCharacterLift = false,
+                finalLiftRatio = backgroundLiftRatio,
+                useCharacterLift = true,
                 currentTimeMs = currentTimeMs,
             )
         }
@@ -525,6 +671,97 @@ internal class KaraokeLineRenderer {
             progress = progress,
             sweepX = sweepX,
             isGrowable = isGrowable,
+        )
+    }
+
+    private fun buildHeldHighlightState(
+        words: List<LyricWord>,
+        anchorIndex: Int,
+        currentTimeMs: Long,
+        marginLeft: Float,
+        overshootPx: Float,
+    ): ActiveHighlightState? {
+        if (words.isEmpty() || anchorIndex !in words.indices) return null
+
+        val anchorWord = words[anchorIndex]
+        val visualWordRange = LyricsVisualWords.findVisualWordRange(words, anchorIndex)
+        val visualWord = if (!visualWordRange.isEmpty()) words.slice(visualWordRange) else listOf(anchorWord)
+        val singleRowVisualWord = visualWord.map { it.yOffset }.distinct().size == 1
+        val combinedText = visualWord.joinToString(separator = "") { it.text }
+        val combinedStartMs = visualWord.firstOrNull()?.startMs ?: anchorWord.startMs
+        val combinedEndMs = visualWord.lastOrNull()?.endMs ?: anchorWord.endMs
+        val isGrowable = singleRowVisualWord &&
+            LyricsVisualWords.isGrowableVisualWord(combinedText, combinedStartMs, combinedEndMs)
+
+        val activeRange = if (isGrowable && !visualWordRange.isEmpty()) {
+            visualWordRange
+        } else {
+            anchorIndex..anchorIndex
+        }
+
+        val rangeWords = words.slice(activeRange)
+        val rangeLeft = marginLeft + rangeWords.first().xOffset
+        val rangeWidth = (rangeWords.last().xOffset + rangeWords.last().width) - rangeWords.first().xOffset
+        val clampedRangeWidth = rangeWidth.coerceAtLeast(1f)
+        val visualDurationMs = (combinedEndMs - combinedStartMs).coerceAtLeast(1L).toFloat()
+        val completedAgeMs = (currentTimeMs - combinedEndMs).coerceAtLeast(0L).toFloat()
+        val sweepSettle = smoothStep((completedAgeMs / (visualDurationMs * 0.35f)).coerceIn(0f, 1f))
+        val sweepX = rangeLeft + clampedRangeWidth + overshootPx.coerceAtLeast(0f) * sweepSettle
+        val drawableGlyphCount = rangeWords.sumOf(::getDrawableGlyphCount).coerceAtLeast(1)
+        val settledProgress = 1.5f + (drawableGlyphCount - 1).coerceAtLeast(0) * 0.09f
+        val holdProgress = (1f + completedAgeMs / visualDurationMs)
+            .coerceIn(1f, settledProgress)
+
+        return ActiveHighlightState(
+            activeWordIndex = anchorIndex,
+            completedLimit = if (isGrowable) activeRange.first else anchorIndex,
+            activeRange = activeRange,
+            progress = holdProgress,
+            sweepX = sweepX,
+            isGrowable = isGrowable,
+        )
+    }
+
+    private fun drawNextWordPreHighlight(
+        canvas: Canvas,
+        line: LyricLine,
+        words: List<LyricWord>,
+        activeHighlightState: ActiveHighlightState?,
+        currentTimeMs: Long,
+        paint: Paint,
+        rowHeight: Float,
+        callbacks: KaraokeLineRenderCallbacks,
+    ) {
+        if (activeHighlightState == null) return
+        val activeWordIndex = activeHighlightState.activeWordIndex
+        if (activeWordIndex !in words.indices) return
+        if (activeWordIndex >= words.lastIndex) return
+
+        val currentWord = words[activeWordIndex]
+        val nextWord = words[activeWordIndex + 1]
+        if (currentTimeMs >= nextWord.startMs) return
+        val nextIsLastWord = activeWordIndex + 1 == words.lastIndex
+        if (LyricsVisualWords.shouldInsertSpacing(currentWord, nextWord) && !nextIsLastWord) return
+
+        val currentDurationMs = (currentWord.endMs - currentWord.startMs).coerceAtLeast(1L).toFloat()
+        val currentWidth = currentWord.width.coerceAtLeast(0.1f)
+        val gradientDistancePx = 0.375f * paint.textSize
+        val gradientDurationMs = (gradientDistancePx / currentWidth) * currentDurationMs
+        if (gradientDurationMs <= 0f) return
+
+        val clampedGradientDurationMs = gradientDurationMs.coerceIn(1f, currentDurationMs)
+        val preHighlightDelayMs = currentDurationMs - clampedGradientDurationMs
+        val elapsedMs = (currentTimeMs - currentWord.startMs).toFloat()
+        if (elapsedMs < preHighlightDelayMs || elapsedMs > currentDurationMs) return
+
+        val preProgress = ((elapsedMs - preHighlightDelayMs) / clampedGradientDurationMs).coerceIn(0f, 1f)
+        callbacks.drawWordPreHighlight(
+            canvas = canvas,
+            line = line,
+            word = nextWord,
+            progress = preProgress,
+            paint = paint,
+            rowHeight = rowHeight,
         )
     }
 

@@ -30,11 +30,9 @@ internal class KaraokeAmbientBackgroundRenderer(private val density: Float) {
     private var r1 = 60;  private var g1 = 120; private var b1 = 220  // Secondary
     private var r2 = 30;  private var g2 = 60;  private var b2 = 160  // Deep / background
 
-    // --- Cache: last painted orb centers to avoid unnecessary shader rebuilds ---
-    private var lastCx0 = -999f; private var lastCy0 = -999f
-    private var lastCx1 = -999f; private var lastCy1 = -999f
-    private var lastCx2 = -999f; private var lastCy2 = -999f
-    private val rebuildThreshold = 6f * density  // Only rebuild shader if moved > 6dp
+    // --- Cache: only rebuild shaders if view height or colors change ---
+    private var lastHeight = -1f
+    private var forceRebuild = true
 
     /**
      * Call once whenever the accent/glow color changes.
@@ -62,7 +60,7 @@ internal class KaraokeAmbientBackgroundRenderer(private val density: Float) {
         b2 = ((gb + bb) / 2).coerceIn(0, 255)
 
         // Force shader rebuild on next draw
-        lastCx0 = -999f; lastCx1 = -999f; lastCx2 = -999f
+        forceRebuild = true
     }
 
     /**
@@ -89,6 +87,24 @@ internal class KaraokeAmbientBackgroundRenderer(private val density: Float) {
         val w = width.toFloat()
         val h = height.toFloat()
 
+        if (h != lastHeight || forceRebuild) {
+            val r0radius = (h * 0.65f)
+            val r1radius = (h * 0.55f)
+            val r2radius = (h * 0.42f)
+            
+            paint0.shader = buildRadialShader(r0radius, r0, g0, b0, maxAlpha = if (lightweight) 55 else 90)
+            paint1.shader = buildRadialShader(r1radius, r1, g1, b1, maxAlpha = 70)
+            paint2.shader = buildRadialShader(r2radius, r2, g2, b2, maxAlpha = 55)
+            
+            lastHeight = h
+            forceRebuild = false
+        }
+
+        // Apply dynamic alpha efficiently without rebuilding the shader
+        paint0.alpha = alpha
+        paint1.alpha = alpha
+        paint2.alpha = alpha
+
         // ------------------------------------------------------------------
         // Orb 0 — large primary blob, slow drift, top half
         // Frequency: ~22s cycle  |  Amplitude: 15% of screen
@@ -97,11 +113,10 @@ internal class KaraokeAmbientBackgroundRenderer(private val density: Float) {
         val cy0 = h * 0.32f + h * 0.12f * cos(t * 0.000220f)
         val r0radius = (h * 0.65f)
 
-        if (needsRebuild(cx0, cy0, lastCx0, lastCy0)) {
-            paint0.shader = buildRadialShader(cx0, cy0, r0radius, r0, g0, b0, alpha, maxAlpha = if (lightweight) 55 else 90)
-            lastCx0 = cx0; lastCy0 = cy0
-        }
-        canvas.drawCircle(cx0, cy0, r0radius, paint0)
+        canvas.save()
+        canvas.translate(cx0, cy0)
+        canvas.drawCircle(0f, 0f, r0radius, paint0)
+        canvas.restore()
 
         if (lightweight) return  // Lightweight: single orb only
 
@@ -113,11 +128,10 @@ internal class KaraokeAmbientBackgroundRenderer(private val density: Float) {
         val cy1 = h * 0.70f + h * 0.14f * sin(t * 0.000290f + 2.2f)
         val r1radius = (h * 0.55f)
 
-        if (needsRebuild(cx1, cy1, lastCx1, lastCy1)) {
-            paint1.shader = buildRadialShader(cx1, cy1, r1radius, r1, g1, b1, alpha, maxAlpha = 70)
-            lastCx1 = cx1; lastCy1 = cy1
-        }
-        canvas.drawCircle(cx1, cy1, r1radius, paint1)
+        canvas.save()
+        canvas.translate(cx1, cy1)
+        canvas.drawCircle(0f, 0f, r1radius, paint1)
+        canvas.restore()
 
         // ------------------------------------------------------------------
         // Orb 2 — deep small blob, faster drift, left side — adds depth
@@ -127,38 +141,29 @@ internal class KaraokeAmbientBackgroundRenderer(private val density: Float) {
         val cy2 = h * 0.58f + h * 0.18f * cos(t * 0.000410f + 0.7f)
         val r2radius = (h * 0.42f)
 
-        if (needsRebuild(cx2, cy2, lastCx2, lastCy2)) {
-            paint2.shader = buildRadialShader(cx2, cy2, r2radius, r2, g2, b2, alpha, maxAlpha = 55)
-            lastCx2 = cx2; lastCy2 = cy2
-        }
-        canvas.drawCircle(cx2, cy2, r2radius, paint2)
+        canvas.save()
+        canvas.translate(cx2, cy2)
+        canvas.drawCircle(0f, 0f, r2radius, paint2)
+        canvas.restore()
     }
 
     // ------------------------------------------------------------------
     // Helpers
     // ------------------------------------------------------------------
 
-    /** Returns true if the orb moved more than the threshold → needs shader rebuild. */
-    private fun needsRebuild(cx: Float, cy: Float, lastCx: Float, lastCy: Float): Boolean {
-        val dx = abs(cx - lastCx)
-        val dy = abs(cy - lastCy)
-        return dx > rebuildThreshold || dy > rebuildThreshold
-    }
-
     /**
      * Builds a radial gradient that fades from the orb color at center
-     * to fully transparent at the edge.  Accepts `alpha` (0–255) and
-     * `maxAlpha` to cap brightness regardless of the passed alpha.
+     * to fully transparent at the edge. Base shader is centered at 0,0.
      */
     private fun buildRadialShader(
-        cx: Float, cy: Float, radius: Float,
+        radius: Float,
         r: Int, g: Int, b: Int,
-        alpha: Int, maxAlpha: Int,
+        maxAlpha: Int,
     ): RadialGradient {
-        val a0 = ((alpha / 255f) * maxAlpha).toInt().coerceIn(0, maxAlpha)
+        val a0 = maxAlpha
         val a1 = (a0 * 0.35f).toInt()
         return RadialGradient(
-            cx, cy, radius,
+            0f, 0f, radius,
             intArrayOf(
                 Color.argb(a0, r, g, b),
                 Color.argb(a1, r, g, b),

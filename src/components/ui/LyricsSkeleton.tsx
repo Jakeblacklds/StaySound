@@ -5,6 +5,7 @@ import Animated, {
     Easing,
     FadeIn,
     interpolate,
+    type SharedValue,
     useAnimatedStyle,
     useSharedValue,
     withDelay,
@@ -88,7 +89,7 @@ function SkeletonLine({
             style={[
                 styles.skeletonLine,
                 animStyle,
-                { width: widthPercent },
+                { width: widthPercent as any },
             ]}
         />
     );
@@ -101,7 +102,7 @@ function AnimatedDots({ color }: { color: string }) {
     const dot3 = useSharedValue(0);
 
     useEffect(() => {
-        const dotAnim = (sv: Animated.SharedValue<number>, delayMs: number) => {
+        const dotAnim = (sv: SharedValue<number>, delayMs: number) => {
             sv.value = withDelay(
                 delayMs,
                 withRepeat(

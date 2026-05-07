@@ -1,8 +1,8 @@
 import { usePlayerStore } from '@/src/stores';
-import type { Track } from '@/src/types/audio';
-import React, { useCallback, useState } from 'react';
+import type { Track } from '@/src/types';
+import React, { useCallback, useMemo } from 'react';
 
-import { QueueOverlay } from './QueueOverlay';
+import { QueueOverlay, type QueueOverlayTrack } from './QueueOverlay';
 
 type PlayerQueueOverlayLayerProps = {
   visible: boolean;
@@ -14,6 +14,16 @@ type PlayerQueueOverlayLayerProps = {
   onClose: () => void;
 };
 
+const QUEUE_LIMIT = 50;
+
+function decorateQueueTrack(track: Track, index: number): QueueOverlayTrack {
+  return {
+    ...track,
+    _queueKey: `${track.id}-${index}`,
+    _originalIndex: index,
+  };
+}
+
 export const PlayerQueueOverlayLayer = React.memo(function PlayerQueueOverlayLayer({
   visible,
   currentTrackId,
@@ -24,39 +34,55 @@ export const PlayerQueueOverlayLayer = React.memo(function PlayerQueueOverlayLay
   onClose,
 }: PlayerQueueOverlayLayerProps) {
   const queue = usePlayerStore(state => state.queue);
+  const queueIndex = usePlayerStore(state => state.queueIndex);
   const skipTo = usePlayerStore(state => state.skipTo);
   const removeFromQueue = usePlayerStore(state => state.removeFromQueue);
-  const [queueDraft, setQueueDraft] = useState(queue);
-  const [visibleCount, setVisibleCount] = useState(25);
+  const reorderQueue = usePlayerStore(state => state.reorderQueue);
 
-  React.useEffect(() => {
-    if (visible) {
-      setQueueDraft(queue);
-      setVisibleCount(25);
+  const resolvedCurrentIndex = useMemo(() => {
+    if (!queue || queue.length === 0) {
+      return -1;
     }
-  }, [queue, visible]);
 
-  const paginatedQueue = React.useMemo(() => queueDraft.slice(0, visibleCount), [queueDraft, visibleCount]);
-
-  const loadMoreQueue = useCallback(() => {
-    if (visibleCount < queueDraft.length) {
-      setVisibleCount(prev => Math.min(prev + 25, queueDraft.length));
+    if (queueIndex >= 0 && queueIndex < queue.length) {
+      return queueIndex;
     }
-  }, [queueDraft.length, visibleCount]);
 
-  const handleQueueDragEnd = useCallback(({ data }: { data: Track[] }) => {
-    const fullQueue = [...queueDraft];
-    fullQueue.splice(0, data.length, ...data);
-    const newIndex = fullQueue.findIndex(track => track.id === currentTrackId);
-    if (newIndex < 0) return;
-    setQueueDraft(fullQueue);
-    usePlayerStore.setState({ queue: fullQueue, queueIndex: newIndex });
-  }, [currentTrackId, queueDraft]);
+    const trackIndex = queue.findIndex(track => track.id === currentTrackId);
+    return trackIndex >= 0 ? trackIndex : 0;
+  }, [currentTrackId, queue, queueIndex]);
 
-  const handleTrackPress = useCallback((idx: number) => {
-    void skipTo(idx);
+  const currentQueueTrack = useMemo(() => {
+    if (!visible || resolvedCurrentIndex < 0 || resolvedCurrentIndex >= queue.length) {
+      return null;
+    }
+
+    return decorateQueueTrack(queue[resolvedCurrentIndex], resolvedCurrentIndex);
+  }, [queue, resolvedCurrentIndex, visible]);
+
+  const upcomingQueue = useMemo(() => {
+    if (!visible || resolvedCurrentIndex < 0 || queue.length === 0) {
+      return [];
+    }
+
+    return queue
+      .slice(resolvedCurrentIndex + 1, resolvedCurrentIndex + 1 + QUEUE_LIMIT)
+      .map((track, offset) => decorateQueueTrack(track, resolvedCurrentIndex + 1 + offset));
+  }, [queue, resolvedCurrentIndex, visible]);
+
+  const handleTrackPress = useCallback((item: QueueOverlayTrack) => {
+    void skipTo(item._originalIndex);
     onClose();
   }, [onClose, skipTo]);
+
+  const handleRemove = useCallback((item: QueueOverlayTrack) => {
+    removeFromQueue(item._originalIndex);
+  }, [removeFromQueue]);
+
+  const handleReorder = useCallback((from: number, to: number) => {
+    const baseIndex = resolvedCurrentIndex + 1;
+    void reorderQueue(baseIndex + from, baseIndex + to);
+  }, [reorderQueue, resolvedCurrentIndex]);
 
   if (!visible) {
     return null;
@@ -64,17 +90,16 @@ export const PlayerQueueOverlayLayer = React.memo(function PlayerQueueOverlayLay
 
   return (
     <QueueOverlay
-      queue={paginatedQueue}
-      currentTrackId={currentTrackId}
+      currentTrack={currentQueueTrack}
+      upcomingQueue={upcomingQueue}
       accentColor={accentColor}
       textColor={textColor}
       backgroundColor={backgroundColor}
       animStyle={animStyle}
       onClose={onClose}
       onTrackPress={handleTrackPress}
-      onRemove={removeFromQueue}
-      onDragEnd={handleQueueDragEnd}
-      loadMore={loadMoreQueue}
+      onRemove={handleRemove}
+      onReorder={handleReorder}
     />
   );
 });

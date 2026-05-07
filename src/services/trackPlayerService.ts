@@ -1,4 +1,4 @@
-﻿/**
+/**
  * TrackPlayerService - Audio Playback with Background Support
  *
  * Uses react-native-track-player as the primary audio engine for:
@@ -20,9 +20,98 @@ import TrackPlayer, {
 } from "react-native-track-player";
 import { getArtworkNotificationUri } from "./artworkThumbnails";
 import { Track } from "../types/audio";
+import { resolveContentUriToFileUriNative } from "./nativeLibraryIndexer";
 
 let isInitialized = false;
 let initializationPromise: Promise<boolean> | null = null;
+const EXPLICITLY_UNSUPPORTED_CONTAINERS = new Set([
+  "wma",
+  "asf",
+  "ra",
+  "rm",
+  "ape",
+  "dsf",
+  "dff",
+  "mka",
+  "tta",
+  "wv",
+]);
+const KNOWN_PLAYABLE_CONTAINERS = new Set([
+  "flac",
+  "mp3",
+  "mpeg",
+  "m4a",
+  "mp4",
+  "aac",
+  "alac",
+  "wav",
+  "ogg",
+  "opus",
+  "hls",
+  "dash",
+  "mpd",
+]);
+const runtimeUnsupportedTrackKeys = new Set<string>();
+const mediaStoreFileUriCache = new Map<string, Promise<string | null>>();
+
+function normalizeContainerToken(value?: string): string {
+  return (value ?? "").trim().toLowerCase().replace(/^\./, "");
+}
+
+function getUriContainerHint(uri?: string): string {
+  const normalizedUri = (uri ?? "").trim().toLowerCase();
+  const match = normalizedUri.match(/\.([a-z0-9]+)(\?|$)/);
+  return normalizeContainerToken(match?.[1]);
+}
+
+function getTrackContainerHint(track: Track): string {
+  const normalizedFormat = normalizeContainerToken(track.format);
+  if (normalizedFormat) return normalizedFormat;
+  return getUriContainerHint(track.uri);
+}
+
+function getRuntimeUnsupportedKeys(track: Track): string[] {
+  const keys = new Set<string>();
+  const id = track.id?.trim();
+  if (id) keys.add(`id:${id}`);
+
+  const normalizedUri = normalizePlaybackUri(track.uri || "").trim();
+  if (normalizedUri) keys.add(`uri:${normalizedUri}`);
+
+  return [...keys];
+}
+
+function isRuntimeUnsupportedTrack(track: Track): boolean {
+  const keys = getRuntimeUnsupportedKeys(track);
+  return keys.some((key) => runtimeUnsupportedTrackKeys.has(key));
+}
+
+export function shouldPersistRuntimeUnsupportedTrack(
+  track: Track | null | undefined,
+): boolean {
+  if (!track) return false;
+  const containerHint = getTrackContainerHint(track);
+  if (!containerHint) return false;
+  if (KNOWN_PLAYABLE_CONTAINERS.has(containerHint)) return false;
+  return EXPLICITLY_UNSUPPORTED_CONTAINERS.has(containerHint);
+}
+
+export function markTrackAsUnsupported(
+  track: Track | null | undefined,
+  reason?: string,
+): void {
+  if (!track) return;
+  const keys = getRuntimeUnsupportedKeys(track);
+  if (keys.length === 0) return;
+  keys.forEach((key) => runtimeUnsupportedTrackKeys.add(key));
+  console.warn("[TrackPlayer] Marked track as unsupported in runtime session", {
+    id: track.id,
+    uri: track.uri,
+    format: track.format,
+    codec: track.codec,
+    reason,
+  });
+}
 
 function hasSupportedPlaybackUriScheme(uri: string): boolean {
   return (
@@ -55,11 +144,81 @@ function normalizePlaybackUri(uri: string): string {
   return trimmed;
 }
 
+function isMediaStoreAudioUri(uri: string): boolean {
+  return /^content:\/\/media\/[^/]+\/audio\/media\/\d+/i.test(uri.trim());
+}
+
+function normalizeRelativePath(relativePath?: string): string {
+  return (relativePath ?? "").replace(/\\/g, "/").replace(/^\/+|\/+$/g, "");
+}
+
+function encodePathSegments(pathValue: string): string {
+  return pathValue
+    .split("/")
+    .filter(Boolean)
+    .map((segment) => encodeURIComponent(segment))
+    .join("/");
+}
+
+function buildFilePlaybackUri(track: Track): string | null {
+  const relativePath = normalizeRelativePath(track.relativePath);
+  const fileName = (track._filename ?? "").trim();
+  if (!relativePath || !fileName) return null;
+
+  const safePath = encodePathSegments(relativePath);
+  const safeFileName = encodeURIComponent(fileName);
+  return `file:///storage/emulated/0/${safePath}/${safeFileName}`;
+}
+
+async function resolveNativePlaybackUrl(track: Track): Promise<string> {
+  const normalizedUri = normalizePlaybackUri(track.uri);
+  if (isMediaStoreAudioUri(normalizedUri)) {
+    const fileUri = buildFilePlaybackUri(track);
+    if (fileUri) {
+      return fileUri;
+    }
+
+    if (!mediaStoreFileUriCache.has(normalizedUri)) {
+      mediaStoreFileUriCache.set(
+        normalizedUri,
+        resolveContentUriToFileUriNative(normalizedUri).catch(() => null),
+      );
+    }
+    const nativeResolvedFileUri = await mediaStoreFileUriCache.get(normalizedUri)!;
+    if (nativeResolvedFileUri) {
+      return normalizePlaybackUri(nativeResolvedFileUri);
+    }
+
+    console.warn("[TrackPlayer] MediaStore URI without file fallback metadata", {
+      id: track.id,
+      uri: track.uri,
+      relativePath: track.relativePath,
+      filename: track._filename,
+      format: track.format,
+      codec: track.codec,
+    });
+  }
+
+  return normalizedUri;
+}
+
 export function isTrackPlayable(track: Track | null | undefined): boolean {
   const uri = track?.uri?.trim();
   if (!track || !uri || track.cloudOnly) return false;
 
   if (uri.startsWith("spotify://") || uri.startsWith("cloud://")) {
+    return false;
+  }
+
+  if (isRuntimeUnsupportedTrack(track)) {
+    return false;
+  }
+
+  const containerHint = getTrackContainerHint(track);
+  if (
+    containerHint &&
+    EXPLICITLY_UNSUPPORTED_CONTAINERS.has(containerHint)
+  ) {
     return false;
   }
 
@@ -111,11 +270,14 @@ async function resolveArtworkForNowPlaying(
   );
 }
 
-function getNativeStreamDescriptor(track: Track): {
+function getNativeStreamDescriptor(
+  track: Track,
+  playbackUriOverride?: string,
+): {
   type?: TrackType;
   contentType?: string;
 } {
-  const uri = track.uri.trim().toLowerCase();
+  const uri = (playbackUriOverride ?? track.uri).trim().toLowerCase();
   const format = (track.format ?? "").trim().toLowerCase();
   const codec = (track.codec ?? "").trim().toLowerCase();
 
@@ -155,7 +317,9 @@ function getNativeStreamDescriptor(track: Track): {
   if (
     format === "aac" ||
     format === "m4a" ||
+    format === "alac" ||
     codec.includes("aac") ||
+    codec.includes("alac") ||
     uri.includes(".m4a") ||
     uri.includes(".mp4")
   ) {
@@ -179,19 +343,23 @@ function getNativeStreamDescriptor(track: Track): {
   return {};
 }
 
-function buildNativeTrack(track: Track, options?: { artwork?: string }): any {
+async function buildNativeTrack(
+  track: Track,
+  options?: { artwork?: string },
+): Promise<any> {
   if (!isTrackPlayable(track)) {
     throw new Error(
       `[TrackPlayer] Unsupported track URI for native playback: ${track.uri || "<empty>"}`,
     );
   }
 
-  const streamDescriptor = getNativeStreamDescriptor(track);
+  const playbackUrl = await resolveNativePlaybackUrl(track);
+  const streamDescriptor = getNativeStreamDescriptor(track, playbackUrl);
 
   return {
     id: track.id,
     mediaId: track.id,
-    url: normalizePlaybackUri(track.uri),
+    url: playbackUrl,
     type: streamDescriptor.type,
     contentType: streamDescriptor.contentType,
     title: track.title || "Unknown Title",
@@ -305,7 +473,7 @@ export async function playTrack(track: Track): Promise<void> {
     // load() can sometimes preserve metadata from previous sessions on buggy Android versions.
     await TrackPlayer.reset();
 
-    const trackData = buildNativeTrack(track, {
+    const trackData = await buildNativeTrack(track, {
       artwork: resolveArtworkForQueue(track),
     });
 
@@ -372,11 +540,11 @@ export async function playQueue(
 
     await TrackPlayer.reset();
 
-    const trackPlayerTracks = playableTracks.map((track) =>
+    const trackPlayerTracks = await Promise.all(playableTracks.map((track) =>
       buildNativeTrack(track, {
         artwork: resolveArtworkForQueue(track),
       }),
-    );
+    ));
 
     const safeIndex = Math.max(
       0,

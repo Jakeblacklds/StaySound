@@ -1,5 +1,6 @@
 export {
   isLibraryIndexerAvailable,
+  resolveContentUriToFileUri,
   scanTracksNative,
 } from './LibraryIndexerModule';
 

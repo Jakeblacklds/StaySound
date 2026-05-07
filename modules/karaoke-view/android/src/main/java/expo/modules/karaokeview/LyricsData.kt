@@ -18,7 +18,17 @@ data class LyricWord(
     val isPart: Boolean = false,
     var xOffset: Float = 0f,    // Pre-computed X position within line
     var yOffset: Float = 0f,    // Pre-computed Y offset (for multi-line)
-    var width: Float = 0f       // Pre-computed width
+    var width: Float = 0f,      // Pre-computed width
+    var glyphUnits: List<LyricGlyphUnit> = emptyList(),
+    var drawableGlyphCount: Int = 0,
+)
+
+data class LyricGlyphUnit(
+    val text: String,
+    val width: Float,
+    val advanceX: Float,
+    val centerRatio: Float,
+    val isWhitespace: Boolean,
 )
 
 data class LyricLine(

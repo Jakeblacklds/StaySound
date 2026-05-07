@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { GestureResponderEvent, Pressable, StyleSheet, View } from 'react-native';
 import Animated, { 
     useAnimatedStyle, 
     useSharedValue, 
@@ -20,7 +20,7 @@ import { Text } from 'react-native-paper';
 interface DownloadAnimatedButtonProps {
     status: 'idle' | 'downloading' | 'done' | 'error';
     progress?: number;
-    onPress: () => void;
+    onPress: (event: GestureResponderEvent) => void;
     size?: number;
 }
 

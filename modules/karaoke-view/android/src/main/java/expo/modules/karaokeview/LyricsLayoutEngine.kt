@@ -1,10 +1,12 @@
 package expo.modules.karaokeview
 
 import android.graphics.Paint
+import java.text.BreakIterator
 
 internal data class LyricsLayoutConfig(
     val width: Int,
     val marginLeft: Float,
+    val marginRight: Float,
     val lineHeight: Float,
     val lineSpacing: Float,
     val spaceWidth: Float,
@@ -22,7 +24,7 @@ internal class LyricsLayoutEngine {
     ) {
         if (config.width <= 0) return
 
-        val maxWidth = config.width - config.marginLeft * 2
+        val maxWidth = config.width - config.marginLeft - config.marginRight
         var currentY = 0f
 
         for (line in lines) {
@@ -99,6 +101,9 @@ internal class LyricsLayoutEngine {
 
         for (word in words) {
             word.width = paint.measureText(word.text)
+            val (glyphUnits, drawableGlyphCount) = buildGlyphUnits(word.text, paint, word.width)
+            word.glyphUnits = glyphUnits
+            word.drawableGlyphCount = drawableGlyphCount
             val spacingBefore = if (LyricsVisualWords.shouldInsertSpacing(previousWord, word)) {
                 spacingWidth
             } else {
@@ -126,6 +131,63 @@ internal class LyricsLayoutEngine {
             height = rowOffset + rowHeight,
             width = maxRowWidth,
         )
+    }
+
+    private fun buildGlyphUnits(
+        text: String,
+        paint: Paint,
+        measuredWordWidth: Float,
+    ): Pair<List<LyricGlyphUnit>, Int> {
+        if (text.isEmpty()) return emptyList<LyricGlyphUnit>() to 0
+
+        val iterator = BreakIterator.getCharacterInstance()
+        iterator.setText(text)
+        val rawUnits = mutableListOf<LyricGlyphUnit>()
+        var advanceX = 0f
+        var start = iterator.first()
+        var end = iterator.next()
+        var drawableWidth = 0f
+        var drawableCount = 0
+
+        while (end != BreakIterator.DONE) {
+            val glyphText = text.substring(start, end)
+            val glyphWidth = paint.measureText(glyphText)
+            val isWhitespace = glyphText.all { it.isWhitespace() }
+            rawUnits += LyricGlyphUnit(
+                text = glyphText,
+                width = glyphWidth,
+                advanceX = advanceX,
+                centerRatio = 0.5f,
+                isWhitespace = isWhitespace,
+            )
+            if (!isWhitespace && glyphWidth > 0f) {
+                drawableWidth += glyphWidth
+                drawableCount += 1
+            }
+            advanceX += glyphWidth
+            start = end
+            end = iterator.next()
+        }
+
+        val targetWidth = when {
+            measuredWordWidth > 0f -> measuredWordWidth
+            drawableWidth > 0f -> drawableWidth
+            else -> 1f
+        }
+
+        var drawableCursor = 0f
+        val units = rawUnits.map { unit ->
+            if (unit.isWhitespace || unit.width <= 0f) {
+                unit
+            } else {
+                val center = drawableCursor + unit.width * 0.5f
+                val ratio = (center / targetWidth).coerceIn(0f, 1f)
+                drawableCursor += unit.width
+                unit.copy(centerRatio = ratio)
+            }
+        }
+
+        return units to drawableCount
     }
 
     private data class LayoutMetrics(

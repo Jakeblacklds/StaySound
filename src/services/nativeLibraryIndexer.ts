@@ -22,6 +22,7 @@ type TidalMetadataSidecar = Partial<Pick<Track, 'title' | 'artist' | 'album' | '
 type NativeLibraryIndexerApi = {
     isLibraryIndexerAvailable: () => boolean;
     scanTracksNative: (folderPattern?: string) => Promise<NativeScanTrack[]>;
+    resolveContentUriToFileUri?: (contentUri: string) => Promise<string | null>;
 };
 
 type DirectoryEntryRef = {
@@ -64,6 +65,17 @@ export function canUseNativeLibraryIndexer(): boolean {
         return api.isLibraryIndexerAvailable();
     } catch {
         return false;
+    }
+}
+
+export async function resolveContentUriToFileUriNative(contentUri: string): Promise<string | null> {
+    const api = getNativeApi();
+    if (!api?.resolveContentUriToFileUri || !contentUri?.trim()) return null;
+
+    try {
+        return await api.resolveContentUriToFileUri(contentUri.trim());
+    } catch {
+        return null;
     }
 }
 

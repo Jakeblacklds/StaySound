@@ -30,6 +30,7 @@ export {
 export { LyricsRepository } from './lyricsRepository';
 export { getActiveLyricIndex, LyricsData, parseLRC, SAMPLE_LRC } from './lyricsService';
 export { playResolvedRemoteTrack, resolveRemoteTrackForDownload, resolveRemoteTrackForPlayback } from './remotePlaybackService';
+export { downloadSoulseekTrack, searchSoulseekTrack, SoulseekCompressedFallbackError } from './soulseekDownloadService';
 export {
     formatDuration,
     formatDurationLong,

@@ -1,5 +1,6 @@
 import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
-import { useAuthStore, useDabAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
+import { applyDownloadedOtaUpdate, checkForAppUpdates, downloadAndInstallBinaryUpdate, getAppUpdateConfig, getInstalledVersionLabel } from '@/src/services/appUpdateService';
+import { useAppUpdateStore, useAuthStore, useDabAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
 import { TidalMirrorAvailability, getTidalMirrorAvailability, getTidalMirrorOptions } from '@/src/services/tidalService';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
 import { useUIStore } from '@/src/stores/uiStore';
@@ -8,6 +9,7 @@ import { useTheme } from '@/src/theme';
 import { generateManualAccentPalette, SchemeVariant } from '@/src/theme/utils';
 import { TidalQuality } from '@/src/types/audio';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import Constants from 'expo-constants';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
@@ -117,6 +119,32 @@ export default function SettingsScreen() {
     };
 
     const showNotification = useNotificationStore(s => s.showNotification);
+    const appUpdateStatus = useAppUpdateStore(state => state.status);
+    const availableBinaryRelease = useAppUpdateStore(state => state.availableBinaryRelease);
+    const otaReady = useAppUpdateStore(state => state.otaReady);
+    const appUpdateError = useAppUpdateStore(state => state.lastError);
+    const appUpdatesConfig = getAppUpdateConfig();
+    const installedVersionLabel = getInstalledVersionLabel();
+    const footerVersionLabel = `STAYSOUND v${Constants.nativeApplicationVersion || Constants.expoConfig?.version || '1.0.0'}`;
+
+    const handleAppUpdateAction = () => {
+        if (!appUpdatesConfig.binaryUpdatesEnabled) {
+            showNotification('Este flujo de actualizacion vive solo en StaySound release.', 'info');
+            return;
+        }
+
+        if (otaReady) {
+            void applyDownloadedOtaUpdate();
+            return;
+        }
+
+        if (availableBinaryRelease) {
+            void downloadAndInstallBinaryUpdate();
+            return;
+        }
+
+        void checkForAppUpdates('manual');
+    };
 
     const handleMirrorChange = (mirror: string) => {
         const availability = mirrorAvailability[mirror];
@@ -312,6 +340,30 @@ export default function SettingsScreen() {
         () => ['LOSSLESS', 'MP3', 'HI_RES_LOSSLESS', 'LOW'] as TidalQuality[],
         [],
     );
+    const appUpdateDescription = !appUpdatesConfig.binaryUpdatesEnabled
+        ? 'Disponible solo en la build release de StaySound.'
+        : otaReady
+        ? 'Hay una actualizacion JS lista para aplicar.'
+        : availableBinaryRelease
+            ? `Nueva version ${availableBinaryRelease.versionName} disponible.`
+            : appUpdateStatus === 'checking'
+                ? 'Buscando nuevas versiones...'
+                : appUpdateStatus === 'downloading'
+                    ? 'Descargando APK nueva...'
+                    : appUpdateStatus === 'installing'
+                        ? 'Preparando instalacion...'
+                        : appUpdateStatus === 'awaiting-install-permission'
+                            ? 'Activa el permiso para instalar APKs y vuelve a tocar Actualizar.'
+                            : appUpdateError
+                                ? appUpdateError
+                                : `Instalada ${installedVersionLabel}`;
+    const appUpdateActionLabel = !appUpdatesConfig.binaryUpdatesEnabled
+        ? 'Solo release'
+        : otaReady
+        ? 'Reiniciar'
+        : availableBinaryRelease
+            ? 'Actualizar'
+            : 'Buscar';
 
     return (
         <ScrollView
@@ -477,7 +529,7 @@ export default function SettingsScreen() {
                 <List.Item
                     title={t('settings.appearance.lightweightMode')}
                     description="Optimiza para dispositivos lentos"
-                    left={(props) => <MaterialCommunityIcons name="leaf-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    left={(props) => <MaterialCommunityIcons name="leaf" size={24} color={theme.colors.primary} style={props.style} />}
                     right={() => (
                         <Switch
                             value={config.lightweightMode}
@@ -632,6 +684,26 @@ export default function SettingsScreen() {
                     right={(props) => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => setShowMirrorModal(true)}
                 />
+                <Divider style={styles.cardDivider} />
+                <List.Item
+                    title="Actualizacion de la app"
+                    description={appUpdateDescription}
+                    left={(props) => <MaterialCommunityIcons name="update" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={() => (
+                        appUpdateStatus === 'checking' || appUpdateStatus === 'downloading' || appUpdateStatus === 'installing'
+                            ? <ActivityIndicator size="small" />
+                            : (
+                                <Button
+                                    mode={availableBinaryRelease || otaReady ? 'contained-tonal' : 'text'}
+                                    onPress={handleAppUpdateAction}
+                                    disabled={!appUpdatesConfig.binaryUpdatesEnabled}
+                                >
+                                    {appUpdateActionLabel}
+                                </Button>
+                            )
+                    )}
+                    onPress={handleAppUpdateAction}
+                />
             </SectionGroup>
 
             {/* Modals for Quality and Mirror */}
@@ -700,7 +772,7 @@ export default function SettingsScreen() {
                     style={styles.footerLogo}
                     contentFit="contain"
                 />
-                <Text variant="labelLarge" style={{ fontWeight: '800', opacity: 0.9 }}>STAYSOUND v1.0.0</Text>
+                <Text variant="labelLarge" style={{ fontWeight: '800', opacity: 0.9 }}>{footerVersionLabel}</Text>
                 <Text variant="bodySmall" style={{ opacity: 0.5 }}>{t('settings.about.madeWith')}</Text>
             </View>
         </ScrollView>

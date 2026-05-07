@@ -1,12 +1,14 @@
 export const MINI_HEIGHT = 66;
-export const MINI_MARGIN = 12;
-export const TAB_BAR_HEIGHT = 72;
+export const MINI_MARGIN = 0;
+export const TAB_BAR_HEIGHT = 78;
 export const TAB_BAR_FLOAT_OFFSET = 12;
 export const MINI_GAP_FROM_TAB = 6;
 export const DETAIL_HEIGHT = 78;
 export const DETAIL_EXTRA_BOTTOM = 0;
 export const MINI_ARTWORK_SIZE = 48;
 export const MINI_ARTWORK_LEFT = 10;
+export const BG_CROSSFADE_START = 0.75;
+export const BG_CROSSFADE_END = 1.0;
 
 export function isPlayerDetailRoute(pathname: string): boolean {
     return (

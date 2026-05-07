@@ -3,7 +3,6 @@ import { getMiniPlayerButtonColors } from '@/src/hooks/usePlayerColors';
 import { usePlayerStore } from '@/src/stores';
 import { useUIStore } from '@/src/stores/uiStore';
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
-import { mixHexColors } from '@/src/utils/colorContrast';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, Pressable, StyleSheet } from 'react-native';
@@ -13,7 +12,6 @@ import Animated, {
     Extrapolation,
     interpolate,
     runOnJS,
-    useAnimatedReaction,
     useAnimatedStyle,
     useSharedValue,
     withTiming
@@ -25,7 +23,6 @@ import {
     DETAIL_EXTRA_BOTTOM,
     DETAIL_HEIGHT,
     MINI_HEIGHT,
-    TAB_BAR_FLOAT_OFFSET,
     TAB_BAR_HEIGHT,
     isPlayerDetailRoute,
 } from './playerLayout';
@@ -34,7 +31,7 @@ const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
 
 const M3_EMPHASIZED = Easing.bezier(0.2, 0.0, 0, 1.0);
 const M3_EMPHASIZED_DECEL = Easing.bezier(0.05, 0.7, 0.1, 1.0);
-const EXPAND_DURATION = 400;
+const EXPAND_DURATION = 280;
 const COLLAPSE_DURATION = 320;
 const TRACK_SWITCH_HOLD_MS = 700;
 
@@ -70,7 +67,6 @@ function SharedPlayerShellInner() {
     const shouldShowTidalLoading = canUsePendingPreview
         || (isLoading && (currentTrack?.source === 'tidal' || currentTrack?.source === 'tidal_stream'));
     const [isTrackSwitching, setIsTrackSwitching] = useState(false);
-    const [shellInteractive, setShellInteractive] = useState(true);
     const lastTrackIdRef = useRef<string | null>(null);
     const shouldHoldPauseAffordance = !shouldShowTidalLoading && (isPlaying || isLoading || isTrackSwitching);
     const shellArtworkUri = currentTrack?.artworkThumb || displayTrack?.artwork;
@@ -102,29 +98,13 @@ function SharedPlayerShellInner() {
     const playButtonBaseColor = playerColors.primary || theme.colors.primary;
     const playButtonIconColor = playerColors.text || theme.colors.onSurface;
     const playButtonColors = getMiniPlayerButtonColors(playButtonBaseColor, playButtonIconColor);
-    const miniPlayerSurfaceColor = React.useMemo(() => {
-        if (shouldUseThemePlayerColors) {
-            return theme.colors.surface;
-        }
-
-        // In light mode, blend more aggressively (22%) so the album palette is visible.
-        return mixHexColors(
-            theme.colors.surface,
-            playerColors.background || theme.colors.surface,
-            isDark ? 1.0 : 0.22
-        );
-    }, [isDark, playerColors.background, shouldUseThemePlayerColors, theme.colors.surface]);
-
     const routeProgress = useSharedValue(0);
     const translateX = useSharedValue(0);
     const isHorizontal = useSharedValue(false);
     const isVertical = useSharedValue(false);
     const playPress = useSharedValue(0);
     const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.35;
-    const tabReservedSpace = config.style === 'material3'
-        ? TAB_BAR_HEIGHT + TAB_BAR_FLOAT_OFFSET
-        : 85;
-    const collapsedBottom = Math.max(insets.bottom + TAB_BAR_HEIGHT, 78);
+    const collapsedBottom = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom;
     const isDetailRoute = isPlayerDetailRoute(pathname);
 
     useEffect(() => {
@@ -167,46 +147,25 @@ function SharedPlayerShellInner() {
         }
     }, [isPlaying, shouldShowTidalLoading]);
 
-    useAnimatedReaction(
-        () => (expansion?.value ?? 0) < 0.42,
-        (next, prev) => {
-            if (next !== prev) {
-                runOnJS(setShellInteractive)(next);
-            }
-        },
-        [expansion]
-    );
-
     const shellContainerStyle = useAnimatedStyle(() => {
         const routeP = routeProgress.value;
-        const p = expansion?.value ?? 0;
         const detailBottom = Math.max(insets.bottom + DETAIL_EXTRA_BOTTOM, DETAIL_EXTRA_BOTTOM);
-        const collapseBtm = Math.max(insets.bottom + TAB_BAR_HEIGHT, 78);
-
-        // Use animated background in both modes for smooth palette transitions.
-        const animBg = playerAnimColors?.background?.value;
-        const staticBg = isDark
-            ? (playerColors.background || theme.colors.surface)
-            : miniPlayerSurfaceColor;
+        const collapseBtm = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom;
 
         return {
-            backgroundColor: animBg || staticBg,
             bottom: interpolate(routeP, [0, 1], [collapseBtm, detailBottom], Extrapolation.CLAMP),
             left: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
             right: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
             height: interpolate(routeP, [0, 1], [MINI_HEIGHT, DETAIL_HEIGHT], Extrapolation.CLAMP),
-            borderTopLeftRadius: interpolate(routeP, [0, 1], [26, 0], Extrapolation.CLAMP),
-            borderTopRightRadius: interpolate(routeP, [0, 1], [26, 0], Extrapolation.CLAMP),
+            borderTopLeftRadius: interpolate(routeP, [0, 1], [24, 0], Extrapolation.CLAMP),
+            borderTopRightRadius: interpolate(routeP, [0, 1], [24, 0], Extrapolation.CLAMP),
             borderBottomLeftRadius: 0,
             borderBottomRightRadius: 0,
             transform: [
-                { scale: interpolate(p, [0, 0.22, 0.45], [1, 1.015, 1.035], Extrapolation.CLAMP) },
-                { translateY: interpolate(p, [0, 0.45], [0, -14], Extrapolation.CLAMP) },
                 { translateX: translateX.value },
                 { rotate: `${interpolate(translateX.value, [-SCREEN_WIDTH, 0, SCREEN_WIDTH], [-10, 0, 10], Extrapolation.CLAMP)}deg` },
             ],
-            opacity: interpolate(p, [0, 0.36, 0.48], [1, 1, 0], Extrapolation.CLAMP)
-                * interpolate(Math.abs(translateX.value), [0, SCREEN_WIDTH * 0.8], [1, 0], Extrapolation.CLAMP),
+            opacity: interpolate(Math.abs(translateX.value), [0, SCREEN_WIDTH * 0.8], [1, 0], Extrapolation.CLAMP),
         };
     });
 
@@ -250,7 +209,7 @@ function SharedPlayerShellInner() {
     }));
 
     const panGesture = useMemo(() => Gesture.Pan()
-        .enabled(shellInteractive)
+        .enabled(!playerVisible)
         .onStart(() => {
             isHorizontal.value = false;
             isVertical.value = false;
@@ -324,7 +283,7 @@ function SharedPlayerShellInner() {
                     easing: M3_EMPHASIZED_DECEL,
                 });
             }
-        }), [collapsedBottom, expansion, setPlayerVisible, stop, SWIPE_THRESHOLD, isHorizontal, isVertical, shellInteractive]);
+        }), [collapsedBottom, expansion, setPlayerVisible, stop, SWIPE_THRESHOLD, isHorizontal, isVertical, playerVisible]);
 
     const handleTap = useCallback(() => {
         setPlayerVisible(true);
@@ -354,12 +313,13 @@ function SharedPlayerShellInner() {
     return (
         <GestureDetector gesture={panGesture}>
             <Animated.View
-                pointerEvents={shellInteractive || !playerVisible ? 'auto' : 'none'}
+                pointerEvents={playerVisible ? 'none' : 'auto'}
                 style={[styles.container, shellContainerStyle]}
             >
                 <MiniPlayerShell
                     variant="row"
                     track={displayTrack}
+                    showArtwork={false}
                     textColor={playButtonIconColor}
                     buttonFillColor={playButtonColors.fill}
                     buttonBorderColor={playButtonColors.border}

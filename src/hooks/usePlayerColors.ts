@@ -13,7 +13,9 @@ const LYRICS_TEXT_MIN_RATIO = 7;
 const LYRICS_ACCENT_MIN_RATIO = 4.8;
 const LYRICS_HIGHLIGHT_MIN_RATIO = 5.1;
 const LYRICS_GLOW_MIN_RATIO = 5.4;
-const LYRICS_INACTIVE_MIN_RATIO = 3.1;
+// Inactive is intentionally lower contrast — it should read as dim, not active.
+// Clamped just high enough to be legible but clearly subdued vs the highlight.
+const LYRICS_INACTIVE_MIN_RATIO = 2.6;
 
 function parseHexColor(value?: string) {
   if (!value) return null;
@@ -113,7 +115,8 @@ export function usePlayerColors(args: {
 
   const protectedInactiveColor = useMemo(
     () => ensureColorContrast(
-      mixHexColors(lyricsTextColor, lyricsBaseSurface, 0.44),
+      // Mix further toward the surface (0.55) so inactive is clearly dimmer than active.
+      mixHexColors(lyricsTextColor, lyricsBaseSurface, 0.55),
       lyricsBaseSurface,
       { minRatio: LYRICS_INACTIVE_MIN_RATIO, targetColor: lyricsTextColor }
     ),

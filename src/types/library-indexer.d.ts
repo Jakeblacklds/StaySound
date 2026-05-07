@@ -16,5 +16,6 @@ declare module 'library-indexer' {
   }
 
   export function isLibraryIndexerAvailable(): boolean;
+  export function resolveContentUriToFileUri(contentUri: string): Promise<string | null>;
   export function scanTracksNative(folderPattern?: string): Promise<NativeScanTrack[]>;
 }

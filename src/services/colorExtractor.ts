@@ -89,6 +89,87 @@ function adjustBrightness(hex: string, factor: number): string {
 }
 
 /**
+ * Convert RGB to HSL
+ */
+function rgbToHsl(r: number, g: number, b: number): [number, number, number] {
+    r /= 255; g /= 255; b /= 255;
+    const max = Math.max(r, g, b), min = Math.min(r, g, b);
+    let h = 0, s = 0;
+    const l = (max + min) / 2;
+    if (max !== min) {
+        const d = max - min;
+        s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+        switch (max) {
+            case r: h = ((g - b) / d + (g < b ? 6 : 0)) / 6; break;
+            case g: h = ((b - r) / d + 2) / 6; break;
+            case b: h = ((r - g) / d + 4) / 6; break;
+        }
+    }
+    return [h, s, l];
+}
+
+function hslToRgb(h: number, s: number, l: number): [number, number, number] {
+    if (s === 0) {
+        const v = Math.round(l * 255);
+        return [v, v, v];
+    }
+    const hue2rgb = (p: number, q: number, t: number) => {
+        if (t < 0) t += 1;
+        if (t > 1) t -= 1;
+        if (t < 1 / 6) return p + (q - p) * 6 * t;
+        if (t < 1 / 2) return q;
+        if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+        return p;
+    };
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    return [
+        Math.round(hue2rgb(p, q, h + 1 / 3) * 255),
+        Math.round(hue2rgb(p, q, h) * 255),
+        Math.round(hue2rgb(p, q, h - 1 / 3) * 255),
+    ];
+}
+
+function getSaturation(hex: string): number {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return 0;
+    const [, s] = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    return s;
+}
+
+/**
+ * Boost a near-grey color toward a reference color's hue.
+ * Used as a last resort fallback instead of hard-coding purple.
+ */
+function boostSaturationToward(hex: string, referenceHex: string, blendAmount: number): string {
+    const rgb = hexToRgb(hex);
+    const ref = hexToRgb(referenceHex);
+    if (!rgb || !ref) return hex;
+    const [h, s, l] = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    const [rh, rs] = rgbToHsl(ref.r, ref.g, ref.b);
+    const newH = h + (rh - h) * blendAmount;
+    const newS = Math.min(1, s + (rs - s) * blendAmount + 0.25);
+    const newL = Math.max(0.35, Math.min(0.72, l + 0.08));
+    const [nr, ng, nb] = hslToRgb(newH, newS, newL);
+    return `#${[nr, ng, nb].map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
+ * If a color's HSL saturation is below the minimum, boost it proportionally.
+ * Prevents washed-out greys from being used as accent/active colors.
+ */
+function ensureMinimumSaturation(hex: string, minSaturation: number): string {
+    const rgb = hexToRgb(hex);
+    if (!rgb) return hex;
+    const [h, s, l] = rgbToHsl(rgb.r, rgb.g, rgb.b);
+    if (s >= minSaturation) return hex;
+    // Boost saturation while keeping luminance stable
+    const newS = minSaturation + (1 - minSaturation) * 0.15;
+    const [nr, ng, nb] = hslToRgb(h, newS, l);
+    return `#${[nr, ng, nb].map(c => Math.max(0, Math.min(255, c)).toString(16).padStart(2, '0')).join('')}`;
+}
+
+/**
  * Get the best contrasting text color (#000 or #fff) for a given background.
  */
 function getContrastingTextColor(bgColor: string): string {
@@ -162,23 +243,49 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
         : (primaryLum + 0.05) / (bgLum + 0.05);
 
     if (contrastRatio < 1.8) {
-        // Primary and background are too similar — push primary in the right direction.
         if (bgLum < 0.5) {
-            primary = adjustBrightness(primary, 3.5);  // Dark bg → brighten primary
+            primary = adjustBrightness(primary, 3.5);
         } else {
-            primary = adjustBrightness(primary, 0.35); // Light bg → darken primary
+            primary = adjustBrightness(primary, 0.35);
         }
         primaryLum = getLuminance(primary);
     }
 
     // Final safety nets
     if (primaryLum < 0.12 && bgLum < 0.2) {
-        // Still unreadably dark on a dark background → vibrant fallback
-        primary = '#BB86FC';
+        // Still too dark on a dark background.
+        // Try to boost the extracted vibrant/muted colors instead of going straight to lilac.
+        const candidates = result.platform === 'android'
+            ? [result.lightVibrant, result.muted, result.vibrant]
+            : [];
+        const boosted = candidates.find(c => c && getLuminance(c) >= 0.12);
+        if (boosted) {
+            primary = adjustBrightness(boosted, 1.6);
+        } else {
+            // Last resort: boost the existing primary strongly rather than forcing a purple
+            primary = boostSaturationToward(primary, '#E8E0FF', 0.55);
+        }
+        primaryLum = getLuminance(primary);
     }
     if (primaryLum > 0.85 && bgLum > 0.7) {
-        // Unreadably light on a light background → darken it
         primary = adjustBrightness(primary, 0.3);
+    }
+
+    const candidatePalette = [primary, secondary, background]
+        .map((color) => ({ color, saturation: getSaturation(color) }))
+        .filter((entry) => !!entry.color);
+    const maxPaletteSaturation = candidatePalette.reduce((max, entry) => Math.max(max, entry.saturation), 0);
+    const isLikelyMonochromeArtwork = maxPaletteSaturation < 0.14;
+
+    if (isLikelyMonochromeArtwork) {
+        // Monochrome/near-grayscale artworks should default to crisp neutral highlights.
+        // Avoid hue-boost fallback here (which can skew toward warm/red accents).
+        const neutralPrimary = bgLum < 0.5 ? '#F5F7FF' : '#0F121A';
+        primary = neutralPrimary;
+    } else {
+        // Saturation guard: if the primary is a near-grey (low saturation), boost it
+        // so it doesn't look identical to the inactive lyrics text.
+        primary = ensureMinimumSaturation(primary, 0.18);
     }
 
     const isDark = isColorDark(background);
@@ -227,8 +334,8 @@ function generateCacheKey(uri: string): string {
 }
 
 const colorCache = new Map<string, AlbumColors>();
-// v2: bumped to invalidate previous cache entries that used forced-dark backgrounds.
-const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors-v2';
+// v4: invalidate persisted palettes so monochrome artworks stop inheriting warm/red accents.
+const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors-v4';
 const MAX_PERSISTED_COLOR_CACHE = 120;
 let persistedColorCacheLoaded = false;
 let persistedColorCachePromise: Promise<void> | null = null;

@@ -41,6 +41,7 @@ internal class KaraokeParticleSystem(
         glowColor: Int,
     ) {
         if (!enableSpectralParticles || glowProgress <= 0.12f || words.isEmpty()) return
+        if (motionProfile != MotionProfile.COSMIC) return
         val preset = motionProfile.preset
 
         val firstWord = words.first()

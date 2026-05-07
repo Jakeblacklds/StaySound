@@ -28,72 +28,59 @@ import {
   searchDabBetaTracks,
 } from "./dabService";
 import { getDabBaseUrl, isDabBaseUrl } from "./dabAuthService";
-import {
-  clearRemoteMirrorCatalogCache,
-  getRemoteMirrorCatalog,
-  MirrorProvider,
-  RemoteMirrorCatalogEntry,
-} from "./mirrorCatalogService";
-
-const MONOCHROME_UPTIME_URLS = [
-  "https://tidal-uptime.jiffy-puffs-1j.workers.dev/",
-  "https://tidal-uptime.props-76styles.workers.dev/",
-] as const;
+type MirrorProvider = "tidal" | "dab";
 
 export const TIDAL_API_BASES = [
-  "https://triton.squid.wtf",
-  "https://hifi-two.spotisaver.net",
-  "https://hifi.geeked.wtf",
-  "https://maus.qqdl.site",
-  "https://vogel.qqdl.site",
-  "https://katze.qqdl.site",
-  "https://hund.qqdl.site",
-  "https://wolf.qqdl.site",
-  "https://dabmusic.xyz/api",
-  "https://beta.dabmusic.xyz",
-  "https://dab.monochrome.tf",
-  "https://hifi.monochrome.tf",
-  "https://arran.monochrome.tf",
-  "https://music.binimum.org",
   "https://eu-central.monochrome.tf",
   "https://us-west.monochrome.tf",
+  "https://katze.qqdl.site",
+  "https://hund.qqdl.site",
+  "https://dabmusic.xyz/api",
+  "https://beta.dabmusic.xyz",
+];
+const TIDAL_API_LEGACY_BASES = [
+  "https://hifi.geeked.wtf",
+  "https://triton.squid.wtf",
+  "https://maus.qqdl.site",
+  "https://vogel.qqdl.site",
+  "https://wolf.qqdl.site",
+  "https://tidal.kinoplus.online",
+  "https://arran.monochrome.tf",
   "https://api.monochrome.tf",
   "https://monochrome-api.samidy.com",
+  "https://hifi-one.spotisaver.net",
+  "https://hifi-two.spotisaver.net",
 ];
 const STATIC_GENERIC_TIDAL_API_BASES = TIDAL_API_BASES.filter(
   (base) => !base.includes("dabmusic.xyz"),
 );
 const STATIC_GENERIC_STREAMING_BASES = [
-  "https://maus.qqdl.site",
-  "https://vogel.qqdl.site",
+  "https://eu-central.monochrome.tf",
+  "https://us-west.monochrome.tf",
   "https://katze.qqdl.site",
   "https://hund.qqdl.site",
-  "https://wolf.qqdl.site",
-  "https://hifi.geeked.wtf",
 ];
 
 export const TIDAL_MIRROR_NAMES: Record<string, string> = {
-  "https://triton.squid.wtf": "Fuente Principal",
-  "https://hifi-two.spotisaver.net": "HiFi Spotisaver",
-  "https://hifi.geeked.wtf": "Monochrome Worker (Nuevo)",
-  "https://maus.qqdl.site": "QQDL Maus",
-  "https://vogel.qqdl.site": "QQDL Vogel",
-  "https://katze.qqdl.site": "QQDL Katze",
-  "https://hund.qqdl.site": "QQDL Hund",
-  "https://wolf.qqdl.site": "QQDL Wolf",
-  "https://beta.dabmusic.xyz": "DAB Beta (Respaldo)",
+  "https://eu-central.monochrome.tf": "Monochrome EU Central (Activo)",
+  "https://us-west.monochrome.tf": "Monochrome US West (Activo)",
+  "https://katze.qqdl.site": "QQDL Katze (Activo)",
+  "https://hund.qqdl.site": "QQDL Hund (Activo)",
   "https://dabmusic.xyz/api": "DAB Oficial",
-  "https://dab.monochrome.tf": "Servidor Espejo A",
-  "https://hifi.monochrome.tf": "Servidor Espejo B",
-  "https://arran.monochrome.tf": "Servidor Espejo C",
-  "https://music.binimum.org": "Fuente de Respaldo",
-  "https://eu-central.monochrome.tf": "Monochrome EU Central",
-  "https://us-west.monochrome.tf": "Monochrome US West",
-  "https://api.monochrome.tf": "Monochrome API",
-  "https://monochrome-api.samidy.com": "Monochrome Samidy",
-  auto: "Selección Automática (Recomendado)",
+  "https://beta.dabmusic.xyz": "DAB Beta (Respaldo)",
+  "https://hifi.geeked.wtf": "HiFi Geeked (Legacy)",
+  "https://triton.squid.wtf": "Triton (Legacy)",
+  "https://maus.qqdl.site": "QQDL Maus (Legacy)",
+  "https://vogel.qqdl.site": "QQDL Vogel (Legacy)",
+  "https://wolf.qqdl.site": "QQDL Wolf (Legacy)",
+  "https://tidal.kinoplus.online": "Kinoplus (Legacy)",
+  "https://arran.monochrome.tf": "Monochrome Arran (Legacy)",
+  "https://api.monochrome.tf": "Monochrome API (Legacy)",
+  "https://monochrome-api.samidy.com": "Monochrome Samidy (Legacy)",
+  "https://hifi-one.spotisaver.net": "Spotisaver One (Legacy)",
+  "https://hifi-two.spotisaver.net": "Spotisaver Two (Legacy)",
+  auto: "Seleccion Automatica (Recomendado)",
 };
-
 let currentBaseIndex = 0;
 export type TidalMirrorCapability = "search" | "stream" | "download";
 export type TidalMirrorAvailability = {
@@ -107,7 +94,7 @@ export type TidalMirrorAvailability = {
   supportsDownload: boolean;
   priority?: number;
   lastError?: string | null;
-  source: "supabase" | "uptime" | "probe" | "static";
+  source: "probe" | "static";
 };
 
 const TIDAL_ARTWORK_BASE = "https://resources.tidal.com/images";
@@ -119,7 +106,6 @@ const TIDAL_PUBLIC_DOWNLOADS_PERMISSION_KEY =
 const REQUEST_TIMEOUT_MS = 12000;
 const MIRROR_HEALTH_TIMEOUT_MS = 3500;
 const MIRROR_HEALTH_CACHE_TTL_MS = 5 * 60 * 1000;
-const DYNAMIC_INSTANCE_CACHE_TTL_MS = 15 * 60 * 1000;
 const DAB_OFFICIAL_BASE_URL = "https://dabmusic.xyz";
 const mirrorAvailabilityCache = new Map<string, TidalMirrorAvailability>();
 const inflightMirrorChecks = new Map<
@@ -127,16 +113,26 @@ const inflightMirrorChecks = new Map<
   Promise<TidalMirrorAvailability>
 >();
 type TidalMirrorCategory = "api" | "streaming";
-type DynamicMirrorEntry = { url?: string; version?: string };
-type TidalMirrorCatalogEntry = RemoteMirrorCatalogEntry & {
-  source: "supabase" | "uptime" | "static";
+type TidalMirrorCatalogEntry = {
+  baseUrl: string;
+  provider: MirrorProvider;
+  enabled: boolean;
+  priority: number;
+  supportsSearch: boolean;
+  supportsStream: boolean;
+  supportsDownload: boolean;
+  status: "available" | "slow" | "unavailable";
+  latencyMs?: number;
+  lastCheckedAt?: number;
+  lastError?: string | null;
+  source: "static";
 };
 type DynamicMirrorCatalog = {
   api: TidalMirrorCatalogEntry[];
   streaming: TidalMirrorCatalogEntry[];
   all: TidalMirrorCatalogEntry[];
   fetchedAt: number;
-  source: "supabase" | "uptime" | "static";
+  source: "static";
 };
 type MirrorJsonResult<T> = {
   data: T;
@@ -334,6 +330,8 @@ interface TidalTrackManifestResponse {
 interface DownloadOptions {
   onProgress?: (progress: number) => void;
   onTask?: (task: FileSystem.DownloadResumable | null) => void;
+  qobuzFallback?: boolean;
+  qobuzOnly?: boolean;
 }
 
 type PersistedPublicDownloadsPermission = {
@@ -341,6 +339,7 @@ type PersistedPublicDownloadsPermission = {
 };
 
 import { sanitizeFilename as utilsSanitizeFilename } from "./audioUtils";
+import { resolveQobuzStreamFromTrack } from "./qobuzKennyService";
 
 function sanitizeFilename(input: string): string {
   return utilsSanitizeFilename(input);
@@ -413,6 +412,10 @@ function resolveDownloadExtension(
   }
 
   return "m4a";
+}
+
+function requiresFlacDownload(targetQuality: TidalQuality): boolean {
+  return targetQuality === "LOSSLESS" || targetQuality === "HI_RES_LOSSLESS";
 }
 
 function getSafEntityName(uri: string): string {
@@ -774,23 +777,6 @@ export async function getTidalMirrorAvailability(
   const results = await Promise.all(
     uniqueMirrors.map(async (mirror) => {
       const remoteEntry = catalogByBaseUrl.get(mirror);
-      if (remoteEntry && catalog?.source === "supabase" && !options.force) {
-        return [
-          mirror,
-          {
-            status: remoteEntry.status,
-            latencyMs: remoteEntry.latencyMs,
-            checkedAt: remoteEntry.lastCheckedAt ?? catalog.fetchedAt,
-            provider: remoteEntry.provider,
-            supportsSearch: remoteEntry.supportsSearch,
-            supportsStream: remoteEntry.supportsStream,
-            supportsDownload: remoteEntry.supportsDownload,
-            priority: remoteEntry.priority,
-            lastError: remoteEntry.lastError ?? null,
-            source: remoteEntry.source,
-          } satisfies TidalMirrorAvailability,
-        ] as const;
-      }
 
       const cached = mirrorAvailabilityCache.get(mirror);
       if (
@@ -953,6 +939,10 @@ function shouldFallbackFromResponse(
   status: number,
   responseBody: string,
 ): boolean {
+  if (status === 429) {
+    return true;
+  }
+
   if (status >= 500 || (status === 404 && base.includes("music.binimum.org"))) {
     return true;
   }
@@ -992,8 +982,7 @@ function inferMirrorProvider(baseUrl: string): MirrorProvider {
 
 function createCatalogEntry(
   baseUrl: string,
-  source: "supabase" | "uptime" | "static",
-  partial: Partial<RemoteMirrorCatalogEntry> = {},
+  partial: Partial<Omit<TidalMirrorCatalogEntry, "baseUrl" | "source">> = {},
 ): TidalMirrorCatalogEntry {
   return {
     baseUrl,
@@ -1007,7 +996,7 @@ function createCatalogEntry(
     latencyMs: partial.latencyMs,
     lastCheckedAt: partial.lastCheckedAt,
     lastError: partial.lastError ?? null,
-    source,
+    source: "static",
   };
 }
 
@@ -1030,7 +1019,6 @@ function mergeCatalogEntry(
 
 function entriesToCatalog(
   entries: TidalMirrorCatalogEntry[],
-  source: "supabase" | "uptime" | "static",
 ): DynamicMirrorCatalog {
   const sorted = [...entries].sort((left, right) => left.priority - right.priority);
   return {
@@ -1040,7 +1028,7 @@ function entriesToCatalog(
     ),
     all: sorted,
     fetchedAt: Date.now(),
-    source,
+    source: "static",
   };
 }
 
@@ -1052,7 +1040,7 @@ function buildStaticMirrorCatalog(): DynamicMirrorCatalog {
       baseUrl,
       mergeCatalogEntry(
         combined.get(baseUrl),
-        createCatalogEntry(baseUrl, "static", {
+        createCatalogEntry(baseUrl, {
           priority: 100 + index * 10,
           supportsSearch: true,
           supportsStream: false,
@@ -1067,7 +1055,7 @@ function buildStaticMirrorCatalog(): DynamicMirrorCatalog {
       baseUrl,
       mergeCatalogEntry(
         combined.get(baseUrl),
-        createCatalogEntry(baseUrl, "static", {
+        createCatalogEntry(baseUrl, {
           priority: 200 + index * 10,
           supportsSearch: false,
           supportsStream: true,
@@ -1085,9 +1073,9 @@ function buildStaticMirrorCatalog(): DynamicMirrorCatalog {
       baseUrl,
       mergeCatalogEntry(
         combined.get(baseUrl),
-        createCatalogEntry(baseUrl, "static", {
+        createCatalogEntry(baseUrl, {
           provider: "dab",
-          priority: 10 + index * 10,
+          priority: 500 + index * 10,
           supportsSearch: true,
           supportsStream: true,
           supportsDownload: true,
@@ -1096,114 +1084,17 @@ function buildStaticMirrorCatalog(): DynamicMirrorCatalog {
     );
   });
 
-  return entriesToCatalog(Array.from(combined.values()), "static");
-}
-
-function normalizeUptimeEntries(
-  entries: DynamicMirrorEntry[] | undefined,
-  capability: TidalMirrorCapability,
-  offset: number,
-): TidalMirrorCatalogEntry[] {
-  if (!Array.isArray(entries)) return [];
-
-  return entries
-    .map((entry, index) => {
-      const baseUrl =
-        typeof entry?.url === "string"
-          ? entry.url.trim().replace(/\/+$/, "")
-          : "";
-      if (!baseUrl) return null;
-
-      return createCatalogEntry(baseUrl, "uptime", {
-        priority: offset + index * 10,
-        supportsSearch: capability === "search",
-        supportsStream: capability === "stream",
-        supportsDownload:
-          capability === "download" || capability === "stream",
-      });
-    })
-    .filter((entry): entry is TidalMirrorCatalogEntry => Boolean(entry));
-}
-
-async function fetchDynamicMirrorCatalogFrom(
-  url: string,
-): Promise<DynamicMirrorCatalog> {
-  const { signal, cleanup } = withTimeoutSignal(5000);
-
-  try {
-    const response = await fetch(url, { signal });
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
-    }
-
-    const payload = (await response.json()) as {
-      api?: DynamicMirrorEntry[];
-      streaming?: DynamicMirrorEntry[];
-    };
-
-    const combined = new Map<string, TidalMirrorCatalogEntry>();
-    const apiEntries = normalizeUptimeEntries(payload.api, "search", 300);
-    const streamingEntries = normalizeUptimeEntries(
-      payload.streaming,
-      "stream",
-      600,
-    );
-
-    [...apiEntries, ...streamingEntries].forEach((entry) => {
-      combined.set(
-        entry.baseUrl,
-        mergeCatalogEntry(combined.get(entry.baseUrl), entry),
-      );
-    });
-
-    return entriesToCatalog(Array.from(combined.values()), "uptime");
-  } finally {
-    cleanup();
-  }
+  return entriesToCatalog(Array.from(combined.values()));
 }
 
 async function loadDynamicMirrorCatalog(): Promise<DynamicMirrorCatalog> {
-  const cached = dynamicMirrorCatalogCache;
-  if (cached && Date.now() - cached.fetchedAt < DYNAMIC_INSTANCE_CACHE_TTL_MS) {
-    return cached;
-  }
+  if (dynamicMirrorCatalogCache) return dynamicMirrorCatalogCache;
 
   if (dynamicMirrorCatalogPromise) {
     return dynamicMirrorCatalogPromise;
   }
 
   dynamicMirrorCatalogPromise = (async () => {
-    try {
-      const remoteEntries = await getRemoteMirrorCatalog();
-      if (remoteEntries.length > 0) {
-        const remoteCatalog = entriesToCatalog(
-          remoteEntries.map((entry) =>
-            createCatalogEntry(entry.baseUrl, "supabase", entry),
-          ),
-          "supabase",
-        );
-        dynamicMirrorCatalogCache = remoteCatalog;
-        return remoteCatalog;
-      }
-    } catch (error) {
-      console.warn("[TidalService] Failed to fetch mirror catalog from Supabase:", error);
-    }
-
-    for (const url of MONOCHROME_UPTIME_URLS) {
-      try {
-        const catalog = await fetchDynamicMirrorCatalogFrom(url);
-        if (catalog.all.length > 0) {
-          dynamicMirrorCatalogCache = catalog;
-          return catalog;
-        }
-      } catch (error) {
-        console.warn(
-          `[TidalService] Failed to fetch mirror catalog from ${url}:`,
-          error,
-        );
-      }
-    }
-
     const fallbackCatalog = buildStaticMirrorCatalog();
     dynamicMirrorCatalogCache = fallbackCatalog;
     return fallbackCatalog;
@@ -1283,20 +1174,21 @@ export async function getTidalMirrorOptions(
     "https://beta.dabmusic.xyz",
   ];
 
+  if (options.force) {
+    dynamicMirrorCatalogCache = null;
+    dynamicMirrorCatalogPromise = null;
+    mirrorAvailabilityCache.clear();
+    inflightMirrorChecks.clear();
+  }
+
   try {
-    const catalog = options.force
-      ? await (async () => {
-          dynamicMirrorCatalogCache = null;
-          mirrorAvailabilityCache.clear();
-          clearRemoteMirrorCatalogCache();
-          return await loadDynamicMirrorCatalog();
-        })()
-      : await loadDynamicMirrorCatalog();
+    const catalog = await loadDynamicMirrorCatalog();
     if (catalog.all.length > 0) {
       return Array.from(
         new Set([
           ...pinnedMirrors,
           ...catalog.all.map((entry) => entry.baseUrl),
+          ...TIDAL_API_LEGACY_BASES,
         ]),
       );
     }
@@ -1308,6 +1200,7 @@ export async function getTidalMirrorOptions(
     new Set([
       ...pinnedMirrors,
       ...TIDAL_API_BASES,
+      ...TIDAL_API_LEGACY_BASES,
     ]),
   );
 }
@@ -2624,9 +2517,15 @@ export async function downloadTidalTrack(
   options: DownloadOptions = {},
 ): Promise<Track> {
   const canUseDabRescue = shouldRescueWithDabBeta();
+  const flacOnlyDownload = requiresFlacDownload(targetQuality);
   const downloadFromDabBeta = async (): Promise<Track> => {
     const baseFilename = getTrackBaseFilename(tidalTrack);
     const streamInfo = await getDabBetaStreamInfo(tidalTrack, targetQuality);
+    if (flacOnlyDownload && streamInfo.extension !== "flac") {
+      throw new Error(
+        "La fuente actual no entrego FLAC. Cambia de mirror o intenta nuevamente.",
+      );
+    }
     const filename = `${baseFilename}.${streamInfo.extension}`;
 
     const existingPublicUri = await findExistingPublicTrackUri(filename);
@@ -2706,6 +2605,108 @@ export async function downloadTidalTrack(
     return toLibraryTrack(enrichedTrack, persistentUri);
   };
 
+  const downloadFromQobuz = async (): Promise<Track> => {
+    const baseFilename = getTrackBaseFilename(tidalTrack);
+    const streamInfo = await resolveQobuzStreamFromTrack(
+      {
+        title: tidalTrack.title,
+        artist: tidalTrack.artist,
+        album: tidalTrack.album,
+      },
+      targetQuality,
+    );
+    if (!streamInfo?.url) {
+      throw new Error("Qobuz no devolvio una URL valida para esta pista.");
+    }
+
+    if (flacOnlyDownload && streamInfo.extension !== "flac") {
+      throw new Error(
+        "Qobuz no entrego FLAC para esta pista en este momento.",
+      );
+    }
+
+    const filename = `${baseFilename}.${streamInfo.extension}`;
+    const existingPublicUri = await findExistingPublicTrackUri(filename);
+    if (existingPublicUri) {
+      await persistMetadataInPublicDownloads(tidalTrack, baseFilename);
+      if (tidalTrack.artworkUrl) {
+        await persistArtworkInPublicDownloads(
+          tidalTrack.artworkUrl,
+          tidalTrack.artist,
+          tidalTrack.album,
+        );
+      }
+      return toLibraryTrack(
+        {
+          ...tidalTrack,
+          quality: streamInfo.quality,
+          codec: streamInfo.codec,
+          sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+          bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+        },
+        existingPublicUri,
+      );
+    }
+
+    await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
+    const outputUri = getOutputUri(baseFilename, streamInfo.extension);
+    await downloadSegment(
+      streamInfo.url,
+      outputUri,
+      options.onTask,
+      options.onProgress,
+    );
+
+    const fileInfo = await FileSystem.getInfoAsync(outputUri);
+    if (!fileInfo.exists || !fileInfo.size || fileInfo.size <= 0) {
+      throw new Error("Download failed: File is empty or does not exist");
+    }
+
+    if (!(await isValidAudioFile(outputUri, streamInfo.extension))) {
+      throw new Error(
+        `Download failed: The file received is not a valid ${streamInfo.extension.toUpperCase()}`,
+      );
+    }
+
+    let persistentUri = outputUri;
+    try {
+      persistentUri = await persistInPublicDownloads(
+        outputUri,
+        baseFilename,
+        streamInfo.extension,
+      );
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
+    } catch (persistError) {
+      console.error(
+        "[TidalService] Failed to persist Qobuz file in public folder:",
+        persistError,
+      );
+    }
+
+    const enrichedTrack: TidalTrack = {
+      ...tidalTrack,
+      quality: streamInfo.quality,
+      codec: streamInfo.codec,
+      sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+      bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+    };
+
+    await persistMetadataInPublicDownloads(enrichedTrack, baseFilename);
+    if (enrichedTrack.artworkUrl) {
+      await persistArtworkInPublicDownloads(
+        enrichedTrack.artworkUrl,
+        enrichedTrack.artist,
+        enrichedTrack.album,
+      );
+    }
+
+    return toLibraryTrack(enrichedTrack, persistentUri);
+  };
+
+  if (options.qobuzOnly) {
+    return await downloadFromQobuz();
+  }
+
   if (isSelectedDabSource()) {
     return await downloadFromDabBeta();
   }
@@ -2713,28 +2714,45 @@ export async function downloadTidalTrack(
   const baseFilename = getTrackBaseFilename(tidalTrack);
 
   // 1. Get manifest for target quality
-  let manifest: ParsedManifest;
+  let manifest: ParsedManifest | null = null;
   try {
-    try {
-      manifest = await getTidalTrackManifest(tidalTrack.id, targetQuality, {
-        capability: "download",
-      });
-    } catch (error) {
-      console.warn(
-        `[TidalService] Quality ${targetQuality} failed, falling back to LOSSLESS/HIGH`,
-        error,
-      );
+    const manifestQualityCandidates: TidalQuality[] = flacOnlyDownload
+      ? targetQuality === "HI_RES_LOSSLESS"
+        ? ["HI_RES_LOSSLESS", "LOSSLESS"]
+        : ["LOSSLESS"]
+      : [targetQuality, "LOSSLESS", "HIGH"];
+
+    let manifestLastError: unknown = null;
+    for (const candidate of manifestQualityCandidates) {
       try {
-        manifest = await getTidalTrackManifest(tidalTrack.id, "LOSSLESS", {
+        manifest = await getTidalTrackManifest(tidalTrack.id, candidate, {
           capability: "download",
         });
-      } catch {
-        manifest = await getTidalTrackManifest(tidalTrack.id, "HIGH", {
-          capability: "download",
-        });
+        break;
+      } catch (error) {
+        manifestLastError = error;
+        console.warn(
+          `[TidalService] Download manifest ${candidate} failed for track ${tidalTrack.id}.`,
+          error,
+        );
       }
     }
+
+    if (!manifest) {
+      throw (
+        manifestLastError ??
+        new Error("No se pudo resolver un manifest de descarga.")
+      );
+    }
   } catch (error) {
+    if (options.qobuzFallback) {
+      try {
+        return await downloadFromQobuz();
+      } catch (qobuzError) {
+        console.warn("[TidalService] Qobuz download fallback failed:", qobuzError);
+      }
+    }
+
     if (
       !activateDabBetaRescue(
         "Tidal no pudo entregar el audio. Cambiando a DAB de respaldo.",
@@ -2744,6 +2762,10 @@ export async function downloadTidalTrack(
     }
 
     return await downloadFromDabBeta();
+  }
+
+  if (!manifest) {
+    throw new Error("No se pudo resolver el manifest de descarga.");
   }
 
   let sourceUrl = getDirectUrl(manifest);
@@ -2763,6 +2785,14 @@ export async function downloadTidalTrack(
   }
 
   if (!sourceUrl) {
+    if (options.qobuzFallback) {
+      try {
+        return await downloadFromQobuz();
+      } catch (qobuzError) {
+        console.warn("[TidalService] Qobuz direct-url fallback failed:", qobuzError);
+      }
+    }
+
     if (targetQuality === "HI_RES_LOSSLESS" && canUseDabRescue) {
       try {
         console.log(
@@ -2785,6 +2815,19 @@ export async function downloadTidalTrack(
   }
 
   const extension = resolveDownloadExtension(manifest, sourceUrl);
+  if (flacOnlyDownload && extension !== "flac") {
+    if (options.qobuzFallback) {
+      try {
+        return await downloadFromQobuz();
+      } catch (qobuzError) {
+        console.warn("[TidalService] Qobuz FLAC fallback failed:", qobuzError);
+      }
+    }
+
+    throw new Error(
+      "La descarga no esta en FLAC. Cambia de mirror o intenta de nuevo.",
+    );
+  }
   const filename = `${baseFilename}.${extension}`;
 
   if (Platform.OS === "android") {
@@ -2930,16 +2973,82 @@ function buildCloudStreamTrackFromStreamInfo(
     tidalId: tidalTrack.id,
     tidalAlbumId: tidalTrack.albumId,
     dateAdded: Date.now(),
-    cloudOnly: true,
+    cloudOnly: false,
   };
 }
 
 export async function createTidalStreamTrack(
   tidalTrack: TidalTrack,
+  options: { qobuzFallback?: boolean; qobuzOnly?: boolean } = {},
 ): Promise<Track> {
+  const stackPreview = new Error()
+    .stack
+    ?.split("\n")
+    .slice(1, 6)
+    .map(line => line.trim());
+  console.log("[TidalService] createTidalStreamTrack called", {
+    trackId: tidalTrack.id,
+    title: tidalTrack.title,
+    artist: tidalTrack.artist,
+    stack: stackPreview,
+  });
+
   const preferredQuality = useSettingsStore.getState().tidalDownloadQuality;
   const shouldPreferDabStream =
     isSelectedDabSource() || shouldRescueWithDabBeta();
+
+  if (options.qobuzOnly || options.qobuzFallback) {
+    try {
+      const qobuzStream = await resolveQobuzStreamFromTrack(
+        {
+          title: tidalTrack.title,
+          artist: tidalTrack.artist,
+          album: tidalTrack.album,
+        },
+        preferredQuality,
+      );
+      if (qobuzStream?.url) {
+        console.log("[TidalService] Qobuz stream resolved", {
+          trackId: tidalTrack.id,
+          quality: qobuzStream.quality,
+          extension: qobuzStream.extension,
+        });
+        const formatMap: Record<string, string> = {
+          flac: "FLAC",
+          m4a: "AAC",
+          mp3: "MP3",
+        };
+        return {
+          id: `tidal_stream_${tidalTrack.id}`,
+          uri: qobuzStream.url,
+          title: tidalTrack.title,
+          artist: tidalTrack.artist,
+          artistId: tidalTrack.artistId ? String(tidalTrack.artistId) : undefined,
+          album: tidalTrack.album,
+          duration: tidalTrack.durationMs,
+          artwork: tidalTrack.artworkUrl,
+          trackNumber: tidalTrack.trackNumber,
+          year: tidalTrack.year,
+          format: formatMap[qobuzStream.extension] || "FLAC",
+          codec: qobuzStream.codec,
+          sampleRate: qobuzStream.sampleRate ?? tidalTrack.sampleRate,
+          bitDepth: qobuzStream.bitDepth ?? tidalTrack.bitDepth,
+          quality: qobuzStream.quality,
+          source: "tidal_stream",
+          tidalId: tidalTrack.id,
+          tidalAlbumId: tidalTrack.albumId,
+          dateAdded: Date.now(),
+          cloudOnly: false,
+        };
+      }
+    } catch (qobuzError) {
+      console.warn("[TidalService] Qobuz stream fallback failed:", qobuzError);
+    }
+
+    if (options.qobuzOnly) {
+      throw new Error("Qobuz no pudo resolver stream para esta pista.");
+    }
+  }
 
   if (shouldPreferDabStream) {
     try {
@@ -3031,7 +3140,7 @@ export async function createTidalStreamTrack(
         tidalId: enrichedTrack.id,
         tidalAlbumId: enrichedTrack.albumId,
         dateAdded: Date.now(),
-        cloudOnly: true,
+        cloudOnly: false,
       };
     }
   }
@@ -3077,7 +3186,7 @@ export async function createTidalStreamTrack(
       tidalId: tidalTrack.id,
       tidalAlbumId: tidalTrack.albumId,
       dateAdded: Date.now(),
-      cloudOnly: true,
+      cloudOnly: false,
     };
   }
 
@@ -3295,3 +3404,4 @@ export async function getTidalSimilarAlbums(
     return [];
   }
 }
+
