@@ -552,14 +552,16 @@ internal class KaraokeLineRenderer {
         config.backgroundBasePaint.alpha = (188f * layerVisibility).toInt().coerceIn(0, 188)
         for ((index, word) in line.backgroundWords.withIndex()) {
             if (resolvedActiveHighlightState != null && index in resolvedActiveHighlightState.activeRange) {
-                callbacks.drawWordTail(
-                    canvas = canvas,
-                    line = line,
-                    word = word,
-                    paint = config.backgroundBasePaint,
-                    revealX = resolvedActiveHighlightState.sweepX,
-                    rowHeight = config.backgroundLineHeight,
-                )
+                if (!resolvedActiveHighlightState.isGrowable) {
+                    callbacks.drawWordTail(
+                        canvas = canvas,
+                        line = line,
+                        word = word,
+                        paint = config.backgroundBasePaint,
+                        revealX = resolvedActiveHighlightState.sweepX,
+                        rowHeight = config.backgroundLineHeight,
+                    )
+                }
                 continue
             }
             if (index < completedWordCount) continue

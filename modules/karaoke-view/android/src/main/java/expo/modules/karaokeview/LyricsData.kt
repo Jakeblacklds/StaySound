@@ -98,13 +98,18 @@ internal object LyricsVisualWords {
         val hasHyphen = combinedText.contains('-')
         val length = combinedText.length
 
+        // Binimum/Apple Music: apply the sustained glow to any note that lasts long enough.
+        // Old limit (length <= 7) silently excluded most multi-syllable words like
+        // "beautiful", "together", "forever", "running", etc. Removed.
+        // Per-character penalty relaxed: 200ms/char instead of 300ms (too aggressive).
+        // Short words (1-3 chars) still need a higher per-char threshold to avoid
+        // turning tiny filler words into glowing notes.
         return !isCjk &&
             !isRtl &&
             !hasHyphen &&
-            length <= 7 &&
-            durationMs >= 900 &&
-            durationMs >= length * 300L &&
-            (length >= 4 || durationMs / length >= 600L)
+            durationMs >= 850 &&
+            durationMs >= length * 200L &&
+            (length >= 4 || durationMs / length >= 550L)
     }
 }
 

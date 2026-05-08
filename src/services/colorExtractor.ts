@@ -137,6 +137,22 @@ function getSaturation(hex: string): number {
     return s;
 }
 
+function getMaxPaletteSaturation(colors: Array<string | undefined>): number {
+    return colors.reduce((max, color) => {
+        if (!color) return max;
+        return Math.max(max, getSaturation(color));
+    }, 0);
+}
+
+export function isAlbumPaletteMonochrome(colors: Pick<AlbumColors, 'primary' | 'secondary' | 'background' | 'accent'>): boolean {
+    return getMaxPaletteSaturation([
+        colors.primary,
+        colors.secondary,
+        colors.background,
+        colors.accent,
+    ]) < 0.14;
+}
+
 /**
  * Boost a near-grey color toward a reference color's hue.
  * Used as a last resort fallback instead of hard-coding purple.
@@ -207,8 +223,18 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
     let primary = DEFAULT_COLORS.primary;
     let secondary = DEFAULT_COLORS.secondary;
     let background = DEFAULT_COLORS.background;
+    let extractedPaletteSaturation = 1;
 
     if (result.platform === 'android') {
+        extractedPaletteSaturation = getMaxPaletteSaturation([
+            result.vibrant,
+            result.lightVibrant,
+            result.darkVibrant,
+            result.muted,
+            result.darkMuted,
+            result.dominant,
+        ]);
+
         // Prefer vibrant colors for primary; fall back to dominant.
         primary = (result.vibrant && getLuminance(result.vibrant) > 0.008)
             ? result.vibrant
@@ -218,31 +244,46 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
         // fall back to dominant then our default.
         background = result.darkMuted || result.dominant || DEFAULT_COLORS.background;
     } else if (result.platform === 'ios') {
+        extractedPaletteSaturation = getMaxPaletteSaturation([
+            result.primary,
+            result.secondary,
+            result.background,
+            result.detail,
+        ]);
+
         primary = result.primary || DEFAULT_COLORS.primary;
         secondary = result.secondary || DEFAULT_COLORS.secondary;
         background = result.background || DEFAULT_COLORS.background;
     }
 
-    const bgLuminance = getLuminance(background);
+    let bgLum = getLuminance(background);
 
     // Only correct extreme values — let the artwork dictate the mood.
-    if (bgLuminance < 0.018) {
+    if (bgLum < 0.018) {
         // Near-pure black → lift to a rich dark charcoal.
         background = '#0F0D13';
-    } else if (bgLuminance > 0.88) {
+    } else if (bgLum > 0.88) {
         // Near-pure white → pull back slightly.
         background = adjustBrightness(background, 0.82);
     }
     // Mid-range (0.018–0.88) → keep as-is; covers both light and dark artworks.
 
+    bgLum = getLuminance(background);
+
+    const isLikelyMonochromeArtwork = extractedPaletteSaturation < 0.14;
+
+    if (isLikelyMonochromeArtwork) {
+        primary = bgLum < 0.5 ? '#F5F7FF' : '#0F121A';
+        secondary = bgLum < 0.5 ? '#D8DCE8' : '#2A2D35';
+    }
+
     // ----- Ensure primary has enough contrast against background -----
     let primaryLum = getLuminance(primary);
-    const bgLum = getLuminance(background);
     const contrastRatio = bgLum > primaryLum
         ? (bgLum + 0.05) / (primaryLum + 0.05)
         : (primaryLum + 0.05) / (bgLum + 0.05);
 
-    if (contrastRatio < 1.8) {
+    if (!isLikelyMonochromeArtwork && contrastRatio < 1.8) {
         if (bgLum < 0.5) {
             primary = adjustBrightness(primary, 3.5);
         } else {
@@ -252,7 +293,7 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
     }
 
     // Final safety nets
-    if (primaryLum < 0.12 && bgLum < 0.2) {
+    if (!isLikelyMonochromeArtwork && primaryLum < 0.12 && bgLum < 0.2) {
         // Still too dark on a dark background.
         // Try to boost the extracted vibrant/muted colors instead of going straight to lilac.
         const candidates = result.platform === 'android'
@@ -267,21 +308,12 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
         }
         primaryLum = getLuminance(primary);
     }
-    if (primaryLum > 0.85 && bgLum > 0.7) {
+    if (!isLikelyMonochromeArtwork && primaryLum > 0.85 && bgLum > 0.7) {
         primary = adjustBrightness(primary, 0.3);
     }
 
-    const candidatePalette = [primary, secondary, background]
-        .map((color) => ({ color, saturation: getSaturation(color) }))
-        .filter((entry) => !!entry.color);
-    const maxPaletteSaturation = candidatePalette.reduce((max, entry) => Math.max(max, entry.saturation), 0);
-    const isLikelyMonochromeArtwork = maxPaletteSaturation < 0.14;
-
     if (isLikelyMonochromeArtwork) {
-        // Monochrome/near-grayscale artworks should default to crisp neutral highlights.
-        // Avoid hue-boost fallback here (which can skew toward warm/red accents).
-        const neutralPrimary = bgLum < 0.5 ? '#F5F7FF' : '#0F121A';
-        primary = neutralPrimary;
+        primary = bgLum < 0.5 ? '#F5F7FF' : '#0F121A';
     } else {
         // Saturation guard: if the primary is a near-grey (low saturation), boost it
         // so it doesn't look identical to the inactive lyrics text.
@@ -334,8 +366,8 @@ function generateCacheKey(uri: string): string {
 }
 
 const colorCache = new Map<string, AlbumColors>();
-// v4: invalidate persisted palettes so monochrome artworks stop inheriting warm/red accents.
-const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors-v4';
+// v5: detect monochrome artwork before any contrast/saturation rescue can invent a hue.
+const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors-v5';
 const MAX_PERSISTED_COLOR_CACHE = 120;
 let persistedColorCacheLoaded = false;
 let persistedColorCachePromise: Promise<void> | null = null;

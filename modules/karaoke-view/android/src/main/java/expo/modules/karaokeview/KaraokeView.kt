@@ -722,20 +722,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 drawWordTranslated(canvas, line, word, paint, -rowHeight * finalLiftRatio)
             }
 
-            val wordDurationMs = word.endMs - word.startMs
-            if (wordDurationMs >= 900L) {
-                drawSweepGlowForWords(
-                    canvas = canvas,
-                    line = line,
-                    words = listOf(word),
-                    sweepX = sweepX,
-                    glowProgress = getSustainedGlowProgress(clampedProgress),
-                    paint = paint,
-                    rowHeight = rowHeight,
-                    translateY = -rowHeight * finalLiftRatio,
-                    currentTimeMs = currentTimeMs,
-                )
-            }
             return
         }
 
@@ -794,23 +780,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             paint.shader = originalShader
         }
 
-        // Glow for long-duration words (≥900ms) that don't qualify as growable.
-        // This is shared across all motion profiles.
-        if (wordDurationMs >= 900L) {
-            paint.shader = null
-            drawSweepGlowForWords(
-                canvas = canvas,
-                line = line,
-                words = listOf(word),
-                sweepX = sweepX,
-                glowProgress = getSustainedGlowProgress(clampedProgress),
-                paint = paint,
-                rowHeight = rowHeight,
-                translateY = -rowHeight * finalLiftRatio,
-                currentTimeMs = currentTimeMs,
-            )
-            paint.shader = originalShader
-        }
     }
 
     private fun drawWordPreHighlight(
@@ -885,6 +854,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 paint = paint,
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
+                enableGlow = false,
             )
             return
         }
@@ -930,14 +900,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val clampedProgress = progress.coerceIn(0f, 1f)
         val shouldRenderWipeShader = KaraokeHighlightStateMachine.shouldRenderWipeShader(progress)
 
-        val firstWord = words.first()
-        val lastWord = words.last()
-        val wordLeft = marginLeft + firstWord.xOffset
-        val wordTop = line.y + words.minOf { it.yOffset }
-        val wordBottom = line.y + words.maxOf { it.yOffset } + rowHeight
-        val wordRight = marginLeft + lastWord.xOffset + lastWord.width + FEATHER_PX * 2
-
         if (!shouldRenderWipeShader) {
+            // Wipe complete: draw with lift/glow held at their target values
             drawVisualWordCharactersWithLift(
                 canvas = canvas,
                 line = line,
@@ -949,12 +913,16 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 marginLeft = marginLeft,
                 density = density,
                 glowColor = glowColor,
+                enableGlow = true,
                 smootherStep = ::smootherStep,
             )
             return
         }
 
-        // Shader on the paint itself — no saveLayer/DST_IN needed.
+        // Active wipe: apply a feathered gradient shader that reveals left-to-right at sweepX.
+        // enableGlow=false during wipe: Android's setShadowLayer bleeds through the gradient's
+        // transparent areas (unlike CSS text-shadow which only affects visible pixels).
+        // The glow kicks in cleanly once the wipe completes above.
         val endSoftness = smootherStep(((clampedProgress - 0.88f) / 0.12f).coerceIn(0f, 1f))
         val fadeWidth = FEATHER_PX * (4f + 1.6f * endSoftness)
         val r = Color.red(paint.color)
@@ -985,18 +953,13 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             marginLeft = marginLeft,
             density = density,
             glowColor = glowColor,
+            enableGlow = false, // No glow during wipe — shadow bleeds through gradient transparency
             smootherStep = ::smootherStep,
         )
 
         paint.shader = originalShader
     }
 
-    private fun getSustainedGlowProgress(progress: Float): Float {
-        val t = progress.coerceIn(0f, 1f)
-        if (t <= 0f) return 0f
-        val eased = smootherStep(t)
-        return (0.22f + eased * 0.70f).coerceAtMost(0.92f)
-    }
 
     private fun drawWordCharactersWithLift(
         canvas: Canvas,
@@ -1006,6 +969,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         paint: Paint,
         rowHeight: Float,
         finalLiftRatio: Float,
+        enableGlow: Boolean = true,
     ) {
         drawVisualWordCharactersWithLift(
             canvas = canvas,
@@ -1018,6 +982,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             marginLeft = marginLeft,
             density = density,
             glowColor = glowColor,
+            enableGlow = enableGlow,
             smootherStep = ::smootherStep,
         )
     }
@@ -1333,3 +1298,4 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     override fun onDetachedFromWindow() { super.onDetachedFromWindow(); animator?.stop(); animator = null }
     override fun onAttachedToWindow() { super.onAttachedToWindow(); if (lines.isNotEmpty() && animator?.isRunning != true) startAnimator() }
 }
+

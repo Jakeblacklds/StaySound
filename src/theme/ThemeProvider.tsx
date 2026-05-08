@@ -1,7 +1,7 @@
 import React, { createContext, ReactNode, useCallback, useContext, useState } from 'react';
 import { useColorScheme } from 'react-native';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
-import { AlbumColors } from '../services/colorExtractor';
+import { AlbumColors, isAlbumPaletteMonochrome } from '../services/colorExtractor';
 import { useSettingsStore } from '../stores/settingsStore';
 import { Theme, ThemeMode, ThemeStyle } from '../types/theme';
 import { ensureColorContrast, mixHexColors, pickReadableColor } from '../utils/colorContrast';
@@ -237,7 +237,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         const colorToUse = seed.startsWith('#') ? seed : `#${seed}`;
 
         try {
-            const variant = isDynamic ? 'content' : (settings.schemeVariant as SchemeVariant) || 'expressive';
+            const dynamicVariant = isDynamic && isAlbumPaletteMonochrome(dynamicPalette)
+                ? 'monochrome'
+                : 'content';
+            const variant = isDynamic ? dynamicVariant : (settings.schemeVariant as SchemeVariant) || 'expressive';
             const m3Colors = isDynamic
                 ? generateM3Palette(colorToUse, isDark, variant)
                 : generateManualAccentPalette(colorToUse, isDark, variant);
