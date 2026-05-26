@@ -1,7 +1,12 @@
 import { TidalQuality, TidalTrack } from "../types/audio";
 
-const QOBUZ_API_BASE = "https://qobuz.kennyy.com.br/api";
-const REQUEST_TIMEOUT_MS = 15000;
+const QOBUZ_API_BASES = [
+  "https://qdl-api.monochrome.tf",
+  "https://trypt-hifi-dl-456461932686.us-west1.run.app",
+  "https://qobuz.kennyy.com.br",
+  "https://mono.scavengerfurs.net",
+];
+const REQUEST_TIMEOUT_MS = 8000;
 
 type QobuzTrackItem = {
   id?: number;
@@ -69,10 +74,10 @@ function withTimeoutSignal(timeoutMs: number): {
   };
 }
 
-async function fetchQobuzJson<T>(url: string): Promise<T> {
+async function fetchQobuzJson<T>(baseUrl: string, path: string): Promise<T> {
   const { signal, cleanup } = withTimeoutSignal(REQUEST_TIMEOUT_MS);
   try {
-    const response = await fetch(url, { signal });
+    const response = await fetch(`${baseUrl.replace(/\/+$/, "")}${path}`, { signal });
     const body = await response.text();
     let parsed: unknown = {};
     try {
@@ -88,6 +93,23 @@ async function fetchQobuzJson<T>(url: string): Promise<T> {
   } finally {
     cleanup();
   }
+}
+
+async function fetchQobuzJsonFromAnyBase<T>(path: string): Promise<T> {
+  let lastError: unknown = null;
+
+  for (const baseUrl of QOBUZ_API_BASES) {
+    try {
+      return await fetchQobuzJson<T>(baseUrl, path);
+    } catch (error) {
+      lastError = error;
+      console.warn(`[QobuzKennyService] ${baseUrl} failed for ${path}:`, error);
+    }
+  }
+
+  throw lastError instanceof Error
+    ? lastError
+    : new Error("All Qobuz endpoints failed");
 }
 
 function parseYear(value?: string): number | undefined {
@@ -136,10 +158,15 @@ function normalizeQobuzTrack(item: QobuzTrackItem): TidalTrack {
     sampleRate,
     bitDepth,
     codec: bitDepth && bitDepth > 16 ? "flac" : "flac",
+    isrc: item.isrc,
   };
 }
 
-function scoreCandidate(baseTrack: Pick<TidalTrack, "title" | "artist" | "album">, candidate: TidalTrack): number {
+function scoreCandidate(baseTrack: Pick<TidalTrack, "title" | "artist" | "album" | "isrc">, candidate: TidalTrack): number {
+  if (baseTrack.isrc && candidate.isrc && baseTrack.isrc.toLowerCase() === candidate.isrc.toLowerCase()) {
+    return 1000;
+  }
+
   const titleA = baseTrack.title.toLowerCase().trim();
   const titleB = candidate.title.toLowerCase().trim();
   const artistA = baseTrack.artist.toLowerCase().trim();
@@ -159,15 +186,13 @@ function scoreCandidate(baseTrack: Pick<TidalTrack, "title" | "artist" | "album"
 }
 
 function qualityToQobuzCode(quality: TidalQuality): "5" | "6" | "7" | "27" {
-  if (quality === "LOW" || quality === "MP3") return "5";
-  if (quality === "HIGH") return "6";
+  if (quality === "LOW" || quality === "MP3" || quality === "HIGH") return "5";
   if (quality === "HI_RES_LOSSLESS") return "27";
-  return "7";
+  return "6";
 }
 
 function extensionFromQobuzFormat(formatCode: string): "flac" | "m4a" | "mp3" {
   if (formatCode === "5") return "mp3";
-  if (formatCode === "6") return "m4a";
   return "flac";
 }
 
@@ -178,8 +203,8 @@ function isQobuzFormatCode(value: string): value is "5" | "6" | "7" | "27" {
 export async function searchQobuzTracks(query: string): Promise<TidalTrack[]> {
   const trimmed = query.trim();
   if (!trimmed) return [];
-  const url = `${QOBUZ_API_BASE}/get-music?q=${encodeURIComponent(trimmed)}&offset=0`;
-  const payload = await fetchQobuzJson<QobuzSearchResponse>(url);
+  const path = `/api/get-music?q=${encodeURIComponent(trimmed)}&offset=0`;
+  const payload = await fetchQobuzJsonFromAnyBase<QobuzSearchResponse>(path);
   if (!payload.success) return [];
   const items = payload.data?.tracks?.items ?? [];
   return items
@@ -188,10 +213,10 @@ export async function searchQobuzTracks(query: string): Promise<TidalTrack[]> {
 }
 
 export async function resolveQobuzStreamFromTrack(
-  track: Pick<TidalTrack, "title" | "artist" | "album">,
+  track: Pick<TidalTrack, "title" | "artist" | "album" | "isrc">,
   quality: TidalQuality,
 ): Promise<QobuzResolvedStream | null> {
-  const query = `${track.artist} ${track.title}`.trim();
+  const query = track.isrc?.trim() || `${track.artist} ${track.title}`.trim();
   const candidates = await searchQobuzTracks(query);
   if (!candidates.length) return null;
 
@@ -201,8 +226,8 @@ export async function resolveQobuzStreamFromTrack(
   if (!best) return null;
 
   const requestedCode = qualityToQobuzCode(quality);
-  const downloadUrl = `${QOBUZ_API_BASE}/download-music?track_id=${best.id}&quality=${requestedCode}`;
-  const payload = await fetchQobuzJson<QobuzDownloadResponse>(downloadUrl);
+  const path = `/api/download-music?track_id=${best.id}&quality=${requestedCode}`;
+  const payload = await fetchQobuzJsonFromAnyBase<QobuzDownloadResponse>(path);
   const finalUrl = payload.data?.url?.trim();
   if (!payload.success || !finalUrl) return null;
 

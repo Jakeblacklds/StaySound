@@ -1,6 +1,6 @@
 import { CustomIcon, DownloadAnimatedButton, EmptyState, Skeleton } from '@/src/components/ui';
 import { useTidalDownload } from '@/src/hooks';
-import { getSoulseekCredentials, setSoulseekCredentials, SoulseekCompressedFallbackError, type SoulseekSearchResult } from '@/src/services/soulseekDownloadService';
+import { getSoulseekCredentials, searchSoulseekTracksByQuery, setSoulseekCredentials, SoulseekCompressedFallbackError, type SoulseekSearchResult } from '@/src/services/soulseekDownloadService';
 import { FileSystemStorage } from '@/src/services/storage';
 import {
     createTidalStreamTrack,
@@ -611,9 +611,23 @@ export default function TidalScreen() {
             setTracks([]);
             setArtists([]);
             setAlbums([]);
+            setPlaylists([]);
             setArtistArtworkOverrides(new Map());
             artistArtworkAttempted.current.clear();
             setHasResolvedSearch(false);
+            setError(null);
+            setIsLoading(false);
+            return;
+        }
+
+        if (activeSourceTab === 'soulseek') {
+            setTracks([]);
+            setArtists([]);
+            setAlbums([]);
+            setPlaylists([]);
+            setArtistArtworkOverrides(new Map());
+            artistArtworkAttempted.current.clear();
+            setHasResolvedSearch(true);
             setError(null);
             setIsLoading(false);
             return;
@@ -679,11 +693,59 @@ export default function TidalScreen() {
     }, [activeSourceTab, committedQuery, searchRunId]);
 
     useEffect(() => {
+        const currentQuery = committedQuery.trim();
+        if (activeSourceTab !== 'soulseek' || !currentQuery || !hasSoulseekCredentials) {
+            setSoulseekResults([]);
+            setSoulseekError(null);
+            setHasResolvedSoulseekSearch(false);
+            setIsSoulseekLoading(false);
+            return;
+        }
+
+        const controller = new AbortController();
+        let cancelled = false;
+
         setSoulseekResults([]);
         setSoulseekError(null);
         setHasResolvedSoulseekSearch(false);
-        setIsSoulseekLoading(false);
-    }, [activeSourceTab, committedQuery, searchRunId]);
+        setIsSoulseekLoading(true);
+        console.log(`${SOULSEEK_FLOW_LOG} native search start`, {
+            query: currentQuery,
+            run: searchRunId,
+        });
+
+        searchSoulseekTracksByQuery(currentQuery, tidalDownloadQuality, controller.signal)
+            .then((nextResults) => {
+                if (cancelled) return;
+                console.log(`${SOULSEEK_FLOW_LOG} native search result`, {
+                    query: currentQuery,
+                    results: nextResults.length,
+                    folders: new Set(nextResults.map(result => `${result.match.username}:${getSoulseekFolderPath(result.match.filename || '')}`)).size,
+                });
+                setSoulseekResults(nextResults);
+            })
+            .catch((searchError: unknown) => {
+                if (cancelled || controller.signal.aborted) return;
+                const message = searchError instanceof Error ? searchError.message : 'No se pudo consultar Soulseek';
+                console.log(`${SOULSEEK_FLOW_LOG} native search error`, {
+                    query: currentQuery,
+                    message,
+                });
+                setSoulseekError(message);
+                setSoulseekResults([]);
+            })
+            .finally(() => {
+                if (!cancelled) {
+                    setHasResolvedSoulseekSearch(true);
+                    setIsSoulseekLoading(false);
+                }
+            });
+
+        return () => {
+            cancelled = true;
+            controller.abort();
+        };
+    }, [activeSourceTab, committedQuery, hasSoulseekCredentials, searchRunId, tidalDownloadQuality]);
 
     const handleSoulseekMatchDownload = useCallback(async (
         result: SoulseekSearchResult,
@@ -1078,7 +1140,9 @@ export default function TidalScreen() {
             .map(group => ({
                 ...group,
                 results: [...group.results].sort((left, right) => {
-                    const titleDiff = left.track.title.localeCompare(right.track.title, 'es', { sensitivity: 'base' });
+                    const leftLeaf = getSoulseekLeafFilename(left.match.filename || left.track.title);
+                    const rightLeaf = getSoulseekLeafFilename(right.match.filename || right.track.title);
+                    const titleDiff = leftLeaf.localeCompare(rightLeaf, 'es', { numeric: true, sensitivity: 'base' });
                     if (titleDiff !== 0) return titleDiff;
                     return left.track.durationMs - right.track.durationMs;
                 }),
@@ -1107,6 +1171,10 @@ export default function TidalScreen() {
 
         activeSourceTabRef.current = nextSource;
         setActiveSourceTab(nextSource);
+        if (nextSource === 'soulseek') {
+            setActiveTab('tracks');
+            activeTabRef.current = 'tracks';
+        }
         console.log(`${SOULSEEK_FLOW_LOG} source ref updated`, {
             nextSource,
             ref: activeSourceTabRef.current,
@@ -1814,7 +1882,7 @@ export default function TidalScreen() {
                                 </Button>
                             </View>
                         </View>
-                ) : isLoading ? (
+                ) : (isSoulseekSource ? isSoulseekLoading : isLoading) ? (
                     <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(220)} style={styles.resultsContent}>
                         {(activeTab === 'all' || activeTab === 'artists') && (
                             <View style={styles.section}>
@@ -1876,10 +1944,48 @@ export default function TidalScreen() {
                             </View>
                         )}
                     </Animated.View>
-                ) : error ? (
+                ) : (isSoulseekSource ? soulseekError : error) ? (
                     <View style={styles.centered}>
-                        <EmptyState title="No se pudo cargar Tidal" description={error} />
+                        <EmptyState
+                            title={isSoulseekSource ? 'No se pudo cargar Soulseek' : 'No se pudo cargar Tidal'}
+                            description={(isSoulseekSource ? soulseekError : error) ?? undefined}
+                        />
                     </View>
+                ) : isSoulseekSource && hasCommittedQuery ? (
+                    hasResolvedSoulseekSearch && soulseekFolderGroups.length === 0 ? (
+                        <View style={styles.centered}>
+                            <EmptyState title="Sin resultados" description={`No encontramos resultados para "${committedQuery.trim()}"`} />
+                        </View>
+                    ) : (
+                        <Animated.View key={`soulseek-results-${committedQuery}-${searchRunId}`} entering={FadeInDown.duration(260)} exiting={FadeOut.duration(180)} style={styles.resultsContent}>
+                            <View style={styles.section}>
+                                <View style={styles.sectionHeader}>
+                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Carpetas</Text>
+                                    <Text style={[typeScale.micro, { color: theme.colors.onSurfaceVariant }]}>
+                                        {soulseekResults.length} pistas
+                                    </Text>
+                                </View>
+                                {soulseekFolderGroups.map(group => (
+                                    <View key={group.key} style={styles.soulseekFolderGroup}>
+                                        <View style={[styles.soulseekFolderHeader, { borderBottomColor: palette.cardBorder }]}>
+                                            <View style={styles.soulseekFolderTitleBlock}>
+                                                <Text numberOfLines={1} style={[styles.soulseekFolderPath, { color: theme.colors.onSurface }]}>
+                                                    {group.folderPath}
+                                                </Text>
+                                                <Text numberOfLines={1} style={[styles.soulseekFolderPeer, { color: withAlpha(theme.colors.onSurfaceVariant, 'B8') }]}>
+                                                    {group.username}
+                                                </Text>
+                                            </View>
+                                            <Text style={[styles.soulseekFolderCount, { color: theme.colors.onSurfaceVariant }]}>
+                                                {group.results.length}
+                                            </Text>
+                                        </View>
+                                        {group.results.map(renderSoulseekTrackRow)}
+                                    </View>
+                                ))}
+                            </View>
+                        </Animated.View>
+                    )
                 ) : !hasQuery && !isFocused ? (
                     <Animated.View entering={FadeInDown.duration(320)} style={styles.discoveryContainer}>
                         {isRecommending && recommendedTracks.length === 0 ? (
@@ -2529,14 +2635,17 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'space-between',
         borderBottomWidth: 1,
-        paddingBottom: 4,
-        marginBottom: 6,
+        paddingBottom: 8,
+        marginBottom: 2,
+    },
+    soulseekFolderTitleBlock: {
+        flex: 1,
+        minWidth: 0,
+        marginRight: 12,
     },
     soulseekFolderPath: {
         ...typeScale.label,
-        flex: 1,
         fontWeight: '700',
-        marginRight: 12,
     },
     soulseekFolderCount: {
         ...typeScale.micro,
@@ -2544,9 +2653,8 @@ const styles = StyleSheet.create({
     },
     soulseekFolderPeer: {
         ...typeScale.micro,
-        marginBottom: 6,
+        marginTop: 2,
         textTransform: 'uppercase',
-        letterSpacing: 0.3,
     },
     discoveryContainer: {
         paddingHorizontal: 16,

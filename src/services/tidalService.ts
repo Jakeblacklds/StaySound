@@ -60,6 +60,7 @@ const STATIC_GENERIC_STREAMING_BASES = [
   "https://katze.qqdl.site",
   "https://hund.qqdl.site",
 ];
+const TIDAL_UPTIME_CATALOG_URLS = ["https://tidal-uptime.geeked.wtf"];
 
 export const TIDAL_MIRROR_NAMES: Record<string, string> = {
   "https://eu-central.monochrome.tf": "Monochrome EU Central (Activo)",
@@ -94,7 +95,7 @@ export type TidalMirrorAvailability = {
   supportsDownload: boolean;
   priority?: number;
   lastError?: string | null;
-  source: "probe" | "static";
+  source: "probe" | "static" | "remote";
 };
 
 const TIDAL_ARTWORK_BASE = "https://resources.tidal.com/images";
@@ -125,14 +126,14 @@ type TidalMirrorCatalogEntry = {
   latencyMs?: number;
   lastCheckedAt?: number;
   lastError?: string | null;
-  source: "static";
+  source: "static" | "remote";
 };
 type DynamicMirrorCatalog = {
   api: TidalMirrorCatalogEntry[];
   streaming: TidalMirrorCatalogEntry[];
   all: TidalMirrorCatalogEntry[];
   fetchedAt: number;
-  source: "static";
+  source: "static" | "remote";
 };
 type MirrorJsonResult<T> = {
   data: T;
@@ -158,6 +159,7 @@ interface TidalTrackApiResponse {
   title: string;
   duration: number;
   trackNumber?: number;
+  isrc?: string;
   explicit?: boolean;
   audioQuality?: string;
   mediaMetadata?: { tags?: string[] };
@@ -662,6 +664,7 @@ async function persistMetadataInPublicDownloads(
       source: "tidal",
       tidalId: track.id,
       tidalAlbumId: track.albumId,
+      isrc: track.isrc,
     });
 
     const existing = await findSafChildByName(directoryUri, filename);
@@ -982,7 +985,7 @@ function inferMirrorProvider(baseUrl: string): MirrorProvider {
 
 function createCatalogEntry(
   baseUrl: string,
-  partial: Partial<Omit<TidalMirrorCatalogEntry, "baseUrl" | "source">> = {},
+  partial: Partial<Omit<TidalMirrorCatalogEntry, "baseUrl">> = {},
 ): TidalMirrorCatalogEntry {
   return {
     baseUrl,
@@ -996,7 +999,7 @@ function createCatalogEntry(
     latencyMs: partial.latencyMs,
     lastCheckedAt: partial.lastCheckedAt,
     lastError: partial.lastError ?? null,
-    source: "static",
+    source: partial.source ?? "static",
   };
 }
 
@@ -1019,6 +1022,7 @@ function mergeCatalogEntry(
 
 function entriesToCatalog(
   entries: TidalMirrorCatalogEntry[],
+  source: DynamicMirrorCatalog["source"] = "static",
 ): DynamicMirrorCatalog {
   const sorted = [...entries].sort((left, right) => left.priority - right.priority);
   return {
@@ -1028,8 +1032,80 @@ function entriesToCatalog(
     ),
     all: sorted,
     fetchedAt: Date.now(),
-    source: "static",
+    source,
   };
+}
+
+function normalizeCatalogUrl(value: unknown): string | null {
+  const raw =
+    typeof value === "string"
+      ? value
+      : value && typeof value === "object" && "url" in value
+        ? String((value as { url?: unknown }).url ?? "")
+        : "";
+  const normalized = raw.trim().replace(/\/+$/, "");
+  if (!/^https?:\/\//i.test(normalized)) return null;
+  if (/\.squid\.wtf/i.test(normalized)) return null;
+  return normalized;
+}
+
+function catalogEntryFromRemoteItem(
+  item: unknown,
+  category: TidalMirrorCategory,
+  index: number,
+): TidalMirrorCatalogEntry | null {
+  const baseUrl = normalizeCatalogUrl(item);
+  if (!baseUrl) return null;
+
+  const source = item && typeof item === "object" ? item as Record<string, unknown> : {};
+  const enabled =
+    source.enabled === false ||
+    source.online === false ||
+    source.status === "offline" ||
+    source.status === "down"
+      ? false
+      : true;
+
+  const isStreaming = category === "streaming";
+  const isApi = category === "api";
+  return createCatalogEntry(baseUrl, {
+    enabled,
+    priority: (isApi ? 100 : isStreaming ? 200 : 300) + index * 10,
+    supportsSearch: isApi || Boolean(source.supportsSearch),
+    supportsStream: isStreaming || Boolean(source.supportsStream),
+    supportsDownload: isStreaming || Boolean(source.supportsDownload),
+    status: enabled ? "available" : "unavailable",
+    lastError: enabled ? null : "Disabled by uptime catalog",
+    source: "remote",
+    provider: inferMirrorProvider(baseUrl),
+  });
+}
+
+function buildCatalogFromRemotePayload(payload: unknown): DynamicMirrorCatalog | null {
+  if (!payload || typeof payload !== "object") return null;
+  const source = payload as Record<string, unknown>;
+  const combined = new Map<string, TidalMirrorCatalogEntry>();
+
+  const addEntry = (entry: TidalMirrorCatalogEntry | null) => {
+    if (!entry) return;
+    combined.set(entry.baseUrl, mergeCatalogEntry(combined.get(entry.baseUrl), entry));
+  };
+
+  const categories: TidalMirrorCategory[] = ["api", "streaming"];
+  categories.forEach((category) => {
+    const items = source[category];
+    if (!Array.isArray(items)) return;
+    items.forEach((item, index) => addEntry(catalogEntryFromRemoteItem(item, category, index)));
+  });
+
+  const allItems = source.instances ?? source.mirrors ?? source.data;
+  if (Array.isArray(allItems)) {
+    allItems.forEach((item, index) => addEntry(catalogEntryFromRemoteItem(item, "api", index)));
+  }
+
+  const remoteEntries = Array.from(combined.values()).filter((entry) => entry.enabled);
+  if (remoteEntries.length === 0) return null;
+  return entriesToCatalog(remoteEntries, "remote");
 }
 
 function buildStaticMirrorCatalog(): DynamicMirrorCatalog {
@@ -1096,6 +1172,24 @@ async function loadDynamicMirrorCatalog(): Promise<DynamicMirrorCatalog> {
 
   dynamicMirrorCatalogPromise = (async () => {
     const fallbackCatalog = buildStaticMirrorCatalog();
+    for (const catalogUrl of TIDAL_UPTIME_CATALOG_URLS) {
+      const { signal, cleanup } = withTimeoutSignal(MIRROR_HEALTH_TIMEOUT_MS);
+      try {
+        const response = await fetch(catalogUrl, { signal });
+        if (!response.ok) throw new Error(`Uptime catalog failed (${response.status})`);
+        const payload = await response.json();
+        const remoteCatalog = buildCatalogFromRemotePayload(payload);
+        if (remoteCatalog) {
+          dynamicMirrorCatalogCache = remoteCatalog;
+          return remoteCatalog;
+        }
+      } catch (error) {
+        console.warn("[TidalService] Monochrome uptime catalog unavailable:", error);
+      } finally {
+        cleanup();
+      }
+    }
+
     dynamicMirrorCatalogCache = fallbackCatalog;
     return fallbackCatalog;
   })().finally(() => {
@@ -1684,6 +1778,7 @@ function normalizeSearchItem(item: TidalTrackApiResponse): TidalSearchResult {
     coverUuid,
     artworkUrl: getArtworkUrl(coverUuid),
     trackNumber: item.trackNumber,
+    isrc: item.isrc,
     explicit: item.explicit,
     popularity: item.popularity,
     artistId: item.artist?.id,
@@ -2583,6 +2678,12 @@ export async function downloadTidalTrack(
         "[TidalService] Failed to persist in public folder:",
         persistError,
       );
+      persistentUri = await persistInPrivateDownloads(
+        outputUri,
+        baseFilename,
+        streamInfo.extension,
+      );
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
     }
 
     const enrichedTrack: TidalTrack = {
@@ -2612,6 +2713,7 @@ export async function downloadTidalTrack(
         title: tidalTrack.title,
         artist: tidalTrack.artist,
         album: tidalTrack.album,
+        isrc: tidalTrack.isrc,
       },
       targetQuality,
     );
@@ -2681,6 +2783,12 @@ export async function downloadTidalTrack(
         "[TidalService] Failed to persist Qobuz file in public folder:",
         persistError,
       );
+      persistentUri = await persistInPrivateDownloads(
+        outputUri,
+        baseFilename,
+        streamInfo.extension,
+      );
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
     }
 
     const enrichedTrack: TidalTrack = {
