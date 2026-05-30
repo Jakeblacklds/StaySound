@@ -31,6 +31,10 @@ import { getDabBaseUrl, isDabBaseUrl } from "./dabAuthService";
 type MirrorProvider = "tidal" | "dab";
 
 export const TIDAL_API_BASES = [
+  "https://hifi-api-bffw.onrender.com",
+  "https://ohio-1.monochrome.tf",
+  "https://frankfurt-1.monochrome.tf",
+  "https://monochrome-api.samidy.com",
   "https://eu-central.monochrome.tf",
   "https://us-west.monochrome.tf",
   "https://katze.qqdl.site",
@@ -47,7 +51,6 @@ const TIDAL_API_LEGACY_BASES = [
   "https://tidal.kinoplus.online",
   "https://arran.monochrome.tf",
   "https://api.monochrome.tf",
-  "https://monochrome-api.samidy.com",
   "https://hifi-one.spotisaver.net",
   "https://hifi-two.spotisaver.net",
 ];
@@ -55,14 +58,24 @@ const STATIC_GENERIC_TIDAL_API_BASES = TIDAL_API_BASES.filter(
   (base) => !base.includes("dabmusic.xyz"),
 );
 const STATIC_GENERIC_STREAMING_BASES = [
+  "https://hifi-api-bffw.onrender.com",
+  "https://ohio-1.monochrome.tf",
+  "https://frankfurt-1.monochrome.tf",
+  "https://monochrome-api.samidy.com",
   "https://eu-central.monochrome.tf",
   "https://us-west.monochrome.tf",
   "https://katze.qqdl.site",
   "https://hund.qqdl.site",
 ];
-const TIDAL_UPTIME_CATALOG_URLS = ["https://tidal-uptime.geeked.wtf"];
+const TIDAL_UPTIME_CATALOG_URLS = [
+  "https://tidal-uptime.geeked.wtf",
+  "https://monochrome-khaki.vercel.app/instances",
+];
 
 export const TIDAL_MIRROR_NAMES: Record<string, string> = {
+  "https://hifi-api-bffw.onrender.com": "HiFi API BFFW (Activo)",
+  "https://ohio-1.monochrome.tf": "Monochrome Ohio (Activo)",
+  "https://frankfurt-1.monochrome.tf": "Monochrome Frankfurt (Activo)",
   "https://eu-central.monochrome.tf": "Monochrome EU Central (Activo)",
   "https://us-west.monochrome.tf": "Monochrome US West (Activo)",
   "https://katze.qqdl.site": "QQDL Katze (Activo)",
@@ -1060,6 +1073,7 @@ function catalogEntryFromRemoteItem(
   const source = item && typeof item === "object" ? item as Record<string, unknown> : {};
   const enabled =
     source.enabled === false ||
+    source.ok === false ||
     source.online === false ||
     source.status === "offline" ||
     source.status === "down"
@@ -1075,6 +1089,7 @@ function catalogEntryFromRemoteItem(
     supportsStream: isStreaming || Boolean(source.supportsStream),
     supportsDownload: isStreaming || Boolean(source.supportsDownload),
     status: enabled ? "available" : "unavailable",
+    latencyMs: typeof source.ms === "number" ? source.ms : undefined,
     lastError: enabled ? null : "Disabled by uptime catalog",
     source: "remote",
     provider: inferMirrorProvider(baseUrl),
@@ -1325,13 +1340,11 @@ async function fetchJson<T>(
   } = {},
 ): Promise<T> {
   const { tidalMirror } = useSettingsStore.getState();
-  let lastError: Error | null = null;
   const category = options.category ?? "api";
   const capability =
     options.capability ?? (category === "streaming" ? "stream" : "search");
-  const fallbackBases = await getFallbackBases(category, capability);
-  const startBaseIndex =
-    fallbackBases.length > 0 ? currentBaseIndex % fallbackBases.length : 0;
+  let fallbackBases = await getFallbackBases(category, capability);
+  let lastError: Error | null = null;
 
   // If user selected a specific mirror, try it first
   if (!options.ignoreManualMirror && tidalMirror && tidalMirror !== "auto") {
@@ -1358,16 +1371,22 @@ async function fetchJson<T>(
       );
     } catch (error: any) {
       cleanup();
+      lastError = error;
       markTidalMirrorUnavailable(tidalMirror);
       console.warn(
-        `[TidalService] Manual mirror ${tidalMirror} failed: ${error.message}.`,
+        `[TidalService] Manual mirror ${tidalMirror} failed: ${error.message}. Trying fallback mirrors...`,
       );
-      throw error;
+      fallbackBases = fallbackBases.filter((base) => base !== tidalMirror);
     }
   }
 
+  if (fallbackBases.length === 0) {
+    throw lastError || new Error("All Tidal mirrors failed");
+  }
+
+  const startBaseIndex = currentBaseIndex % fallbackBases.length;
   for (let i = 0; i < fallbackBases.length; i++) {
-    const base = fallbackBases[currentBaseIndex];
+    const base = fallbackBases[currentBaseIndex % fallbackBases.length];
     const url = `${base}${path}`;
     const { signal, cleanup } = withTimeoutSignal(timeoutMs);
 
@@ -1418,6 +1437,8 @@ async function fetchJsonWithMirror<T>(
   const category = options.category ?? "api";
   const capability =
     options.capability ?? (category === "streaming" ? "stream" : "search");
+  let fallbackBases = await getFallbackBases(category, capability);
+  let lastError: Error | null = null;
 
   if (!options.ignoreManualMirror && tidalMirror && tidalMirror !== "auto") {
     const manualEntry = await getCatalogEntryByBaseUrl(tidalMirror);
@@ -1433,6 +1454,9 @@ async function fetchJsonWithMirror<T>(
       const response = await fetch(url, { signal });
       if (!response.ok) {
         const errorBody = await response.text().catch(() => "No body");
+        if (shouldFallbackFromResponse(tidalMirror, response.status, errorBody)) {
+          throw new Error(`Manual mirror issue: ${response.status}`);
+        }
         throw new Error(
           `Tidal request failed (${response.status}): ${errorBody}`,
         );
@@ -1442,18 +1466,26 @@ async function fetchJsonWithMirror<T>(
         data: await parseJsonResponse<T>(response, tidalMirror),
         base: tidalMirror,
       };
+    } catch (error: any) {
+      lastError = error;
+      markTidalMirrorUnavailable(tidalMirror);
+      console.warn(
+        `[TidalService] Manual mirror ${tidalMirror} failed: ${error.message}. Trying fallback mirrors...`,
+      );
+      fallbackBases = fallbackBases.filter((base) => base !== tidalMirror);
     } finally {
       cleanup();
     }
   }
 
-  const fallbackBases = await getFallbackBases(category, capability);
-  let lastError: Error | null = null;
-  const startBaseIndex =
-    fallbackBases.length > 0 ? currentBaseIndex % fallbackBases.length : 0;
+  if (fallbackBases.length === 0) {
+    throw lastError || new Error("All Tidal mirrors failed");
+  }
+
+  const startBaseIndex = currentBaseIndex % fallbackBases.length;
 
   for (let i = 0; i < fallbackBases.length; i++) {
-    const base = fallbackBases[currentBaseIndex];
+    const base = fallbackBases[currentBaseIndex % fallbackBases.length];
     const url = `${base}${path}`;
     const { signal, cleanup } = withTimeoutSignal(timeoutMs);
 

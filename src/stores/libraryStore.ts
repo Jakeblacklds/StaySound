@@ -1,14 +1,15 @@
-﻿/**
+/**
  * LibraryStore - Zustand store for music library
  */
 
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
+import * as FileSystem from 'expo-file-system/legacy';
 import { getArtistInfo } from '../services/artistApi';
 import { getArtworkThumbUri } from '../services/artworkThumbnails';
-import { MUSIC_FOLDERS, runConcurrent, scanMusicLibraryFast, withTimeout } from '../services/fileScanner';
+import { extractMetadata, MUSIC_FOLDERS, runConcurrent, scanMusicLibraryFast, withTimeout } from '../services/fileScanner';
 import { enrichTrackFromUri, generateAlbumId, generateArtistId, organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
-import { hydrateDeferredTidalMetadata } from '../services/nativeLibraryIndexer';
+import { hydrateArtworkForLocalTracks, hydrateDeferredTidalMetadata } from '../services/nativeLibraryIndexer';
 import { FileSystemStorage } from '../services/storage';
 import { Album, Artist, LibraryState, Playlist, ScanProgress, Track } from '../types/audio';
 
@@ -38,6 +39,10 @@ const hasMeaningfulLibraryValue = (value?: string) => {
     const normalized = value?.trim().toLowerCase();
     return !!normalized && !GENERIC_LIBRARY_VALUES.has(normalized);
 };
+
+const trackNeedsMetadataRepair = (track: Track) =>
+    !hasMeaningfulLibraryValue(track.title)
+    || !hasMeaningfulLibraryValue(track.artist);
 
 const normalizeRequestedScanPath = (value?: unknown) =>
     typeof value === 'string' && value.trim().length > 0
@@ -71,6 +76,50 @@ const resolveMediaLibraryAssetId = (trackId: string, trackUri?: string): string 
 
 const isDirectFileUri = (uri?: string) =>
     typeof uri === 'string' && (uri.startsWith('file://') || uri.startsWith('/'));
+
+const normalizePathForJunkCheck = (value?: string) =>
+    decodeURIComponent(value ?? '').toLowerCase().replace(/\\/g, '/');
+
+const isCacheDownloadUri = (uri?: string) => {
+    const normalized = normalizePathForJunkCheck(uri);
+    return normalized.includes('/cache/staysound/downloads/')
+        || (normalized.includes('/android/data/') && normalized.includes('/cache/'));
+};
+
+const isLikelyJunkStaySoundTrack = (track: Track) => {
+    const combined = [
+        track.uri,
+        track.relativePath,
+        track._filename,
+    ].map(normalizePathForJunkCheck).join('/');
+
+    const looksLikeStaySound = combined.includes('staysound') || track.source === 'tidal';
+    if (!looksLikeStaySound) return false;
+    if (isCacheDownloadUri(track.uri) || isCacheDownloadUri(track.relativePath)) return true;
+
+    const looksLikeAudio = /\.(flac|mp3|m4a|aac|wav|ogg|opus)(?:$|\?)/i.test(track._filename ?? track.uri ?? '');
+    return looksLikeAudio && (track.duration ?? 0) <= 0;
+};
+
+const removeTrackIdsFromPlaylists = (playlists: Map<string, Playlist>, removedIds: Set<string>) => {
+    if (removedIds.size === 0) return { playlists, changed: false };
+
+    let changed = false;
+    const nextPlaylists = new Map(playlists);
+    nextPlaylists.forEach((playlist, id) => {
+        const nextTrackIds = playlist.trackIds.filter(trackId => !removedIds.has(trackId));
+        if (nextTrackIds.length === playlist.trackIds.length) return;
+
+        changed = true;
+        nextPlaylists.set(id, {
+            ...playlist,
+            trackIds: nextTrackIds,
+            updatedAt: Date.now(),
+        });
+    });
+
+    return { playlists: changed ? nextPlaylists : playlists, changed };
+};
 
 const resolveArtworkFromScan = (scannedArtwork?: string, existingArtwork?: string) => {
     if (!existingArtwork) return scannedArtwork;
@@ -167,6 +216,8 @@ interface LibraryActions {
     updateTrack: (id: string, updates: Partial<Track>) => void;
     applyAlbumArtwork: (album: string, artist: string, artwork: string) => void;
     ensureArtworkThumbsForTracks: (trackIds?: string[]) => Promise<void>;
+    repairMissingMetadata: () => Promise<number>;
+    hydrateMetadataFromTidalForLibrary: (onLog?: (message: string) => void) => Promise<number>;
     removeTrack: (id: string) => void;
     deleteTrack: (id: string, deleteFile?: boolean) => Promise<void>;
     getTrack: (id: string) => Track | undefined;
@@ -211,6 +262,7 @@ interface LibraryActions {
     clearLibrary: () => void;
 
     // Hydration
+    pruneInvalidLibraryEntries: () => Promise<number>;
     setHasHydrated: (state: boolean) => void;
     bumpCatalogRevision: () => void;
 }
@@ -298,8 +350,15 @@ export const useLibraryStore = create<LibraryStore>()(
                         (newTracks: Track[]) => {
                             batchCount++;
                             newTracks.forEach(track => {
+                                if (isLikelyJunkStaySoundTrack(track)) {
+                                    return;
+                                }
+
                                 const enrichmentSource = track._filename || track.uri;
                                 const enriched = enrichTrackFromUri(track, enrichmentSource);
+                                if (isLikelyJunkStaySoundTrack(enriched)) {
+                                    return;
+                                }
 
                                 // Build the filename key for matching:
                                 // 1. Prefer track._filename (set by NativeLibraryIndexer from MediaStore DISPLAY_NAME)
@@ -418,6 +477,47 @@ export const useLibraryStore = create<LibraryStore>()(
                                 artists,
                             };
                         });
+                    });
+
+                    // Second pass: fetch artwork from Tidal for local tracks that have no artwork
+                    void hydrateArtworkForLocalTracks(finalTracks, (updates) => {
+                        if (updates.length === 0) return;
+
+                        set((state) => {
+                            if (state.tracks.size === 0) return state;
+
+                            let changed = false;
+                            const nextTracks = new Map(state.tracks);
+
+                            for (const updatedTrack of updates) {
+                                const currentTrack = nextTracks.get(updatedTrack.id);
+                                if (!currentTrack) continue;
+                                // Skip if the track already has a high-quality (non-MediaStore) artwork
+                                const isMediaStoreArt = typeof currentTrack.artwork === 'string'
+                                    && currentTrack.artwork.startsWith('content://media/external/audio/albumart');
+                                if (currentTrack.artwork && !isMediaStoreArt) continue;
+
+                                console.log(`[LibraryStore] Applying Tidal artwork to local track: ${updatedTrack.artist} - ${updatedTrack.title}`);
+                                nextTracks.set(updatedTrack.id, {
+                                    ...currentTrack,
+                                    artwork: updatedTrack.artwork,
+                                });
+                                changed = true;
+                            }
+
+                            if (!changed) return state;
+
+                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                            return {
+                                tracks: nextTracks,
+                                albums,
+                                artists,
+                                catalogRevision: state.catalogRevision + 1,
+                            };
+                        });
+
+                        // Generate thumbnails for newly-artwork'd tracks
+                        void get().ensureArtworkThumbsForTracks(updates.map(t => t.id));
                     });
 
                     // Mantenimiento (DESACTIVADO TRAS EXPERIMENTO)
@@ -600,7 +700,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
                     const tracksToHydrate = sourceTracks.filter(track => {
                         const artwork = track.artwork?.trim();
-                        return !!artwork && !track.artworkThumb;
+                        return !!artwork;
                     });
 
                     if (tracksToHydrate.length === 0) return;
@@ -610,6 +710,13 @@ export const useLibraryStore = create<LibraryStore>()(
                     let changes = 0;
 
                     await runConcurrent(tracksToHydrate, 2, async (track) => {
+                        if (track.artworkThumb?.startsWith('file://')) {
+                            const existingThumb = await FileSystem.getInfoAsync(track.artworkThumb);
+                            if (existingThumb.exists) return;
+                        } else if (track.artworkThumb) {
+                            return;
+                        }
+
                         const thumbUri = await getArtworkThumbUri(track.artwork);
                         if (!thumbUri) return;
 
@@ -640,6 +747,209 @@ export const useLibraryStore = create<LibraryStore>()(
                 } finally {
                     isHydratingArtworkThumbs = false;
                 }
+            },
+
+            repairMissingMetadata: async () => {
+                const state = get();
+                const candidates = Array.from(state.tracks.values()).filter(trackNeedsMetadataRepair);
+                if (candidates.length === 0) return 0;
+
+                const nextTracks = new Map(state.tracks);
+                const changedTrackIds: string[] = [];
+
+                for (const track of candidates) {
+                    const currentTrack = nextTracks.get(track.id);
+                    if (!currentTrack) continue;
+
+                    const filenameSource = currentTrack._filename
+                        || decodeURIComponent(currentTrack.uri).split('/').pop()
+                        || currentTrack.uri;
+                    const repairedTrack = enrichTrackFromUri(currentTrack, filenameSource);
+
+                    const updatedTrack: Track = {
+                        ...currentTrack,
+                        title: hasMeaningfulLibraryValue(currentTrack.title) ? currentTrack.title : repairedTrack.title,
+                        artist: hasMeaningfulLibraryValue(currentTrack.artist) ? currentTrack.artist : repairedTrack.artist,
+                        album: hasMeaningfulLibraryValue(currentTrack.album) ? currentTrack.album : repairedTrack.album,
+                    };
+
+                    const changed = updatedTrack.title !== currentTrack.title
+                        || updatedTrack.artist !== currentTrack.artist
+                        || updatedTrack.album !== currentTrack.album;
+
+                    if (!changed) continue;
+                    nextTracks.set(track.id, updatedTrack);
+                    changedTrackIds.push(track.id);
+                }
+
+                if (changedTrackIds.length === 0) return 0;
+
+                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                set(state => ({
+                    tracks: nextTracks,
+                    albums,
+                    artists,
+                    catalogRevision: state.catalogRevision + 1,
+                }));
+
+                void get().ensureArtworkThumbsForTracks(changedTrackIds);
+                return changedTrackIds.length;
+            },
+
+            hydrateMetadataFromTidalForLibrary: async (onLog?: (message: string) => void) => {
+                const state = get();
+                const sourceTracks = Array.from(state.tracks.values());
+                if (sourceTracks.length === 0) return 0;
+
+                const isMissingArtwork = (track: Track) => {
+                    if (!track.artwork) return true;
+                    return isMediaStoreAlbumArtUri(track.artwork);
+                };
+                const artworkCandidates = sourceTracks.filter(isMissingArtwork);
+                onLog?.(`[Artwork] Biblioteca: ${sourceTracks.length} pistas`);
+                onLog?.(`[Artwork] Candidatas sin portada: ${artworkCandidates.length}`);
+                if (artworkCandidates.length === 0) {
+                    onLog?.('[Artwork] No hay pistas pendientes');
+                    return 0;
+                }
+
+                let changedTrackIds = new Set<string>();
+                const staySoundCandidates = artworkCandidates.filter(track =>
+                    (track.relativePath ?? '').toLowerCase().includes('staysound')
+                );
+                const localCandidates = artworkCandidates.filter(track =>
+                    !(track.relativePath ?? '').toLowerCase().includes('staysound')
+                );
+                onLog?.(`[Artwork] StaySound sin portada: ${staySoundCandidates.length}`);
+                onLog?.(`[Artwork] Locales sin portada: ${localCandidates.length}`);
+
+                // Paso 1: intentar artwork embebido real del archivo (FLAC tags) antes de cualquier API.
+                const embeddedCandidates = [...staySoundCandidates, ...localCandidates];
+                if (embeddedCandidates.length > 0) {
+                    onLog?.(`[Artwork] Intentando extraer artwork embebido en ${embeddedCandidates.length} pistas...`);
+                    await runConcurrent(embeddedCandidates, 2, async (track) => {
+                        try {
+                            const meta = await withTimeout(extractMetadata(track.uri), 5000);
+                            const embeddedArtwork = meta?.artwork;
+                            if (!embeddedArtwork) return;
+
+                            set((currentState) => {
+                                const currentTrack = currentState.tracks.get(track.id);
+                                if (!currentTrack) return currentState;
+                                if (currentTrack.artwork && !isMediaStoreAlbumArtUri(currentTrack.artwork)) return currentState;
+                                if (currentTrack.artwork === embeddedArtwork) return currentState;
+
+                                const nextTracks = new Map(currentState.tracks);
+                                nextTracks.set(track.id, {
+                                    ...currentTrack,
+                                    artwork: embeddedArtwork,
+                                });
+                                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                                changedTrackIds.add(track.id);
+                                onLog?.(`[Artwork] EMBEDDED OK ${currentTrack.artist} - ${currentTrack.title}`);
+                                return {
+                                    tracks: nextTracks,
+                                    albums,
+                                    artists,
+                                    catalogRevision: currentState.catalogRevision + 1,
+                                };
+                            });
+                        } catch {
+                            // seguimos con fallback de API
+                        }
+                    });
+                }
+
+                if (staySoundCandidates.length > 0) {
+                    await hydrateDeferredTidalMetadata(staySoundCandidates, (updates) => {
+                        if (updates.length === 0) return;
+                        onLog?.(`[Artwork] Lote StaySound: ${updates.length}`);
+
+                        set((currentState) => {
+                            if (currentState.tracks.size === 0) return currentState;
+
+                            let changed = false;
+                            const nextTracks = new Map(currentState.tracks);
+
+                            for (const updatedTrack of updates) {
+                                const currentTrack = nextTracks.get(updatedTrack.id);
+                                if (!currentTrack) continue;
+
+                                const isMediaStoreArt = typeof currentTrack.artwork === 'string'
+                                    && currentTrack.artwork.startsWith('content://media/external/audio/albumart');
+                                if (currentTrack.artwork && !isMediaStoreArt) continue;
+                                if (!updatedTrack.artwork || updatedTrack.artwork === currentTrack.artwork) continue;
+                                nextTracks.set(updatedTrack.id, {
+                                    ...currentTrack,
+                                    artwork: updatedTrack.artwork,
+                                });
+                                onLog?.(`[Artwork] OK ${currentTrack.artist} - ${currentTrack.title}`);
+                                changedTrackIds.add(updatedTrack.id);
+                                changed = true;
+                            }
+
+                            if (!changed) return currentState;
+
+                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                            return {
+                                tracks: nextTracks,
+                                albums,
+                                artists,
+                                catalogRevision: currentState.catalogRevision + 1,
+                            };
+                        });
+                    });
+                }
+
+                await hydrateArtworkForLocalTracks(localCandidates, (updates) => {
+                    if (updates.length === 0) return;
+                    onLog?.(`[Artwork] Lote recibido: ${updates.length}`);
+
+                    set((currentState) => {
+                        if (currentState.tracks.size === 0) return currentState;
+
+                        let changed = false;
+                        const nextTracks = new Map(currentState.tracks);
+
+                        for (const updatedTrack of updates) {
+                            const currentTrack = nextTracks.get(updatedTrack.id);
+                            if (!currentTrack) continue;
+
+                            const isMediaStoreArt = typeof currentTrack.artwork === 'string'
+                                && currentTrack.artwork.startsWith('content://media/external/audio/albumart');
+                            if (currentTrack.artwork && !isMediaStoreArt) continue;
+                            if (!updatedTrack.artwork || updatedTrack.artwork === currentTrack.artwork) continue;
+
+                            nextTracks.set(updatedTrack.id, {
+                                ...currentTrack,
+                                artwork: updatedTrack.artwork,
+                            });
+                            onLog?.(`[Artwork] OK ${currentTrack.artist} - ${currentTrack.title}`);
+                            changedTrackIds.add(updatedTrack.id);
+                            changed = true;
+                        }
+
+                        if (!changed) return currentState;
+
+                        const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                        return {
+                            tracks: nextTracks,
+                            albums,
+                            artists,
+                            catalogRevision: currentState.catalogRevision + 1,
+                        };
+                    });
+                }, {
+                    maxCandidates: Math.max(localCandidates.length, 1),
+                });
+
+                const changedIds = Array.from(changedTrackIds);
+                if (changedIds.length > 0) {
+                    void get().ensureArtworkThumbsForTracks(changedIds);
+                }
+                onLog?.(`[Artwork] Finalizado. Actualizadas: ${changedIds.length}`);
+
+                return changedIds.length;
             },
 
             removeTrack: (id: string) => {
@@ -1049,6 +1359,47 @@ export const useLibraryStore = create<LibraryStore>()(
                 });
             },
 
+            pruneInvalidLibraryEntries: async () => {
+                const { tracks, playlists } = get();
+                if (tracks.size === 0) return 0;
+
+                const nextTracks = new Map(tracks);
+                const removedIds = new Set<string>();
+
+                for (const [id, track] of tracks.entries()) {
+                    let shouldRemove = isLikelyJunkStaySoundTrack(track);
+
+                    if (!shouldRemove && isDirectFileUri(track.uri)) {
+                        try {
+                            const info = await FileSystem.getInfoAsync(track.uri);
+                            shouldRemove = !info.exists || (typeof info.size === 'number' && info.size <= 0);
+                        } catch {
+                            shouldRemove = true;
+                        }
+                    }
+
+                    if (!shouldRemove) continue;
+                    nextTracks.delete(id);
+                    removedIds.add(id);
+                }
+
+                if (removedIds.size === 0) return 0;
+
+                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                const playlistResult = removeTrackIdsFromPlaylists(playlists, removedIds);
+
+                set(state => ({
+                    tracks: nextTracks,
+                    albums,
+                    artists,
+                    playlists: playlistResult.playlists,
+                    catalogRevision: state.catalogRevision + 1,
+                }));
+
+                if (playlistResult.changed) queuePlaylistSync();
+                return removedIds.size;
+            },
+
             setHasHydrated: (state: boolean) => {
                 set({ _hasHydrated: state });
             },
@@ -1071,15 +1422,30 @@ export const useLibraryStore = create<LibraryStore>()(
                     const hydratedTracks = (state as any).tracks instanceof Map
                         ? (state as any).tracks as Map<string, Track>
                         : new Map<string, Track>();
-                    const { albums, artists } = rebuildDerivedLibraryCollections(hydratedTracks);
+                    const cleanedTracks = new Map<string, Track>();
+                    const removedIds = new Set<string>();
+                    hydratedTracks.forEach((track, id) => {
+                        if (isLikelyJunkStaySoundTrack(track)) {
+                            removedIds.add(id);
+                            return;
+                        }
+                        cleanedTracks.set(id, track);
+                    });
+                    (state as any).tracks = cleanedTracks;
+                    const { albums, artists } = rebuildDerivedLibraryCollections(cleanedTracks);
                     console.log('[LibraryStore] Hydrated library snapshot:', {
-                        tracks: hydratedTracks.size,
+                        tracks: cleanedTracks.size,
                         albums: albums.size,
                         artists: artists.size,
+                        pruned: removedIds.size,
                     });
                     (state as any).albums = albums;
                     (state as any).artists = artists;
                     if (Array.isArray(state.playlists)) (state as any).playlists = new Map(state.playlists as any);
+                    if ((state as any).playlists instanceof Map && removedIds.size > 0) {
+                        const playlistResult = removeTrackIdsFromPlaylists((state as any).playlists, removedIds);
+                        (state as any).playlists = playlistResult.playlists;
+                    }
                     if (Array.isArray((state as any).cloudPlaylistTracks)) {
                         (state as any).cloudPlaylistTracks = new Map(((state as any).cloudPlaylistTracks as any[]).map(([playlistId, tracks]) => [playlistId, new Map(tracks)]));
                     }

@@ -1,14 +1,12 @@
 import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
+import * as Haptics from 'expo-haptics';
 import DraggableFlatList, {
   ScaleDecorator,
   type RenderItemParams,
 } from 'react-native-draggable-flatlist';
 import { IconButton, Text } from 'react-native-paper';
 import Animated, {
-  FadeInDown,
-  FadeOutUp,
-  LinearTransition,
   interpolate,
   useAnimatedStyle,
   useSharedValue,
@@ -47,9 +45,9 @@ export function QueueItemDecorator({
   const decoratorStyle = useAnimatedStyle(() => {
     const progress = activeAnim.value;
     return {
-      transform: [{ scale: interpolate(progress, [0, 1], [1, 0.985]) }],
-      backgroundColor: progress > 0.01 ? `${accentColor}15` : 'transparent',
-      borderRadius: 18,
+      transform: [{ scale: interpolate(progress, [0, 1], [1, 0.99]) }],
+      backgroundColor: progress > 0.01 ? `${accentColor}12` : 'transparent',
+      borderRadius: 14,
     };
   });
 
@@ -131,70 +129,92 @@ const QueueRow = React.memo(function QueueRow({
 }: QueueRowProps) {
   const [isPressed, setIsPressed] = React.useState(false);
 
+  const triggerLightHaptic = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => { });
+  }, []);
+
+  const handleRemovePress = useCallback(() => {
+    if (!onRemove) {
+      return;
+    }
+    onRemove(item);
+  }, [item, onRemove]);
+
+  const handleDragStart = useCallback(() => {
+    triggerLightHaptic();
+    onDrag?.();
+  }, [onDrag, triggerLightHaptic]);
+
   return (
     <QueueItemDecorator accentColor={accentColor} isPressed={isPressed && !isDragActive}>
-      <View
-        style={[
-          styles.queueRow,
-          isCurrent && { backgroundColor: accentBg30 },
-          isDragActive && styles.queueRowActive,
-          isDragActive && { borderColor: `${accentColor}55`, backgroundColor: `${accentColor}1A` },
-        ]}
-      >
-        {isCurrent ? (
-          <PlayingIndicator accentColor={accentColor} />
-        ) : (
-          <View style={styles.queueOrderWrap}>
-            <Text style={[styles.queueOrderText, { color: textColor80 }]}>
-              {item._originalIndex + 1}
-            </Text>
-          </View>
-        )}
-
-        <Pressable
-          style={styles.queueTrackInfo}
-          onPress={onPress ? () => onPress(item) : undefined}
-          onPressIn={() => setIsPressed(true)}
-          onPressOut={() => setIsPressed(false)}
-          disabled={isDragActive}
+      <View style={styles.queueRowWrap}>
+        <Animated.View
+          style={[
+            styles.queueRow,
+            isCurrent && { backgroundColor: accentBg30 },
+            isDragActive && styles.queueRowActive,
+            isDragActive && { borderColor: `${accentColor}44`, backgroundColor: `${accentColor}16` },
+          ]}
         >
-          <Text
-            numberOfLines={1}
-            style={[styles.queueTrackTitle, { color: isCurrent ? accentColor : textColor }]}
-          >
-            {item.title}
-          </Text>
-          <Text numberOfLines={1} style={[styles.queueTrackArtist, { color: textColorB3 }]}>
-            {item.artist}
-          </Text>
-        </Pressable>
+          {isCurrent ? (
+            <PlayingIndicator accentColor={accentColor} />
+          ) : (
+            <View style={styles.queueOrderWrap}>
+              <Text style={[styles.queueOrderText, { color: textColor80 }]}>
+                {item._originalIndex + 1}
+              </Text>
+            </View>
+          )}
 
-        {!isCurrent && onRemove ? (
-          <IconButton
-            icon="close"
-            size={18}
-            iconColor={textColor80}
-            onPress={() => onRemove(item)}
-            style={styles.queueIconButton}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-          />
-        ) : null}
-
-        {!isCurrent && draggable && onDrag ? (
           <Pressable
-            onLongPress={onDrag}
-            delayLongPress={120}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-            style={styles.dragHandle}
+            style={styles.queueTrackInfo}
+            onPress={onPress ? () => onPress(item) : undefined}
+            onPressIn={() => setIsPressed(true)}
+            onPressOut={() => setIsPressed(false)}
+            disabled={isDragActive}
           >
-            <IconButton
-              icon="drag"
-              size={20}
-              iconColor={isDragActive ? accentColor : textColor80}
-              style={styles.queueIconButton}
-            />
+            <Text
+              numberOfLines={1}
+              style={[styles.queueTrackTitle, { color: isCurrent ? accentColor : textColor }]}
+            >
+              {item.title}
+            </Text>
+            <Text numberOfLines={1} style={[styles.queueTrackArtist, { color: textColorB3 }]}>
+              {item.artist}
+            </Text>
           </Pressable>
-        ) : null}
+
+          {!isCurrent && onRemove ? (
+            <Pressable
+              style={styles.removeActionButtonInline}
+              onPress={handleRemovePress}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <IconButton
+                icon="trash-can-outline"
+                size={18}
+                iconColor="#FF4D4D"
+                style={styles.queueIconButton}
+              />
+            </Pressable>
+          ) : null}
+
+          {!isCurrent && draggable && onDrag ? (
+            <Pressable
+              onLongPress={handleDragStart}
+              delayLongPress={110}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              style={styles.dragHandle}
+            >
+              <IconButton
+                icon="drag"
+                size={20}
+                iconColor={isDragActive ? accentColor : textColor80}
+                style={styles.queueIconButton}
+              />
+            </Pressable>
+          ) : null}
+        </Animated.View>
       </View>
     </QueueItemDecorator>
   );
@@ -229,6 +249,25 @@ export function QueueOverlay({
   const textColor80 = React.useMemo(() => `${textColor}80`, [textColor]);
   const textColorB3 = React.useMemo(() => `${textColor}B3`, [textColor]);
 
+  const triggerSelectionHaptic = useCallback(() => {
+    Haptics.selectionAsync().catch(() => { });
+  }, []);
+
+  const triggerSuccessHaptic = useCallback(() => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => { });
+  }, []);
+
+  const handleReorder = useCallback((from: number, to: number) => {
+    if (from === to) return;
+    triggerSelectionHaptic();
+    onReorder(from, to);
+  }, [onReorder, triggerSelectionHaptic]);
+
+  const handleRemove = useCallback((item: QueueOverlayTrack) => {
+    triggerSuccessHaptic();
+    onRemove(item);
+  }, [onRemove, triggerSuccessHaptic]);
+
   const renderQueueItem = useCallback(({ item, drag, isActive }: RenderItemParams<QueueOverlayTrack>) => (
     <ScaleDecorator activeScale={1.02}>
       <QueueRow
@@ -242,16 +281,21 @@ export function QueueOverlay({
         textColorB3={textColorB3}
         textColor80={textColor80}
         onPress={onTrackPress}
-        onRemove={onRemove}
+        onRemove={handleRemove}
         onDrag={drag}
       />
     </ScaleDecorator>
-  ), [accentBg30, accentColor, onRemove, onTrackPress, textColor, textColor80, textColorB3]);
+  ), [accentBg30, accentColor, handleRemove, onTrackPress, textColor, textColor80, textColorB3]);
 
   return (
     <Animated.View style={[styles.queueOverlay, { backgroundColor }, animStyle]}>
       <View style={styles.queueHeader}>
-        <Text style={[styles.queueTitle, { color: textColor }]}>Cola</Text>
+        <View>
+          <Text style={[styles.queueTitle, { color: textColor }]}>En cola</Text>
+          <Text style={[styles.queueSubtitle, { color: textColor80 }]}>
+            {upcomingQueue.length} siguientes
+          </Text>
+        </View>
         <IconButton icon="close" size={24} iconColor={textColor} onPress={onClose} />
       </View>
 
@@ -274,9 +318,6 @@ export function QueueOverlay({
 
       <View style={styles.sectionHeader}>
         <Text style={[styles.sectionLabel, { color: textColor80 }]}>A continuacion</Text>
-        <Text style={[styles.sectionCount, { color: textColor80 }]}>
-          {upcomingQueue.length}
-        </Text>
       </View>
 
       <View style={styles.listContainer}>
@@ -284,17 +325,13 @@ export function QueueOverlay({
           data={upcomingQueue}
           keyExtractor={(item) => item._queueKey}
           renderItem={renderQueueItem}
-          onDragEnd={({ from, to }) => onReorder(from, to)}
+          onDragEnd={({ from, to }) => handleReorder(from, to)}
           activationDistance={8}
           autoscrollSpeed={180}
           autoscrollThreshold={80}
           contentContainerStyle={styles.queueListContent}
           showsVerticalScrollIndicator={false}
           containerStyle={styles.queueListContainer}
-          itemEnteringAnimation={FadeInDown.duration(140)}
-          itemExitingAnimation={FadeOutUp.duration(120)}
-          itemLayoutAnimation={LinearTransition.springify().damping(20).stiffness(240)}
-          enableLayoutAnimationExperimental
           ListEmptyComponent={(
             <View style={styles.queueEmptyWrap}>
               <Text style={[styles.queueTrackArtist, { color: textColorB3 }]}>
@@ -311,40 +348,44 @@ export function QueueOverlay({
 const styles = StyleSheet.create({
   queueOverlay: {
     position: 'absolute',
-    left: 16,
-    right: 16,
-    top: 60,
-    bottom: 24,
+    left: 0,
+    right: 0,
+    top: 56,
+    bottom: 0,
     zIndex: 50,
-    borderRadius: 28,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    borderTopLeftRadius: 26,
+    borderTopRightRadius: 26,
+    borderWidth: 0,
     overflow: 'hidden',
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.4,
-    shadowRadius: 24,
-    elevation: 20,
+    shadowOffset: { width: 0, height: -8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 16,
+    elevation: 18,
   },
   queueHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 16,
-    paddingBottom: 4,
+    paddingHorizontal: 18,
+    paddingTop: 14,
+    paddingBottom: 2,
   },
   queueTitle: {
-    fontSize: 18,
+    fontSize: 20,
     fontWeight: '700',
-    letterSpacing: 0.2,
+    letterSpacing: -0.2,
+  },
+  queueSubtitle: {
+    fontSize: 12,
+    marginTop: 2,
   },
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 20,
-    paddingTop: 10,
+    paddingHorizontal: 18,
+    paddingTop: 14,
     paddingBottom: 6,
   },
   sectionLabel: {
@@ -353,10 +394,6 @@ const styles = StyleSheet.create({
     letterSpacing: 1.1,
     textTransform: 'uppercase',
   },
-  sectionCount: {
-    fontSize: 12,
-    fontWeight: '600',
-  },
   listContainer: {
     flex: 1,
   },
@@ -364,21 +401,36 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   queueListContent: {
-    paddingHorizontal: 12,
-    paddingBottom: 24,
-    paddingTop: 2,
+    paddingHorizontal: 10,
+    paddingBottom: 32,
+    paddingTop: 0,
   },
   queueRow: {
+    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
-    borderRadius: 18,
-    paddingVertical: 6,
-    paddingLeft: 12,
-    paddingRight: 6,
-    marginHorizontal: 12,
-    marginVertical: 3,
+    borderRadius: 14,
+    paddingVertical: 5,
+    paddingLeft: 10,
+    paddingRight: 2,
+    marginHorizontal: 8,
+    marginVertical: 1,
     borderWidth: 1,
     borderColor: 'transparent',
+  },
+  queueRowWrap: {
+    position: 'relative',
+    marginHorizontal: 8,
+    marginVertical: 1,
+  },
+  removeActionButtonInline: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: 'rgba(255,77,77,0.10)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
   },
   queueRowActive: {
     shadowColor: '#000',

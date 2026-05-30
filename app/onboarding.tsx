@@ -6,14 +6,14 @@ import {
     ONBOARDING_TASTE_PROFILE_VERSION,
 } from '@/src/services/onboardingTasteService';
 import { getArtistInfo } from '@/src/services/artistApi';
+import { hasPermissions, requestPermissions } from '@/src/services/fileScanner';
 import { getTidalArtistInfo, searchTidalArtists } from '@/src/services/tidalService';
-import { useAuthStore } from '@/src/stores';
+import { useAuthStore, useLibraryStore } from '@/src/stores';
 import { OnboardingTasteArtist, useOnboardingStore } from '@/src/stores/onboardingStore';
 import { typeScale, useTheme } from '@/src/theme';
 import { Ionicons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import * as ImagePicker from 'expo-image-picker';
-import * as MediaLibrary from 'expo-media-library';
 import { router, useRootNavigationState } from 'expo-router';
 import React, { startTransition, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import {
@@ -808,6 +808,7 @@ export default function OnboardingScreen() {
     const artistArtworkAttempted = useRef<Set<number>>(new Set());
     const quickSuggestionsAttempted = useRef(false);
     const searchRequestId = useRef(0);
+    const scanLibrary = useLibraryStore(state => state.scanLibrary);
 
     // Pre-fill name from email
     useEffect(() => {
@@ -979,12 +980,26 @@ export default function OnboardingScreen() {
         if (!result.canceled && result.assets[0]?.uri) setAvatarUri(result.assets[0].uri);
     }, []);
 
+    useEffect(() => {
+        if (step !== 'permissions') return;
+        let cancelled = false;
+        void hasPermissions().then(granted => {
+            if (!cancelled) setMediaGranted(granted);
+        });
+        return () => {
+            cancelled = true;
+        };
+    }, [step]);
+
     const askMedia = useCallback(async () => {
         try {
-            const result = await MediaLibrary.requestPermissionsAsync();
-            setMediaGranted(result.status === 'granted');
+            const granted = await requestPermissions();
+            setMediaGranted(granted);
+            if (granted) {
+                await scanLibrary();
+            }
         } catch { }
-    }, []);
+    }, [scanLibrary]);
 
     const finish = useCallback(async () => {
         if (isFinishing) return;

@@ -814,6 +814,10 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
 
     removeFromQueue: (index) => {
         const { queue, queueIndex } = get();
+        if (index < 0 || index >= queue.length) {
+            return;
+        }
+
         const removedTrack = queue[index];
 
         if (removedTrack?.id) {
@@ -824,6 +828,12 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
         }
 
         const newQueue = queue.filter((_, i) => i !== index);
+        if (newQueue.length === 0) {
+            linearPlaybackContextQueue = [];
+            set({ queue: [], queueIndex: -1, currentTrack: null, isPlaying: false, position: 0 });
+            void AudioEngine.stop();
+            return;
+        }
 
         // Adjust current index if needed
         let newIndex = queueIndex;
@@ -833,8 +843,9 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             newIndex = Math.min(newIndex, newQueue.length - 1);
         }
 
-        set({ queue: newQueue, queueIndex: newIndex });
-        AudioEngine.removeTracks([index]).catch(() => { });
+        // Keep native queue and visual queue in sync by fully replacing the queue.
+        // Native index-based remove can desync when native order diverges from store order.
+        void get().replaceQueue(newQueue, Math.max(0, newIndex));
     },
 
     clearQueue: () => {

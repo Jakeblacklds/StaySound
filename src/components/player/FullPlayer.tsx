@@ -146,7 +146,7 @@ export function FullPlayer() {
     (theme.components?.player?.variant as any) || playerVariant;
   const lightweightMode = config.lightweightMode;
   const shouldResolveDynamicColors = isVisible;
-  const playerArtworkUri = currentTrack?.artworkThumb || currentTrack?.artwork;
+  const playerArtworkUri = currentTrack?.artwork || currentTrack?.artworkThumb;
   const { colors: albumColors, animated: animColors } =
     useDynamicColorsWithOptions(playerArtworkUri, {
       enabled:

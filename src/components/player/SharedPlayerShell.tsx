@@ -69,7 +69,7 @@ function SharedPlayerShellInner() {
     const [isTrackSwitching, setIsTrackSwitching] = useState(false);
     const lastTrackIdRef = useRef<string | null>(null);
     const shouldHoldPauseAffordance = !shouldShowTidalLoading && (isPlaying || isLoading || isTrackSwitching);
-    const shellArtworkUri = currentTrack?.artworkThumb || displayTrack?.artwork;
+    const shellArtworkUri = pendingTrackPreview?.artwork || currentTrack?.artwork || currentTrack?.artworkThumb;
     const { colors: albumColors, animated: animColors } = useDynamicColors(shellArtworkUri, {
         enabled: performanceProfile.enableDynamicColors,
     });

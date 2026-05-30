@@ -14,6 +14,8 @@ import { bootstrapAppUpdates } from '@/src/services/appUpdateService';
 import { refreshAndroidEqualizerCapabilities, syncAndroidEqualizerFromSettings } from '@/src/services/androidEqualizerService';
 import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
 import { ensureOnboardingMirrorPlaylist } from '@/src/services/onboardingTasteService';
+import { hasPermissions } from '@/src/services/fileScanner';
+import { addAudioLibraryChangedListenerNative } from '@/src/services/nativeLibraryIndexer';
 import { ensureSeededSpotifyTop50Playlist, hydrateSpotifyTop50GlobalPlaylist } from '@/src/services/spotifyChartsService';
 import { AudioEngine } from '@/src/services';
 import { useAuthStore, useDabAuthStore, useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
@@ -170,6 +172,73 @@ function AndroidAutoCatalogBootstrap() {
   return null;
 }
 
+function LibraryAutoScanBootstrap() {
+  const hasHydrated = useLibraryStore(state => state._hasHydrated);
+  const isScanning = useLibraryStore(state => state.isScanning);
+  const trackCount = useLibraryStore(state => state.tracks.size);
+  const scanLibrary = useLibraryStore(state => state.scanLibrary);
+  const pruneInvalidLibraryEntries = useLibraryStore(state => state.pruneInvalidLibraryEntries);
+  const initialScanAttemptedRef = useRef(false);
+  const pruneAttemptedRef = useRef(false);
+  const mediaStoreScanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const isScanningRef = useRef(isScanning);
+
+  useEffect(() => {
+    isScanningRef.current = isScanning;
+  }, [isScanning]);
+
+  useEffect(() => {
+    if (!hasHydrated || isScanning || trackCount > 0 || initialScanAttemptedRef.current) {
+      return;
+    }
+
+    initialScanAttemptedRef.current = true;
+    void hasPermissions().then(granted => {
+      if (granted) {
+        void scanLibrary();
+      }
+    });
+  }, [hasHydrated, isScanning, scanLibrary, trackCount]);
+
+  useEffect(() => {
+    if (!hasHydrated || pruneAttemptedRef.current) return;
+
+    pruneAttemptedRef.current = true;
+    void pruneInvalidLibraryEntries();
+  }, [hasHydrated, pruneInvalidLibraryEntries]);
+
+  useEffect(() => {
+    if (!hasHydrated) return;
+
+    const subscription = addAudioLibraryChangedListenerNative(() => {
+      if (mediaStoreScanTimeoutRef.current) {
+        clearTimeout(mediaStoreScanTimeoutRef.current);
+      }
+
+      mediaStoreScanTimeoutRef.current = setTimeout(() => {
+        mediaStoreScanTimeoutRef.current = null;
+        if (isScanningRef.current) return;
+
+        void hasPermissions().then(granted => {
+          if (granted) {
+            void scanLibrary();
+          }
+        });
+      }, 1500);
+    });
+
+    return () => {
+      subscription?.remove();
+      if (mediaStoreScanTimeoutRef.current) {
+        clearTimeout(mediaStoreScanTimeoutRef.current);
+        mediaStoreScanTimeoutRef.current = null;
+      }
+    };
+  }, [hasHydrated, scanLibrary]);
+
+  return null;
+}
+
 function EqualizerBootstrap() {
   const hasHydrated = useSettingsStore(state => state._hasHydrated);
   const currentTrackId = usePlayerStore(state => state.currentTrack?.id);
@@ -318,6 +387,7 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
             <SessionBootstrap />
             <AppUpdateBootstrap isAppReady={isAppReady} />
             <AndroidAutoCatalogBootstrap />
+            <LibraryAutoScanBootstrap />
             <EqualizerBootstrap />
             <AudioSync />
             <Stack

@@ -134,7 +134,7 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
   const pendingTrackPreview = usePlayerStore(state => state.pendingTrackPreview);
   const [barWidth, setBarWidth] = useState(0);
 
-  const navArtworkUri = currentTrack?.artworkThumb || pendingTrackPreview?.artwork || currentTrack?.artwork;
+  const navArtworkUri = pendingTrackPreview?.artwork || currentTrack?.artwork || currentTrack?.artworkThumb;
   const { colors: albumColors, animated: navAnimColors } = useDynamicColors(navArtworkUri, {
     enabled: performanceProfile.enableDynamicColors,
   });

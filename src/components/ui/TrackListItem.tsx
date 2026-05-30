@@ -164,7 +164,7 @@ function LibraryTrackListItemInner({
                     <Animated.View style={[artworkContainerStyle, animatedArtworkStyle]}>
                         {track.artwork || track.artworkThumb ? (
                             <Image
-                                source={{ uri: track.artworkThumb || track.artwork }}
+                                source={{ uri: track.artwork || track.artworkThumb }}
                                 style={styles.artworkImage}
                                 contentFit="cover"
                                 recyclingKey={track.id}
@@ -459,7 +459,7 @@ function DefaultTrackListItemInner({
                     <Animated.View style={[artworkContainerBaseStyle, animatedArtworkStyle]}>
                         {track.artwork || track.artworkThumb ? (
                             <Image
-                                source={{ uri: track.artworkThumb || track.artwork }}
+                                source={{ uri: track.artwork || track.artworkThumb }}
                                 style={styles.artworkImage}
                                 contentFit="cover"
                                 recyclingKey={track.id}

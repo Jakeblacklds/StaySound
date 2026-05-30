@@ -7,7 +7,7 @@ import { useUIStore } from '@/src/stores/uiStore';
 import { useI18n } from '@/src/i18n';
 import { useTheme } from '@/src/theme';
 import { generateManualAccentPalette, SchemeVariant } from '@/src/theme/utils';
-import { TidalQuality } from '@/src/types/audio';
+import { TidalQuality, Track } from '@/src/types/audio';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
@@ -55,6 +55,18 @@ function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
         .filter((mirror, index, all) => availableMirrors.includes(mirror) && all.indexOf(mirror) === index);
 }
 
+const GENERIC_METADATA_VALUES = new Set(['unknown', 'unknown title', 'unknown artist', 'unknown album', 'media', 'external', 'staysound']);
+
+function hasRealMetadataValue(value?: string) {
+    const normalized = value?.trim().toLowerCase();
+    return !!normalized && !GENERIC_METADATA_VALUES.has(normalized);
+}
+
+function trackNeedsMetadataRepair(track: Track) {
+    return !hasRealMetadataValue(track.title)
+        || !hasRealMetadataValue(track.artist);
+}
+
 export default function SettingsScreen() {
     const {
         theme,
@@ -67,7 +79,7 @@ export default function SettingsScreen() {
     } = useTheme();
     const { t, locale } = useI18n();
     const insets = useSafeAreaInsets();
-    const { isScanning, scanLibrary, getAllTracks, lastScanDate } = useLibraryStore();
+    const { isScanning, scanLibrary, getAllTracks, lastScanDate, repairMissingMetadata, hydrateMetadataFromTidalForLibrary } = useLibraryStore();
     const appSession = useAuthStore(state => state.session);
     const signOut = useAuthStore(state => state.signOut);
     const dabSession = useDabAuthStore(state => state.session);
@@ -80,7 +92,11 @@ export default function SettingsScreen() {
     const [showPicker, setShowPicker] = useState(false);
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showMirrorModal, setShowMirrorModal] = useState(false);
+    const [showArtworkHydrationModal, setShowArtworkHydrationModal] = useState(false);
     const [showLegacyMirrors, setShowLegacyMirrors] = useState(false);
+    const [isRepairingMetadata, setIsRepairingMetadata] = useState(false);
+    const [isHydratingTidalMetadata, setIsHydratingTidalMetadata] = useState(false);
+    const [artworkHydrationLogs, setArtworkHydrationLogs] = useState<string[]>([]);
     const [availableMirrors, setAvailableMirrors] = useState<string[]>(() => [
         'https://dabmusic.xyz/api',
         'https://beta.dabmusic.xyz',
@@ -194,7 +210,12 @@ export default function SettingsScreen() {
         setTempColor(config.accentColor);
     }, [config.accentColor]);
 
-    const trackCount = getAllTracks().length;
+    const allTracks = getAllTracks();
+    const trackCount = allTracks.length;
+    const missingMetadataCount = useMemo(
+        () => allTracks.filter(trackNeedsMetadataRepair).length,
+        [allTracks],
+    );
     const lastScan = lastScanDate
         ? new Date(lastScanDate).toLocaleDateString(locale)
         : t('common.never');
@@ -205,6 +226,39 @@ export default function SettingsScreen() {
             Alert.alert(t('settings.alert.scanCompleteTitle'), t('settings.alert.scanCompleteBody', { count: getAllTracks().length }));
         } catch (error) {
             Alert.alert(t('settings.alert.scanErrorTitle'), t('settings.alert.scanErrorBody'));
+        }
+    };
+
+    const handleMetadataRepair = async () => {
+        if (isRepairingMetadata) return;
+        setIsRepairingMetadata(true);
+        try {
+            const repairedCount = await repairMissingMetadata();
+            showNotification(`Metadata actualizada en ${repairedCount} canciones`, repairedCount > 0 ? 'success' : 'info');
+        } finally {
+            setIsRepairingMetadata(false);
+        }
+    };
+
+    const handleHydrateMetadataFromTidal = async () => {
+        if (isHydratingTidalMetadata) return;
+        setArtworkHydrationLogs([]);
+        setShowArtworkHydrationModal(true);
+        setIsHydratingTidalMetadata(true);
+        try {
+            const updatedCount = await hydrateMetadataFromTidalForLibrary((message) => {
+                setArtworkHydrationLogs((prev) => [...prev, message]);
+            });
+            showNotification(
+                updatedCount > 0
+                    ? `TIDAL actualizo metadata/artwork en ${updatedCount} canciones`
+                    : 'No hubo cambios de metadata/artwork',
+                updatedCount > 0 ? 'success' : 'info'
+            );
+        } catch {
+            showNotification('No se pudo completar la recuperacion de metadata con TIDAL', 'error');
+        } finally {
+            setIsHydratingTidalMetadata(false);
         }
     };
 
@@ -659,11 +713,34 @@ export default function SettingsScreen() {
                 <Divider style={styles.cardDivider} />
                 <List.Item
                     title="Biblioteca de Musica"
-                    description={isScanning ? 'Escaneando archivos...' : `${trackCount} pistas encontradas`}
+                    description={isScanning ? 'Escaneando archivos...' : missingMetadataCount > 0 ? `${trackCount} pistas, ${missingMetadataCount} sin metadata` : `${trackCount} pistas encontradas`}
                     left={(props) => <MaterialCommunityIcons name="folder-music-outline" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={() => isScanning ? <ActivityIndicator size="small" /> : <MaterialCommunityIcons name="refresh" size={20} color={theme.colors.primary} />}
+                    right={() => isScanning || isRepairingMetadata ? (
+                        <ActivityIndicator size="small" />
+                    ) : missingMetadataCount > 0 ? (
+                        <Button mode="contained-tonal" compact onPress={handleMetadataRepair}>
+                            Metadata
+                        </Button>
+                    ) : (
+                        <MaterialCommunityIcons name="refresh" size={20} color={theme.colors.primary} />
+                    )}
                     onPress={handleScan}
-                    disabled={isScanning}
+                    disabled={isScanning || isRepairingMetadata}
+                />
+                <Divider style={styles.cardDivider} />
+                <List.Item
+                    title="Encontrar metadata en TIDAL"
+                    description="Busca solo artwork faltante en tu biblioteca usando TIDAL"
+                    left={(props) => <MaterialCommunityIcons name="database-search-outline" size={24} color={theme.colors.primary} style={props.style} />}
+                    right={() => isHydratingTidalMetadata ? (
+                        <ActivityIndicator size="small" />
+                    ) : (
+                        <Button mode="contained-tonal" compact onPress={handleHydrateMetadataFromTidal}>
+                            Buscar
+                        </Button>
+                    )}
+                    onPress={handleHydrateMetadataFromTidal}
+                    disabled={isHydratingTidalMetadata || isScanning || isRepairingMetadata}
                 />
             </SectionGroup>
 
@@ -762,6 +839,48 @@ export default function SettingsScreen() {
                                 </Pressable>
                             ))}
                         </ScrollView>
+                    </View>
+                </View>
+            </Modal>
+
+            <Modal
+                visible={showArtworkHydrationModal}
+                transparent
+                animationType="fade"
+                onRequestClose={() => {
+                    if (!isHydratingTidalMetadata) setShowArtworkHydrationModal(false);
+                }}
+            >
+                <View style={styles.modalOverlay}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
+                        <View style={styles.modalHeader}>
+                            <Text variant="titleLarge">Buscando artwork faltante</Text>
+                            {!isHydratingTidalMetadata && (
+                                <IconButton icon="close" onPress={() => setShowArtworkHydrationModal(false)} />
+                            )}
+                        </View>
+                        <View style={{ paddingHorizontal: 16, paddingBottom: 8, flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                            {isHydratingTidalMetadata && <ActivityIndicator size="small" />}
+                            <Text variant="bodySmall" style={{ opacity: 0.8 }}>
+                                {isHydratingTidalMetadata ? 'Procesando solo canciones sin artwork...' : 'Proceso completado'}
+                            </Text>
+                        </View>
+                        <ScrollView style={{ maxHeight: 340 }} contentContainerStyle={{ paddingHorizontal: 16, paddingBottom: 16, gap: 8 }}>
+                            {artworkHydrationLogs.length === 0 ? (
+                                <Text variant="bodySmall" style={{ opacity: 0.65 }}>Preparando...</Text>
+                            ) : artworkHydrationLogs.map((line, index) => (
+                                <Text key={`${line}-${index}`} variant="bodySmall" style={{ opacity: 0.88 }}>
+                                    {line}
+                                </Text>
+                            ))}
+                        </ScrollView>
+                        {!isHydratingTidalMetadata && (
+                            <View style={{ paddingHorizontal: 16, paddingBottom: 16 }}>
+                                <Button mode="contained-tonal" onPress={() => setShowArtworkHydrationModal(false)}>
+                                    Cerrar
+                                </Button>
+                            </View>
+                        )}
                     </View>
                 </View>
             </Modal>

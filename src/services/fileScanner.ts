@@ -17,7 +17,7 @@ import { MusicInfo } from 'expo-music-info-2';
 import { ScanProgress, Track } from '../types/audio';
 import { getFormatFromUri, parseFilename } from './audioUtils';
 import { extractFlacMetadata, isFlacFile } from './flacParser';
-import { canUseNativeLibraryIndexer, scanMusicNative } from './nativeLibraryIndexer';
+import { canUseNativeLibraryIndexer, resolveContentUriToFileUriNative, scanMusicNative } from './nativeLibraryIndexer';
 
 // Supported audio formats
 const AUDIO_EXTENSIONS = ['mp3', 'm4a', 'flac', 'wav', 'ogg', 'opus', 'aac'];
@@ -49,7 +49,7 @@ export const MUSIC_FOLDERS = {
  * Request media library permissions
  */
 export async function requestPermissions(): Promise<boolean> {
-    const { status } = await MediaLibrary.requestPermissionsAsync();
+    const { status } = await MediaLibrary.requestPermissionsAsync(false, ['audio']);
 
     if (status !== 'granted') {
         console.warn('[FileScanner] Permission denied');
@@ -64,7 +64,7 @@ export async function requestPermissions(): Promise<boolean> {
  * Check if permissions are granted
  */
 export async function hasPermissions(): Promise<boolean> {
-    const { status } = await MediaLibrary.getPermissionsAsync();
+    const { status } = await MediaLibrary.getPermissionsAsync(false, ['audio']);
     return status === 'granted';
 }
 
@@ -79,6 +79,15 @@ function generateTrackId(uri: string): string {
         hash = hash & hash;
     }
     return `track_${Math.abs(hash).toString(16)}`;
+}
+
+function isJunkAudioAsset(asset: MediaLibrary.Asset): boolean {
+    const uri = decodeURIComponent(asset.uri || '').toLowerCase().replace(/\\/g, '/');
+    const filename = (asset.filename || '').toLowerCase();
+    const combined = `${uri}/${filename}`;
+
+    return combined.includes('/cache/staysound/downloads/')
+        || (combined.includes('/android/data/') && combined.includes('/cache/'));
 }
 
 /**
@@ -127,6 +136,13 @@ export async function extractMetadata(uri: string): Promise<{
 }> {
     const fileUri = (uri.startsWith('file://') || uri.startsWith('content://')) ? uri : `file://${uri}`;
 
+    const tryResolveContentUriToFileUri = async (candidateUri: string): Promise<string | null> => {
+        if (!candidateUri.startsWith('content://')) return null;
+        const resolved = await resolveContentUriToFileUriNative(candidateUri);
+        if (!resolved) return null;
+        return resolved.startsWith('file://') ? resolved : `file://${resolved}`;
+    };
+
     // Use FLAC parser for FLAC files
     if (isFlacFile(uri)) {
         try {
@@ -147,6 +163,32 @@ export async function extractMetadata(uri: string): Promise<{
             }
         } catch (error) {
             console.debug(`[FileScanner] FLAC parsing failed for ${uri}: ${error}`);
+
+            // SAF/content URIs frequently fail direct positioned reads in release builds.
+            // Resolve to concrete file path and retry FLAC extraction once.
+            try {
+                const resolvedFileUri = await tryResolveContentUriToFileUri(fileUri);
+                if (resolvedFileUri) {
+                    const flacMetadata = await extractFlacMetadata(resolvedFileUri);
+                    if (flacMetadata) {
+                        console.log(`[FileScanner] FLAC retry via resolved file URI succeeded: ${uri}`);
+                        return {
+                            title: flacMetadata.title,
+                            artist: flacMetadata.artist,
+                            album: flacMetadata.album,
+                            artwork: flacMetadata.picture?.pictureData,
+                            genre: flacMetadata.genre,
+                            year: flacMetadata.year ? parseInt(flacMetadata.year, 10) : undefined,
+                            trackNumber: flacMetadata.trackNumber ? parseInt(flacMetadata.trackNumber, 10) : undefined,
+                            format: flacMetadata.format ?? 'FLAC',
+                            sampleRate: flacMetadata.sampleRate,
+                            bitDepth: flacMetadata.bitDepth,
+                        };
+                    }
+                }
+            } catch (retryError) {
+                console.debug(`[FileScanner] FLAC retry failed for ${uri}: ${retryError}`);
+            }
         }
         return {};
     }
@@ -312,6 +354,7 @@ export async function scanMusicLibraryFast(
             const matchingAssets = result.assets.filter(asset => {
                 const ext = asset.filename?.split('.').pop()?.toLowerCase();
                 if (!ext || !AUDIO_EXTENSIONS.includes(ext)) return false;
+                if (isJunkAudioAsset(asset)) return false;
 
                 if (folderPattern) {
                     const uri = decodeURIComponent(asset.uri || '');

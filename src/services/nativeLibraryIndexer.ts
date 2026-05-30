@@ -1,7 +1,20 @@
 import * as FileSystem from 'expo-file-system/legacy';
+import { EventSubscription } from 'expo-modules-core';
 import { Platform } from 'react-native';
 import { TidalSearchResult, Track } from '../types/audio';
 import { FileSystemStorage } from './storage';
+
+// Lazy accessor to avoid potential circular module init in Hermes release builds.
+// tidalService imports settingsStore/notificationStore which are initialized after
+// nativeLibraryIndexer, so we defer the reference until first use.
+let _searchTidal: ((query: string) => Promise<TidalSearchResult[]>) | null = null;
+function getSearchTidal(): (query: string) => Promise<TidalSearchResult[]> {
+    if (!_searchTidal) {
+        // eslint-disable-next-line @typescript-eslint/no-var-requires
+        _searchTidal = require('./tidalService').searchTidal as (query: string) => Promise<TidalSearchResult[]>;
+    }
+    return _searchTidal;
+}
 
 type NativeScanTrack = {
     id: string;
@@ -15,14 +28,22 @@ type NativeScanTrack = {
     albumId?: string;
     relativePath?: string;
     displayName?: string;
+    size?: number;
+    artworkEntries?: DirectoryEntryRef[];
 };
 
-type TidalMetadataSidecar = Partial<Pick<Track, 'title' | 'artist' | 'album' | 'artwork' | 'trackNumber' | 'year' | 'quality' | 'codec' | 'sampleRate' | 'bitDepth' | 'source' | 'tidalId' | 'tidalAlbumId'>>;
+type TidalMetadataSidecar = Partial<Pick<Track, 'title' | 'artist' | 'album' | 'artwork' | 'trackNumber' | 'year' | 'quality' | 'codec' | 'sampleRate' | 'bitDepth' | 'source' | 'tidalId' | 'tidalAlbumId' | 'isrc'>>;
 
 type NativeLibraryIndexerApi = {
     isLibraryIndexerAvailable: () => boolean;
     scanTracksNative: (folderPattern?: string) => Promise<NativeScanTrack[]>;
     resolveContentUriToFileUri?: (contentUri: string) => Promise<string | null>;
+    addAudioLibraryChangedListener?: (listener: (event: AudioLibraryChangedEvent) => void) => EventSubscription;
+};
+
+export type AudioLibraryChangedEvent = {
+    uri?: string;
+    changedAt: number;
 };
 
 type DirectoryEntryRef = {
@@ -43,7 +64,7 @@ const metadataSidecarCache = new Map<string, Promise<TidalMetadataSidecar | null
 const tidalHydrationCache = new Map<string, Promise<TidalMetadataSidecar | null>>();
 let activeHydrationCount = 0;
 const pendingHydrationResolvers: Array<() => void> = [];
-const MAX_BACKGROUND_HYDRATION_BATCH = 24;
+const MAX_BACKGROUND_HYDRATION_BATCH = 48;
 
 function getNativeApi(): NativeLibraryIndexerApi | null {
     if (nativeApi) return nativeApi;
@@ -79,6 +100,19 @@ export async function resolveContentUriToFileUriNative(contentUri: string): Prom
     }
 }
 
+export function addAudioLibraryChangedListenerNative(
+    listener: (event: AudioLibraryChangedEvent) => void
+): EventSubscription | null {
+    const api = getNativeApi();
+    if (!api?.addAudioLibraryChangedListener) return null;
+
+    try {
+        return api.addAudioLibraryChangedListener(listener);
+    } catch {
+        return null;
+    }
+}
+
 import { parseFilename, sanitizeFilename } from './audioUtils';
 
 const UNKNOWN_TITLES = new Set(['unknown', 'unknown title']);
@@ -98,6 +132,16 @@ function normalizeMatchValue(value?: string): string {
         .toLowerCase()
         .replace(/[^a-z0-9]+/g, ' ')
         .trim();
+}
+
+function normalizeArtworkUri(value?: string | null): string | undefined {
+    if (typeof value !== 'string') return undefined;
+    const trimmed = value.trim();
+    if (!trimmed) return undefined;
+    if (trimmed.startsWith('http://')) {
+        return `https://${trimmed.slice('http://'.length)}`;
+    }
+    return trimmed;
 }
 
 function ensureTrailingSlash(value: string): string {
@@ -123,6 +167,25 @@ function isSupportedAudioContainer(displayName?: string, uri?: string): boolean 
         return true;
     }
     return SUPPORTED_AUDIO_EXTENSIONS.has(extension);
+}
+
+function isJunkScannedAudio(track: NativeScanTrack): boolean {
+    const relativePath = normalizeValue(track.relativePath).replace(/\\/g, '/');
+    const uri = normalizeValue(track.uri).replace(/\\/g, '/');
+    const displayName = normalizeValue(track.displayName);
+    const combined = `${relativePath}/${uri}/${displayName}`;
+
+    if (combined.includes('/cache/staysound/downloads/')) return true;
+    if (combined.includes('/android/data/') && combined.includes('/cache/')) return true;
+
+    const size = typeof track.size === 'number' ? track.size : undefined;
+    const duration = typeof track.durationMs === 'number' ? track.durationMs : undefined;
+    const isStaySoundDownload = relativePath.includes('staysound');
+    const looksLikeAudio = /\.(flac|mp3|m4a|aac|wav|ogg|opus)$/i.test(track.displayName ?? track.uri);
+    return Boolean(isStaySoundDownload && looksLikeAudio && (
+        (size !== undefined && size < 16 * 1024)
+        || (duration !== undefined && duration <= 0)
+    ));
 }
 
 function getSafEntityName(uri: string): string {
@@ -151,6 +214,19 @@ function shouldUseParsedAlbum(rawAlbum: string | undefined): boolean {
 function isKnownAlbumValue(album?: string): boolean {
     const normalizedAlbum = normalizeValue(album);
     return !!normalizedAlbum && !GENERIC_ALBUMS.has(normalizedAlbum);
+}
+
+function isWeakTitleValue(title?: string, displayName?: string): boolean {
+    const normalizedTitle = normalizeValue(title);
+    if (!normalizedTitle || UNKNOWN_TITLES.has(normalizedTitle)) return true;
+
+    const normalizedDisplay = normalizeValue(stripExtension(displayName ?? ''));
+    return !!normalizedDisplay && normalizedTitle === normalizedDisplay;
+}
+
+function isWeakArtistValue(artist?: string): boolean {
+    const normalizedArtist = normalizeValue(artist);
+    return !normalizedArtist || UNKNOWN_ARTISTS.has(normalizedArtist);
 }
 
 function isLikelyTidalDownload(relativePath?: string): boolean {
@@ -263,6 +339,28 @@ async function inferAlbumFromSidecar(relativePath: string | undefined, artist: s
     return inferredAlbum || undefined;
 }
 
+function inferAlbumFromEntries(entries: DirectoryEntryRef[], artist: string | undefined): string | undefined {
+    const safeArtist = artist?.trim();
+    if (!safeArtist || entries.length === 0) return undefined;
+
+    const sanitizedArtistPrefix = `${sanitizeFilename(safeArtist)} - `.toLowerCase();
+    const rawArtistPrefix = `${safeArtist} - `.toLowerCase();
+
+    const match = entries.find((entry) => {
+        const lower = entry.name.toLowerCase();
+        return IMAGE_EXTENSIONS.some(ext => lower.endsWith(ext))
+            && (lower.startsWith(sanitizedArtistPrefix) || lower.startsWith(rawArtistPrefix));
+    });
+
+    if (!match) return undefined;
+
+    const withoutExt = stripExtension(match.name);
+    if (withoutExt.length <= safeArtist.length + 3) return undefined;
+
+    const inferredAlbum = withoutExt.slice(withoutExt.indexOf(' - ') + 3).trim();
+    return inferredAlbum || undefined;
+}
+
 async function findSidecarArtwork(relativePath?: string, artist?: string, album?: string): Promise<string | undefined> {
     const safeArtist = artist?.trim();
     const safeAlbum = album?.trim();
@@ -270,6 +368,24 @@ async function findSidecarArtwork(relativePath?: string, artist?: string, album?
 
     const entries = await getDirectoryEntries(relativePath);
     if (entries.length === 0) return undefined;
+
+    const normalizedCandidates = new Set([
+        `${sanitizeFilename(`${safeArtist} - ${safeAlbum}`)}.jpg`.toLowerCase(),
+        `${sanitizeFilename(`${safeArtist} - ${safeAlbum}`)}.jpeg`.toLowerCase(),
+        `${sanitizeFilename(`${safeArtist} - ${safeAlbum}`)}.png`.toLowerCase(),
+        `${safeArtist} - ${safeAlbum}.jpg`.toLowerCase(),
+        `${safeArtist} - ${safeAlbum}.jpeg`.toLowerCase(),
+        `${safeArtist} - ${safeAlbum}.png`.toLowerCase(),
+    ]);
+
+    const match = entries.find(entry => normalizedCandidates.has(entry.name.toLowerCase()));
+    return match?.uri;
+}
+
+function findArtworkInEntries(entries: DirectoryEntryRef[], artist?: string, album?: string): string | undefined {
+    const safeArtist = artist?.trim();
+    const safeAlbum = album?.trim();
+    if (!safeArtist || !safeAlbum || entries.length === 0) return undefined;
 
     const normalizedCandidates = new Set([
         `${sanitizeFilename(`${safeArtist} - ${safeAlbum}`)}.jpg`.toLowerCase(),
@@ -323,7 +439,7 @@ function scoreTidalMatch(candidate: TidalSearchResult, title: string, artist: st
     return score;
 }
 
-function findBestTidalMatch(results: TidalSearchResult[], title: string, artist: string, album?: string): TidalSearchResult | null {
+function findBestTidalMatch(results: TidalSearchResult[], title: string, artist: string, album?: string, minScore = 12): TidalSearchResult | null {
     let bestMatch: TidalSearchResult | null = null;
     let bestScore = 0;
 
@@ -335,7 +451,8 @@ function findBestTidalMatch(results: TidalSearchResult[], title: string, artist:
         }
     }
 
-    return bestScore >= 12 ? bestMatch : null;
+    console.log(`[NativeLibraryIndexer] TidalMatch for "${artist} - ${title}": bestScore=${bestScore}/${minScore}, matched=${bestScore >= minScore ? (bestMatch?.title + ' / ' + bestMatch?.artworkUrl) : 'NONE'}, candidates=${results.length}`);
+    return bestScore >= minScore ? bestMatch : null;
 }
 
 async function hydrateMetadataFromTidal(title: string, artist: string, album: string | undefined, relativePath?: string): Promise<TidalMetadataSidecar | null> {
@@ -346,26 +463,68 @@ async function hydrateMetadataFromTidal(title: string, artist: string, album: st
     const cacheKey = `${normalizeMatchValue(artist)}|${normalizeMatchValue(title)}|${normalizeMatchValue(album)}`;
     if (!tidalHydrationCache.has(cacheKey)) {
         tidalHydrationCache.set(cacheKey, withTidalHydrationSlot(async () => {
-            const { searchTidal } = await import('./tidalService');
-            const results = await searchTidal(`${artist} ${title}`.trim());
+            console.log(`[NativeLibraryIndexer] hydrateMetadataFromTidal: searching for "${artist} - ${title}" (Tidal download path)`);
+            const results = await getSearchTidal()(`${artist} ${title}`.trim());
+            console.log(`[NativeLibraryIndexer] hydrateMetadataFromTidal: got ${results.length} results for "${artist} - ${title}"`);
             const match = findBestTidalMatch(results, title, artist, album);
-            if (!match) return null;
+            if (!match) {
+                console.log(`[NativeLibraryIndexer] hydrateMetadataFromTidal: NO match for "${artist} - ${title}"`);
+                return null;
+            }
 
+            console.log(`[NativeLibraryIndexer] hydrateMetadataFromTidal: matched "${match.artist} - ${match.title}", artwork=${match.artworkUrl ?? 'NONE'}`);
             return {
                 title: match.title,
                 artist: match.artist,
                 album: match.album,
-                artwork: match.artworkUrl,
+                artwork: normalizeArtworkUri(match.artworkUrl),
                 trackNumber: match.trackNumber,
+                year: match.year,
                 quality: match.quality,
                 source: 'tidal',
                 tidalId: match.id,
                 tidalAlbumId: match.albumId,
+                isrc: match.isrc,
             } satisfies TidalMetadataSidecar;
-        }).catch(() => null));
+        }).catch((err) => {
+            console.warn(`[NativeLibraryIndexer] hydrateMetadataFromTidal error for "${artist} - ${title}": ${err}`);
+            return null;
+        }));
     }
 
     return await tidalHydrationCache.get(cacheKey)!;
+}
+
+/**
+ * Search Tidal for artwork for a local track (no path gating).
+ * Used for tracks that have title+artist but no artwork.
+ */
+async function fetchArtworkFromTidal(title: string, artist: string, album?: string): Promise<string | null> {
+    if (!title || UNKNOWN_TITLES.has(normalizeValue(title))) return null;
+    if (!artist || UNKNOWN_ARTISTS.has(normalizeValue(artist))) return null;
+
+    const cacheKey = `artwork:${normalizeMatchValue(artist)}|${normalizeMatchValue(title)}`;
+    if (!tidalHydrationCache.has(cacheKey)) {
+        tidalHydrationCache.set(cacheKey, withTidalHydrationSlot(async () => {
+            console.log(`[NativeLibraryIndexer] fetchArtworkFromTidal: searching artwork for "${artist} - ${title}"`);
+            const results = await getSearchTidal()(`${artist} ${title}`.trim());
+            console.log(`[NativeLibraryIndexer] fetchArtworkFromTidal: got ${results.length} results for "${artist} - ${title}"`);
+            // Lower minScore to 10 for artwork-only (we only need title+artist to match)
+            const match = findBestTidalMatch(results, title, artist, album, 10);
+            if (!match?.artworkUrl) {
+                console.log(`[NativeLibraryIndexer] fetchArtworkFromTidal: NO artwork match for "${artist} - ${title}"`);
+                return null;
+            }
+            console.log(`[NativeLibraryIndexer] fetchArtworkFromTidal: artwork found for "${artist} - ${title}" → ${match.artworkUrl}`);
+            // Return as TidalMetadataSidecar with only artwork populated
+            return { artwork: normalizeArtworkUri(match.artworkUrl) } as TidalMetadataSidecar;
+        }).catch((err) => {
+            console.warn(`[NativeLibraryIndexer] fetchArtworkFromTidal error for "${artist} - ${title}": ${err}`);
+            return null;
+        }));
+    }
+
+    return ((await tidalHydrationCache.get(cacheKey)!) as any)?.artwork ?? null;
 }
 
 function normalizeFolderPattern(folderPattern?: unknown): string | undefined {
@@ -374,9 +533,14 @@ function normalizeFolderPattern(folderPattern?: unknown): string | undefined {
     return trimmed.length > 0 ? trimmed : undefined;
 }
 
-function shouldHydrateTrackFromApi(track: Pick<Track, 'title' | 'artist' | 'album' | 'artwork' | 'relativePath'>): boolean {
+function shouldHydrateTrackFromApi(track: Pick<Track, 'title' | 'artist' | 'album' | 'artwork' | 'relativePath' | '_filename'>): boolean {
     return isLikelyTidalDownload(track.relativePath)
-        && (!isKnownAlbumValue(track.album) || !track.artwork);
+        && (
+            isWeakTitleValue(track.title, track._filename)
+            || isWeakArtistValue(track.artist)
+            || !isKnownAlbumValue(track.album)
+            || !track.artwork
+        );
 }
 
 function mergeHydratedTrack(track: Track, apiMetadata: TidalMetadataSidecar | null): Track {
@@ -384,10 +548,10 @@ function mergeHydratedTrack(track: Track, apiMetadata: TidalMetadataSidecar | nu
 
     return {
         ...track,
-        title: apiMetadata.title || track.title,
-        artist: apiMetadata.artist || track.artist,
+        title: isWeakTitleValue(track.title, track._filename) ? (apiMetadata.title || track.title) : track.title,
+        artist: isWeakArtistValue(track.artist) ? (apiMetadata.artist || track.artist) : track.artist,
         album: isKnownAlbumValue(track.album) ? track.album : (apiMetadata.album || track.album),
-        artwork: apiMetadata.artwork || track.artwork,
+        artwork: normalizeArtworkUri(apiMetadata.artwork) || normalizeArtworkUri(track.artwork),
         trackNumber: track.trackNumber || apiMetadata.trackNumber,
         year: track.year || apiMetadata.year,
         quality: track.quality || apiMetadata.quality,
@@ -397,6 +561,7 @@ function mergeHydratedTrack(track: Track, apiMetadata: TidalMetadataSidecar | nu
         source: track.source || apiMetadata.source,
         tidalId: track.tidalId || apiMetadata.tidalId,
         tidalAlbumId: track.tidalAlbumId || apiMetadata.tidalAlbumId,
+        isrc: track.isrc || apiMetadata.isrc,
     };
 }
 
@@ -426,7 +591,7 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
     if (!api) return [];
 
     const nativeTracks = await api.scanTracksNative(normalizeFolderPattern(folderPattern));
-    const playableTracks = nativeTracks.filter(track => isSupportedAudioContainer(track.displayName, track.uri));
+    const playableTracks = nativeTracks.filter(track => isSupportedAudioContainer(track.displayName, track.uri) && !isJunkScannedAudio(track));
 
     if (playableTracks.length !== nativeTracks.length) {
         console.log('[NativeLibraryIndexer] Skipping unsupported audio containers:', nativeTracks.length - playableTracks.length);
@@ -434,11 +599,12 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
 
     return await Promise.all(playableTracks.map(async (track) => {
         const sidecarMetadata = await readMetadataSidecar(track.relativePath, track.displayName);
+        const nativeArtworkEntries = Array.isArray(track.artworkEntries) ? track.artworkEntries : [];
         const parsed = parseFilename(track.displayName || track.uri);
         const resolvedArtist = sidecarMetadata?.artist
             || ((!track.artist || UNKNOWN_ARTISTS.has(normalizeValue(track.artist))) ? parsed.artist : track.artist);
         const inferredAlbum = !sidecarMetadata?.album && shouldUseParsedAlbum(track.album) && parsed.album === 'Unknown Album'
-            ? await inferAlbumFromSidecar(track.relativePath, resolvedArtist)
+            ? ((await inferAlbumFromSidecar(track.relativePath, resolvedArtist)) || inferAlbumFromEntries(nativeArtworkEntries, resolvedArtist))
             : undefined;
         const resolvedAlbum = sidecarMetadata?.album
             || (shouldUseParsedAlbum(track.album)
@@ -447,6 +613,7 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
         const resolvedTitle = sidecarMetadata?.title
             || (shouldUseParsedTitle(track.title, track.displayName || track.uri) ? parsed.title : track.title);
         const sidecarArtwork = await findSidecarArtwork(track.relativePath, resolvedArtist, resolvedAlbum);
+        const nativeSidecarArtwork = findArtworkInEntries(nativeArtworkEntries, resolvedArtist, resolvedAlbum);
 
         const finalTitle = sidecarMetadata?.title || resolvedTitle;
         const finalArtist = sidecarMetadata?.artist || resolvedArtist;
@@ -454,6 +621,7 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
             ? resolvedAlbum
             : (sidecarMetadata?.album || resolvedAlbum);
         const finalArtwork = sidecarArtwork
+            || nativeSidecarArtwork
             || sidecarMetadata?.artwork
             || track.artwork;
 
@@ -464,7 +632,7 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
             artist: finalArtist,
             album: finalAlbum,
             duration: track.durationMs || 0,
-            artwork: finalArtwork,
+            artwork: normalizeArtworkUri(finalArtwork),
             albumId: track.albumId,
             trackNumber: sidecarMetadata?.trackNumber,
             year: sidecarMetadata?.year,
@@ -475,6 +643,7 @@ export async function scanMusicNative(folderPattern?: string): Promise<Track[]> 
             source: sidecarMetadata?.source || (isLikelyTidalDownload(track.relativePath) ? 'tidal' : undefined),
             tidalId: sidecarMetadata?.tidalId,
             tidalAlbumId: sidecarMetadata?.tidalAlbumId,
+            isrc: sidecarMetadata?.isrc,
             dateAdded: track.dateAddedMs || Date.now(),
             format: getFormatFromValue(track.displayName || track.uri),
             relativePath: track.relativePath,
@@ -490,6 +659,8 @@ export async function hydrateDeferredTidalMetadata(
     const candidates = tracks
         .filter(track => shouldHydrateTrackFromApi(track))
         .slice(0, MAX_BACKGROUND_HYDRATION_BATCH);
+
+    console.log(`[NativeLibraryIndexer] hydrateDeferredTidalMetadata: ${candidates.length} StaySound tracks need hydration out of ${tracks.length} total`);
 
     if (candidates.length === 0) return;
 
@@ -517,6 +688,65 @@ export async function hydrateDeferredTidalMetadata(
     });
 
     if (updates.length > 0) {
+        console.log(`[NativeLibraryIndexer] hydrateDeferredTidalMetadata: resolved ${updates.length} StaySound track(s)`);
+        onBatchResolved(updates);
+    }
+}
+
+/**
+ * Hydrate artwork for generic local tracks (not StaySound downloads) that are
+ * missing artwork by searching Tidal. Runs in background after scan.
+ * Max 60 tracks to avoid excessive API usage.
+ */
+export async function hydrateArtworkForLocalTracks(
+    tracks: Track[],
+    onBatchResolved: (updates: Track[]) => void,
+    options?: {
+        maxCandidates?: number;
+        includeStaySoundDownloads?: boolean;
+    }
+): Promise<void> {
+    const maxCandidates = typeof options?.maxCandidates === 'number' && options.maxCandidates > 0
+        ? Math.floor(options.maxCandidates)
+        : 60;
+    const includeStaySoundDownloads = options?.includeStaySoundDownloads === true;
+
+    const candidates = tracks.filter(track => {
+        // By default skip StaySound downloads (handled by hydrateDeferredTidalMetadata),
+        // but allow opting in for manual tooling.
+        if (!includeStaySoundDownloads && isLikelyTidalDownload(track.relativePath)) return false;
+        // Must have a meaningful title and artist for searching
+        if (isWeakTitleValue(track.title, track._filename)) return false;
+        if (isWeakArtistValue(track.artist)) return false;
+        // Target tracks with NO artwork OR tracks with only a low-quality
+        // MediaStore albumart URI (content://media/external/audio/albumart/...).
+        // These URIs often point to empty/missing album art; Tidal provides
+        // a much higher-quality cover image.
+        const hasRealArtwork = typeof track.artwork === 'string'
+            && track.artwork.length > 0
+            && !track.artwork.startsWith('content://media/external/audio/albumart');
+        return !hasRealArtwork;
+    }).slice(0, maxCandidates);
+
+    console.log(`[NativeLibraryIndexer] hydrateArtworkForLocalTracks: ${candidates.length} local tracks need artwork (of ${tracks.length} total)`);
+
+    if (candidates.length === 0) return;
+
+    const updates: Track[] = [];
+    await mapConcurrent(candidates, 2, async (track) => {
+        try {
+            const artworkUrl = await fetchArtworkFromTidal(track.title, track.artist, track.album);
+            if (!artworkUrl) return null;
+
+            updates.push({ ...track, artwork: artworkUrl });
+            return updates[updates.length - 1];
+        } catch {
+            return null;
+        }
+    });
+
+    if (updates.length > 0) {
+        console.log(`[NativeLibraryIndexer] hydrateArtworkForLocalTracks: resolved artwork for ${updates.length} local track(s)`);
         onBatchResolved(updates);
     }
 }

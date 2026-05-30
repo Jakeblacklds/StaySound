@@ -18,6 +18,7 @@ import TrackPlayer, {
   RepeatMode,
   State,
 } from "react-native-track-player";
+import * as FileSystem from "expo-file-system";
 import { getArtworkNotificationUri } from "./artworkThumbnails";
 import { Track } from "../types/audio";
 import { resolveContentUriToFileUriNative } from "./nativeLibraryIndexer";
@@ -175,7 +176,14 @@ async function resolveNativePlaybackUrl(track: Track): Promise<string> {
   if (isMediaStoreAudioUri(normalizedUri)) {
     const fileUri = buildFilePlaybackUri(track);
     if (fileUri) {
-      return fileUri;
+      try {
+        const info = await FileSystem.getInfoAsync(fileUri);
+        if (info.exists) {
+          return fileUri;
+        }
+      } catch {
+        // Ignore and continue with safer fallbacks below.
+      }
     }
 
     if (!mediaStoreFileUriCache.has(normalizedUri)) {
@@ -186,7 +194,15 @@ async function resolveNativePlaybackUrl(track: Track): Promise<string> {
     }
     const nativeResolvedFileUri = await mediaStoreFileUriCache.get(normalizedUri)!;
     if (nativeResolvedFileUri) {
-      return normalizePlaybackUri(nativeResolvedFileUri);
+      const normalizedResolvedUri = normalizePlaybackUri(nativeResolvedFileUri);
+      try {
+        const info = await FileSystem.getInfoAsync(normalizedResolvedUri);
+        if (info.exists) {
+          return normalizedResolvedUri;
+        }
+      } catch {
+        // Ignore and continue with content:// fallback.
+      }
     }
 
     console.warn("[TrackPlayer] MediaStore URI without file fallback metadata", {
@@ -197,6 +213,11 @@ async function resolveNativePlaybackUrl(track: Track): Promise<string> {
       format: track.format,
       codec: track.codec,
     });
+
+    // Keep the original content:// URI as the final fallback.
+    // On some devices, reconstructed file:/// paths can fail with Source error
+    // while direct MediaStore access is still valid.
+    return normalizedUri;
   }
 
   return normalizedUri;

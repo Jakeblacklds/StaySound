@@ -112,6 +112,7 @@ export interface TidalTrack {
     sampleRate?: number;
     bitDepth?: number;
     codec?: string;
+    isrc?: string;
 }
 
 export type TidalSearchResult = TidalTrack;
