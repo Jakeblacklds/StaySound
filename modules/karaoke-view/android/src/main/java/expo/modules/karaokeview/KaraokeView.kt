@@ -42,8 +42,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             paint: Paint,
             revealX: Float,
             rowHeight: Float,
+            fadeWidth: Float,
         ) {
-            this@KaraokeView.drawWordTail(canvas, line, word, paint, revealX, rowHeight)
+            this@KaraokeView.drawWordTail(canvas, line, word, paint, revealX, rowHeight, fadeWidth)
         }
 
         override fun drawWordTranslated(
@@ -65,6 +66,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             finalLiftRatio: Float,
             currentTimeMs: Long,
             keepCharacterLift: Boolean,
+            visualWordDurationMs: Float,
         ) {
             this@KaraokeView.drawCompletedWordWithLift(
                 canvas = canvas,
@@ -75,6 +77,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 finalLiftRatio = finalLiftRatio,
                 currentTimeMs = currentTimeMs,
                 keepCharacterLift = keepCharacterLift,
+                visualWordDurationMs = visualWordDurationMs,
             )
         }
 
@@ -112,6 +115,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             finalLiftRatio: Float,
             useCharacterLift: Boolean,
             currentTimeMs: Long,
+            visualWordDurationMs: Float,
         ) {
             this@KaraokeView.drawWordWipeHighlight(
                 canvas = canvas,
@@ -123,6 +127,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 finalLiftRatio = finalLiftRatio,
                 useCharacterLift = useCharacterLift,
                 currentTimeMs = currentTimeMs,
+                visualWordDurationMs = visualWordDurationMs,
             )
         }
 
@@ -700,6 +705,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         finalLiftRatio: Float,
         useCharacterLift: Boolean,
         currentTimeMs: Long,
+        visualWordDurationMs: Float = 0f,
     ) {
         val wordX = marginLeft + word.xOffset
         val clampedProgress = progress.coerceIn(0f, 1f)
@@ -717,6 +723,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                     paint = paint,
                     rowHeight = rowHeight,
                     finalLiftRatio = finalLiftRatio,
+                    overrideDurationMs = visualWordDurationMs,
                 )
             } else {
                 drawWordTranslated(canvas, line, word, paint, -rowHeight * finalLiftRatio)
@@ -728,8 +735,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         // Shader on the paint itself — no saveLayer/DST_IN, no visible boundary line.
         // The bright text fades to transparent at sweepX; the dim base text underneath
         // shows through organically, matching Apple Music's liquid fill look.
-        val endSoftness = smootherStep(((clampedProgress - 0.88f) / 0.12f).coerceIn(0f, 1f))
-        val fadeWidth = FEATHER_PX * (4f + 1.6f * endSoftness)
+        val endSettleT = smootherStep(((clampedProgress - 0.82f) / 0.18f).coerceIn(0f, 1f))
+        val fadeWidth = FEATHER_PX * (4f * (1f - endSettleT * 0.88f))
         val r = Color.red(paint.color)
         val g = Color.green(paint.color)
         val b = Color.blue(paint.color)
@@ -737,13 +744,15 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val originalShader = paint.shader
         paint.shader = LinearGradient(
             sweepX - fadeWidth, 0f,
-            sweepX + fadeWidth * 0.25f, 0f,
+            sweepX + fadeWidth * 0.4f, 0f,
             intArrayOf(
                 Color.argb(a, r, g, b),
                 Color.argb(a, r, g, b),
+                Color.argb((a * 0.65f).toInt(), r, g, b),
+                Color.argb((a * 0.2f).toInt(), r, g, b),
                 Color.argb(0, r, g, b),
             ),
-            floatArrayOf(0f, 0.60f, 1f),
+            floatArrayOf(0f, 0.40f, 0.65f, 0.85f, 1f),
             Shader.TileMode.CLAMP,
         )
 
@@ -756,6 +765,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 paint = paint,
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
+                overrideDurationMs = visualWordDurationMs,
             )
         } else {
             drawWordTranslated(canvas, line, word, paint, -rowHeight * finalLiftRatio)
@@ -814,8 +824,14 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             0f,
             bandCenter + preBandHalf,
             0f,
-            intArrayOf(Color.TRANSPARENT, Color.BLACK, Color.TRANSPARENT),
-            floatArrayOf(0f, 0.5f, 1f),
+            intArrayOf(
+                Color.TRANSPARENT,
+                Color.argb(40, 0, 0, 0),
+                Color.argb(180, 0, 0, 0),
+                Color.argb(40, 0, 0, 0),
+                Color.TRANSPARENT,
+            ),
+            floatArrayOf(0f, 0.18f, 0.5f, 0.82f, 1f),
             Shader.TileMode.CLAMP,
         )
         sweepMaskPaint.shader = preMaskShader
@@ -839,6 +855,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         finalLiftRatio: Float,
         currentTimeMs: Long,
         keepCharacterLift: Boolean,
+        visualWordDurationMs: Float = 0f,
     ) {
         // Keep completed words in lifted character style while this line stays active
         // (including silent gap until next estrofa starts).
@@ -855,6 +872,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
                 enableGlow = false,
+                overrideDurationMs = visualWordDurationMs,
             )
             return
         }
@@ -919,28 +937,18 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             return
         }
 
-        // Active wipe: apply a feathered gradient shader that reveals left-to-right at sweepX.
-        // enableGlow=false during wipe: Android's setShadowLayer bleeds through the gradient's
-        // transparent areas (unlike CSS text-shadow which only affects visible pixels).
-        // The glow kicks in cleanly once the wipe completes above.
-        val endSoftness = smootherStep(((clampedProgress - 0.88f) / 0.12f).coerceIn(0f, 1f))
-        val fadeWidth = FEATHER_PX * (4f + 1.6f * endSoftness)
-        val r = Color.red(paint.color)
-        val g = Color.green(paint.color)
-        val b = Color.blue(paint.color)
-        val a = paint.alpha
-        val originalShader = paint.shader
-        paint.shader = LinearGradient(
-            sweepX - fadeWidth, 0f,
-            sweepX + fadeWidth * 0.25f, 0f,
-            intArrayOf(
-                Color.argb(a, r, g, b),
-                Color.argb(a, r, g, b),
-                Color.argb(0, r, g, b),
-            ),
-            floatArrayOf(0f, 0.60f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+        // Active wipe: use saveLayer + DST_IN mask to clip BOTH text AND shadow
+        // to the revealed area. This lets us keep enableGlow=true so the glow
+        // builds gradually as the wipe reveals each character — no pop at the end.
+        // (The old shader approach couldn't clip the shadow layer, causing bleed.)
+        val firstWord = words.first()
+        val lastWord = words.last()
+        val wordLeft = marginLeft + firstWord.xOffset - FEATHER_PX * 2
+        val wordRight = marginLeft + lastWord.xOffset + lastWord.width + FEATHER_PX * 4
+        val wordTop = line.y + words.minOf { it.yOffset } - rowHeight * 1.5f
+        val wordBottom = line.y + words.maxOf { it.yOffset } + rowHeight * 2.5f
+
+        canvas.saveLayer(wordLeft, wordTop, wordRight, wordBottom, null)
 
         drawVisualWordCharactersWithLift(
             canvas = canvas,
@@ -953,11 +961,31 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             marginLeft = marginLeft,
             density = density,
             glowColor = glowColor,
-            enableGlow = false, // No glow during wipe — shadow bleeds through gradient transparency
+            enableGlow = true, // Glow is ON — the DST_IN mask clips it to the revealed area
             smootherStep = ::smootherStep,
         )
 
-        paint.shader = originalShader
+        // Same settling logic: shrink feather toward end so no characters are left partially
+        // revealed when the word completes and transitions to the full-glow post-wipe state.
+        val endSettleT = smootherStep(((clampedProgress - 0.82f) / 0.18f).coerceIn(0f, 1f))
+        val fadeWidth = FEATHER_PX * (4f * (1f - endSettleT * 0.88f))
+        val maskShader = LinearGradient(
+            sweepX - fadeWidth, 0f,
+            sweepX + fadeWidth * 0.4f, 0f,
+            intArrayOf(
+                Color.BLACK,
+                Color.BLACK,
+                Color.argb(166, 0, 0, 0),
+                Color.argb(51, 0, 0, 0),
+                Color.TRANSPARENT,
+            ),
+            floatArrayOf(0f, 0.40f, 0.65f, 0.85f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        sweepMaskPaint.shader = maskShader
+        canvas.drawRect(wordLeft, wordTop, wordRight, wordBottom, sweepMaskPaint)
+
+        canvas.restore()
     }
 
 
@@ -970,6 +998,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         rowHeight: Float,
         finalLiftRatio: Float,
         enableGlow: Boolean = true,
+        overrideDurationMs: Float = 0f,
     ) {
         drawVisualWordCharactersWithLift(
             canvas = canvas,
@@ -984,6 +1013,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             glowColor = glowColor,
             enableGlow = enableGlow,
             smootherStep = ::smootherStep,
+            overrideDurationMs = overrideDurationMs,
         )
     }
 
@@ -1014,22 +1044,69 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         paint: Paint,
         revealX: Float,
         rowHeight: Float,
+        fadeWidth: Float = 0f,
     ) {
         val wordLeft = marginLeft + word.xOffset
         val wordRight = wordLeft + word.width
-        if (revealX <= wordLeft) {
+        
+        // Mathematically perfect continuous boundaries for complementary fading:
+        // 1. If transition hasn't touched the word yet, draw the full dim word.
+        if (fadeWidth > 0f && revealX + fadeWidth * 0.25f <= wordLeft) {
             drawWord(canvas, line, word, paint)
             return
         }
-        if (revealX >= wordRight) {
+        if (fadeWidth <= 0f && revealX <= wordLeft) {
+            drawWord(canvas, line, word, paint)
+            return
+        }
+        
+        // 2. If transition has completely passed the word, render nothing.
+        if (fadeWidth > 0f && revealX - fadeWidth * 0.25f >= wordRight) {
+            return
+        }
+        if (fadeWidth <= 0f && revealX >= wordRight) {
             return
         }
 
         val wordTop = line.y + word.yOffset
         val wordBottom = wordTop + rowHeight
         canvas.save()
-        canvas.clipRect(revealX, wordTop - rowHeight, wordRight + FEATHER_PX, wordBottom + rowHeight)
-        drawWord(canvas, line, word, paint)
+        
+        if (fadeWidth > 0f) {
+            val startX = revealX - fadeWidth * 0.4f
+            val endX = revealX + fadeWidth * 0.4f
+            
+            val originalShader = paint.shader
+            val baseColor = paint.color
+            val bR = Color.red(baseColor)
+            val bG = Color.green(baseColor)
+            val bB = Color.blue(baseColor)
+            val bA = Color.alpha(baseColor)
+            
+            // Complementary curve: mirrors the wipe gradient so the sum ≈ constant
+            val maskShader = LinearGradient(
+                startX, 0f,
+                endX, 0f,
+                intArrayOf(
+                    Color.argb(0, bR, bG, bB),
+                    Color.argb((bA * 0.35f).toInt(), bR, bG, bB),
+                    Color.argb((bA * 0.80f).toInt(), bR, bG, bB),
+                    Color.argb(bA, bR, bG, bB),
+                ),
+                floatArrayOf(0f, 0.3f, 0.7f, 1f),
+                Shader.TileMode.CLAMP
+            )
+            paint.shader = maskShader
+            
+            // Optimization & safety: clip from startX to prevent overdraw and ensure smooth clipping
+            canvas.clipRect(startX.coerceAtLeast(wordLeft), wordTop - rowHeight, wordRight + FEATHER_PX, wordBottom + rowHeight)
+            drawWord(canvas, line, word, paint)
+            
+            paint.shader = originalShader
+        } else {
+            canvas.clipRect(revealX, wordTop - rowHeight, wordRight + FEATHER_PX, wordBottom + rowHeight)
+            drawWord(canvas, line, word, paint)
+        }
         canvas.restore()
     }
 

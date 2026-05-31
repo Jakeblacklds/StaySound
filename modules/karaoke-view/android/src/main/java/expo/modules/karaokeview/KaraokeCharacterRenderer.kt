@@ -31,10 +31,15 @@ internal fun drawVisualWordCharactersWithLift(
     glowColor: Int,
     enableGlow: Boolean = true,
     smootherStep: (Float) -> Float,
+    overrideDurationMs: Float = 0f,
 ) {
     if (words.isEmpty()) return
 
     val visualWordDurationMs = (words.last().endMs - words.first().startMs).coerceAtLeast(1L).toFloat()
+    // For lift calculations, use the full visual word duration when available.
+    // This makes the lift animate per-word instead of per-syllable, while the
+    // sweep (driven by the paint shader) remains at syllable granularity.
+    val liftDurationMs = if (overrideDurationMs > 0f) overrideDurationMs else visualWordDurationMs
     val wordGlyphUnits = words.map { word ->
         if (word.glyphUnits.isNotEmpty()) word.glyphUnits
         else buildFallbackGlyphUnits(word.text, paint)
@@ -69,36 +74,36 @@ internal fun drawVisualWordCharactersWithLift(
     // This is the "word-level energy" — same as Binimum's `easedProgress`.
     val minDurationMs = 400f
     val maxDurationMs = 3000f
-    val rawProgress = ((visualWordDurationMs - minDurationMs) / (maxDurationMs - minDurationMs))
+    val rawProgress = ((liftDurationMs - minDurationMs) / (maxDurationMs - minDurationMs))
         .coerceIn(0f, 1f)
     // Binimum uses easingPower = 3
     val easedWordProgress = rawProgress * rawProgress * rawProgress
 
     // Decay rate: later characters get less energy (Binimum: positionInWord * maxDecayRate)
     val isLongWord = charCount > 5
-    val isShortDuration = visualWordDurationMs < 1200f
+    val isShortDuration = liftDurationMs < 1200f
     var maxDecayRate = 0f
     if (isLongWord || isShortDuration) {
         var decayStrength = 0f
         if (isLongWord) decayStrength += ((charCount - 5).toFloat() / 5f).coerceIn(0f, 1f) * 0.4f
         if (isShortDuration && charCount > 3) {
-            decayStrength += (1f - (visualWordDurationMs - 800f) / 400f).coerceIn(0f, 1f) * 0.3f
+            decayStrength += (1f - (liftDurationMs - 800f) / 400f).coerceIn(0f, 1f) * 0.3f
         } else if (isShortDuration) {
-            decayStrength += (1f - (visualWordDurationMs - 800f) / 400f).coerceIn(0f, 1f) * 0.1f
+            decayStrength += (1f - (liftDurationMs - 800f) / 400f).coerceIn(0f, 1f) * 0.1f
         }
         maxDecayRate = decayStrength.coerceAtMost(0.7f)
     }
 
     // Syllable imbalance penalty (multi-word visual groups with uneven first syllable)
     val firstDurationMs = words.firstOrNull()?.let { (it.endMs - it.startMs).coerceAtLeast(1L).toFloat() }
-        ?: visualWordDurationMs
+        ?: liftDurationMs
     val penaltyFactor = if (words.size > 1) {
-        val ratio = firstDurationMs / visualWordDurationMs
+        val ratio = firstDurationMs / liftDurationMs
         if (ratio < 0.25f) 0.5f + 0.5f * (ratio / 0.25f).coerceIn(0f, 1f) else 1f
     } else 1f
 
     // Binimum glow intensity scale (duration × length factors)
-    val glowDurFactor = (visualWordDurationMs / 1500f).coerceAtMost(1.1f)
+    val glowDurFactor = (liftDurationMs / 1500f).coerceAtMost(1.1f)
     val glowLenFactor = when {
         charCount <= 3 -> 0.85f
         charCount >= 6 -> 1.1f
@@ -107,20 +112,25 @@ internal fun drawVisualWordCharactersWithLift(
     val glowIntensityScale = glowDurFactor * glowLenFactor
 
     // Binimum riseDuration: 1.2s + 0.6s/second of note, capped at 2.5s
-    val riseDurationMs = (1200f + (visualWordDurationMs / 1000f) * 600f).coerceIn(1200f, 2500f)
+    val riseDurationMs = (1200f + (liftDurationMs / 1000f) * 600f).coerceIn(1200f, 2500f)
     val releaseDurationMs = (riseDurationMs * 0.25f).coerceIn(250f, 600f)
 
-    val wordElapsedMs = progress.coerceAtLeast(0f) * visualWordDurationMs
+    val wordElapsedMs = progress.coerceAtLeast(0f) * liftDurationMs
 
-    // animT: 0→1 during rise, stays at 1 during hold, 1→0 during release.
+    // animT: 0→animTAtEnd during rise, stays at animTAtEnd during hold,
+    // animTAtEnd→0 during release.
+    // KEY: riseDuration can be longer than the word, so animT may not reach 1.0
+    // by the time the word ends. The release must start from the ACTUAL value
+    // (animTAtEnd), not from 1.0, otherwise there's a visible pop in scale/glow.
+    val animTAtEnd = smootherStep((liftDurationMs / riseDurationMs).coerceIn(0f, 1f))
     val animT: Float = when {
         progress >= 1f -> {
-            // Release: eased out from 1 → 0
-            val postMs = (progress - 1f) * visualWordDurationMs
-            1f - smootherStep((postMs / releaseDurationMs).coerceIn(0f, 1f))
+            // Release: eased out from animTAtEnd → 0
+            val postMs = (progress - 1f) * liftDurationMs
+            animTAtEnd * (1f - smootherStep((postMs / releaseDurationMs).coerceIn(0f, 1f)))
         }
         else -> {
-            // Rise: smootherstep toward 1.0 over riseDurationMs
+            // Rise: smootherstep toward animTAtEnd over riseDurationMs
             smootherStep((wordElapsedMs / riseDurationMs).coerceIn(0f, 1f))
         }
     }
@@ -129,7 +139,7 @@ internal fun drawVisualWordCharactersWithLift(
     // Never release from here — the line renderer handles lowering via scale/alpha
     // when the line becomes inactive. Releasing here caused completed words to descend.
     val nonSustainedGrowT: Float = run {
-        val growDurationMs = (visualWordDurationMs * 1.4f).coerceAtLeast(400f)
+        val growDurationMs = (liftDurationMs * 1.4f).coerceAtLeast(400f)
         smootherStep((wordElapsedMs / growDurationMs).coerceIn(0f, 1f))
     }
 
@@ -171,7 +181,7 @@ internal fun drawVisualWordCharactersWithLift(
             val syllableDurationMs = words.getOrNull(wordIndex)?.let {
                 (it.endMs - it.startMs).toFloat()
             } ?: visualWordDurationMs
-            val effectiveDurationMs = (visualWordDurationMs + syllableDurationMs * 2f) / 3f
+            val effectiveDurationMs = (liftDurationMs + syllableDurationMs * 2f) / 3f
             val peakMultiplier = (effectiveDurationMs / 2000f).coerceIn(0.3f, 1f)
             val charTranslateYPeak = -normalizedGrowth * (2f * peakMultiplier) * density
 

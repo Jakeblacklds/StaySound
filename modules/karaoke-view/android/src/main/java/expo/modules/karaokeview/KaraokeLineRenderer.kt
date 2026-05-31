@@ -33,6 +33,7 @@ internal data class ActiveHighlightState(
     val progress: Float,
     val sweepX: Float,
     val isGrowable: Boolean,
+    val visualWordDurationMs: Float,
 )
 
 internal interface KaraokeLineRenderCallbacks {
@@ -45,6 +46,7 @@ internal interface KaraokeLineRenderCallbacks {
         paint: Paint,
         revealX: Float,
         rowHeight: Float,
+        fadeWidth: Float = 0f,
     )
     fun drawWordTranslated(
         canvas: Canvas,
@@ -62,6 +64,7 @@ internal interface KaraokeLineRenderCallbacks {
         finalLiftRatio: Float,
         currentTimeMs: Long,
         keepCharacterLift: Boolean,
+        visualWordDurationMs: Float = 0f,
     )
     fun drawGrowableVisualWordWipeHighlight(
         canvas: Canvas,
@@ -84,6 +87,7 @@ internal interface KaraokeLineRenderCallbacks {
         finalLiftRatio: Float,
         useCharacterLift: Boolean,
         currentTimeMs: Long,
+        visualWordDurationMs: Float = 0f,
     )
     fun drawWordPreHighlight(
         canvas: Canvas,
@@ -229,6 +233,17 @@ internal class KaraokeLineRenderer {
         for ((index, word) in line.words.withIndex()) {
             if (isPast) continue
             if (activeHighlightState != null && index in activeHighlightState.activeRange) {
+                // If it's a growable word, calculate fadeWidth to perform a smooth,
+                // complementary fade of the base (dim) text under the highlight sweep.
+                // This completely eliminates the "double letter" artifact without creating
+                // empty gaps between the reveal edge and the dim text (liquid sweep feeling).
+                val fadeWidth = if (activeHighlightState.isGrowable) {
+                    val clampedProgress = activeHighlightState.progress.coerceIn(0f, 1f)
+                    val endSettleT = callbacks.smootherStep(((clampedProgress - 0.82f) / 0.18f).coerceIn(0f, 1f))
+                    config.featherPx * (4f * (1f - endSettleT * 0.88f))
+                } else {
+                    0f
+                }
                 callbacks.drawWordTail(
                     canvas = canvas,
                     line = line,
@@ -236,6 +251,7 @@ internal class KaraokeLineRenderer {
                     paint = config.basePaint,
                     revealX = activeHighlightState.sweepX,
                     rowHeight = config.lineHeight,
+                    fadeWidth = fadeWidth,
                 )
                 continue
             }
@@ -458,6 +474,7 @@ internal class KaraokeLineRenderer {
                 finalLiftRatio = foregroundLiftRatio,
                 currentTimeMs = currentTimeMs,
                 keepCharacterLift = keepCompletedCharacterLift,
+                visualWordDurationMs = resolvedActiveHighlightState?.visualWordDurationMs ?: 0f,
             )
         }
 
@@ -509,6 +526,7 @@ internal class KaraokeLineRenderer {
                 finalLiftRatio = foregroundLiftRatio,
                 useCharacterLift = true,
                 currentTimeMs = currentTimeMs,
+                visualWordDurationMs = resolvedActiveHighlightState.visualWordDurationMs,
             )
         }
         config.highlightPaint.maskFilter = null
@@ -580,6 +598,7 @@ internal class KaraokeLineRenderer {
                 finalLiftRatio = backgroundLiftRatio,
                 currentTimeMs = currentTimeMs,
                 keepCharacterLift = keepCompletedCharacterLift,
+                visualWordDurationMs = resolvedActiveHighlightState?.visualWordDurationMs ?: 0f,
             )
         }
 
@@ -630,6 +649,7 @@ internal class KaraokeLineRenderer {
                 finalLiftRatio = backgroundLiftRatio,
                 useCharacterLift = true,
                 currentTimeMs = currentTimeMs,
+                visualWordDurationMs = resolvedActiveHighlightState.visualWordDurationMs,
             )
         }
     }
@@ -666,6 +686,8 @@ internal class KaraokeLineRenderer {
         val rangeWidth = (rangeWords.last().xOffset + rangeWords.last().width) - rangeWords.first().xOffset
         val sweepX = rangeLeft + rangeWidth.coerceAtLeast(0f) * progress
 
+        val visualWordDurationMs = (combinedEndMs - combinedStartMs).coerceAtLeast(1L).toFloat()
+
         return ActiveHighlightState(
             activeWordIndex = activeWordIndex,
             completedLimit = if (isGrowable) activeRange.first else activeWordIndex,
@@ -673,6 +695,7 @@ internal class KaraokeLineRenderer {
             progress = progress,
             sweepX = sweepX,
             isGrowable = isGrowable,
+            visualWordDurationMs = visualWordDurationMs,
         )
     }
 
@@ -721,6 +744,7 @@ internal class KaraokeLineRenderer {
             progress = holdProgress,
             sweepX = sweepX,
             isGrowable = isGrowable,
+            visualWordDurationMs = visualDurationMs,
         )
     }
 
@@ -735,25 +759,52 @@ internal class KaraokeLineRenderer {
         callbacks: KaraokeLineRenderCallbacks,
     ) {
         if (activeHighlightState == null) return
-        val activeWordIndex = activeHighlightState.activeWordIndex
-        if (activeWordIndex !in words.indices) return
-        if (activeWordIndex >= words.lastIndex) return
 
-        val currentWord = words[activeWordIndex]
-        val nextWord = words[activeWordIndex + 1]
+        // For growable visual words the active range spans multiple words.
+        // The pre-highlight must start from the LAST word in the growable range,
+        // not from activeWordIndex (which may be mid-range). Otherwise the
+        // pre-highlight fires too early and forces an abrupt snap at the boundary.
+        val anchorIndex = if (activeHighlightState.isGrowable) {
+            activeHighlightState.activeRange.last
+        } else {
+            activeHighlightState.activeWordIndex
+        }
+        if (anchorIndex !in words.indices) return
+        if (anchorIndex >= words.lastIndex) return
+
+        val currentWord = words[anchorIndex]
+        val nextWord = words[anchorIndex + 1]
         if (currentTimeMs >= nextWord.startMs) return
-        val nextIsLastWord = activeWordIndex + 1 == words.lastIndex
+        val nextIsLastWord = anchorIndex + 1 == words.lastIndex
         if (LyricsVisualWords.shouldInsertSpacing(currentWord, nextWord) && !nextIsLastWord) return
 
-        val currentDurationMs = (currentWord.endMs - currentWord.startMs).coerceAtLeast(1L).toFloat()
-        val currentWidth = currentWord.width.coerceAtLeast(0.1f)
+        val currentDurationMs = if (activeHighlightState.isGrowable) {
+            // Use the combined duration of the entire growable visual word group
+            // so the pre-highlight delay is proportional to the whole note, not just
+            // the last syllable fragment.
+            val rangeWords = words.slice(activeHighlightState.activeRange)
+            (rangeWords.last().endMs - rangeWords.first().startMs).coerceAtLeast(1L).toFloat()
+        } else {
+            (currentWord.endMs - currentWord.startMs).coerceAtLeast(1L).toFloat()
+        }
+        val currentWidth = if (activeHighlightState.isGrowable) {
+            val rangeWords = words.slice(activeHighlightState.activeRange)
+            (rangeWords.last().xOffset + rangeWords.last().width - rangeWords.first().xOffset).coerceAtLeast(0.1f)
+        } else {
+            currentWord.width.coerceAtLeast(0.1f)
+        }
         val gradientDistancePx = 0.375f * paint.textSize
         val gradientDurationMs = (gradientDistancePx / currentWidth) * currentDurationMs
         if (gradientDurationMs <= 0f) return
 
         val clampedGradientDurationMs = gradientDurationMs.coerceIn(1f, currentDurationMs)
         val preHighlightDelayMs = currentDurationMs - clampedGradientDurationMs
-        val elapsedMs = (currentTimeMs - currentWord.startMs).toFloat()
+        val startMs = if (activeHighlightState.isGrowable) {
+            words.slice(activeHighlightState.activeRange).first().startMs
+        } else {
+            currentWord.startMs
+        }
+        val elapsedMs = (currentTimeMs - startMs).toFloat()
         if (elapsedMs < preHighlightDelayMs || elapsedMs > currentDurationMs) return
 
         val preProgress = ((elapsedMs - preHighlightDelayMs) / clampedGradientDurationMs).coerceIn(0f, 1f)
