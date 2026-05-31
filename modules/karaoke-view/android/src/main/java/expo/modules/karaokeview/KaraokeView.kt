@@ -742,19 +742,24 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val b = Color.blue(paint.color)
         val a = paint.alpha
         val originalShader = paint.shader
-        paint.shader = LinearGradient(
-            sweepX - fadeWidth, 0f,
-            sweepX + fadeWidth * 0.4f, 0f,
-            intArrayOf(
-                Color.argb(a, r, g, b),
-                Color.argb(a, r, g, b),
-                Color.argb((a * 0.65f).toInt(), r, g, b),
-                Color.argb((a * 0.2f).toInt(), r, g, b),
-                Color.argb(0, r, g, b),
-            ),
-            floatArrayOf(0f, 0.40f, 0.65f, 0.85f, 1f),
-            Shader.TileMode.CLAMP,
-        )
+        val agslShader = KaraokeWipeShader.getWipeColorShader(sweepX, fadeWidth, paint.color, a)
+        if (agslShader != null) {
+            paint.shader = agslShader
+        } else {
+            paint.shader = LinearGradient(
+                sweepX - fadeWidth, 0f,
+                sweepX + fadeWidth * 0.4f, 0f,
+                intArrayOf(
+                    Color.argb(a, r, g, b),
+                    Color.argb(a, r, g, b),
+                    Color.argb((a * 0.65f).toInt(), r, g, b),
+                    Color.argb((a * 0.2f).toInt(), r, g, b),
+                    Color.argb(0, r, g, b),
+                ),
+                floatArrayOf(0f, 0.40f, 0.65f, 0.85f, 1f),
+                Shader.TileMode.CLAMP,
+            )
+        }
 
         if (useCharacterLift) {
             drawWordCharactersWithLift(
@@ -819,7 +824,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         canvas.saveLayer(wordX - FEATHER_PX, wordTop - rowHeight, wordRight, wordBottom + rowHeight, null)
         drawWordTranslated(canvas, line, word, paint, preLiftY)
 
-        val preMaskShader = LinearGradient(
+        val agslPreGlow = KaraokeWipeShader.getPreGlowShader(bandCenter, preBandHalf)
+        val preMaskShader: Shader = agslPreGlow ?: LinearGradient(
             bandCenter - preBandHalf,
             0f,
             bandCenter + preBandHalf,
@@ -969,7 +975,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         // revealed when the word completes and transitions to the full-glow post-wipe state.
         val endSettleT = smootherStep(((clampedProgress - 0.82f) / 0.18f).coerceIn(0f, 1f))
         val fadeWidth = FEATHER_PX * (4f * (1f - endSettleT * 0.88f))
-        val maskShader = LinearGradient(
+        val agslMask = KaraokeWipeShader.getWipeMaskShader(sweepX, fadeWidth)
+        val maskShader: Shader = agslMask ?: LinearGradient(
             sweepX - fadeWidth, 0f,
             sweepX + fadeWidth * 0.4f, 0f,
             intArrayOf(
