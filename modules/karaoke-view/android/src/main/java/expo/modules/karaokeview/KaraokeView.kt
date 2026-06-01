@@ -888,19 +888,23 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         if (keepCharacterLift) {
             val wordDurationMs = (word.endMs - word.startMs).coerceAtLeast(1L).toFloat()
             val completedAgeMs = (currentTimeMs - word.endMs).coerceAtLeast(0L).toFloat()
-            // Compute lift progress from visual word timing when available.
-            // This ensures the lift continues rising smoothly across syllables
-            // instead of jumping to release phase when each syllable ends.
-            val liftProgress = if (visualWordStartMs > 0L && visualWordDurationMs > 0f) {
+            // Only use visual word timing for words that are actually PART of the
+            // current visual word (i.e. earlier syllables of the same spoken word).
+            // Words from other visual word groups use their own timing for release.
+            val visualWordEndMs = visualWordStartMs + visualWordDurationMs.toLong()
+            val belongsToActiveVisualWord = visualWordStartMs > 0L && visualWordDurationMs > 0f &&
+                word.startMs >= visualWordStartMs && word.endMs <= visualWordEndMs
+            val liftProgress = if (belongsToActiveVisualWord) {
+                // Still within the active visual word → continuous rise
                 ((currentTimeMs - visualWordStartMs).toFloat() / visualWordDurationMs).coerceAtLeast(0f)
             } else {
-                val progressDurationMs = if (visualWordDurationMs > 0f) visualWordDurationMs else wordDurationMs
-                1f + (completedAgeMs / progressDurationMs)
+                // Different visual word → standard release from completion
+                1f + (completedAgeMs / wordDurationMs)
             }
             // For sustained words that just completed, keep glow enabled so the
             // animT release curve fades it naturally (instead of cutting to 0 instantly).
             val recentlyCompleted = completedAgeMs < 600f
-            val isSustained = visualWordDurationMs >= 850f
+            val isSustained = belongsToActiveVisualWord && visualWordDurationMs >= 850f
             drawWordCharactersWithLift(
                 canvas = canvas,
                 line = line,
@@ -910,7 +914,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
                 enableGlow = recentlyCompleted && isSustained,
-                overrideDurationMs = visualWordDurationMs,
+                overrideDurationMs = if (belongsToActiveVisualWord) visualWordDurationMs else 0f,
             )
             return
         }
