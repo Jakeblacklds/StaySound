@@ -715,12 +715,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val wordX = marginLeft + word.xOffset
         val clampedProgress = progress.coerceIn(0f, 1f)
         val postEndSettle = smootherStep(((progress - 1f) / 0.35f).coerceIn(0f, 1f))
-        // Warm-in: start sweepX slightly before the word edge so the first letters
-        // appear through the feathered gradient (matching the pre-highlight that was
-        // just showing). Over the first 15% of progress, ease from -FEATHER_PX to 0.
-        val warmInT = smootherStep((clampedProgress / 0.15f).coerceIn(0f, 1f))
-        val warmInOffset = FEATHER_PX * 1.5f * (1f - warmInT)
-        val sweepX = wordX - warmInOffset + word.width * clampedProgress + FEATHER_PX * 2f * postEndSettle
+        val sweepX = wordX + word.width * clampedProgress + FEATHER_PX * 2f * postEndSettle
         val shouldRenderWipeShader = KaraokeHighlightStateMachine.shouldRenderWipeShader(progress)
 
         // Compute lift progress from visual word timing (not syllable progress).
