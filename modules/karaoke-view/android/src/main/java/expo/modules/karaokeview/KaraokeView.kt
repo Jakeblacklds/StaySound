@@ -67,6 +67,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             currentTimeMs: Long,
             keepCharacterLift: Boolean,
             visualWordDurationMs: Float,
+            visualWordStartMs: Long,
         ) {
             this@KaraokeView.drawCompletedWordWithLift(
                 canvas = canvas,
@@ -78,6 +79,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 currentTimeMs = currentTimeMs,
                 keepCharacterLift = keepCharacterLift,
                 visualWordDurationMs = visualWordDurationMs,
+                visualWordStartMs = visualWordStartMs,
             )
         }
 
@@ -116,6 +118,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             useCharacterLift: Boolean,
             currentTimeMs: Long,
             visualWordDurationMs: Float,
+            visualWordStartMs: Long,
         ) {
             this@KaraokeView.drawWordWipeHighlight(
                 canvas = canvas,
@@ -128,6 +131,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 useCharacterLift = useCharacterLift,
                 currentTimeMs = currentTimeMs,
                 visualWordDurationMs = visualWordDurationMs,
+                visualWordStartMs = visualWordStartMs,
             )
         }
 
@@ -706,12 +710,27 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         useCharacterLift: Boolean,
         currentTimeMs: Long,
         visualWordDurationMs: Float = 0f,
+        visualWordStartMs: Long = 0L,
     ) {
         val wordX = marginLeft + word.xOffset
         val clampedProgress = progress.coerceIn(0f, 1f)
         val postEndSettle = smootherStep(((progress - 1f) / 0.35f).coerceIn(0f, 1f))
-        val sweepX = wordX + word.width * clampedProgress + FEATHER_PX * 2f * postEndSettle
+        // Warm-in: start sweepX slightly before the word edge so the first letters
+        // appear through the feathered gradient (matching the pre-highlight that was
+        // just showing). Over the first 15% of progress, ease from -FEATHER_PX to 0.
+        val warmInT = smootherStep((clampedProgress / 0.15f).coerceIn(0f, 1f))
+        val warmInOffset = FEATHER_PX * 1.5f * (1f - warmInT)
+        val sweepX = wordX - warmInOffset + word.width * clampedProgress + FEATHER_PX * 2f * postEndSettle
         val shouldRenderWipeShader = KaraokeHighlightStateMachine.shouldRenderWipeShader(progress)
+
+        // Compute lift progress from visual word timing (not syllable progress).
+        // The syllable progress drives the sweep position, but the lift should
+        // animate over the full visual word duration to avoid jumps between syllables.
+        val liftProgress = if (visualWordStartMs > 0L && visualWordDurationMs > 0f) {
+            ((currentTimeMs - visualWordStartMs).toFloat() / visualWordDurationMs).coerceAtLeast(0f)
+        } else {
+            progress.coerceAtLeast(0f)
+        }
 
         if (!shouldRenderWipeShader) {
             if (useCharacterLift) {
@@ -719,7 +738,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                     canvas = canvas,
                     line = line,
                     word = word,
-                    progress = progress.coerceAtLeast(0f),
+                    progress = liftProgress,
                     paint = paint,
                     rowHeight = rowHeight,
                     finalLiftRatio = finalLiftRatio,
@@ -766,7 +785,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 canvas = canvas,
                 line = line,
                 word = word,
-                progress = progress.coerceAtLeast(0f),
+                progress = liftProgress,
                 paint = paint,
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
@@ -862,22 +881,35 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         currentTimeMs: Long,
         keepCharacterLift: Boolean,
         visualWordDurationMs: Float = 0f,
+        visualWordStartMs: Long = 0L,
     ) {
         // Keep completed words in lifted character style while this line stays active
         // (including silent gap until next estrofa starts).
         if (keepCharacterLift) {
             val wordDurationMs = (word.endMs - word.startMs).coerceAtLeast(1L).toFloat()
             val completedAgeMs = (currentTimeMs - word.endMs).coerceAtLeast(0L).toFloat()
-            val keepProgress = 1f + (completedAgeMs / wordDurationMs)
+            // Compute lift progress from visual word timing when available.
+            // This ensures the lift continues rising smoothly across syllables
+            // instead of jumping to release phase when each syllable ends.
+            val liftProgress = if (visualWordStartMs > 0L && visualWordDurationMs > 0f) {
+                ((currentTimeMs - visualWordStartMs).toFloat() / visualWordDurationMs).coerceAtLeast(0f)
+            } else {
+                val progressDurationMs = if (visualWordDurationMs > 0f) visualWordDurationMs else wordDurationMs
+                1f + (completedAgeMs / progressDurationMs)
+            }
+            // For sustained words that just completed, keep glow enabled so the
+            // animT release curve fades it naturally (instead of cutting to 0 instantly).
+            val recentlyCompleted = completedAgeMs < 600f
+            val isSustained = visualWordDurationMs >= 850f
             drawWordCharactersWithLift(
                 canvas = canvas,
                 line = line,
                 word = word,
-                progress = keepProgress,
+                progress = liftProgress,
                 paint = paint,
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
-                enableGlow = false,
+                enableGlow = recentlyCompleted && isSustained,
                 overrideDurationMs = visualWordDurationMs,
             )
             return

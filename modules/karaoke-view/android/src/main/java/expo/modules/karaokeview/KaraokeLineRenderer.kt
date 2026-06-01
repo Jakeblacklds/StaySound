@@ -34,6 +34,7 @@ internal data class ActiveHighlightState(
     val sweepX: Float,
     val isGrowable: Boolean,
     val visualWordDurationMs: Float,
+    val visualWordStartMs: Long,
 )
 
 internal interface KaraokeLineRenderCallbacks {
@@ -65,6 +66,7 @@ internal interface KaraokeLineRenderCallbacks {
         currentTimeMs: Long,
         keepCharacterLift: Boolean,
         visualWordDurationMs: Float = 0f,
+        visualWordStartMs: Long = 0L,
     )
     fun drawGrowableVisualWordWipeHighlight(
         canvas: Canvas,
@@ -88,6 +90,7 @@ internal interface KaraokeLineRenderCallbacks {
         useCharacterLift: Boolean,
         currentTimeMs: Long,
         visualWordDurationMs: Float = 0f,
+        visualWordStartMs: Long = 0L,
     )
     fun drawWordPreHighlight(
         canvas: Canvas,
@@ -475,6 +478,7 @@ internal class KaraokeLineRenderer {
                 currentTimeMs = currentTimeMs,
                 keepCharacterLift = keepCompletedCharacterLift,
                 visualWordDurationMs = resolvedActiveHighlightState?.visualWordDurationMs ?: 0f,
+                visualWordStartMs = resolvedActiveHighlightState?.visualWordStartMs ?: 0L,
             )
         }
 
@@ -527,6 +531,7 @@ internal class KaraokeLineRenderer {
                 useCharacterLift = true,
                 currentTimeMs = currentTimeMs,
                 visualWordDurationMs = resolvedActiveHighlightState.visualWordDurationMs,
+                visualWordStartMs = resolvedActiveHighlightState.visualWordStartMs,
             )
         }
         config.highlightPaint.maskFilter = null
@@ -599,6 +604,7 @@ internal class KaraokeLineRenderer {
                 currentTimeMs = currentTimeMs,
                 keepCharacterLift = keepCompletedCharacterLift,
                 visualWordDurationMs = resolvedActiveHighlightState?.visualWordDurationMs ?: 0f,
+                visualWordStartMs = resolvedActiveHighlightState?.visualWordStartMs ?: 0L,
             )
         }
 
@@ -650,6 +656,7 @@ internal class KaraokeLineRenderer {
                 useCharacterLift = true,
                 currentTimeMs = currentTimeMs,
                 visualWordDurationMs = resolvedActiveHighlightState.visualWordDurationMs,
+                visualWordStartMs = resolvedActiveHighlightState.visualWordStartMs,
             )
         }
     }
@@ -696,6 +703,7 @@ internal class KaraokeLineRenderer {
             sweepX = sweepX,
             isGrowable = isGrowable,
             visualWordDurationMs = visualWordDurationMs,
+            visualWordStartMs = combinedStartMs,
         )
     }
 
@@ -745,6 +753,7 @@ internal class KaraokeLineRenderer {
             sweepX = sweepX,
             isGrowable = isGrowable,
             visualWordDurationMs = visualDurationMs,
+            visualWordStartMs = combinedStartMs,
         )
     }
 
