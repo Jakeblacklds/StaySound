@@ -1,6 +1,6 @@
 import { Track } from '@/src/types/audio';
 import React, { useEffect } from 'react';
-import { Pressable, View } from 'react-native';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -242,6 +242,45 @@ const TrackInfoSection = React.memo(function TrackInfoSection({
     );
 });
 
+const PlayPauseIcon = React.memo(function PlayPauseIcon({
+    isPlaying,
+    color,
+    size,
+}: {
+    isPlaying: boolean;
+    color: string;
+    size: number;
+}) {
+    const progress = useSharedValue(isPlaying ? 1 : 0);
+
+    useEffect(() => {
+        progress.value = withTiming(isPlaying ? 1 : 0, {
+            duration: 220,
+            easing: Easing.inOut(Easing.cubic),
+        });
+    }, [isPlaying, progress]);
+
+    const playStyle = useAnimatedStyle(() => ({
+        opacity: 1 - progress.value,
+        transform: [{ scale: interpolate(progress.value, [0, 1], [1, 0.7]) }],
+    }));
+    const pauseStyle = useAnimatedStyle(() => ({
+        opacity: progress.value,
+        transform: [{ scale: interpolate(progress.value, [0, 1], [0.7, 1]) }],
+    }));
+
+    return (
+        <View style={styles.flexCenter}>
+            <Animated.View style={[StyleSheet.absoluteFill, styles.flexCenter, playStyle]}>
+                <MaterialCommunityIcons name="play" size={size} color={color} />
+            </Animated.View>
+            <Animated.View style={[StyleSheet.absoluteFill, styles.flexCenter, pauseStyle]}>
+                <MaterialCommunityIcons name="pause" size={size} color={color} />
+            </Animated.View>
+        </View>
+    );
+});
+
 type ControlsSectionProps = {
     isPlaying: boolean;
     shuffleEnabled: boolean;
@@ -304,6 +343,8 @@ const ControlsSection = React.memo(function ControlsSection({
                 kind="secondary"
                 style={styles.secondaryBtnImmersive}
                 onPress={onToggleShuffle}
+                active={shuffleEnabled}
+                activeColor={accentColor}
                 accessibilityLabel={shuffleEnabled ? 'Desactivar aleatorio' : 'Activar aleatorio'}
                 accessibilityState={{ selected: shuffleEnabled }}
             >
@@ -346,13 +387,7 @@ const ControlsSection = React.memo(function ControlsSection({
                     accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
                     accessibilityState={{ selected: isPlaying }}
                 >
-                    <View style={styles.flexCenter}>
-                        <MaterialCommunityIcons
-                            name={isPlaying ? 'pause' : 'play'}
-                            size={44}
-                            color={onPrimaryColor}
-                        />
-                    </View>
+                    <PlayPauseIcon isPlaying={isPlaying} color={onPrimaryColor} size={44} />
                 </AnimatedPlayerButton>
             </View>
 
@@ -375,6 +410,8 @@ const ControlsSection = React.memo(function ControlsSection({
                 kind="secondary"
                 style={styles.secondaryBtnImmersive}
                 onPress={onCycleRepeatMode}
+                active={repeatMode !== 'off'}
+                activeColor={accentColor}
                 accessibilityLabel={
                     repeatMode === 'off'
                         ? 'Activar repetición'
@@ -417,6 +454,8 @@ const BottomActions = React.memo(function BottomActions({
                 kind="secondary"
                 style={styles.bottomBtnImmersive}
                 onPress={onToggleLyrics}
+                active={showLyrics}
+                activeColor={accentColor}
                 accessibilityRole="button"
                 accessibilityLabel={showLyrics ? 'Ocultar letras' : 'Mostrar letras'}
                 accessibilityState={{ selected: showLyrics }}

@@ -38,7 +38,15 @@ export function ThemeBackground({ colors, animColors, artwork, isVisible, expans
     }));
 
     return (
-        <Animated.View style={[StyleSheet.absoluteFill, bgStyle]} pointerEvents="none">
+        <Animated.View
+            style={[StyleSheet.absoluteFill, bgStyle]}
+            pointerEvents="none"
+            // Flatten this whole (mostly static) subtree — blurred artwork + overlays +
+            // fog — into a single GPU texture. Otherwise each full-screen translucent
+            // layer adds per-frame overdraw behind the karaoke views, starving the
+            // lyrics renderer's frame budget and making the sweep stutter.
+            renderToHardwareTextureAndroid
+        >
             {artwork ? (
                 <View style={StyleSheet.absoluteFill}>
                     <Animated.View style={[StyleSheet.absoluteFill, artworkDriftStyle]}>

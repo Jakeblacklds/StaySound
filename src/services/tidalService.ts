@@ -31,68 +31,46 @@ import { getDabBaseUrl, isDabBaseUrl } from "./dabAuthService";
 type MirrorProvider = "tidal" | "dab";
 
 export const TIDAL_API_BASES = [
-  "https://hifi-api-bffw.onrender.com",
-  "https://ohio-1.monochrome.tf",
-  "https://frankfurt-1.monochrome.tf",
-  "https://monochrome-api.samidy.com",
+  "https://hifi.geeked.wtf",
   "https://eu-central.monochrome.tf",
+  "https://tidal.kinoplus.online",
+  "https://api.monochrome.tf",
   "https://us-west.monochrome.tf",
+  "https://monochrome-api.samidy.com",
+  "https://wolf.qqdl.site",
   "https://katze.qqdl.site",
   "https://hund.qqdl.site",
-  "https://dabmusic.xyz/api",
-  "https://beta.dabmusic.xyz",
-];
-const TIDAL_API_LEGACY_BASES = [
-  "https://hifi.geeked.wtf",
-  "https://triton.squid.wtf",
   "https://maus.qqdl.site",
   "https://vogel.qqdl.site",
-  "https://wolf.qqdl.site",
-  "https://tidal.kinoplus.online",
-  "https://arran.monochrome.tf",
-  "https://api.monochrome.tf",
-  "https://hifi-one.spotisaver.net",
-  "https://hifi-two.spotisaver.net",
 ];
+const TIDAL_API_LEGACY_BASES: string[] = [];
 const STATIC_GENERIC_TIDAL_API_BASES = TIDAL_API_BASES.filter(
   (base) => !base.includes("dabmusic.xyz"),
 );
 const STATIC_GENERIC_STREAMING_BASES = [
-  "https://hifi-api-bffw.onrender.com",
-  "https://ohio-1.monochrome.tf",
-  "https://frankfurt-1.monochrome.tf",
-  "https://monochrome-api.samidy.com",
-  "https://eu-central.monochrome.tf",
-  "https://us-west.monochrome.tf",
+  "https://hifi.geeked.wtf",
+  "https://vogel.qqdl.site",
+  "https://maus.qqdl.site",
   "https://katze.qqdl.site",
   "https://hund.qqdl.site",
+  "https://wolf.qqdl.site",
 ];
-const TIDAL_UPTIME_CATALOG_URLS = [
-  "https://tidal-uptime.geeked.wtf",
-  "https://monochrome-khaki.vercel.app/instances",
-];
+const TIDAL_UPTIME_CATALOG_URLS: string[] = [];
 
 export const TIDAL_MIRROR_NAMES: Record<string, string> = {
-  "https://hifi-api-bffw.onrender.com": "HiFi API BFFW (Activo)",
-  "https://ohio-1.monochrome.tf": "Monochrome Ohio (Activo)",
-  "https://frankfurt-1.monochrome.tf": "Monochrome Frankfurt (Activo)",
-  "https://eu-central.monochrome.tf": "Monochrome EU Central (Activo)",
-  "https://us-west.monochrome.tf": "Monochrome US West (Activo)",
-  "https://katze.qqdl.site": "QQDL Katze (Activo)",
-  "https://hund.qqdl.site": "QQDL Hund (Activo)",
   "https://dabmusic.xyz/api": "DAB Oficial",
   "https://beta.dabmusic.xyz": "DAB Beta (Respaldo)",
-  "https://hifi.geeked.wtf": "HiFi Geeked (Legacy)",
-  "https://triton.squid.wtf": "Triton (Legacy)",
-  "https://maus.qqdl.site": "QQDL Maus (Legacy)",
-  "https://vogel.qqdl.site": "QQDL Vogel (Legacy)",
-  "https://wolf.qqdl.site": "QQDL Wolf (Legacy)",
-  "https://tidal.kinoplus.online": "Kinoplus (Legacy)",
-  "https://arran.monochrome.tf": "Monochrome Arran (Legacy)",
-  "https://api.monochrome.tf": "Monochrome API (Legacy)",
-  "https://monochrome-api.samidy.com": "Monochrome Samidy (Legacy)",
-  "https://hifi-one.spotisaver.net": "Spotisaver One (Legacy)",
-  "https://hifi-two.spotisaver.net": "Spotisaver Two (Legacy)",
+  "https://hifi.geeked.wtf": "HiFi Geeked",
+  "https://eu-central.monochrome.tf": "Monochrome EU Central",
+  "https://tidal.kinoplus.online": "Kinoplus",
+  "https://api.monochrome.tf": "Monochrome API",
+  "https://us-west.monochrome.tf": "Monochrome US West",
+  "https://monochrome-api.samidy.com": "Monochrome Samidy",
+  "https://wolf.qqdl.site": "QQDL Wolf",
+  "https://katze.qqdl.site": "QQDL Katze",
+  "https://hund.qqdl.site": "QQDL Hund",
+  "https://maus.qqdl.site": "QQDL Maus",
+  "https://vogel.qqdl.site": "QQDL Vogel",
   auto: "Seleccion Automatica (Recomendado)",
 };
 let currentBaseIndex = 0;
@@ -861,6 +839,11 @@ function isProxyTidalMirror(base: string): boolean {
     base.includes("dabmusic.xyz") ||
     base.includes("dab.yeet.su") ||
     base.includes("dab.monochrome.tf") ||
+    base.includes("geeked.wtf") ||
+    base.includes("kinoplus.online") ||
+    base.includes("monochrome.tf") ||
+    base.includes("monochrome-api.samidy.com") ||
+    base.includes("qqdl.site") ||
     base.includes("hifi.monochrome.tf") ||
     base.includes("arran.monochrome.tf") ||
     base.includes("music.binimum.org")

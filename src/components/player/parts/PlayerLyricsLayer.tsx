@@ -8,19 +8,21 @@ import { withAlpha } from '@/src/utils/colorContrast';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { Image } from 'expo-image';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { KaraokeView } from 'karaoke-view';
-import React, { useCallback } from 'react';
+import { KaraokeView, KaraokeSpectrumView } from 'karaoke-view';
+import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, View, processColor } from 'react-native';
 import { Text } from 'react-native-paper';
-import Animated, { Easing, Extrapolation, interpolate, runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, Extrapolation, interpolate, runOnJS, useAnimatedReaction, useAnimatedStyle, useSharedValue, withSpring, withTiming } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LYRICS_MOTION_OPTIONS } from '../lyricsMotionProfiles';
 import { playerStyles as styles } from '../playerStyles';
 import { ThemeBackground } from '../backgrounds/ThemeBackground';
+import { ProgressSlider } from '../ProgressSlider';
 import { LyricsSkeleton } from '../../ui';
 
 const LYRICS_KEEP_AWAKE_TAG = 'StaySoundLyricsView';
+const KARAOKE_SPECTRUM_RENDER_DELAY_MS = 350;
 
 export type PhraseLyricLine = {
   id: string;
@@ -61,6 +63,9 @@ type AnimatedPressableProps = {
   style?: any;
   pressedScale?: number;
   children: React.ReactNode;
+  /** When true, paints an animated accent selection pill behind the content. */
+  active?: boolean;
+  activeColor?: string;
   accessibilityRole?: string;
   accessibilityLabel?: string;
   accessibilityState?: object;
@@ -119,15 +124,31 @@ function AnimatedPressable({
   style,
   pressedScale = 0.93,
   children,
+  active = false,
+  activeColor,
   accessibilityRole,
   accessibilityLabel,
   accessibilityState,
   accessibilityHint,
 }: AnimatedPressableProps) {
   const pressScale = useSharedValue(1);
+  const activeProgress = useSharedValue(active ? 1 : 0);
+
+  useEffect(() => {
+    activeProgress.value = withSpring(active ? 1 : 0, {
+      damping: 18,
+      stiffness: 260,
+      mass: 0.6,
+    });
+  }, [active, activeProgress]);
 
   const pressStyle = useAnimatedStyle(() => ({
     transform: [{ scale: pressScale.value }],
+  }));
+
+  const pillStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(activeProgress.value, [0, 1], [0, 0.2]),
+    transform: [{ scale: interpolate(activeProgress.value, [0, 1], [0.5, 1]) }],
   }));
 
   const handlePressIn = useCallback(() => {
@@ -150,11 +171,99 @@ function AnimatedPressable({
         accessibilityState={accessibilityState as any}
         accessibilityHint={accessibilityHint}
       >
+        {activeColor ? (
+          <Animated.View
+            pointerEvents="none"
+            style={[StyleSheet.absoluteFill, { borderRadius: 999, backgroundColor: activeColor }, pillStyle]}
+          />
+        ) : null}
         {children}
       </Pressable>
     </Animated.View>
   );
 }
+
+/** Smooth crossfade + scale between play and pause glyphs. */
+const AnimatedPlayPauseIcon = React.memo(function AnimatedPlayPauseIcon({
+  isPlaying,
+  color,
+  size,
+}: {
+  isPlaying: boolean;
+  color: string;
+  size: number;
+}) {
+  const progress = useSharedValue(isPlaying ? 1 : 0);
+
+  useEffect(() => {
+    progress.value = withTiming(isPlaying ? 1 : 0, {
+      duration: 220,
+      easing: Easing.inOut(Easing.cubic),
+    });
+  }, [isPlaying, progress]);
+
+  const playStyle = useAnimatedStyle(() => ({
+    opacity: 1 - progress.value,
+    transform: [{ scale: interpolate(progress.value, [0, 1], [1, 0.7]) }],
+  }));
+  const pauseStyle = useAnimatedStyle(() => ({
+    opacity: progress.value,
+    transform: [{ scale: interpolate(progress.value, [0, 1], [0.7, 1]) }],
+  }));
+
+  return (
+    <View style={styles.lyricsPlayIconStack}>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.lyricsPlayIconCenter, playStyle]}>
+        <MaterialCommunityIcons name="play" size={size} color={color} />
+      </Animated.View>
+      <Animated.View style={[StyleSheet.absoluteFill, styles.lyricsPlayIconCenter, pauseStyle]}>
+        <MaterialCommunityIcons name="pause" size={size} color={color} />
+      </Animated.View>
+    </View>
+  );
+});
+
+/** Primary play control with a soft accent glow that reacts to playback state. */
+const LyricsPlayButton = React.memo(function LyricsPlayButton({
+  isPlaying,
+  accent,
+  onPrimaryColor,
+  onPress,
+}: {
+  isPlaying: boolean;
+  accent: string;
+  onPrimaryColor?: string;
+  onPress: () => void;
+}) {
+  const glow = useSharedValue(isPlaying ? 1 : 0);
+
+  useEffect(() => {
+    glow.value = withTiming(isPlaying ? 1 : 0, {
+      duration: 380,
+      easing: Easing.out(Easing.cubic),
+    });
+  }, [isPlaying, glow]);
+
+  const glowStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(glow.value, [0, 1], [0.12, 0.42]),
+    transform: [{ scale: interpolate(glow.value, [0, 1], [0.78, 1]) }],
+  }));
+
+  return (
+    <View style={styles.lyricsPlayWrap}>
+      <Animated.View pointerEvents="none" style={[styles.lyricsPlayGlow, { backgroundColor: accent }, glowStyle]} />
+      <AnimatedPressable
+        onPress={onPress}
+        style={[styles.lyricsPlayButton, { backgroundColor: accent }]}
+        pressedScale={0.9}
+        accessibilityRole="button"
+        accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
+      >
+        <AnimatedPlayPauseIcon isPlaying={isPlaying} color={onPrimaryColor ?? '#000000'} size={30} />
+      </AnimatedPressable>
+    </View>
+  );
+});
 
 export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
   visible,
@@ -220,7 +329,6 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
     protectedGlowColor,
     protectedInactiveColor,
     secondaryLyricsTextColor,
-    modeTabActiveBackground,
     motionRailBackground,
     motionRailBorder,
     inactiveMotionIconColor,
@@ -307,7 +415,8 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
   const topMeta = [currentTrack?.album, trackTechLabel, qualityBadge?.label].filter(Boolean).join(' / ');
   const repeatIconName = repeatMode === 'one' ? 'repeat-once' : repeatMode === 'all' ? 'repeat' : 'repeat-off';
   const playerBottom = Math.max(insets.bottom + 14, 22);
-  const lyricControlsBottom = playerBottom + 76;
+  const lyricProgressBottom = playerBottom + 88;
+  const lyricControlsBottom = lyricProgressBottom + 48;
   const topHeaderOffset = Math.max(insets.top + 8, 34);
 
   return (
@@ -332,6 +441,15 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
               backgroundColor: withAlpha('#000000', colors.isDark ? 0.26 : 0.08),
             },
           ]}
+        />
+
+        <KaraokeSpectrumView
+          pointerEvents="none"
+          style={StyleSheet.absoluteFill}
+          enabled={visible && expanded}
+          isPlaying={isPlaying}
+          renderDelayMs={KARAOKE_SPECTRUM_RENDER_DELAY_MS}
+          glowColor={processColor(protectedGlowColor)}
         />
 
         <View style={[styles.fullScreenLyricsHeader, { top: topHeaderOffset }]}>
@@ -425,8 +543,8 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
             )}
             <View style={[styles.lyricsIslandsLayer, { bottom: lyricControlsBottom }]}>
               <View style={[styles.lyricsTimingIsland, { backgroundColor: motionRailBackground, borderColor: motionRailBorder }]}>
-                <AnimatedPressable style={styles.lyricsTimingAction} onPress={() => applyLyricsOffsetStep(-50)}>
-                  <Text style={[styles.lyricsTimingActionText, { color: secondaryLyricsTextColor }]}>-50</Text>
+                <AnimatedPressable style={styles.lyricsTimingAction} onPress={() => applyLyricsOffsetStep(-50)} accessibilityRole="button" accessibilityLabel="Retrasar letras 50 milisegundos">
+                  <Text style={[styles.lyricsTimingActionText, { color: secondaryLyricsTextColor }]}>−50</Text>
                 </AnimatedPressable>
                 <AnimatedPressable
                   style={styles.lyricsTimingReset}
@@ -437,7 +555,7 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                     {lyricsTimingOffsetMs > 0 ? `+${lyricsTimingOffsetMs}` : lyricsTimingOffsetMs}ms
                   </Text>
                 </AnimatedPressable>
-                <AnimatedPressable style={styles.lyricsTimingAction} onPress={() => applyLyricsOffsetStep(50)}>
+                <AnimatedPressable style={styles.lyricsTimingAction} onPress={() => applyLyricsOffsetStep(50)} accessibilityRole="button" accessibilityLabel="Adelantar letras 50 milisegundos">
                   <Text style={[styles.lyricsTimingActionText, { color: secondaryLyricsTextColor }]}>+50</Text>
                 </AnimatedPressable>
               </View>
@@ -472,13 +590,12 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                       <AnimatedPressable
                         key={option.id}
                         onPress={() => setSelectedMotionOptionId(option.id)}
-                        style={[
-                          styles.lyricsThemeOptionButton,
-                          selected && {
-                            backgroundColor: modeTabActiveBackground,
-                            borderColor: withAlpha(protectedAccentColor, 0.45),
-                          },
-                        ]}
+                        style={styles.lyricsThemeOptionButton}
+                        active={selected}
+                        activeColor={protectedAccentColor}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Estilo de animación ${option.id}`}
+                        accessibilityState={{ selected }}
                       >
                         <MaterialCommunityIcons
                           name={option.icon as any}
@@ -493,6 +610,11 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                 <AnimatedPressable
                   onPress={() => setLyricsControlsExpanded(prev => !prev)}
                   style={[styles.lyricsThemeToggleCircle, { backgroundColor: motionRailBackground, borderColor: motionRailBorder }]}
+                  active={lyricsControlsExpanded}
+                  activeColor={protectedAccentColor}
+                  accessibilityRole="button"
+                  accessibilityLabel="Estilos de animación de letras"
+                  accessibilityState={{ expanded: lyricsControlsExpanded }}
                 >
                   <MaterialCommunityIcons
                     name={(activeMotionOption?.icon ?? LYRICS_MOTION_OPTIONS[0]?.icon) as any}
@@ -511,11 +633,31 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
               </View>
             ) : null}
 
-            <View style={[styles.lyricsBottomPlayer, { bottom: playerBottom }]}>
+            {currentTrack?.duration ? (
+              <View style={[styles.lyricsProgressTrackWrap, { bottom: lyricProgressBottom }]}>
+                <ProgressSlider
+                  duration={currentTrack.duration}
+                  onSeek={seek}
+                  showTime={false}
+                  activeColor={protectedAccentColor}
+                  inactiveColor={withAlpha(secondaryLyricsTextColor, 0.22)}
+                  textColor={secondaryLyricsTextColor}
+                />
+              </View>
+            ) : null}
+
+            <View
+              style={[
+                styles.lyricsBottomPlayer,
+                { bottom: playerBottom, backgroundColor: motionRailBackground, borderColor: motionRailBorder },
+              ]}
+            >
               <AnimatedPressable
                 onPress={onToggleShuffle}
                 style={styles.lyricsTransportButton}
                 pressedScale={0.9}
+                active={shuffleEnabled}
+                activeColor={protectedAccentColor}
                 accessibilityRole="button"
                 accessibilityLabel="Aleatorio"
                 accessibilityState={{ selected: shuffleEnabled }}
@@ -525,15 +667,12 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
               <AnimatedPressable onPress={onPrevious} style={styles.lyricsTransportButton} pressedScale={0.88} accessibilityRole="button" accessibilityLabel="Anterior">
                 <MaterialCommunityIcons name="skip-previous" size={30} color={lyricsTextColor} />
               </AnimatedPressable>
-              <AnimatedPressable
+              <LyricsPlayButton
+                isPlaying={isPlaying}
+                accent={protectedAccentColor}
+                onPrimaryColor={onPrimaryColor}
                 onPress={onPlayPause}
-                style={[styles.lyricsPlayButton, { backgroundColor: protectedAccentColor }]}
-                pressedScale={0.9}
-                accessibilityRole="button"
-                accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
-              >
-                <MaterialCommunityIcons name={isPlaying ? 'pause' : 'play'} size={30} color={onPrimaryColor ?? '#000000'} />
-              </AnimatedPressable>
+              />
               <AnimatedPressable onPress={onNext} style={styles.lyricsTransportButton} pressedScale={0.88} accessibilityRole="button" accessibilityLabel="Siguiente">
                 <MaterialCommunityIcons name="skip-next" size={30} color={lyricsTextColor} />
               </AnimatedPressable>
@@ -541,6 +680,8 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
                 onPress={onCycleRepeatMode}
                 style={styles.lyricsTransportButton}
                 pressedScale={0.9}
+                active={repeatMode !== 'off'}
+                activeColor={protectedAccentColor}
                 accessibilityRole="button"
                 accessibilityLabel="Repetir"
                 accessibilityState={{ selected: repeatMode !== 'off' }}
@@ -564,4 +705,3 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
     </Animated.View>
   );
 });
-

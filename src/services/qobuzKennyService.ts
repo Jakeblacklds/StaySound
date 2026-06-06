@@ -1,9 +1,8 @@
 import { TidalQuality, TidalTrack } from "../types/audio";
 
 const QOBUZ_API_BASES = [
-  "https://qdl-api.monochrome.tf",
-  "https://trypt-hifi-dl-456461932686.us-west1.run.app",
   "https://qobuz.kennyy.com.br",
+  "https://qdl-api.monochrome.tf",
   "https://mono.scavengerfurs.net",
 ];
 const REQUEST_TIMEOUT_MS = 8000;

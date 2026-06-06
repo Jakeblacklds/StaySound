@@ -14,7 +14,7 @@ import expo.modules.karaokeview.motionprofiles.VelvetProfileRenderer
 
 /**
  * KaraokeView - Apple Music-style 120fps lyrics renderer
- * 
+ *
  * Architecture:
  * - GLOBAL LINE SWEEP: One continuous mask per line (not per word)
  * - LEADING GLOW: Soft aura runs slightly ahead of the sweep
@@ -43,8 +43,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             revealX: Float,
             rowHeight: Float,
             fadeWidth: Float,
+            translateY: Float,
         ) {
-            this@KaraokeView.drawWordTail(canvas, line, word, paint, revealX, rowHeight, fadeWidth)
+            this@KaraokeView.drawWordTail(canvas, line, word, paint, revealX, rowHeight, fadeWidth, translateY)
         }
 
         override fun drawWordTranslated(
@@ -179,6 +180,30 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 )
             )
         }
+
+        override fun drawRowSweepHighlight(
+            canvas: Canvas,
+            line: LyricLine,
+            rowWords: List<LyricWord>,
+            sweepX: Float,
+            paint: Paint,
+            rowHeight: Float,
+            finalLiftRatio: Float,
+            currentTimeMs: Long,
+            isRowComplete: Boolean,
+        ) {
+            this@KaraokeView.drawRowSweepHighlight(
+                canvas = canvas,
+                line = line,
+                rowWords = rowWords,
+                sweepX = sweepX,
+                paint = paint,
+                rowHeight = rowHeight,
+                finalLiftRatio = finalLiftRatio,
+                currentTimeMs = currentTimeMs,
+                isRowComplete = isRowComplete,
+            )
+        }
     }
 
     // --- Layout ---
@@ -208,6 +233,14 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var enableAmbientBackground = true
     private val ambientBackgroundRenderer = KaraokeAmbientBackgroundRenderer(resources.displayMetrics.density)
     private var firstLineStartMs: Long = 0L
+
+    // --- Bottom spectrum ("aurora ridge") ---
+    // Reacts to the live audio spectrum (FFT) of the playing track. Disabled until
+    // both a valid ExoPlayer audio session id and the enable flag arrive from JS.
+    private val spectrumCapture = KaraokeSpectrumCapture(SPECTRUM_BANDS)
+    private val spectrumRenderer = KaraokeSpectrumRenderer(resources.displayMetrics.density, SPECTRUM_BANDS)
+    private var audioSessionId: Int = 0
+    private var enableBottomSpectrum = false
 
     // --- Paints ---
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
@@ -244,9 +277,19 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private val lyricsTransitionDurationNanos = 420_000_000L
 
     // --- Time interpolation ---
-    private var lastJsTimeMs: Long = 0
-    private var lastJsUpdateNanos: Long = System.nanoTime()
+    // A continuously-advancing render clock. Instead of hard-resetting to each JS time
+    // update (which makes the sweep jump by the full error every update — very visible
+    // when JS delivers updates late/unevenly, e.g. heavy animated themes), the clock
+    // runs off nanoTime and gently ABSORBS the small drift between its prediction and
+    // the authoritative JS time. Real discontinuities (seeks) still snap immediately.
+    private var renderBaseTimeMs: Double = 0.0
+    private var renderBaseNanos: Long = System.nanoTime()
+    private var hasTimeBase: Boolean = false
     private var isPlaying: Boolean = false
+
+    private val seekBackThresholdMs = 300.0   // backward jump beyond this = real seek → snap
+    private val seekFwdThresholdMs = 400.0     // forward jump beyond this = real seek → snap
+    private val timeCorrectionFactor = 0.2     // fraction of drift absorbed per update
 
     // --- Scrolling ---
     private val scrollDampingDefault = 0.08f
@@ -310,6 +353,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     // --- Settings ---
     private var isLineByLine = false
     private var enableSpectralParticles = true
+    private var displayMode = "none"
     private var motionProfile = MotionProfile.COSMIC
     private var profileRenderer: MotionProfileRenderer = CosmicProfileRenderer()
     private val suspendedParticles = Array(MAX_SPECTRAL_PARTICLES) { SuspendedParticle() }
@@ -321,6 +365,14 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     fun setIsLineByLine(isLineByLine: Boolean) {
         this.isLineByLine = isLineByLine
+        invalidate()
+    }
+
+    fun setDisplayMode(mode: String?) {
+        val newMode = mode?.trim()?.lowercase() ?: "none"
+        if (displayMode == newMode) return
+        displayMode = newMode
+        precomputePositions()
         invalidate()
     }
 
@@ -397,6 +449,42 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         invalidate()
     }
 
+    fun setAudioSessionId(sessionId: Int) {
+        if (sessionId == audioSessionId) return
+        audioSessionId = sessionId
+        updateSpectrumCaptureState()
+    }
+
+    fun setEnableBottomSpectrum(enabled: Boolean) {
+        if (enabled == enableBottomSpectrum) return
+        enableBottomSpectrum = enabled
+        updateSpectrumCaptureState()
+        invalidate()
+    }
+
+    private fun updateSpectrumCaptureState() {
+        if (enableBottomSpectrum) {
+            // Prefer an explicit session id from JS; otherwise read the ExoPlayer
+            // session id that the track-player MusicService persisted to prefs so we
+            // capture the player's OWN session (no RECORD_AUDIO prompt). Falling back
+            // to 0 would capture the global output mix (requires the mic permission).
+            val resolved = if (audioSessionId > 0) audioSessionId else readExoAudioSessionId()
+            spectrumCapture.attach(resolved.coerceAtLeast(0))
+            if (isPlaying) spectrumCapture.start() else spectrumCapture.stop()
+        } else {
+            spectrumCapture.release()
+        }
+    }
+
+    private fun readExoAudioSessionId(): Int {
+        return try {
+            context.getSharedPreferences("staysound_audio", Context.MODE_PRIVATE)
+                .getInt("exo_audio_session_id", 0)
+        } catch (_: Throwable) {
+            0
+        }
+    }
+
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
         // Multi-stop gradient for a premium cinematic fade (not cheap 2-stop)
@@ -416,7 +504,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     fun setLyrics(lyricsData: List<Map<String, Any>>) {
-        val nextLines = lyricsParser.parse(lyricsData)
+        val parsedLines = lyricsParser.parse(lyricsData)
+        val retimedLines = LyricsRetimer.retime(parsedLines)
+        val nextLines = LyricsGapGenerator.generateGaps(retimedLines)
         val nextSignature = buildLyricsSignature(nextLines)
         val shouldTransitionLyrics =
             lines.isNotEmpty() &&
@@ -449,12 +539,38 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     fun updateTime(timeMs: Long) {
-        lastJsTimeMs = timeMs
-        lastJsUpdateNanos = System.nanoTime()
+        val now = System.nanoTime()
+        if (!hasTimeBase || !isPlaying) {
+            // First sample, or paused → authoritative time is exact; anchor directly.
+            renderBaseTimeMs = timeMs.toDouble()
+            renderBaseNanos = now
+            hasTimeBase = true
+            return
+        }
+
+        val predicted = renderBaseTimeMs + (now - renderBaseNanos) / 1_000_000.0
+        val error = timeMs - predicted
+        renderBaseTimeMs = if (error < -seekBackThresholdMs || error > seekFwdThresholdMs) {
+            timeMs.toDouble() // seek / large discontinuity → snap
+        } else {
+            predicted + error * timeCorrectionFactor // absorb small drift smoothly
+        }
+        renderBaseNanos = now
     }
 
     fun setIsPlaying(isPlaying: Boolean) {
+        if (isPlaying != this.isPlaying && hasTimeBase) {
+            if (isPlaying) {
+                // Resuming: re-anchor so wall-clock time spent paused isn't counted.
+                renderBaseNanos = System.nanoTime()
+            } else {
+                // Pausing: freeze the clock at the current interpolated value.
+                renderBaseTimeMs = liveTimeMs()
+                renderBaseNanos = System.nanoTime()
+            }
+        }
         this.isPlaying = isPlaying
+        updateSpectrumCaptureState()
     }
 
     fun setSeekOnTapEnabled(enabled: Boolean) {
@@ -471,11 +587,13 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         invalidate()
     }
 
-    private fun getInterpolatedTime(): Long {
-        if (!isPlaying) return lastJsTimeMs
-        val elapsedMs = (System.nanoTime() - lastJsUpdateNanos) / 1_000_000
-        return lastJsTimeMs + elapsedMs
+    private fun liveTimeMs(): Double {
+        if (!hasTimeBase) return 0.0
+        if (!isPlaying) return renderBaseTimeMs
+        return renderBaseTimeMs + (System.nanoTime() - renderBaseNanos) / 1_000_000.0
     }
+
+    private fun getInterpolatedTime(): Long = liveTimeMs().toLong()
 
     private fun startAnimator() {
         animator?.stop()
@@ -596,6 +714,20 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         )
         drawFades(canvas)
         canvas.restoreToCount(saveCount)
+
+        // Bottom spectrum is drawn on the raw view canvas (outside the lyrics fade
+        // layer) so the live audio "aurora ridge" sits cleanly along the bottom edge.
+        if (enableBottomSpectrum) {
+            spectrumRenderer.draw(
+                canvas = canvas,
+                bands = spectrumCapture.snapshot(),
+                width = width,
+                height = height,
+                currentTimeMs = currentTimeMs,
+                isPlaying = isPlaying,
+                alphaScale = 1f,
+            )
+        }
     }
 
     private fun drawLyricsLayer(
@@ -645,6 +777,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                     highlightPaint = highlightPaint,
                     backgroundBasePaint = backgroundBasePaint,
                     backgroundHighlightPaint = backgroundHighlightPaint,
+                    displayMode = displayMode,
                 ),
                 callbacks = lineRenderCallbacks,
             )
@@ -683,7 +816,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         return "${value.size}:${wordCount}:${first.startMs}:${first.endMs}:${last.startMs}:${last.endMs}"
     }
 
-    
+
 
     private fun smootherStep(value: Float): Float {
         val t = value.coerceIn(0f, 1f)
@@ -715,7 +848,21 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val wordX = marginLeft + word.xOffset
         val clampedProgress = progress.coerceIn(0f, 1f)
         val postEndSettle = smootherStep(((progress - 1f) / 0.35f).coerceIn(0f, 1f))
-        val sweepX = wordX + word.width * clampedProgress + FEATHER_PX * 2f * postEndSettle
+        // The ONLY word that gets a soft "start-wipe" entry (sweep begins slightly
+        // before the glyphs) is the first word of a row — there is no previous word
+        // to flow from, so a wider lead-in reads as the phrase starting.
+        // Every subsequent word MUST begin exactly at its left edge (offset 0), i.e.
+        // exactly where the previous word's sweep ended. Any negative offset here makes
+        // the reveal edge jump BACKWARD at each word boundary, which is what made the
+        // barrido look like it "starts from zero" on every word instead of flowing
+        // continuously across the whole phrase.
+        val isFirstWord = word.xOffset <= 0.01f
+        val initialOffset = if (isFirstWord) {
+            -paint.textSize * 0.375f * (1f - smootherStep((clampedProgress * 4f).coerceIn(0f, 1f)))
+        } else {
+            0f
+        }
+        val sweepX = wordX + initialOffset + word.width * clampedProgress + FEATHER_PX * 2f * postEndSettle
         val shouldRenderWipeShader = KaraokeHighlightStateMachine.shouldRenderWipeShader(progress)
 
         // Compute lift progress from visual word timing (not syllable progress).
@@ -824,8 +971,14 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val wordBottom = wordTop + rowHeight
         val wordRight = wordX + word.width + FEATHER_PX * 2
 
-        // YouLyPlus pre-wipe-char:
-        // background-size = 0.75em, background-position from -0.75em to -0.375em.
+        // YouLyPlus pre-wipe-char (lyrics.css @keyframes pre-wipe-universal):
+        // background-size = 0.75em, background-position (LEFT edge) from -0.75em to -0.375em.
+        // The band's CENTER (its color peak) therefore travels from -0.375em to 0 — i.e.
+        // it ends ON the word's left edge, not in the empty space before it.
+        // Previously centerEnd was wordX - 0.1em, leaving the peak short of the glyphs, so
+        // the masked glow barely landed on the letters and the pre-sweep looked invisible
+        // until the word became active. Landing the peak at wordX makes the glow lead the
+        // word exactly like the web reference (and ahead of the wipe fill, which follows it).
         val preBandWidth = (paint.textSize * 0.75f).coerceAtLeast(4f * density)
         val preBandHalf = preBandWidth * 0.5f
         val centerStart = wordX - paint.textSize * 0.375f
@@ -889,17 +1042,24 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             val visualWordEndMs = visualWordStartMs + visualWordDurationMs.toLong()
             val belongsToActiveVisualWord = visualWordStartMs > 0L && visualWordDurationMs > 0f &&
                 word.startMs >= visualWordStartMs && word.endMs <= visualWordEndMs
-            val liftProgress = if (belongsToActiveVisualWord) {
+            var liftProgress = if (belongsToActiveVisualWord) {
                 // Still within the active visual word → continuous rise
                 ((currentTimeMs - visualWordStartMs).toFloat() / visualWordDurationMs).coerceAtLeast(0f)
             } else {
                 // Different visual word → standard release from completion
                 1f + (completedAgeMs / wordDurationMs)
             }
+            val sustainedPhraseTiming = buildSustainedPhraseTiming(line.words)
+            val phraseVisualWord = sustainedPhraseTiming?.words?.firstOrNull {
+                word.startMs >= it.startMs && word.endMs <= it.endMs
+            }
+            if (sustainedPhraseTiming != null && phraseVisualWord != null) {
+                liftProgress = getSustainedPhraseLiftProgress(phraseVisualWord, sustainedPhraseTiming, currentTimeMs)
+            }
             // For sustained words that just completed, keep glow enabled so the
             // animT release curve fades it naturally (instead of cutting to 0 instantly).
             val recentlyCompleted = completedAgeMs < 600f
-            val isSustained = belongsToActiveVisualWord && visualWordDurationMs >= 850f
+            val isSustained = phraseVisualWord != null || (belongsToActiveVisualWord && visualWordDurationMs >= 850f)
             drawWordCharactersWithLift(
                 canvas = canvas,
                 line = line,
@@ -908,8 +1068,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 paint = paint,
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
-                enableGlow = recentlyCompleted && isSustained,
-                overrideDurationMs = if (belongsToActiveVisualWord) visualWordDurationMs else 0f,
+                enableGlow = phraseVisualWord != null || (recentlyCompleted && isSustained),
+                overrideDurationMs = phraseVisualWord?.durationMs
+                    ?: if (belongsToActiveVisualWord) visualWordDurationMs else 0f,
             )
             return
         }
@@ -1026,6 +1187,214 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         canvas.restore()
     }
 
+    /**
+     * Draw the highlight layer for an entire row as a single continuous sweep.
+     *
+     * When [isRowComplete], all words are simply drawn with lift — the sweep
+     * is already past. When the row is active, all words are drawn into a
+     * saveLayer and then a single AGSL/LinearGradient mask clips everything
+     * past [sweepX] to transparent, producing one liquid wipe head that
+     * travels across the entire phrase without ever resetting.
+     */
+    private fun drawRowSweepHighlight(
+        canvas: Canvas,
+        line: LyricLine,
+        rowWords: List<LyricWord>,
+        sweepX: Float,
+        paint: Paint,
+        rowHeight: Float,
+        finalLiftRatio: Float,
+        currentTimeMs: Long,
+        isRowComplete: Boolean,
+    ) {
+        if (rowWords.isEmpty()) return
+
+        val visualWordGroups = buildRowVisualWordGroups(rowWords)
+        val sustainedPhraseTiming = buildSustainedPhraseTiming(line.words)
+
+        if (isRowComplete) {
+            for (visualWord in visualWordGroups) {
+                drawVisualWordCharactersWithLift(
+                    canvas = canvas,
+                    line = line,
+                    words = visualWord,
+                    progress = getVisualWordLiftProgress(visualWord, currentTimeMs, sustainedPhraseTiming),
+                    paint = paint,
+                    rowHeight = rowHeight,
+                    finalLiftRatio = finalLiftRatio,
+                    marginLeft = marginLeft,
+                    density = density,
+                    glowColor = glowColor,
+                    enableGlow = true,
+                    smootherStep = ::smootherStep,
+                )
+            }
+            return
+        }
+
+        val firstWord = rowWords.first()
+        val lastWord  = rowWords.last()
+        val rowLeft   = marginLeft + firstWord.xOffset - FEATHER_PX * 2
+        val rowRight  = marginLeft + lastWord.xOffset + lastWord.width + FEATHER_PX * 4
+        val rowTop    = line.y + firstWord.yOffset - rowHeight * 1.5f
+        val rowBottom = line.y + firstWord.yOffset + rowHeight * 2.5f
+
+        // saveLayer so the DST_IN mask clips ALL character draws (including glow shadow)
+        canvas.saveLayer(rowLeft, rowTop, rowRight, rowBottom, null)
+
+        // Draw every visual word with one shared lift clock. The wipe can still
+        // reveal per glyph, but the vertical motion cannot split by syllable.
+        for (visualWord in visualWordGroups) {
+            drawVisualWordCharactersWithLift(
+                canvas = canvas,
+                line = line,
+                words = visualWord,
+                progress = getVisualWordLiftProgress(visualWord, currentTimeMs, sustainedPhraseTiming),
+                paint = paint,
+                rowHeight = rowHeight,
+                finalLiftRatio = finalLiftRatio,
+                marginLeft = marginLeft,
+                density = density,
+                glowColor = glowColor,
+                enableGlow = true,
+                smootherStep = ::smootherStep,
+            )
+        }
+
+        // Single feathered wipe mask for the whole row.
+        val fadeWidth = FEATHER_PX * 3.5f
+        val agslMask = KaraokeWipeShader.getWipeMaskShader(sweepX, fadeWidth)
+        val maskShader: Shader = agslMask ?: LinearGradient(
+            sweepX - fadeWidth, 0f,
+            sweepX + fadeWidth * 0.4f, 0f,
+            intArrayOf(
+                Color.BLACK,
+                Color.BLACK,
+                Color.argb(166, 0, 0, 0),
+                Color.argb(51, 0, 0, 0),
+                Color.TRANSPARENT,
+            ),
+            floatArrayOf(0f, 0.40f, 0.65f, 0.85f, 1f),
+            Shader.TileMode.CLAMP,
+        )
+        sweepMaskPaint.shader = maskShader
+        canvas.drawRect(rowLeft, rowTop, rowRight, rowBottom, sweepMaskPaint)
+
+        canvas.restore()
+    }
+
+    private fun buildRowVisualWordGroups(rowWords: List<LyricWord>): List<List<LyricWord>> {
+        if (rowWords.isEmpty()) return emptyList()
+
+        val groups = mutableListOf<List<LyricWord>>()
+        var currentGroup = mutableListOf<LyricWord>()
+
+        for (word in rowWords) {
+            val previous = currentGroup.lastOrNull()
+            if (previous != null && LyricsVisualWords.shouldInsertSpacing(previous, word)) {
+                groups += currentGroup
+                currentGroup = mutableListOf()
+            }
+            currentGroup += word
+        }
+
+        if (currentGroup.isNotEmpty()) {
+            groups += currentGroup
+        }
+
+        return groups
+    }
+
+    private data class SustainedVisualWordTiming(
+        val startMs: Long,
+        val endMs: Long,
+        val durationMs: Float,
+        val releaseDurationMs: Float,
+    )
+
+    private data class SustainedPhraseTiming(
+        val phraseEndMs: Long,
+        val sharedReleaseDurationMs: Float,
+        val words: List<SustainedVisualWordTiming>,
+    )
+
+    private fun buildSustainedPhraseTiming(words: List<LyricWord>): SustainedPhraseTiming? {
+        val sustainedWords = buildRowVisualWordGroups(words).mapNotNull { visualWord ->
+            val startMs = visualWord.firstOrNull()?.startMs ?: return@mapNotNull null
+            val endMs = visualWord.lastOrNull()?.endMs ?: return@mapNotNull null
+            val combinedText = visualWord.joinToString(separator = "") { it.text }
+            if (!LyricsVisualWords.isGrowableVisualWord(combinedText, startMs, endMs)) {
+                return@mapNotNull null
+            }
+
+            val durationMs = (endMs - startMs).coerceAtLeast(1L).toFloat()
+            SustainedVisualWordTiming(
+                startMs = startMs,
+                endMs = endMs,
+                durationMs = durationMs,
+                releaseDurationMs = getSustainedReleaseDurationMs(durationMs),
+            )
+        }
+
+        if (sustainedWords.size < 2) return null
+
+        return SustainedPhraseTiming(
+            phraseEndMs = sustainedWords.maxOf { it.endMs },
+            sharedReleaseDurationMs = sustainedWords.maxOf { it.releaseDurationMs }.coerceAtLeast(1f),
+            words = sustainedWords,
+        )
+    }
+
+    private fun getSustainedReleaseDurationMs(durationMs: Float): Float {
+        val riseDurationMs = (1200f + (durationMs / 1000f) * 600f).coerceIn(1200f, 2500f)
+        return (riseDurationMs * 0.25f).coerceIn(250f, 600f)
+    }
+
+    private fun getSustainedPhraseLiftProgress(
+        wordTiming: SustainedVisualWordTiming,
+        phraseTiming: SustainedPhraseTiming,
+        currentTimeMs: Long,
+    ): Float {
+        if (currentTimeMs <= wordTiming.endMs) {
+            return ((currentTimeMs - wordTiming.startMs).toFloat() / wordTiming.durationMs).coerceIn(0f, 1f)
+        }
+        if (currentTimeMs <= phraseTiming.phraseEndMs) {
+            return 1f
+        }
+
+        val sharedReleaseT = (
+            (currentTimeMs - phraseTiming.phraseEndMs).coerceAtLeast(0L).toFloat() /
+                phraseTiming.sharedReleaseDurationMs
+            ).coerceIn(0f, 1f)
+        val rendererPostMs = wordTiming.releaseDurationMs * sharedReleaseT
+        return 1f + (rendererPostMs / wordTiming.durationMs)
+    }
+
+    private fun getVisualWordLiftProgress(
+        words: List<LyricWord>,
+        currentTimeMs: Long,
+        sustainedPhraseTiming: SustainedPhraseTiming? = null,
+    ): Float {
+        if (words.isEmpty()) return 0f
+
+        val startMs = words.first().startMs
+        val endMs = words.last().endMs
+        val durationMs = (endMs - startMs).coerceAtLeast(1L).toFloat()
+        val combinedText = words.joinToString(separator = "") { it.text }
+        val isSustained = LyricsVisualWords.isGrowableVisualWord(combinedText, startMs, endMs)
+        val sustainedTiming = if (isSustained) {
+            sustainedPhraseTiming?.words?.firstOrNull { it.startMs == startMs && it.endMs == endMs }
+        } else {
+            null
+        }
+        if (sustainedPhraseTiming != null && sustainedTiming != null) {
+            return getSustainedPhraseLiftProgress(sustainedTiming, sustainedPhraseTiming, currentTimeMs)
+        }
+
+        val maxProgress = if (isSustained) 1.6f else 1.5f
+
+        return ((currentTimeMs - startMs).toFloat() / durationMs).coerceIn(0f, maxProgress)
+    }
 
     private fun drawWordCharactersWithLift(
         canvas: Canvas,
@@ -1073,6 +1442,26 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val rowHeight = if (word.isBackground) backgroundLineHeight else lineHeight
         val wordY = line.y + word.yOffset + rowHeight * 0.7f
         canvas.drawText(word.text, wordX, wordY, paint)
+
+        // Inline Romanization (Word-Synced)
+        val showRomanization = displayMode == "romanize" || displayMode == "both"
+        if (showRomanization && word.romanizedText != null && !word.isBackground) {
+            val romPaint = Paint(paint).apply {
+                textSize = backgroundFontSize
+                shader = null // Clear wipe shader for transliterations
+                alpha = (paint.alpha * 0.7f).toInt().coerceIn(0, 255)
+            }
+            LyricsTranslationManager.drawWordSyncedRomanization(
+                canvas = canvas,
+                word = word,
+                paint = romPaint,
+                line = line,
+                originalRowHeight = rowHeight,
+                subtextRowHeight = backgroundLineHeight,
+                marginLeft = marginLeft,
+                isRtl = false
+            )
+        }
     }
 
     private fun drawWordTail(
@@ -1083,21 +1472,22 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         revealX: Float,
         rowHeight: Float,
         fadeWidth: Float = 0f,
+        translateY: Float = 0f,
     ) {
         val wordLeft = marginLeft + word.xOffset
         val wordRight = wordLeft + word.width
-        
+
         // Mathematically perfect continuous boundaries for complementary fading:
         // 1. If transition hasn't touched the word yet, draw the full dim word.
         if (fadeWidth > 0f && revealX + fadeWidth * 0.25f <= wordLeft) {
-            drawWord(canvas, line, word, paint)
+            drawWordTranslated(canvas, line, word, paint, translateY)
             return
         }
         if (fadeWidth <= 0f && revealX <= wordLeft) {
-            drawWord(canvas, line, word, paint)
+            drawWordTranslated(canvas, line, word, paint, translateY)
             return
         }
-        
+
         // 2. If transition has completely passed the word, render nothing.
         if (fadeWidth > 0f && revealX - fadeWidth * 0.25f >= wordRight) {
             return
@@ -1109,18 +1499,21 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val wordTop = line.y + word.yOffset
         val wordBottom = wordTop + rowHeight
         canvas.save()
-        
+        if (translateY != 0f) {
+            canvas.translate(0f, translateY)
+        }
+
         if (fadeWidth > 0f) {
             val startX = revealX - fadeWidth * 0.4f
             val endX = revealX + fadeWidth * 0.4f
-            
+
             val originalShader = paint.shader
             val baseColor = paint.color
             val bR = Color.red(baseColor)
             val bG = Color.green(baseColor)
             val bB = Color.blue(baseColor)
             val bA = Color.alpha(baseColor)
-            
+
             // Complementary curve: mirrors the wipe gradient so the sum ≈ constant
             val maskShader = LinearGradient(
                 startX, 0f,
@@ -1135,11 +1528,11 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 Shader.TileMode.CLAMP
             )
             paint.shader = maskShader
-            
+
             // Optimization & safety: clip from startX to prevent overdraw and ensure smooth clipping
             canvas.clipRect(startX.coerceAtLeast(wordLeft), wordTop - rowHeight, wordRight + FEATHER_PX, wordBottom + rowHeight)
             drawWord(canvas, line, word, paint)
-            
+
             paint.shader = originalShader
         } else {
             canvas.clipRect(revealX, wordTop - rowHeight, wordRight + FEATHER_PX, wordBottom + rowHeight)
@@ -1358,11 +1751,13 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         basePaint.color = readableInactive
         backgroundBasePaint.color = readableInactive
         ambientBackgroundRenderer.setColors(readableGlow, backgroundColor)
+        spectrumRenderer.setGlowColor(readableGlow)
     }
 
     companion object {
         private const val MAX_SPECTRAL_PARTICLES = 128
         private const val MAX_RETAINED_PROFILE_ACCENTS = 128
+        private const val SPECTRUM_BANDS = 16
     }
     // EDGE FADES
     // ========================================================================
@@ -1401,6 +1796,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 backgroundSpaceWidth = backgroundSpaceWidth,
                 backgroundGap = backgroundGap,
             ),
+            displayMode = displayMode,
         )
     }
 
@@ -1410,7 +1806,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         }
     }
 
-    override fun onDetachedFromWindow() { super.onDetachedFromWindow(); animator?.stop(); animator = null }
-    override fun onAttachedToWindow() { super.onAttachedToWindow(); if (lines.isNotEmpty() && animator?.isRunning != true) startAnimator() }
+    override fun onDetachedFromWindow() { super.onDetachedFromWindow(); animator?.stop(); animator = null; spectrumCapture.release() }
+    override fun onAttachedToWindow() { super.onAttachedToWindow(); if (lines.isNotEmpty() && animator?.isRunning != true) startAnimator(); updateSpectrumCaptureState() }
 }
-

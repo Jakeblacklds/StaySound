@@ -1,5 +1,5 @@
-import React, { useCallback } from 'react';
-import { Pressable, StyleProp, View, ViewStyle } from 'react-native';
+import React, { useCallback, useEffect } from 'react';
+import { Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { IconButton } from 'react-native-paper';
 import Animated, {
     Easing,
@@ -23,6 +23,8 @@ export function AnimatedPlayerButton({
     onPress,
     style,
     children,
+    active = false,
+    activeColor,
     accessibilityLabel,
     accessibilityRole,
     accessibilityState,
@@ -33,12 +35,24 @@ export function AnimatedPlayerButton({
     onPress: () => void;
     style?: StyleProp<ViewStyle>;
     children: React.ReactNode;
+    /** When true, paints an animated selection pill behind the icon (Material 3 expressive). */
+    active?: boolean;
+    activeColor?: string;
     accessibilityLabel?: string;
     accessibilityRole?: 'button' | 'togglebutton';
     accessibilityState?: { selected?: boolean; disabled?: boolean };
     accessibilityHint?: string;
 }) {
     const pressed = useSharedValue(0);
+    const activeProgress = useSharedValue(active ? 1 : 0);
+
+    useEffect(() => {
+        activeProgress.value = withSpring(active ? 1 : 0, {
+            damping: 18,
+            stiffness: 260,
+            mass: 0.6,
+        });
+    }, [active, activeProgress]);
 
     const handlePressIn = useCallback(() => {
         pressed.value = withTiming(1, {
@@ -66,6 +80,11 @@ export function AnimatedPlayerButton({
         };
     });
 
+    const pillStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(activeProgress.value, [0, 1], [0, 0.18]),
+        transform: [{ scale: interpolate(activeProgress.value, [0, 1], [0.55, 1]) }],
+    }));
+
     return (
         <AnimatedPressable
             onPress={onPress}
@@ -77,6 +96,16 @@ export function AnimatedPlayerButton({
             accessibilityState={accessibilityState}
             accessibilityHint={accessibilityHint}
         >
+            {activeColor ? (
+                <Animated.View
+                    pointerEvents="none"
+                    style={[
+                        StyleSheet.absoluteFill,
+                        { borderRadius: 999, backgroundColor: activeColor },
+                        pillStyle,
+                    ]}
+                />
+            ) : null}
             {children}
         </AnimatedPressable>
     );

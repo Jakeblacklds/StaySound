@@ -1,5 +1,303 @@
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/BaseAudioPlayer.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/BaseAudioPlayer.kt
+index a0f995c..49fcc24 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/BaseAudioPlayer.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/BaseAudioPlayer.kt
+@@ -21,6 +21,8 @@ import androidx.media3.common.util.UnstableApi
+ import androidx.media3.datasource.cache.SimpleCache
+ import androidx.media3.exoplayer.DefaultRenderersFactory
+ import androidx.media3.exoplayer.ExoPlayer
++import androidx.media3.exoplayer.audio.AudioSink
++import androidx.media3.exoplayer.audio.DefaultAudioSink
+ import androidx.media3.session.legacy.RatingCompat
+ import com.doublesymmetry.kotlinaudio.event.PlayerEventHolder
+ import com.doublesymmetry.kotlinaudio.models.AudioItem
+@@ -161,7 +163,19 @@ abstract class BaseAudioPlayer internal constructor(
+         }
+         playerEventHolder.updateAudioPlayerState(AudioPlayerState.IDLE)
+ 
+-        val renderer = DefaultRenderersFactory(context)
++        val renderer = object : DefaultRenderersFactory(context) {
++            override fun buildAudioSink(
++                context: Context,
++                enableFloatOutput: Boolean,
++                enableAudioTrackPlaybackParams: Boolean
++            ): AudioSink {
++                return DefaultAudioSink.Builder(context)
++                    .setAudioProcessors(arrayOf(StaySoundPcmSpectrumProcessor()))
++                    .setEnableFloatOutput(enableFloatOutput)
++                    .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
++                    .build()
++            }
++        }
+         renderer.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+         exoPlayer = ExoPlayer
+             .Builder(context)
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt
+new file mode 100644
+index 0000000..4793303
+--- /dev/null
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt
+@@ -0,0 +1,258 @@
++package com.doublesymmetry.kotlinaudio.players
++
++import androidx.media3.common.C
++import androidx.media3.common.audio.AudioProcessor
++import androidx.media3.common.audio.BaseAudioProcessor
++import java.lang.reflect.Method
++import java.nio.ByteBuffer
++import java.nio.ByteOrder
++import kotlin.math.PI
++import kotlin.math.cos
++import kotlin.math.pow
++import kotlin.math.sqrt
++
++/**
++ * Pass-through Media3 audio processor that taps decoded PCM before Android's
++ * output stack and publishes compact log-spaced spectrum bands for StaySound UI.
++ */
++internal class StaySoundPcmSpectrumProcessor(
++    private val bandCount: Int = 16,
++    private val windowSize: Int = 1024,
++    private val hopSize: Int = 512,
++) : BaseAudioProcessor() {
++    private val sampleWindow = FloatArray(windowSize)
++    private val monoScratch = FloatArray(windowSize)
++    private val hannWindow = FloatArray(windowSize) { i ->
++        (0.5f - 0.5f * cos((2.0 * PI * i) / (windowSize - 1)).toFloat())
++    }
++    private val bands = FloatArray(bandCount)
++    private val displayBands = FloatArray(bandCount)
++
++    private var sampleCursor = 0
++    private var sampleRate = 44100
++    private var channelCount = 2
++    private var encoding = C.ENCODING_PCM_16BIT
++    private var queuedSinceAnalysis = 0
++    private var publishedFrames = 0
++    private var publishMethod: Method? = null
++    private var bridgeLookupAttempted = false
++    private var bridgeMissingLogged = false
++
++    override fun onConfigure(inputAudioFormat: AudioProcessor.AudioFormat): AudioProcessor.AudioFormat {
++        if (!isSupportedEncoding(inputAudioFormat.encoding)) throw AudioProcessor.UnhandledAudioFormatException(inputAudioFormat)
++        sampleRate = inputAudioFormat.sampleRate.coerceAtLeast(1)
++        channelCount = inputAudioFormat.channelCount.coerceAtLeast(1)
++        encoding = inputAudioFormat.encoding
++        return inputAudioFormat
++    }
++
++    override fun queueInput(inputBuffer: ByteBuffer) {
++        val byteOrder = if (isBigEndianEncoding(encoding)) ByteOrder.BIG_ENDIAN else ByteOrder.LITTLE_ENDIAN
++        val passThrough = inputBuffer.duplicate()
++        val input = passThrough.duplicate().order(byteOrder)
++        analyze(input)
++
++        val output = replaceOutputBuffer(passThrough.remaining())
++        output.put(passThrough)
++        inputBuffer.position(inputBuffer.limit())
++        output.flip()
++    }
++
++    override fun onFlush() {
++        sampleCursor = 0
++        queuedSinceAnalysis = 0
++        bands.fill(0f)
++        displayBands.fill(0f)
++    }
++
++    override fun onReset() {
++        onFlush()
++        bridgeLookupAttempted = false
++        bridgeMissingLogged = false
++        publishMethod = null
++    }
++
++    private fun analyze(buffer: ByteBuffer) {
++        when (encoding) {
++            C.ENCODING_PCM_FLOAT -> readFloatPcm(buffer)
++            C.ENCODING_PCM_8BIT -> read8BitPcm(buffer)
++            C.ENCODING_PCM_24BIT, C.ENCODING_PCM_24BIT_BIG_ENDIAN -> read24BitPcm(buffer)
++            C.ENCODING_PCM_32BIT, C.ENCODING_PCM_32BIT_BIG_ENDIAN -> read32BitPcm(buffer)
++            else -> read16BitPcm(buffer)
++        }
++    }
++
++    private fun read8BitPcm(buffer: ByteBuffer) {
++        while (buffer.remaining() >= channelCount) {
++            var sum = 0f
++            for (channel in 0 until channelCount) {
++                sum += (((buffer.get().toInt() and 0xFF) - 128) / 128f).coerceIn(-1f, 1f)
++            }
++            pushMonoSample(sum / channelCount)
++        }
++    }
++
++    private fun read16BitPcm(buffer: ByteBuffer) {
++        val frameBytes = channelCount * 2
++        while (buffer.remaining() >= frameBytes) {
++            var sum = 0f
++            for (channel in 0 until channelCount) {
++                sum += (buffer.getShort() / 32768f).coerceIn(-1f, 1f)
++            }
++            pushMonoSample(sum / channelCount)
++        }
++    }
++
++    private fun read24BitPcm(buffer: ByteBuffer) {
++        val frameBytes = channelCount * 3
++        val bigEndian = isBigEndianEncoding(encoding)
++        while (buffer.remaining() >= frameBytes) {
++            var sum = 0f
++            for (channel in 0 until channelCount) {
++                val b0 = buffer.get().toInt() and 0xFF
++                val b1 = buffer.get().toInt() and 0xFF
++                val b2 = buffer.get().toInt() and 0xFF
++                var value = if (bigEndian) {
++                    (b0 shl 16) or (b1 shl 8) or b2
++                } else {
++                    (b2 shl 16) or (b1 shl 8) or b0
++                }
++                if ((value and 0x800000) != 0) value = value or -0x1000000
++                sum += (value / 8388608f).coerceIn(-1f, 1f)
++            }
++            pushMonoSample(sum / channelCount)
++        }
++    }
++
++    private fun read32BitPcm(buffer: ByteBuffer) {
++        val frameBytes = channelCount * 4
++        while (buffer.remaining() >= frameBytes) {
++            var sum = 0f
++            for (channel in 0 until channelCount) {
++                sum += (buffer.getInt() / 2147483648f).coerceIn(-1f, 1f)
++            }
++            pushMonoSample(sum / channelCount)
++        }
++    }
++
++    private fun readFloatPcm(buffer: ByteBuffer) {
++        val frameBytes = channelCount * 4
++        while (buffer.remaining() >= frameBytes) {
++            var sum = 0f
++            for (channel in 0 until channelCount) {
++                sum += buffer.getFloat().coerceIn(-1f, 1f)
++            }
++            pushMonoSample(sum / channelCount)
++        }
++    }
++
++    private fun pushMonoSample(sample: Float) {
++        sampleWindow[sampleCursor] = sample
++        sampleCursor = (sampleCursor + 1) % windowSize
++        queuedSinceAnalysis++
++        if (queuedSinceAnalysis >= hopSize) {
++            queuedSinceAnalysis = 0
++            computeBands()
++            publishBands()
++        }
++    }
++
++    private fun computeBands() {
++        for (i in 0 until windowSize) {
++            val sourceIndex = (sampleCursor + i) % windowSize
++            monoScratch[i] = sampleWindow[sourceIndex] * hannWindow[i]
++        }
++
++        val nyquist = sampleRate / 2f
++        val minHz = 45f
++        val maxHz = minOf(16000f, nyquist.coerceAtLeast(minHz + 1f))
++
++        for (band in 0 until bandCount) {
++            val loFrac = band.toFloat() / bandCount
++            val hiFrac = (band + 1).toFloat() / bandCount
++            val loHz = logLerp(minHz, maxHz, loFrac)
++            val hiHz = logLerp(minHz, maxHz, hiFrac)
++            val centerHz = sqrt(loHz * hiHz)
++            val mag = goertzelMagnitude(centerHz)
++
++            val tilt = 1f + (band.toFloat() / (bandCount - 1).coerceAtLeast(1)) * 1.55f
++            val shaped = (mag * tilt * 5.8f).coerceAtLeast(0f).pow(0.58f).coerceIn(0f, 1.8f)
++            val current = displayBands[band]
++            val coef = if (shaped > current) 0.82f else 0.24f
++            displayBands[band] = current + (shaped - current) * coef
++            bands[band] = displayBands[band]
++        }
++    }
++
++    private fun goertzelMagnitude(frequencyHz: Float): Float {
++        val omega = (2.0 * PI * frequencyHz) / sampleRate
++        val coeff = 2.0 * cos(omega)
++        var q0: Double
++        var q1 = 0.0
++        var q2 = 0.0
++
++        for (sample in monoScratch) {
++            q0 = coeff * q1 - q2 + sample
++            q2 = q1
++            q1 = q0
++        }
++
++        val power = q1 * q1 + q2 * q2 - coeff * q1 * q2
++        return (sqrt(power.coerceAtLeast(0.0)) / windowSize).toFloat()
++    }
++
++    private fun publishBands() {
++        val method = getPublishMethod() ?: return
++        try {
++            method.invoke(null, bands.copyOf(), sampleRate)
++            if (publishedFrames < 3) {
++                publishedFrames++
++                android.util.Log.w(
++                    "KaraokeSpectrum",
++                    "pcm frame sr=$sampleRate band0=${bands[0]} bandMid=${bands[bandCount / 2]} bandLast=${bands[bandCount - 1]}",
++                )
++            }
++        } catch (_: Throwable) {
++            publishMethod = null
++            bridgeLookupAttempted = false
++        }
++    }
++
++    private fun getPublishMethod(): Method? {
++        publishMethod?.let { return it }
++        if (bridgeLookupAttempted) return null
++        bridgeLookupAttempted = true
++        return try {
++            Class.forName("expo.modules.karaokeview.KaraokePcmSpectrumBridge")
++                .getMethod("publishBands", FloatArray::class.java, Integer.TYPE)
++                .also { publishMethod = it }
++        } catch (_: Throwable) {
++            if (!bridgeMissingLogged) {
++                bridgeMissingLogged = true
++                android.util.Log.w("KaraokeSpectrum", "pcm bridge unavailable")
++            }
++            null
++        }
++    }
++
++    private fun logLerp(a: Float, b: Float, t: Float): Float {
++        return (a * (b / a).pow(t)).coerceIn(a, b)
++    }
++
++    private fun isSupportedEncoding(value: Int): Boolean {
++        return value == C.ENCODING_PCM_8BIT ||
++            value == C.ENCODING_PCM_16BIT ||
++            value == C.ENCODING_PCM_16BIT_BIG_ENDIAN ||
++            value == C.ENCODING_PCM_24BIT ||
++            value == C.ENCODING_PCM_24BIT_BIG_ENDIAN ||
++            value == C.ENCODING_PCM_32BIT ||
++            value == C.ENCODING_PCM_32BIT_BIG_ENDIAN ||
++            value == C.ENCODING_PCM_FLOAT
++    }
++
++    private fun isBigEndianEncoding(value: Int): Boolean {
++        return value == C.ENCODING_PCM_16BIT_BIG_ENDIAN ||
++            value == C.ENCODING_PCM_24BIT_BIG_ENDIAN ||
++            value == C.ENCODING_PCM_32BIT_BIG_ENDIAN
++    }
++}
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index b495b5a..e114508 100644
+index b495b5a..3de0675 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -3,6 +3,7 @@ package com.doublesymmetry.trackplayer.service
@@ -59,7 +357,7 @@ index b495b5a..e114508 100644
      fun acquireWakeLock() {
          acquireWakeLockNow(this)
      }
-@@ -139,6 +168,14 @@ class MusicService : HeadlessJsMediaService() {
+@@ -139,6 +168,34 @@ class MusicService : HeadlessJsMediaService() {
              return (player.currentItem as TrackAudioItem?)?.track
          }
  
@@ -68,13 +366,51 @@ index b495b5a..e114508 100644
 +            return C.AUDIO_SESSION_ID_UNSET
 +        }
 +
-+        return player.exoPlayer.audioSessionId
++        val id = player.exoPlayer.audioSessionId
++        persistAudioSessionId(id)
++        return id
++    }
++
++    /**
++     * Persist the ExoPlayer audio session id into app-global SharedPreferences so
++     * other modules (e.g. the karaoke spectrum visualizer) can attach an
++     * android.media.audiofx.Visualizer to the player's OWN session — capturing the
++     * live spectrum without requiring the RECORD_AUDIO runtime permission.
++     */
++    private fun persistAudioSessionId(id: Int) {
++        if (id == C.AUDIO_SESSION_ID_UNSET) return
++        try {
++            android.util.Log.w("KaraokeSpectrum", "MusicService persist audioSessionId=$id")
++            getSharedPreferences(AUDIO_SESSION_PREFS_NAME, MODE_PRIVATE)
++                .edit()
++                .putInt(AUDIO_SESSION_KEY, id)
++                .apply()
++        } catch (_: Throwable) {
++        }
 +    }
 +
      val state
          get() = player.playerState
  
-@@ -857,6 +894,277 @@ class MusicService : HeadlessJsMediaService() {
+@@ -209,6 +266,17 @@ class MusicService : HeadlessJsMediaService() {
+             wakeMode = playerOptions?.getInt(WAKE_MODE, 0) ?: 0
+         )
+         player = QueuedAudioPlayer(this@MusicService, options)
++        persistAudioSessionId(player.exoPlayer.audioSessionId)
++        // The audio session id may be UNSET until the first audio track initializes;
++        // this listener captures it the moment it becomes valid (audio starts).
++        player.exoPlayer.addAnalyticsListener(object : androidx.media3.exoplayer.analytics.AnalyticsListener {
++            override fun onAudioSessionIdChanged(
++                eventTime: androidx.media3.exoplayer.analytics.AnalyticsListener.EventTime,
++                audioSessionId: Int
++            ) {
++                persistAudioSessionId(audioSessionId)
++            }
++        })
+         fakePlayer.release()
+         mediaSession.player = player.forwardingPlayer
+         observeEvents()
+@@ -857,6 +925,277 @@ class MusicService : HeadlessJsMediaService() {
          return null
      }
  
@@ -352,7 +688,7 @@ index b495b5a..e114508 100644
      @MainThread
      inner class MusicBinder : Binder() {
          val service = this@MusicService
-@@ -900,10 +1208,13 @@ class MusicService : HeadlessJsMediaService() {
+@@ -900,10 +1239,13 @@ class MusicService : HeadlessJsMediaService() {
                      "com.google.android.projection.gearhead"
                  )
              ) {
@@ -370,7 +706,7 @@ index b495b5a..e114508 100644
              }
              return if (
                  isMediaNotificationController ||
-@@ -965,6 +1276,45 @@ class MusicService : HeadlessJsMediaService() {
+@@ -965,6 +1307,45 @@ class MusicService : HeadlessJsMediaService() {
              return super.onPlaybackResumption(mediaSession, controller)
          }
  
@@ -416,7 +752,7 @@ index b495b5a..e114508 100644
          override fun onSetRating(
              session: MediaSession,
              controller: MediaSession.ControllerInfo,
-@@ -976,6 +1326,44 @@ class MusicService : HeadlessJsMediaService() {
+@@ -976,6 +1357,44 @@ class MusicService : HeadlessJsMediaService() {
              }
              return super.onSetRating(session, controller, rating)
          }
@@ -461,10 +797,12 @@ index b495b5a..e114508 100644
      }
  
      private fun getPendingIntentFlags(): Int {
-@@ -1029,5 +1417,15 @@ class MusicService : HeadlessJsMediaService() {
+@@ -1029,5 +1448,17 @@ class MusicService : HeadlessJsMediaService() {
  
          const val DEFAULT_JUMP_INTERVAL = 15.0
          const val DEFAULT_STOP_FOREGROUND_GRACE_PERIOD = 5
++        const val AUDIO_SESSION_PREFS_NAME = "staysound_audio"
++        const val AUDIO_SESSION_KEY = "exo_audio_session_id"
 +        const val AUTO_CATALOG_PREFS_NAME = "staysound_android_auto"
 +        const val AUTO_CATALOG_KEY = "catalog_json"
 +        const val AUTO_ROOT_ID = "root"

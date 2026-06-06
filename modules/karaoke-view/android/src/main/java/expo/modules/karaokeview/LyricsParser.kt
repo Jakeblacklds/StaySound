@@ -5,6 +5,9 @@ internal class LyricsParser {
         val result = mutableListOf<LyricLine>()
         var currentMainWords = mutableListOf<LyricWord>()
         var currentBackgroundWords = mutableListOf<LyricWord>()
+        
+        var currentLineTranslatedText: String? = null
+        var currentLineRomanizedText: String? = null
 
         for (wordMap in data) {
             val text = wordMap["w"] as? String ?: ""
@@ -19,6 +22,20 @@ internal class LyricsParser {
             val normalizedText = text.replace(Regex("\\s+"), " ").trim()
             val targetWords = if (isBackground) currentBackgroundWords else currentMainWords
 
+            // Extract word-level synced romanization
+            val wordRomanized = (wordMap["r"] as? String ?: wordMap["romanized"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+
+            // Accumulate line-level properties if present
+            val lineTranslated = (wordMap["translatedText"] as? String ?: wordMap["translation"] as? String ?: wordMap["t"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+            val lineRomanized = (wordMap["romanizedText"] as? String ?: wordMap["romanization"] as? String)?.trim()?.takeIf { it.isNotEmpty() }
+
+            if (lineTranslated != null) {
+                currentLineTranslatedText = lineTranslated
+            }
+            if (lineRomanized != null) {
+                currentLineRomanizedText = lineRomanized
+            }
+
             if (hasSourceSpacing) {
                 if (normalizedText.isNotEmpty()) {
                     targetWords.add(
@@ -29,6 +46,7 @@ internal class LyricsParser {
                             trailingSpace = trailingSpace,
                             isBackground = isBackground,
                             isPart = isPart,
+                            romanizedText = wordRomanized
                         )
                     )
                 }
@@ -48,6 +66,7 @@ internal class LyricsParser {
                                 trailingSpace = false,
                                 isBackground = isBackground,
                                 isPart = isPart,
+                                romanizedText = wordRomanized
                             )
                         )
                     }
@@ -68,6 +87,7 @@ internal class LyricsParser {
                                 trailingSpace = index < tokens.lastIndex,
                                 isBackground = isBackground,
                                 isPart = isPart,
+                                romanizedText = if (index == 0) wordRomanized else null // assign word-synced romanization to the first token
                             )
                         )
                     }
@@ -75,13 +95,15 @@ internal class LyricsParser {
             }
 
             if (wordMap["n"] as? Boolean == true) {
-                finalizeParsedLine(result, currentMainWords, currentBackgroundWords)
+                finalizeParsedLine(result, currentMainWords, currentBackgroundWords, currentLineTranslatedText, currentLineRomanizedText)
                 currentMainWords = mutableListOf()
                 currentBackgroundWords = mutableListOf()
+                currentLineTranslatedText = null
+                currentLineRomanizedText = null
             }
         }
 
-        finalizeParsedLine(result, currentMainWords, currentBackgroundWords)
+        finalizeParsedLine(result, currentMainWords, currentBackgroundWords, currentLineTranslatedText, currentLineRomanizedText)
         return result
     }
 
@@ -89,6 +111,8 @@ internal class LyricsParser {
         result: MutableList<LyricLine>,
         mainWords: MutableList<LyricWord>,
         backgroundWords: MutableList<LyricWord>,
+        lineTranslatedText: String?,
+        lineRomanizedText: String?,
     ) {
         val normalizedMainWords = if (mainWords.isNotEmpty()) {
             mainWords.toMutableList()
@@ -112,7 +136,10 @@ internal class LyricsParser {
                 backgroundWords = normalizedBackgroundWords,
                 startMs = allWords.minOf { it.startMs },
                 endMs = allWords.maxOf { it.endMs },
-            )
+            ).apply {
+                translatedText = lineTranslatedText
+                romanizedText = lineRomanizedText
+            }
         )
     }
 }

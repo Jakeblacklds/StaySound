@@ -150,7 +150,7 @@ export function isAlbumPaletteMonochrome(colors: Pick<AlbumColors, 'primary' | '
         colors.secondary,
         colors.background,
         colors.accent,
-    ]) < 0.14;
+    ]) < 0.20;
 }
 
 /**
@@ -179,6 +179,10 @@ function ensureMinimumSaturation(hex: string, minSaturation: number): string {
     if (!rgb) return hex;
     const [h, s, l] = rgbToHsl(rgb.r, rgb.g, rgb.b);
     if (s >= minSaturation) return hex;
+    // When saturation is negligible the hue is unreliable — JPEG quantization
+    // often leaves a residual hue near 0° (red). Instead of amplifying that
+    // random noise, return the color as-is so monochrome artwork stays white.
+    if (s < 0.06) return hex;
     // Boost saturation while keeping luminance stable
     const newS = minSaturation + (1 - minSaturation) * 0.15;
     const [nr, ng, nb] = hslToRgb(h, newS, l);
@@ -270,7 +274,7 @@ function processColorResult(result: ImageColorsResult): AlbumColors {
 
     bgLum = getLuminance(background);
 
-    const isLikelyMonochromeArtwork = extractedPaletteSaturation < 0.14;
+    const isLikelyMonochromeArtwork = extractedPaletteSaturation < 0.20;
 
     if (isLikelyMonochromeArtwork) {
         primary = bgLum < 0.5 ? '#F5F7FF' : '#0F121A';
@@ -366,8 +370,8 @@ function generateCacheKey(uri: string): string {
 }
 
 const colorCache = new Map<string, AlbumColors>();
-// v5: detect monochrome artwork before any contrast/saturation rescue can invent a hue.
-const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors-v5';
+// v6: widen monochrome threshold (0.14→0.20) & skip saturation boost for negligible-saturation hues.
+const PERSISTED_COLOR_CACHE_KEY = 'staysound-image-colors-v6';
 const MAX_PERSISTED_COLOR_CACHE = 120;
 let persistedColorCacheLoaded = false;
 let persistedColorCachePromise: Promise<void> | null = null;

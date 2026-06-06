@@ -22,11 +22,12 @@ import {
 import { useLibraryStore, useNotificationStore, usePlayerStore, useSettingsStore } from '@/src/stores';
 import { typeScale, useTheme } from '@/src/theme';
 import { TidalAlbum, TidalArtist, TidalPlaylist, TidalTrack } from '@/src/types/audio';
+import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useRootNavigationState } from 'expo-router';
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, Keyboard, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Alert, InteractionManager, Keyboard, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Button, Divider, IconButton, Menu, Searchbar, Text, TextInput } from 'react-native-paper';
 import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -40,6 +41,21 @@ type SoulseekFolderGroup = {
     folderPath: string;
     results: SoulseekSearchResult[];
 };
+type TidalVirtualListItem =
+    | { type: 'auth' }
+    | { type: 'loading' }
+    | { type: 'error' }
+    | { type: 'soulseek-empty' }
+    | { type: 'soulseek-summary'; count: number }
+    | { type: 'soulseek-folder-header'; group: SoulseekFolderGroup }
+    | { type: 'soulseek-track'; result: SoulseekSearchResult }
+    | { type: 'discovery' }
+    | { type: 'empty' }
+    | { type: 'tidal-artists' }
+    | { type: 'tidal-albums' }
+    | { type: 'tidal-playlists' }
+    | { type: 'tidal-tracks-header' }
+    | { type: 'tidal-track'; track: TidalTrack };
 const RECENT_SEARCHES_STORAGE_KEY = 'tidal-recent-searches';
 const MAX_RECENT_SEARCHES = 8;
 const SOULSEEK_FLOW_LOG = '[SoulseekFlow]';
@@ -478,6 +494,7 @@ export default function TidalScreen() {
     const pendingSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const activeTabRef = useRef<TidalTab>('all');
     const activeSourceTabRef = useRef<TidalSourceTab>('tidal');
+    const soulseekResultCommitRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(null);
 
     useEffect(() => {
         activeTabRef.current = activeTab;
@@ -486,6 +503,29 @@ export default function TidalScreen() {
     useEffect(() => {
         activeSourceTabRef.current = activeSourceTab;
     }, [activeSourceTab]);
+
+    useEffect(() => {
+        return () => {
+            soulseekResultCommitRef.current?.cancel();
+            soulseekResultCommitRef.current = null;
+        };
+    }, []);
+
+    const commitSoulseekResults = useCallback((
+        nextResults: SoulseekSearchResult[],
+        afterCommit?: () => void,
+        shouldCommit: () => boolean = () => true,
+    ) => {
+        soulseekResultCommitRef.current?.cancel();
+        soulseekResultCommitRef.current = InteractionManager.runAfterInteractions(() => {
+            soulseekResultCommitRef.current = null;
+            if (!shouldCommit()) return;
+            startTransition(() => {
+                setSoulseekResults(nextResults);
+                afterCommit?.();
+            });
+        });
+    }, []);
 
     const {
         downloads,
@@ -634,6 +674,7 @@ export default function TidalScreen() {
         }
 
         let cancelled = false;
+        let resultCommit: ReturnType<typeof InteractionManager.runAfterInteractions> | null = null;
         setIsLoading(true);
         setError(null);
         console.log(`${SOULSEEK_FLOW_LOG} mirror search start`, {
@@ -659,36 +700,42 @@ export default function TidalScreen() {
                     albums: nextAlbums.length,
                     playlists: nextPlaylists.length,
                 });
-                setTracks(nextTracks);
-                setArtists(nextArtists);
-                setAlbums(nextAlbums);
-                setPlaylists(nextPlaylists);
-                setArtistArtworkOverrides(new Map());
-                artistArtworkAttempted.current.clear();
+                resultCommit = InteractionManager.runAfterInteractions(() => {
+                    if (cancelled) return;
+                    startTransition(() => {
+                        setTracks(nextTracks);
+                        setArtists(nextArtists);
+                        setAlbums(nextAlbums);
+                        setPlaylists(nextPlaylists);
+                        setArtistArtworkOverrides(new Map());
+                        artistArtworkAttempted.current.clear();
+                        setHasResolvedSearch(true);
+                        setIsLoading(false);
+                    });
+                });
             })
             .catch((searchError: unknown) => {
                 if (cancelled) return;
-                setTracks([]);
-                setArtists([]);
-                setAlbums([]);
-                setPlaylists([]);
                 const message = searchError instanceof Error ? searchError.message : 'No se pudo consultar Tidal';
                 console.log(`${SOULSEEK_FLOW_LOG} mirror search error`, {
                     activeSourceTab,
                     query: currentQuery,
                     message,
                 });
-                setError(message);
-            })
-            .finally(() => {
-                if (!cancelled) {
+                startTransition(() => {
+                    setTracks([]);
+                    setArtists([]);
+                    setAlbums([]);
+                    setPlaylists([]);
+                    setError(message);
                     setHasResolvedSearch(true);
                     setIsLoading(false);
-                }
+                });
             });
 
         return () => {
             cancelled = true;
+            resultCommit?.cancel();
         };
     }, [activeSourceTab, committedQuery, searchRunId]);
 
@@ -722,7 +769,10 @@ export default function TidalScreen() {
                     results: nextResults.length,
                     folders: new Set(nextResults.map(result => `${result.match.username}:${getSoulseekFolderPath(result.match.filename || '')}`)).size,
                 });
-                setSoulseekResults(nextResults);
+                commitSoulseekResults(nextResults, () => {
+                    setHasResolvedSoulseekSearch(true);
+                    setIsSoulseekLoading(false);
+                }, () => !cancelled && !controller.signal.aborted);
             })
             .catch((searchError: unknown) => {
                 if (cancelled || controller.signal.aborted) return;
@@ -733,19 +783,17 @@ export default function TidalScreen() {
                 });
                 setSoulseekError(message);
                 setSoulseekResults([]);
-            })
-            .finally(() => {
-                if (!cancelled) {
-                    setHasResolvedSoulseekSearch(true);
-                    setIsSoulseekLoading(false);
-                }
+                setHasResolvedSoulseekSearch(true);
+                setIsSoulseekLoading(false);
             });
 
         return () => {
             cancelled = true;
             controller.abort();
+            soulseekResultCommitRef.current?.cancel();
+            soulseekResultCommitRef.current = null;
         };
-    }, [activeSourceTab, committedQuery, hasSoulseekCredentials, searchRunId, tidalDownloadQuality]);
+    }, [activeSourceTab, commitSoulseekResults, committedQuery, hasSoulseekCredentials, searchRunId, tidalDownloadQuality]);
 
     const handleSoulseekMatchDownload = useCallback(async (
         result: SoulseekSearchResult,
@@ -1642,254 +1690,357 @@ export default function TidalScreen() {
         { key: 'playlists' as const, label: 'Playlists' },
         { key: 'tracks' as const, label: 'Canciones' },
     ]), []);
-    return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
-            <ScrollView
-                contentContainerStyle={[styles.pageContent, { paddingBottom: styles.pageContent.paddingBottom + insets.bottom }]}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="on-drag"
-            >
-                <Animated.View style={styles.header}>
-                    <View pointerEvents="none" style={[styles.headerOrbit, { borderColor: withAlpha(theme.colors.primary, '24') }]} />
-                    <View pointerEvents="none" style={[styles.headerOrbitSecondary, { borderColor: withAlpha(theme.colors.tertiary ?? theme.colors.primary, '18') }]} />
-                    <View style={styles.headerTitleRow}>
-                        <View style={styles.headerTitleBlock}>
-                            <Text variant="headlineMedium" style={[styles.headerTitle, { color: theme.colors.onBackground }]}>Buscar</Text>
-                        </View>
-                        <Menu
-                            visible={showSettingsMenu}
-                            onDismiss={() => setShowSettingsMenu(false)}
-                            anchor={
-                                <IconButton
-                                    icon="cog-outline"
-                                    iconColor={theme.colors.onSurface}
-                                    size={20}
-                                    onPress={() => setShowSettingsMenu(true)}
-                                    style={styles.settingsButton}
-                                    containerColor={withAlpha(theme.colors.surfaceVariant, 'B8')}
-                                />
-                            }
-                            contentStyle={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}
-                        >
-                            <Menu.Item
-                                onPress={() => { setShowSettingsMenu(false); setShowQualityModal(true); }}
-                                title="Calidad de audio"
-                                leadingIcon="tune-variant"
-                            />
-                            <Divider style={{ opacity: 0.1 }} />
-                            <Menu.Item
-                                onPress={() => { setShowSettingsMenu(false); setShowMirrorModal(true); }}
-                                title="Servidor"
-                                leadingIcon="server-network"
-                            />
-                            <Divider style={{ opacity: 0.1 }} />
-                            <Menu.Item
-                                onPress={() => {
-                                    setShowSettingsMenu(false);
-                                    setHasSoulseekCredentials(false);
-                                }}
-                                title="Sesion Soulseek"
-                                leadingIcon="account-cog-outline"
-                            />
-                        </Menu>
-                    </View>
 
-                    <View
+    const visibleArtistResults = useMemo(
+        () => artists.slice(0, activeTab === 'all' ? 6 : artists.length),
+        [activeTab, artists],
+    );
+    const visibleAlbumResults = useMemo(
+        () => albums.slice(0, activeTab === 'all' ? 8 : albums.length),
+        [activeTab, albums],
+    );
+    const visiblePlaylistResults = useMemo(
+        () => playlists.slice(0, activeTab === 'all' ? 6 : playlists.length),
+        [activeTab, playlists],
+    );
+    const visibleTrackResults = useMemo(
+        () => tracks.slice(0, activeTab === 'all' ? 12 : tracks.length),
+        [activeTab, tracks],
+    );
+
+    const virtualListData = useMemo<TidalVirtualListItem[]>(() => {
+        if (activeSourceTab === 'soulseek' && !hasSoulseekCredentials) {
+            return [{ type: 'auth' }];
+        }
+
+        if (isSoulseekSource ? isSoulseekLoading : isLoading) {
+            return [{ type: 'loading' }];
+        }
+
+        if (isSoulseekSource ? soulseekError : error) {
+            return [{ type: 'error' }];
+        }
+
+        if (isSoulseekSource && hasCommittedQuery) {
+            if (hasResolvedSoulseekSearch && soulseekFolderGroups.length === 0) {
+                return [{ type: 'soulseek-empty' }];
+            }
+
+            const nextItems: TidalVirtualListItem[] = [{ type: 'soulseek-summary', count: soulseekResults.length }];
+            for (const group of soulseekFolderGroups) {
+                nextItems.push({ type: 'soulseek-folder-header', group });
+                for (const result of group.results) {
+                    nextItems.push({ type: 'soulseek-track', result });
+                }
+            }
+            return nextItems;
+        }
+
+        if (!hasQuery && !isFocused) {
+            return [{ type: 'discovery' }];
+        }
+
+        if (hasResolvedSearch && !tracks.length && !albums.length && !artists.length && !playlists.length) {
+            return [{ type: 'empty' }];
+        }
+
+        const nextItems: TidalVirtualListItem[] = [];
+        if ((activeTab === 'all' || activeTab === 'artists') && visibleArtistResults.length > 0) {
+            nextItems.push({ type: 'tidal-artists' });
+        }
+        if ((activeTab === 'all' || activeTab === 'albums') && visibleAlbumResults.length > 0) {
+            nextItems.push({ type: 'tidal-albums' });
+        }
+        if ((activeTab === 'all' || activeTab === 'playlists') && visiblePlaylistResults.length > 0) {
+            nextItems.push({ type: 'tidal-playlists' });
+        }
+        if ((activeTab === 'all' || activeTab === 'tracks') && visibleTrackResults.length > 0) {
+            nextItems.push({ type: 'tidal-tracks-header' });
+            for (const track of visibleTrackResults) {
+                nextItems.push({ type: 'tidal-track', track });
+            }
+        }
+        return nextItems;
+    }, [
+        activeSourceTab,
+        activeTab,
+        albums.length,
+        artists.length,
+        error,
+        hasCommittedQuery,
+        hasQuery,
+        hasResolvedSearch,
+        hasResolvedSoulseekSearch,
+        hasSoulseekCredentials,
+        isFocused,
+        isLoading,
+        isSoulseekLoading,
+        isSoulseekSource,
+        playlists.length,
+        soulseekError,
+        soulseekFolderGroups,
+        soulseekResults.length,
+        tracks.length,
+        visibleAlbumResults,
+        visibleArtistResults,
+        visiblePlaylistResults,
+        visibleTrackResults,
+    ]);
+
+    const virtualListKeyExtractor = useCallback((item: TidalVirtualListItem, index: number) => {
+        switch (item.type) {
+            case 'soulseek-folder-header':
+                return `soulseek-folder-${item.group.key}`;
+            case 'soulseek-track':
+                return `soulseek-track-${item.result.track.id}-${item.result.match.id ?? item.result.match.filename ?? index}`;
+            case 'tidal-track':
+                return `tidal-track-${item.track.id}`;
+            default:
+                return item.type;
+        }
+    }, []);
+    const getVirtualListItemType = useCallback((item: TidalVirtualListItem) => item.type, []);
+    const virtualListContentStyle = useMemo(
+        () => [styles.pageContent, { paddingBottom: styles.pageContent.paddingBottom + insets.bottom }],
+        [insets.bottom],
+    );
+    const virtualListExtraData = useMemo(() => ({
+        activeTidalTrackId,
+        downloads,
+        isPlayerPlaying,
+        pendingTrackPreviewId: pendingTrackPreview?.id ?? null,
+    }), [activeTidalTrackId, downloads, isPlayerPlaying, pendingTrackPreview?.id]);
+
+    const virtualListHeader = useMemo(() => (
+        <>
+            <Animated.View style={styles.header}>
+                <View pointerEvents="none" style={[styles.headerOrbit, { borderColor: withAlpha(theme.colors.primary, '24') }]} />
+                <View pointerEvents="none" style={[styles.headerOrbitSecondary, { borderColor: withAlpha(theme.colors.tertiary ?? theme.colors.primary, '18') }]} />
+                <View style={styles.headerTitleRow}>
+                    <View style={styles.headerTitleBlock}>
+                        <Text variant="headlineMedium" style={[styles.headerTitle, { color: theme.colors.onBackground }]}>Buscar</Text>
+                    </View>
+                    <Menu
+                        visible={showSettingsMenu}
+                        onDismiss={() => setShowSettingsMenu(false)}
+                        anchor={
+                            <IconButton
+                                icon="cog-outline"
+                                iconColor={theme.colors.onSurface}
+                                size={20}
+                                onPress={() => setShowSettingsMenu(true)}
+                                style={styles.settingsButton}
+                                containerColor={withAlpha(theme.colors.surfaceVariant, 'B8')}
+                            />
+                        }
+                        contentStyle={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}
+                    >
+                        <Menu.Item
+                            onPress={() => { setShowSettingsMenu(false); setShowQualityModal(true); }}
+                            title="Calidad de audio"
+                            leadingIcon="tune-variant"
+                        />
+                        <Divider style={{ opacity: 0.1 }} />
+                        <Menu.Item
+                            onPress={() => { setShowSettingsMenu(false); setShowMirrorModal(true); }}
+                            title="Servidor"
+                            leadingIcon="server-network"
+                        />
+                        <Divider style={{ opacity: 0.1 }} />
+                        <Menu.Item
+                            onPress={() => {
+                                setShowSettingsMenu(false);
+                                setHasSoulseekCredentials(false);
+                            }}
+                            title="Sesion Soulseek"
+                            leadingIcon="account-cog-outline"
+                        />
+                    </Menu>
+                </View>
+
+                <View style={[styles.searchShell, { borderColor: palette.searchBorder }]}>
+                    <Searchbar
+                        placeholder="Buscar"
+                        value={query}
+                        onChangeText={setQuery}
+                        onFocus={() => setIsFocused(true)}
+                        onBlur={() => setIsFocused(false)}
+                        onSubmitEditing={handleSubmitSearch}
+                        returnKeyType="search"
+                        submitBehavior="submit"
+                        style={[styles.searchbar, { backgroundColor: 'transparent', minHeight: 52 }]}
+                        iconColor={theme.colors.primary}
+                        inputStyle={[styles.searchInput, { color: theme.colors.onSurface }]}
+                        placeholderTextColor={withAlpha(theme.colors.onSurfaceVariant, '40')}
+                    />
+                </View>
+
+                <View style={styles.sourceTabsRow}>
+                    <Pressable onPress={() => handleSourceTabChange('tidal')} style={styles.sourceTab}>
+                        <Text style={[styles.sourceTabLabel, { color: !isSoulseekSource ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
+                            Tidal
+                        </Text>
+                        <View style={[styles.sourceTabUnderline, { backgroundColor: !isSoulseekSource ? theme.colors.primary : 'transparent' }]} />
+                    </Pressable>
+                    <Pressable onPress={() => handleSourceTabChange('soulseek')} style={styles.sourceTab}>
+                        <Text style={[styles.sourceTabLabel, { color: isSoulseekSource ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
+                            Soulseek
+                        </Text>
+                        <View style={[styles.sourceTabUnderline, { backgroundColor: isSoulseekSource ? theme.colors.primary : 'transparent' }]} />
+                    </Pressable>
+                </View>
+            </Animated.View>
+
+            {hasCommittedQuery ? (
+                <Animated.ScrollView
+                    horizontal
+                    showsHorizontalScrollIndicator={false}
+                    contentContainerStyle={styles.filterRow}
+                    style={styles.filterScroller}
+                >
+                    {resultTabs.map((tab) => {
+                        const selected = activeTab === tab.key;
+                        return (
+                            <Pressable key={tab.key} onPress={() => setActiveTab(tab.key)} style={styles.filterChip}>
+                                <View style={styles.filterChipInner}>
+                                    <Text style={[styles.filterChipLabel, { color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
+                                        {tab.label}
+                                    </Text>
+                                    <View style={[styles.filterChipUnderline, { backgroundColor: selected ? theme.colors.primary : 'transparent' }]} />
+                                </View>
+                            </Pressable>
+                        );
+                    })}
+                </Animated.ScrollView>
+            ) : null}
+
+            {searchHealthBanner && (hasCommittedQuery || hasQuery) ? (
+                <View
+                    style={[
+                        styles.searchBanner,
+                        {
+                            borderColor:
+                                searchHealthBanner.tone === 'error'
+                                    ? withAlpha(theme.colors.error, '66')
+                                    : withAlpha('#F59E0B', '66'),
+                            backgroundColor:
+                                searchHealthBanner.tone === 'error'
+                                    ? withAlpha(theme.colors.error, '14')
+                                    : withAlpha('#F59E0B', '14'),
+                        },
+                    ]}
+                >
+                    <Text
+                        variant="labelSmall"
                         style={[
-                            styles.searchShell,
+                            styles.searchBannerText,
                             {
-                                borderColor: palette.searchBorder,
+                                color:
+                                    searchHealthBanner.tone === 'error'
+                                        ? theme.colors.error
+                                        : withAlpha(theme.colors.onSurfaceVariant, 'DD'),
                             },
                         ]}
                     >
-                        <Searchbar
-                            placeholder="Buscar"
-                            value={query}
-                            onChangeText={setQuery}
-                            onFocus={() => setIsFocused(true)}
-                            onBlur={() => setIsFocused(false)}
-                            onSubmitEditing={handleSubmitSearch}
-                            returnKeyType="search"
-                            submitBehavior="submit"
-                            style={[
-                                styles.searchbar,
-                                {
-                                    backgroundColor: 'transparent',
-                                    minHeight: 52,
-                                }
-                            ]}
-                            iconColor={theme.colors.primary}
-                            inputStyle={[styles.searchInput, { color: theme.colors.onSurface }]}
-                            placeholderTextColor={withAlpha(theme.colors.onSurfaceVariant, '40')}
-                        />
-                    </View>
+                        {searchHealthBanner.tone === 'error' ? 'Servicio no disponible.' : 'Servicio inestable.'}
+                    </Text>
+                </View>
+            ) : null}
 
-                    <View style={styles.sourceTabsRow}>
-                        <Pressable
-                            onPress={() => handleSourceTabChange('tidal')}
-                            style={styles.sourceTab}
-                        >
-                            <Text style={[styles.sourceTabLabel, { color: !isSoulseekSource ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
-                                Tidal
-                            </Text>
-                            <View style={[styles.sourceTabUnderline, { backgroundColor: !isSoulseekSource ? theme.colors.primary : 'transparent' }]} />
-                        </Pressable>
-                        <Pressable
-                            onPress={() => handleSourceTabChange('soulseek')}
-                            style={styles.sourceTab}
-                        >
-                            <Text style={[styles.sourceTabLabel, { color: isSoulseekSource ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
-                                Soulseek
-                            </Text>
-                            <View style={[styles.sourceTabUnderline, { backgroundColor: isSoulseekSource ? theme.colors.primary : 'transparent' }]} />
-                        </Pressable>
+            {!hasQuery && isFocused && recentSearches.length > 0 ? (
+                <Animated.View entering={FadeInDown.duration(300)} style={styles.recentSection}>
+                    <View style={styles.sectionHeader}>
+                        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Búsquedas recientes</Text>
+                    </View>
+                    <View style={styles.recentSearchList}>
+                        {recentSearches.map((item, index) => (
+                            <Pressable
+                                key={item}
+                                onPress={() => applySuggestion(item)}
+                                style={[styles.recentSearchCard, { borderBottomColor: palette.cardBorder }]}
+                            >
+                                <Text style={[styles.recentSearchIndex, { color: withAlpha(theme.colors.onSurfaceVariant, 'CC') }]}>
+                                    {String(index + 1).padStart(2, '0')}
+                                </Text>
+                                <View style={styles.recentSearchContent}>
+                                    <Text numberOfLines={1} style={[styles.recentSearchTitle, { color: theme.colors.onSurface }]}>
+                                        {formatRecentSearchTitle(item)}
+                                    </Text>
+                                </View>
+                                <CustomIcon name="Next" size={16} color={theme.colors.onSurfaceVariant} />
+                            </Pressable>
+                        ))}
                     </View>
                 </Animated.View>
+            ) : null}
+        </>
+    ), [
+        activeTab,
+        applySuggestion,
+        handleSourceTabChange,
+        handleSubmitSearch,
+        hasCommittedQuery,
+        hasQuery,
+        isFocused,
+        isSoulseekSource,
+        palette.cardBorder,
+        palette.searchBorder,
+        query,
+        recentSearches,
+        resultTabs,
+        searchHealthBanner,
+        showSettingsMenu,
+        theme.colors,
+    ]);
 
-                {hasCommittedQuery ? (
-                    <Animated.ScrollView
-                        horizontal
-                        showsHorizontalScrollIndicator={false}
-                        contentContainerStyle={styles.filterRow}
-                        style={styles.filterScroller}
-                    >
-                        {resultTabs.map((tab) => {
-                            const selected = activeTab === tab.key;
-                            return (
-                                <Pressable
-                                    key={tab.key}
-                                    onPress={() => setActiveTab(tab.key)}
-                                    style={styles.filterChip}
-                                >
-                                    <View style={styles.filterChipInner}>
-                                        <Text style={[styles.filterChipLabel, { color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
-                                            {tab.label}
-                                        </Text>
-                                        <View
-                                            style={[
-                                                styles.filterChipUnderline,
-                                                { backgroundColor: selected ? theme.colors.primary : 'transparent' },
-                                            ]}
-                                        />
-                                    </View>
-                                </Pressable>
-                            );
-                        })}
-                    </Animated.ScrollView>
-                ) : null}
-
-                {searchHealthBanner && (hasCommittedQuery || hasQuery) ? (
-                    <View
-                        style={[
-                            styles.searchBanner,
-                            {
-                                borderColor:
-                                    searchHealthBanner.tone === 'error'
-                                        ? withAlpha(theme.colors.error, '66')
-                                        : withAlpha('#F59E0B', '66'),
-                                backgroundColor:
-                                    searchHealthBanner.tone === 'error'
-                                        ? withAlpha(theme.colors.error, '14')
-                                        : withAlpha('#F59E0B', '14'),
-                            },
-                        ]}
-                    >
-                        <Text
-                            variant="labelSmall"
-                            style={[
-                                styles.searchBannerText,
-                                {
-                                    color:
-                                        searchHealthBanner.tone === 'error'
-                                            ? theme.colors.error
-                                            : withAlpha(theme.colors.onSurfaceVariant, 'DD'),
-                                },
-                            ]}
-                        >
-                            {searchHealthBanner.tone === 'error'
-                                ? 'Servicio no disponible.'
-                                : 'Servicio inestable.'}
-                        </Text>
+    const renderVirtualListItem = useCallback(({ item }: ListRenderItemInfo<TidalVirtualListItem>) => {
+        switch (item.type) {
+            case 'auth':
+                return (
+                    <View style={styles.centered}>
+                        <View style={[styles.soulseekAuthPanel, { borderColor: palette.cardBorder, backgroundColor: palette.cardBackground }]}>
+                            <Text variant="titleMedium" style={[styles.soulseekAuthTitle, { color: theme.colors.onBackground }]}>
+                                Inicia sesion en Soulseek
+                            </Text>
+                            <TextInput
+                                mode="outlined"
+                                label="Usuario"
+                                value={soulseekUsername}
+                                onChangeText={setSoulseekUsername}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                style={styles.soulseekAuthInput}
+                            />
+                            <TextInput
+                                mode="outlined"
+                                label="Password"
+                                value={soulseekPassword}
+                                onChangeText={setSoulseekPassword}
+                                autoCapitalize="none"
+                                autoCorrect={false}
+                                secureTextEntry
+                                style={styles.soulseekAuthInput}
+                            />
+                            <Button
+                                mode="contained"
+                                onPress={handleSaveSoulseekCredentials}
+                                loading={isSavingSoulseekCredentials}
+                                disabled={isSavingSoulseekCredentials}
+                                contentStyle={styles.soulseekAuthButtonContent}
+                            >
+                                Guardar
+                            </Button>
+                        </View>
                     </View>
-                ) : null}
-
-                {!hasQuery && isFocused && recentSearches.length > 0 ? (
-                    <Animated.View entering={FadeInDown.duration(300)} style={styles.recentSection}>
-                        <View style={styles.sectionHeader}>
-                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Búsquedas recientes</Text>
-                        </View>
-                        <View style={styles.recentSearchList}>
-                            {recentSearches.map((item, index) => (
-                                <Pressable
-                                    key={item}
-                                    onPress={() => applySuggestion(item)}
-                                    style={[
-                                        styles.recentSearchCard,
-                                        {
-                                            borderBottomColor: palette.cardBorder,
-                                        },
-                                    ]}
-                                >
-                                    <Text style={[styles.recentSearchIndex, { color: withAlpha(theme.colors.onSurfaceVariant, 'CC') }]}>
-                                        {String(index + 1).padStart(2, '0')}
-                                    </Text>
-                                    <View style={styles.recentSearchContent}>
-                                        <Text numberOfLines={1} style={[styles.recentSearchTitle, { color: theme.colors.onSurface }]}>
-                                            {formatRecentSearchTitle(item)}
-                                        </Text>
-                                    </View>
-                                    <CustomIcon name="Next" size={16} color={theme.colors.onSurfaceVariant} />
-                                </Pressable>
-                            ))}
-                        </View>
-                    </Animated.View>
-                ) : null}
-
-                {activeSourceTab === 'soulseek' && !hasSoulseekCredentials ? (
-                        <View style={styles.centered}>
-                            <View style={[styles.soulseekAuthPanel, { borderColor: palette.cardBorder, backgroundColor: palette.cardBackground }]}>
-                                <Text variant="titleMedium" style={[styles.soulseekAuthTitle, { color: theme.colors.onBackground }]}>
-                                    Inicia sesion en Soulseek
-                                </Text>
-                                <TextInput
-                                    mode="outlined"
-                                    label="Usuario"
-                                    value={soulseekUsername}
-                                    onChangeText={setSoulseekUsername}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    style={styles.soulseekAuthInput}
-                                />
-                                <TextInput
-                                    mode="outlined"
-                                    label="Password"
-                                    value={soulseekPassword}
-                                    onChangeText={setSoulseekPassword}
-                                    autoCapitalize="none"
-                                    autoCorrect={false}
-                                    secureTextEntry
-                                    style={styles.soulseekAuthInput}
-                                />
-                                <Button
-                                    mode="contained"
-                                    onPress={handleSaveSoulseekCredentials}
-                                    loading={isSavingSoulseekCredentials}
-                                    disabled={isSavingSoulseekCredentials}
-                                    contentStyle={styles.soulseekAuthButtonContent}
-                                >
-                                    Guardar
-                                </Button>
-                            </View>
-                        </View>
-                ) : (isSoulseekSource ? isSoulseekLoading : isLoading) ? (
+                );
+            case 'loading':
+                return (
                     <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(220)} style={styles.resultsContent}>
                         {(activeTab === 'all' || activeTab === 'artists') && (
                             <View style={styles.section}>
                                 <View style={styles.sectionHeader}>
                                     <Skeleton height={24} width={100} borderRadius={6} />
                                 </View>
-                                {/* Masonry skeleton: two columns */}
                                 <View style={styles.gridContainer}>
                                     <View style={styles.gridColumn}>
                                         <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
@@ -1902,7 +2053,6 @@ export default function TidalScreen() {
                                 </View>
                             </View>
                         )}
-
                         {(activeTab === 'all' || activeTab === 'albums') && (
                             <View style={styles.section}>
                                 <View style={styles.sectionHeader}>
@@ -1920,7 +2070,6 @@ export default function TidalScreen() {
                                 </View>
                             </View>
                         )}
-
                         {(activeTab === 'all' || activeTab === 'tracks') && (
                             <View style={styles.section}>
                                 <View style={styles.sectionHeader}>
@@ -1944,49 +2093,55 @@ export default function TidalScreen() {
                             </View>
                         )}
                     </Animated.View>
-                ) : (isSoulseekSource ? soulseekError : error) ? (
+                );
+            case 'error':
+                return (
                     <View style={styles.centered}>
                         <EmptyState
                             title={isSoulseekSource ? 'No se pudo cargar Soulseek' : 'No se pudo cargar Tidal'}
                             description={(isSoulseekSource ? soulseekError : error) ?? undefined}
                         />
                     </View>
-                ) : isSoulseekSource && hasCommittedQuery ? (
-                    hasResolvedSoulseekSearch && soulseekFolderGroups.length === 0 ? (
-                        <View style={styles.centered}>
-                            <EmptyState title="Sin resultados" description={`No encontramos resultados para "${committedQuery.trim()}"`} />
+                );
+            case 'soulseek-empty':
+                return (
+                    <View style={styles.centered}>
+                        <EmptyState title="Sin resultados" description={`No encontramos resultados para "${committedQuery.trim()}"`} />
+                    </View>
+                );
+            case 'soulseek-summary':
+                return (
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Carpetas</Text>
+                            <Text style={[typeScale.micro, { color: theme.colors.onSurfaceVariant }]}>
+                                {item.count} pistas
+                            </Text>
                         </View>
-                    ) : (
-                        <Animated.View key={`soulseek-results-${committedQuery}-${searchRunId}`} entering={FadeInDown.duration(260)} exiting={FadeOut.duration(180)} style={styles.resultsContent}>
-                            <View style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Carpetas</Text>
-                                    <Text style={[typeScale.micro, { color: theme.colors.onSurfaceVariant }]}>
-                                        {soulseekResults.length} pistas
-                                    </Text>
-                                </View>
-                                {soulseekFolderGroups.map(group => (
-                                    <View key={group.key} style={styles.soulseekFolderGroup}>
-                                        <View style={[styles.soulseekFolderHeader, { borderBottomColor: palette.cardBorder }]}>
-                                            <View style={styles.soulseekFolderTitleBlock}>
-                                                <Text numberOfLines={1} style={[styles.soulseekFolderPath, { color: theme.colors.onSurface }]}>
-                                                    {group.folderPath}
-                                                </Text>
-                                                <Text numberOfLines={1} style={[styles.soulseekFolderPeer, { color: withAlpha(theme.colors.onSurfaceVariant, 'B8') }]}>
-                                                    {group.username}
-                                                </Text>
-                                            </View>
-                                            <Text style={[styles.soulseekFolderCount, { color: theme.colors.onSurfaceVariant }]}>
-                                                {group.results.length}
-                                            </Text>
-                                        </View>
-                                        {group.results.map(renderSoulseekTrackRow)}
-                                    </View>
-                                ))}
+                    </View>
+                );
+            case 'soulseek-folder-header':
+                return (
+                    <View style={styles.soulseekVirtualGroupHeader}>
+                        <View style={[styles.soulseekFolderHeader, { borderBottomColor: palette.cardBorder }]}>
+                            <View style={styles.soulseekFolderTitleBlock}>
+                                <Text numberOfLines={1} style={[styles.soulseekFolderPath, { color: theme.colors.onSurface }]}>
+                                    {item.group.folderPath}
+                                </Text>
+                                <Text numberOfLines={1} style={[styles.soulseekFolderPeer, { color: withAlpha(theme.colors.onSurfaceVariant, 'B8') }]}>
+                                    {item.group.username}
+                                </Text>
                             </View>
-                        </Animated.View>
-                    )
-                ) : !hasQuery && !isFocused ? (
+                            <Text style={[styles.soulseekFolderCount, { color: theme.colors.onSurfaceVariant }]}>
+                                {item.group.results.length}
+                            </Text>
+                        </View>
+                    </View>
+                );
+            case 'soulseek-track':
+                return <View style={styles.virtualTrackRow}>{renderSoulseekTrackRow(item.result)}</View>;
+            case 'discovery':
+                return (
                     <Animated.View entering={FadeInDown.duration(320)} style={styles.discoveryContainer}>
                         {isRecommending && recommendedTracks.length === 0 ? (
                             <View style={styles.sectionNoPadding}>
@@ -2013,11 +2168,7 @@ export default function TidalScreen() {
                                 <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
                                     {recommendedTracks.map(track => (
                                         <Pressable key={track.id} onPress={() => handleTidalPlay(track)} style={styles.trackCard}>
-                                            <Image
-                                                source={track.artworkUrl ? { uri: track.artworkUrl } : undefined}
-                                                style={styles.trackCardImage}
-                                                contentFit="cover"
-                                            />
+                                            <Image source={track.artworkUrl ? { uri: track.artworkUrl } : undefined} style={styles.trackCardImage} contentFit="cover" />
                                             <View style={styles.trackCardContent}>
                                                 <Text numberOfLines={1} style={[styles.trackCardTitle, { color: theme.colors.onSurface }]}>{track.title}</Text>
                                                 <Text numberOfLines={1} style={[styles.trackCardArtist, { color: theme.colors.onSurfaceVariant }]}>{track.artist}</Text>
@@ -2080,11 +2231,7 @@ export default function TidalScreen() {
                                             <Pressable key={artist.id} onPress={() => openArtist(artist)} style={styles.artistCircleCard}>
                                                 <View style={[styles.artistCircleImage, { backgroundColor: theme.colors.surfaceVariant + '60', justifyContent: 'center', alignItems: 'center' }]}>
                                                     {finalArtwork ? (
-                                                        <Image
-                                                            source={{ uri: finalArtwork }}
-                                                            style={StyleSheet.absoluteFill}
-                                                            contentFit="cover"
-                                                        />
+                                                        <Image source={{ uri: finalArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" />
                                                     ) : (
                                                         <CustomIcon name="Artista" size={24} color={theme.colors.onSurfaceVariant + '80'} />
                                                     )}
@@ -2097,52 +2244,96 @@ export default function TidalScreen() {
                             </View>
                         ) : null}
                     </Animated.View>
-                ) : hasResolvedSearch && !tracks.length && !albums.length && !artists.length && !playlists.length ? (
+                );
+            case 'empty':
+                return (
                     <View style={styles.centered}>
                         <EmptyState title="Sin resultados" description={`No encontramos resultados para "${committedQuery.trim()}"`} />
                     </View>
-                ) : (
-                    <Animated.View key={`results-${committedQuery}-${searchRunId}`} entering={FadeInDown.duration(260)} exiting={FadeOut.duration(180)} style={styles.resultsContent}>
-                        {(activeTab === 'all' || activeTab === 'artists') && artists.length > 0 ? (
-                            <View style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Artistas</Text>
-                                </View>
-                                {<MasonryGrid items={artists.slice(0, activeTab === 'all' ? 6 : artists.length)} type="artists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />}
-                            </View>
-                        ) : null}
-
-                        {(activeTab === 'all' || activeTab === 'albums') && albums.length > 0 ? (
-                            <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Álbumes</Text>
-                                </View>
-                                {<MasonryGrid items={albums.slice(0, activeTab === 'all' ? 8 : albums.length)} type="albums" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />}
-                            </Animated.View>
-                        ) : null}
-
-                        {(activeTab === 'all' || activeTab === 'playlists') && playlists.length > 0 ? (
-                            <Animated.View entering={FadeInDown.delay(250).duration(400)} style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Playlists</Text>
-                                </View>
-                                {<MasonryGrid items={playlists.slice(0, activeTab === 'all' ? 6 : playlists.length)} type="playlists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />}
-                            </Animated.View>
-                        ) : null}
-
-                        {(activeTab === 'all' || activeTab === 'tracks') && tracks.length > 0 ? (
-                            <Animated.View entering={FadeInDown.delay(300).duration(400)} style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Canciones</Text>
-                                </View>
-                                {tracks
-                                    .slice(0, activeTab === 'all' ? 12 : tracks.length)
-                                    .map(isSoulseekSource ? renderSoulseekMirrorTrackRow : renderTrackRow)}
-                            </Animated.View>
-                        ) : null}
+                );
+            case 'tidal-artists':
+                return (
+                    <View style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Artistas</Text>
+                        </View>
+                        <MasonryGrid items={visibleArtistResults} type="artists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />
+                    </View>
+                );
+            case 'tidal-albums':
+                return (
+                    <Animated.View entering={FadeInDown.delay(120).duration(260)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Álbumes</Text>
+                        </View>
+                        <MasonryGrid items={visibleAlbumResults} type="albums" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />
                     </Animated.View>
-                )}
-            </ScrollView>
+                );
+            case 'tidal-playlists':
+                return (
+                    <Animated.View entering={FadeInDown.delay(160).duration(260)} style={styles.section}>
+                        <View style={styles.sectionHeader}>
+                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Playlists</Text>
+                        </View>
+                        <MasonryGrid items={visiblePlaylistResults} type="playlists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />
+                    </Animated.View>
+                );
+            case 'tidal-tracks-header':
+                return (
+                    <View style={styles.sectionHeaderOnly}>
+                        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Canciones</Text>
+                    </View>
+                );
+            case 'tidal-track':
+                return <View style={styles.virtualTrackRow}>{isSoulseekSource ? renderSoulseekMirrorTrackRow(item.track) : renderTrackRow(item.track)}</View>;
+            default:
+                return null;
+        }
+    }, [
+        activeTab,
+        applyGenreSuggestion,
+        artistArtworkOverrides,
+        committedQuery,
+        error,
+        fetchHomeRecommendations,
+        handleSaveSoulseekCredentials,
+        handleTidalPlay,
+        isRecommending,
+        isSavingSoulseekCredentials,
+        isSoulseekSource,
+        openAlbum,
+        openArtist,
+        openPlaylist,
+        palette.cardBackground,
+        palette.cardBorder,
+        recommendedArtists,
+        recommendedTracks,
+        renderSoulseekMirrorTrackRow,
+        renderSoulseekTrackRow,
+        renderTrackRow,
+        soulseekError,
+        soulseekPassword,
+        soulseekUsername,
+        theme.colors,
+        visibleAlbumResults,
+        visibleArtistResults,
+        visiblePlaylistResults,
+    ]);
+    return (
+        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
+            <FlashList
+                data={virtualListData}
+                extraData={virtualListExtraData}
+                renderItem={renderVirtualListItem}
+                keyExtractor={virtualListKeyExtractor}
+                ListHeaderComponent={virtualListHeader}
+                contentContainerStyle={virtualListContentStyle}
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
+                keyboardDismissMode="none"
+                drawDistance={640}
+                getItemType={getVirtualListItemType}
+            />
 
             {/* Mirror Selection Modal */}
             <Modal
@@ -2630,6 +2821,11 @@ const styles = StyleSheet.create({
     soulseekFolderGroup: {
         marginBottom: 8,
     },
+    soulseekVirtualGroupHeader: {
+        paddingHorizontal: 16,
+        marginTop: 4,
+        marginBottom: 8,
+    },
     soulseekFolderHeader: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -2710,6 +2906,10 @@ const styles = StyleSheet.create({
         marginBottom: 28,
         paddingHorizontal: 16,
     },
+    sectionHeaderOnly: {
+        paddingHorizontal: 16,
+        marginBottom: 10,
+    },
     sectionHeader: {
         flexDirection: 'row',
         alignItems: 'center',
@@ -2728,6 +2928,9 @@ const styles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         gap: 10,
+    },
+    virtualTrackRow: {
+        paddingHorizontal: 16,
     },
     trackRowActiveOverlay: {
         borderRadius: 18,

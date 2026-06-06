@@ -21,6 +21,8 @@ data class LyricWord(
     var width: Float = 0f,      // Pre-computed width
     var glyphUnits: List<LyricGlyphUnit> = emptyList(),
     var drawableGlyphCount: Int = 0,
+    var isGap: Boolean = false,
+    var romanizedText: String? = null,
 )
 
 data class LyricGlyphUnit(
@@ -44,7 +46,16 @@ data class LyricLine(
     var backgroundTopOffset: Float = 0f,
     var backgroundHeight: Float = 0f,
     var focusCenterYOffset: Float = 0f,
-    var backgroundPlacement: BackgroundPlacement = BackgroundPlacement.AFTER
+    var backgroundPlacement: BackgroundPlacement = BackgroundPlacement.AFTER,
+    var isGap: Boolean = false,
+    var translatedText: String? = null,
+    var romanizedText: String? = null,
+    var translationRows: List<String> = emptyList(),
+    var translationY: Float = 0f,
+    var translationHeight: Float = 0f,
+    var romanizationRows: List<String> = emptyList(),
+    var romanizationY: Float = 0f,
+    var romanizationHeight: Float = 0f,
 )
 
 internal object LyricsVisualWords {

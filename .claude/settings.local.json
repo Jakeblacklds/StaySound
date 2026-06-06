@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(./gradlew :karaoke-view:compileDebugKotlin)",
+      "Bash(./gradlew :karaoke-view:testDebugUnitTest)",
+      "Bash(git stash *)",
+      "Bash(./gradlew :karaoke-view:testDebugUnitTest --tests \"*LyricsRepositoryTest*\")",
+      "Bash(./gradlew :karaoke-view:testDebugUnitTest --tests \"*LyricsVisualWordsTest*\")",
+      "Bash(npx tsc *)",
+      "Bash(npx patch-package *)",
+      "Bash(./gradlew projects *)",
+      "Bash(./gradlew :karaoke-view:compileDebugKotlin --console=plain)",
+      "Bash(find src *)",
+      "Bash(ls src/components/player/backgrounds/)",
+      "Bash(./gradlew :karaoke-view:compileDebugKotlin -q)",
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\),indent=2\\)\\)\")"
+    ]
+  }
+}

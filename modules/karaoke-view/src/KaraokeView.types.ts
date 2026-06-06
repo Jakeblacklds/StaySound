@@ -64,6 +64,16 @@ export interface KaraokeViewProps extends ViewProps {
     /** Enables the suspended shimmer particles around the active lyric sweep */
     enableSpectralParticles?: boolean;
 
+    /**
+     * ExoPlayer audio session id used to capture the live audio spectrum (FFT) for
+     * the bottom "aurora ridge" visualizer. Pass 0 (or omit) to disable capture.
+     * Obtain it from `getAndroidEqualizerAudioSessionId()`.
+     */
+    audioSessionId?: number;
+
+    /** Enables the discreet bottom audio-reactive "aurora ridge" spectrum visualizer */
+    enableBottomSpectrum?: boolean;
+
     /** Selects the visual ambience profile used around the lyric sweep */
     motionProfile?: KaraokeMotionProfile;
 

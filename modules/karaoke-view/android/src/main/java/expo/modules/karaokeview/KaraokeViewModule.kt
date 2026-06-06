@@ -105,6 +105,18 @@ class KaraokeViewModule : Module() {
                 view.setEnableSpectralParticles(value ?: true)
             }
 
+            Prop("audioSessionId") { view: KaraokeView, value: Int? ->
+                view.setAudioSessionId(value ?: 0)
+            }
+
+            Prop("enableBottomSpectrum") { view: KaraokeView, value: Boolean? ->
+                view.setEnableBottomSpectrum(value ?: false)
+            }
+
+            Prop("displayMode") { view: KaraokeView, value: String? ->
+                view.setDisplayMode(value)
+            }
+
             Prop("motionProfile") { view: KaraokeView, value: String? ->
                 view.setMotionProfile(value)
             }
