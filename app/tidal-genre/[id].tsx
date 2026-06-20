@@ -1,23 +1,26 @@
-import { EmptyState, Skeleton, CustomIcon } from '@/src/components/ui';
-import { useTidalDownload } from '@/src/hooks';
-import { 
+import { EmptyState, Skeleton } from '@/src/components/ui';
+import {
+    DetailTopBar,
+    GlassPanel,
+    TidalAtmosphere,
+    TidalAtmosphereColors,
+} from '@/src/components/tidal';
+import {
     getArtworkUrl,
     getPlaylistArtworkUrl,
-    searchTidal, 
-    searchTidalPlaylists, 
+    searchTidal,
+    searchTidalPlaylists,
     extractAlbumsFromTracks
 } from '@/src/services/tidalService';
-import { useLibraryStore, usePlayerStore } from '@/src/stores';
-import { useTheme, typeScale } from '@/src/theme';
-import { TidalTrack, TidalPlaylist, TidalAlbum } from '@/src/types/audio';
-import { BlurView } from 'expo-blur';
+import { useTheme, typeScale, withAlpha, radius } from '@/src/theme';
+import { TidalTrack, TidalPlaylist } from '@/src/types/audio';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useState, useMemo } from 'react';
-import { Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
-import { IconButton, Text } from 'react-native-paper';
-import Animated, { FadeInDown } from 'react-native-reanimated';
+import { Pressable, StatusBar, StyleSheet, View } from 'react-native';
+import { Text } from 'react-native-paper';
+import Animated, { FadeIn, FadeInDown, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const CARD_HEIGHT_SQUARE = 180;
@@ -25,10 +28,6 @@ const CARD_HEIGHT_TALL = 260;
 const GENRE_GRID_INITIAL_ITEMS = 16;
 const GENRE_GRID_PAGE_SIZE = 16;
 const GENRE_GRID_MAX_ITEMS = 96;
-
-function withAlpha(color: string, alpha: string): string {
-    return color.length === 7 ? color + alpha : color;
-}
 
 function normalizeCardImageUri(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined;
@@ -166,7 +165,7 @@ const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, is
     const fallbackBg = theme.colors.surfaceVariant || '#1E1E1E';
 
     return (
-        <View style={{ height, borderRadius: 28, overflow: 'hidden', backgroundColor: fallbackBg, marginBottom: 12 }}>
+        <View style={{ height, borderRadius: radius.xl, overflow: 'hidden', backgroundColor: fallbackBg, marginBottom: 12, borderWidth: StyleSheet.hairlineWidth, borderColor: withAlpha(theme.colors.outline, '40') }}>
             <Pressable onPress={onPress} style={StyleSheet.absoluteFill}>
                 <View style={[StyleSheet.absoluteFill, { backgroundColor: fallbackBg }]} />
                 {imageUri && (
@@ -197,6 +196,15 @@ export default function TidalGenreScreen() {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [visibleCount, setVisibleCount] = useState(GENRE_GRID_INITIAL_ITEMS);
+    const [atmos, setAtmos] = useState<TidalAtmosphereColors | null>(null);
+    const accentColor = atmos?.colors.primary ?? theme.colors.primary;
+    const scrollY = useSharedValue(0);
+
+    const scrollHandler = useAnimatedScrollHandler({
+        onScroll: (event) => {
+            scrollY.value = event.contentOffset.y;
+        },
+    });
 
     const albums = useMemo(() => extractAlbumsFromTracks(tracks), [tracks]);
 
@@ -276,6 +284,11 @@ export default function TidalGenreScreen() {
         setVisibleCount(prev => Math.min(prev + GENRE_GRID_PAGE_SIZE, mergedResults.length));
     }, [mergedResults.length]);
 
+    const atmosphereUri = useMemo(
+        () => normalizeCardImageUri(mergedResults[0]?.data?.artworkUrl),
+        [mergedResults]
+    );
+
     const renderGrid = () => {
         const leftCol = visibleResults.filter((_, i) => i % 2 === 0);
         const rightCol = visibleResults.filter((_, i) => i % 2 !== 0);
@@ -345,23 +358,26 @@ export default function TidalGenreScreen() {
     }
 
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
             <Stack.Screen options={{ headerShown: false }} />
-            <StatusBar barStyle="light-content" />
+            <StatusBar barStyle={theme.id.includes('dark') ? 'light-content' : 'dark-content'} />
 
-            <View style={[styles.backButton, { top: insets.top + 8 }]}>
-                <BlurView intensity={20} tint="dark" style={styles.backButtonBlur}>
-                    <IconButton icon="arrow-left" iconColor="#FFFFFF" onPress={() => router.back()} />
-                </BlurView>
-            </View>
+            <TidalAtmosphere sourceUri={atmosphereUri} mode="fog" scrollY={scrollY} onColors={setAtmos} />
 
-            <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 60 }]}>
-                <View style={styles.headerTitleContainer}>
-                    <Text variant="headlineMedium" style={[styles.genreTitle, { color: theme.colors.onBackground }]}>
+            <DetailTopBar title={name ?? 'Género'} scrollY={scrollY} threshold={120} onBack={() => router.back()} />
+
+            <Animated.ScrollView
+                onScroll={scrollHandler}
+                scrollEventThrottle={16}
+                contentContainerStyle={[styles.content, { paddingTop: insets.top + 64 }]}
+                showsVerticalScrollIndicator={false}
+            >
+                <Animated.View entering={FadeIn.duration(450)} style={styles.headerTitleContainer}>
+                    <Text style={[styles.kicker, { color: accentColor }]}>GÉNERO</Text>
+                    <Text style={[styles.genreTitle, { color: theme.colors.onBackground }]}>
                         {name}
                     </Text>
-                    <View style={[styles.titleAccent, { backgroundColor: theme.colors.primary }]} />
-                </View>
+                </Animated.View>
 
                 {error ? (
                     <EmptyState title="Error" description={error} />
@@ -369,41 +385,31 @@ export default function TidalGenreScreen() {
                     <Animated.View entering={FadeInDown.delay(100)} style={styles.section}>
                         {renderGrid()}
                         {hasMoreResults ? (
-                            <Pressable
-                                onPress={loadMoreResults}
-                                style={({ pressed }) => [
-                                    styles.loadMoreButton,
-                                    {
-                                        backgroundColor: withAlpha(theme.colors.surfaceVariant || theme.colors.surface, 'E8'),
-                                        borderColor: withAlpha(theme.colors.outline, '2E'),
-                                    },
-                                    pressed && { opacity: 0.86 },
-                                ]}
-                            >
-                                <Text style={[styles.loadMoreLabel, { color: theme.colors.onSurface }]}>
-                                    Cargar mas
-                                </Text>
-                                <Text style={[styles.loadMoreMeta, { color: theme.colors.onSurfaceVariant }]}>
-                                    Mostrando {visibleResults.length} de {mergedResults.length}
-                                </Text>
+                            <Pressable onPress={loadMoreResults} style={({ pressed }) => [{ opacity: pressed ? 0.86 : 1 }]}>
+                                <GlassPanel style={styles.loadMoreButton} radius={radius.lg}>
+                                    <Text style={[styles.loadMoreLabel, { color: theme.colors.onSurface }]}>
+                                        Cargar más
+                                    </Text>
+                                    <Text style={[styles.loadMoreMeta, { color: theme.colors.onSurfaceVariant }]}>
+                                        Mostrando {visibleResults.length} de {mergedResults.length}
+                                    </Text>
+                                </GlassPanel>
                             </Pressable>
                         ) : null}
                     </Animated.View>
                 )}
-            </ScrollView>
-        </SafeAreaView>
+            </Animated.ScrollView>
+        </View>
     );
 }
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
     header: { flexDirection: 'row', alignItems: 'center', gap: 16, padding: 16 },
-    backButton: { position: 'absolute', left: 16, zIndex: 10 },
-    backButtonBlur: { borderRadius: 20, overflow: 'hidden' },
-    content: { paddingBottom: 100 },
-    headerTitleContainer: { paddingHorizontal: 16, marginBottom: 24 },
-    genreTitle: { fontWeight: '900', letterSpacing: -1 },
-    titleAccent: { height: 4, width: 40, marginTop: 4, borderRadius: 2 },
+    content: { paddingBottom: 120 },
+    headerTitleContainer: { paddingHorizontal: 16, marginBottom: 24, gap: 6 },
+    kicker: { ...typeScale.micro, letterSpacing: 1.6 },
+    genreTitle: { ...typeScale.hero },
     section: { paddingHorizontal: 16 },
     gridWrapper: { flexDirection: 'row', gap: 12 },
     gridColumn: { flex: 1 },
@@ -435,8 +441,6 @@ const styles = StyleSheet.create({
     loadMoreButton: {
         marginTop: 16,
         marginBottom: 12,
-        borderRadius: 20,
-        borderWidth: 1,
         paddingVertical: 14,
         paddingHorizontal: 16,
         alignItems: 'center',

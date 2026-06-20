@@ -1,11 +1,13 @@
 import { AlbumCard, CustomIcon, EmptyState } from '@/src/components/ui';
+import { TidalAtmosphere } from '@/src/components/tidal';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n, type TranslationKey } from '@/src/i18n';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
-import { useLibraryStore, usePlayerStore } from '@/src/stores';
+import { createTidalStreamTrack } from '@/src/services/tidalService';
+import { useLibraryStore, useNotificationStore, usePlayerStore } from '@/src/stores';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
-import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
-import { Album, Track } from '@/src/types';
+import { typeScale, usePerformanceProfile, useTheme } from '@/src/theme';
+import { Album, TidalTrack, Track } from '@/src/types';
 import { FlashList } from '@shopify/flash-list';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
@@ -37,6 +39,40 @@ function getGreeting(t: (key: TranslationKey) => string): string {
   if (hour < 12) return t('home.greeting.morning');
   if (hour < 18) return t('home.greeting.afternoon');
   return t('home.greeting.night');
+}
+
+function getTrackTidalId(track: Track): number | null {
+  if (typeof track.tidalId === 'number' && Number.isFinite(track.tidalId)) {
+    return track.tidalId;
+  }
+
+  const match = track.id?.match(/^tidal(?:_stream)?_(\d+)$/);
+  if (!match) return null;
+
+  const parsed = Number(match[1]);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function toTidalTrackPayload(track: Track): TidalTrack | null {
+  const tidalId = getTrackTidalId(track);
+  if (!tidalId) return null;
+
+  return {
+    id: tidalId,
+    title: track.title,
+    artist: track.artist,
+    album: track.album,
+    durationMs: track.duration,
+    quality: track.quality || 'LOSSLESS',
+    isHiRes: (track.quality || '').toUpperCase().includes('HI_RES'),
+    artworkUrl: track.artwork,
+    trackNumber: track.trackNumber,
+    year: track.year,
+    sampleRate: track.sampleRate,
+    bitDepth: track.bitDepth,
+    codec: track.codec,
+    albumId: track.tidalAlbumId,
+  };
 }
 
 const HeroCarouselDot = React.memo(({
@@ -401,6 +437,8 @@ export default function HomeScreen() {
   const play = usePlayerStore(s => s.play);
   const addToQueue = usePlayerStore(s => s.addToQueue);
   const recentlyPlayed = usePlayerStore(s => s.recentlyPlayed);
+  const setPendingTrackPreview = usePlayerStore(s => s.setPendingTrackPreview);
+  const showNotification = useNotificationStore(s => s.showNotification);
   const { userName, userAvatarUri } = useOnboardingStore();
 
   const toValues = useCallback(<T,>(source: unknown): T[] => {
@@ -452,8 +490,46 @@ export default function HomeScreen() {
   const horizontalDrawDistance = performanceProfile.reducedListWindowing ? TRACK_CARD_WIDTH : TRACK_CARD_WIDTH * 2;
 
   const handleTrackPress = useCallback((track: Track) => {
-    play(track, tracks);
-  }, [tracks, play]);
+    const libraryTrack = tracks.find(item => item.id === track.id);
+    if (libraryTrack) {
+      void play(libraryTrack, tracks);
+      return;
+    }
+
+    const tidalId = getTrackTidalId(track);
+    const downloadedTidalTrack = tidalId
+      ? tracks.find(item => item.id === `tidal_${tidalId}`)
+      : undefined;
+    if (downloadedTidalTrack) {
+      void play(downloadedTidalTrack, [downloadedTidalTrack]);
+      return;
+    }
+
+    const tidalPayload = toTidalTrackPayload(track);
+    if (!tidalPayload) {
+      void play(track, [track]);
+      return;
+    }
+
+    setPendingTrackPreview({
+      id: track.id,
+      title: track.title,
+      artist: track.artist,
+      artwork: track.artwork,
+      tidalId: tidalPayload.id,
+    });
+
+    void (async () => {
+      try {
+        const streamTrack = await createTidalStreamTrack(tidalPayload, { qobuzOnly: true });
+        await play(streamTrack, [streamTrack]);
+      } catch (error) {
+        setPendingTrackPreview(null);
+        const message = error instanceof Error ? error.message : 'No se pudo reproducir esta pista';
+        showNotification(message, 'error');
+      }
+    })();
+  }, [play, setPendingTrackPreview, showNotification, tracks]);
 
   const handleTrackLongPress = useCallback((track: Track) => {
     openTrackActionsMenu({
@@ -480,11 +556,14 @@ export default function HomeScreen() {
   const trackKeyExtractor = useCallback((item: Track) => item.id, []);
   const renderHorizontalSeparator = useCallback(() => <View style={styles.listSeparator} />, []);
 
-  const aC = useAnimatedColors();
-  const animBg = useAnimatedStyle(() => ({ backgroundColor: aC.background.value }));
+  const heroArtwork = useMemo(
+    () => heroTracks[0]?.artwork ?? recentlyPlayedSlice[0]?.artwork ?? recentlyAddedTracks[0]?.artwork,
+    [heroTracks, recentlyAddedTracks, recentlyPlayedSlice]
+  );
 
   return (
-    <Animated.View style={[styles.container, animBg]}>
+    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+      <TidalAtmosphere sourceUri={heroArtwork} mode="fog" />
       <ScrollView
         style={styles.container}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 6, paddingBottom: styles.content.paddingBottom + insets.bottom }]}
@@ -606,7 +685,7 @@ export default function HomeScreen() {
 
         <View style={styles.bottomSpacer} />
       </ScrollView>
-    </Animated.View>
+    </View>
   );
 }
 

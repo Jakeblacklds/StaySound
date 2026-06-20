@@ -22,7 +22,7 @@ object KaraokePcmSpectrumBridge {
 
     // Approximate audio-output latency (sink/AudioTrack buffering). Increase if the
     // visualizer still leads the sound; decrease if it lags behind it.
-    private const val DEFAULT_RENDER_DELAY_MS = 350L
+    private const val DEFAULT_RENDER_DELAY_MS = 380L
     private const val MAX_RENDER_DELAY_MS = 650L
 
     // ~64 frames of history. At hop=512 / 44.1kHz (~11.6ms/frame) that's ~740ms,

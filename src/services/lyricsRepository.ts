@@ -18,6 +18,11 @@ export interface AppleWordLyricsCandidate {
   payload: LyricsPayload;
   lyricsUrl?: string;
   timingType?: string;
+  trackName?: string;
+  artistName?: string;
+  albumName?: string;
+  durationSec?: number;
+  isExactMatch: boolean;
 }
 
 type AppleWordLyricsCachePayload = {
@@ -25,8 +30,8 @@ type AppleWordLyricsCachePayload = {
 };
 
 class LyricsRepositoryService {
-  private readonly APPLE_CACHE_PREFIX = 'apple-word-cache-v2';
-  private readonly TRACK_APPLE_CACHE_PREFIX = 'apple-word-track-cache-v2';
+  private readonly APPLE_CACHE_PREFIX = 'apple-word-cache-v3';
+  private readonly TRACK_APPLE_CACHE_PREFIX = 'apple-word-track-cache-v3';
   private readonly LRC_CACHE_PREFIX = 'lrc-lib-cache-v1';
   private readonly TRACK_LRC_CACHE_PREFIX = 'lrc-lib-track-cache-v1';
 
@@ -97,6 +102,11 @@ class LyricsRepositoryService {
       payload: option.payload as LyricsPayload,
       lyricsUrl: option.lyricsUrl,
       timingType: option.timingType,
+      trackName: option.trackName,
+      artistName: option.artistName,
+      albumName: option.albumName,
+      durationSec: option.durationSec,
+      isExactMatch: option.isExactMatch,
     };
   }
 
@@ -104,7 +114,9 @@ class LyricsRepositoryService {
     try {
       const parsed = JSON.parse(rawValue) as AppleWordLyricsCachePayload | LyricsPayload;
       if (Array.isArray((parsed as AppleWordLyricsCachePayload).options)) {
-        return (parsed as AppleWordLyricsCachePayload).options.filter(option => this.hasLyrics(option?.payload));
+        return (parsed as AppleWordLyricsCachePayload).options.filter(
+          option => this.hasLyrics(option?.payload) && typeof option.isExactMatch === 'boolean'
+        );
       }
 
       if (this.hasLyrics(parsed as LyricsPayload)) {
@@ -113,6 +125,7 @@ class LyricsRepositoryService {
           label: 'Opción 1',
           source: 'binimum',
           payload: parsed as LyricsPayload,
+          isExactMatch: false,
         }];
       }
     } catch {
@@ -215,6 +228,7 @@ class LyricsRepositoryService {
       label: 'Opción 1',
       source: 'binimum',
       payload,
+      isExactMatch: false,
     }], trackId);
   }
 

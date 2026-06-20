@@ -17,6 +17,11 @@ internal class KaraokeTouchController {
     var targetScrollY: Float = 0f
     var isManualScrolling: Boolean = false
         private set
+    // True between ACTION_DOWN and ACTION_UP/CANCEL — i.e. the finger is physically
+    // on the glass. While this holds, manual scrolling must NEVER time out, otherwise
+    // auto-scroll re-targets the active line and the damping spring fights the finger.
+    var isTouching: Boolean = false
+        private set
 
     private var manualScrollTimeoutNanos: Long = 0L
     private var touchStartX = 0f
@@ -27,12 +32,15 @@ internal class KaraokeTouchController {
     private var isTap = true
     private var seekOnTapEnabled = false
 
-    // Fling physics
-    private val flingDecay = 0.88f          // velocity multiplied each frame (~60fps target)
-    private val flingMinSpeed = 0.5f         // px/frame below which fling stops
-    private val flingMaxSpeed = 48f          // px/frame cap to avoid over-shoot
+    // Fling physics — softer decay + higher cap so a flick coasts freely instead of
+    // braking almost immediately (the old 0.88 decay made the list feel "stuck").
+    private val flingDecay = 0.94f           // velocity multiplied each frame (~60fps target)
+    private val flingMinSpeed = 0.4f         // px/frame below which fling stops
+    private val flingMaxSpeed = 70f          // px/frame cap to avoid over-shoot
 
-    private val manualScrollTimeoutNs = 3_000_000_000L
+    // Longer browse window before auto-scroll snaps back to the active line — gives the
+    // user room to read ahead/behind without the view yanking itself away.
+    private val manualScrollTimeoutNs = 5_000_000_000L
     private val tapSlopPx: Float
 
     constructor(density: Float) {
@@ -44,7 +52,9 @@ internal class KaraokeTouchController {
     }
 
     fun onFrame(nowNanos: Long) {
-        if (isManualScrolling && nowNanos > manualScrollTimeoutNanos) {
+        // Only allow the browse window to expire once the finger is lifted. While the
+        // finger is down the timeout must not fire, or the spring fights the drag.
+        if (!isTouching && isManualScrolling && nowNanos > manualScrollTimeoutNanos) {
             isManualScrolling = false
             // Don't clear velocity here — let the fling coast after timeout
         }
@@ -78,6 +88,7 @@ internal class KaraokeTouchController {
                 touchStartY = event.y
                 lastTouchY = event.y
                 isTap = true
+                isTouching = true
                 scrollVelocity = 0f
 
                 velocityTracker?.recycle()
@@ -110,6 +121,7 @@ internal class KaraokeTouchController {
 
             MotionEvent.ACTION_UP, MotionEvent.ACTION_CANCEL -> {
                 val wasDrag = !isTap
+                isTouching = false
 
                 if (seekOnTapEnabled && isTap && event.actionMasked == MotionEvent.ACTION_UP) {
                     // Tap-to-seek: reset manual scroll so auto-scroll resumes

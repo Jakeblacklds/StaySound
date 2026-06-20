@@ -1820,6 +1820,94 @@ function normalizeArtistItem(item: TidalArtistApiResponse): TidalArtist {
   };
 }
 
+function normalizeArtistMatchName(value?: string): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim();
+}
+
+async function getSearchBackedArtistDetail(
+  artistId: number,
+  artistNameHint?: string,
+): Promise<TidalArtistDetail | null> {
+  const queryTerm = artistNameHint?.trim();
+  if (!queryTerm) return null;
+
+  const [artistsResult, tracksResult, albumsResult] = await Promise.allSettled([
+    searchTidalArtists(queryTerm),
+    searchTidal(queryTerm),
+    searchTidalAlbums(queryTerm),
+  ]);
+
+  const artistMatches =
+    artistsResult.status === "fulfilled" ? artistsResult.value : [];
+  const tracksByName =
+    tracksResult.status === "fulfilled" ? tracksResult.value : [];
+  const albumsByName =
+    albumsResult.status === "fulfilled" ? albumsResult.value : [];
+
+  const normalizedHint = normalizeArtistMatchName(queryTerm);
+  const matchedArtist =
+    artistMatches.find((artist) => artist.id === artistId) ??
+    artistMatches.find(
+      (artist) => normalizeArtistMatchName(artist.name) === normalizedHint,
+    ) ??
+    artistMatches[0];
+
+  const artist: TidalArtist = matchedArtist
+    ? { ...matchedArtist, id: matchedArtist.id || artistId }
+    : { id: artistId, name: queryTerm };
+
+  const artistNames = new Set(
+    [queryTerm, artist.name]
+      .map(normalizeArtistMatchName)
+      .filter(Boolean),
+  );
+
+  const mergedTracksMap = new Map<number, TidalTrack>();
+  tracksByName
+    .filter(
+      (track) =>
+        track.artistId === artistId ||
+        track.artistId === artist.id ||
+        artistNames.has(normalizeArtistMatchName(track.artist)),
+    )
+    .forEach((track) => mergedTracksMap.set(track.id, track));
+
+  const mergedTracks = Array.from(mergedTracksMap.values()).sort(
+    (a, b) => (b.popularity ?? 0) - (a.popularity ?? 0),
+  );
+
+  const albumsMap = new Map<number, TidalAlbum>();
+  albumsByName
+    .filter(
+      (album) =>
+        album.artistId === artistId ||
+        album.artistId === artist.id ||
+        artistNames.has(normalizeArtistMatchName(album.artistName)),
+    )
+    .forEach((album) => albumsMap.set(album.id, album));
+
+  extractAlbumsFromTracks(mergedTracks).forEach((album) => {
+    if (!albumsMap.has(album.id)) albumsMap.set(album.id, album);
+  });
+
+  const albums = Array.from(albumsMap.values()).sort((a, b) => {
+    const aDate = a.releaseDate ? Date.parse(a.releaseDate) : 0;
+    const bDate = b.releaseDate ? Date.parse(b.releaseDate) : 0;
+    return bDate - aDate || (b.year ?? 0) - (a.year ?? 0);
+  });
+
+  return {
+    artist,
+    topTracks: mergedTracks.slice(0, 25),
+    albums,
+  };
+}
+
 function normalizeAlbumItem(item: TidalAlbumApiResponse): TidalAlbum {
   return {
     id: item.id,
@@ -2352,8 +2440,10 @@ export async function getTidalPlaylistDetail(
 
 export async function getTidalArtistInfo(
   artistId: number,
+  artistNameHint?: string,
 ): Promise<TidalArtist> {
-  const cacheKey = `artist-info:${getTidalCacheScope()}:${artistId}`;
+  const hintKey = artistNameHint?.trim().toLowerCase() || "none";
+  const cacheKey = `artist-info:${getTidalCacheScope()}:${artistId}:${hintKey}`;
   return withTidalCache(cacheKey, DETAIL_CACHE_TTL_MS, async () => {
     if (isSelectedDabSource()) {
       return await getDabBetaArtistInfo(artistId);
@@ -2383,6 +2473,18 @@ export async function getTidalArtistInfo(
             : getArtworkUrl(artworkCandidate || apiArtist.picture),
       };
     } catch (error) {
+      const fallbackDetail = await getSearchBackedArtistDetail(
+        artistId,
+        artistNameHint,
+      );
+      if (fallbackDetail) {
+        console.warn(
+          `[TidalService] Artist info endpoint failed for ${artistId}; using search-backed artist.`,
+          error,
+        );
+        return fallbackDetail.artist;
+      }
+
       if (
         !activateDabBetaRescue(
           "No se pudo cargar el artista desde Tidal. Cambiando a DAB de respaldo.",
@@ -2463,6 +2565,18 @@ export async function getTidalArtistDetail(
 
       return { artist, topTracks, albums };
     } catch (error) {
+      const fallbackDetail = await getSearchBackedArtistDetail(
+        artistId,
+        artistNameHint,
+      );
+      if (fallbackDetail) {
+        console.warn(
+          `[TidalService] Artist detail endpoint failed for ${artistId}; using search-backed detail.`,
+          error,
+        );
+        return fallbackDetail;
+      }
+
       if (
         !activateDabBetaRescue(
           "No se pudo cargar el artista desde Tidal. Cambiando a DAB de respaldo.",

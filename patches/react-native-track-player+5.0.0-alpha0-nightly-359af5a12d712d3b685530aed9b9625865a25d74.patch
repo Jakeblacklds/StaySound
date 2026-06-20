@@ -56,7 +56,7 @@ index 0000000..4793303
 + * output stack and publishes compact log-spaced spectrum bands for StaySound UI.
 + */
 +internal class StaySoundPcmSpectrumProcessor(
-+    private val bandCount: Int = 16,
++    private val bandCount: Int = 28,
 +    private val windowSize: Int = 1024,
 +    private val hopSize: Int = 512,
 +) : BaseAudioProcessor() {

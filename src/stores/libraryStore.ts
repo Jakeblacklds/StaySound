@@ -18,10 +18,10 @@ const INITIAL_SCAN_THUMBNAIL_PRELOAD_COUNT = 72;
 let isRefreshingArtistPhotos = false;
 let isHydratingArtworkThumbs = false;
 
-function rebuildDerivedLibraryCollections(tracksMap: Map<string, Track>) {
+function rebuildDerivedLibraryCollections(tracksMap: Map<string, Track>, existingArtists?: Map<string, Artist>) {
     const trackList = Array.from(tracksMap.values());
     const albums = organizeIntoAlbums(trackList);
-    const artists = organizeIntoArtists(trackList, albums);
+    const artists = organizeIntoArtists(trackList, albums, existingArtists);
 
     return { albums, artists };
 }
@@ -429,7 +429,7 @@ export const useLibraryStore = create<LibraryStore>()(
                     // PHASE 3: Final Organization
                     const finalTracks = Array.from(collectedTracks.values());
                     const initialAlbums = organizeIntoAlbums(finalTracks);
-                    const initialArtists = organizeIntoArtists(finalTracks, initialAlbums);
+                    const initialArtists = organizeIntoArtists(finalTracks, initialAlbums, get().artists);
 
                     set({
                         tracks: collectedTracks,
@@ -470,7 +470,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
                             if (!changed) return state;
 
-                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks, state.artists);
                             return {
                                 tracks: nextTracks,
                                 albums,
@@ -507,7 +507,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
                             if (!changed) return state;
 
-                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks, state.artists);
                             return {
                                 tracks: nextTracks,
                                 albums,
@@ -784,7 +784,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
                 if (changedTrackIds.length === 0) return 0;
 
-                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks, get().artists);
                 set(state => ({
                     tracks: nextTracks,
                     albums,
@@ -844,7 +844,7 @@ export const useLibraryStore = create<LibraryStore>()(
                                     ...currentTrack,
                                     artwork: embeddedArtwork,
                                 });
-                                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks, currentState.artists);
                                 changedTrackIds.add(track.id);
                                 onLog?.(`[Artwork] EMBEDDED OK ${currentTrack.artist} - ${currentTrack.title}`);
                                 return {
@@ -890,7 +890,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
                             if (!changed) return currentState;
 
-                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                            const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks, currentState.artists);
                             return {
                                 tracks: nextTracks,
                                 albums,
@@ -931,7 +931,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
                         if (!changed) return currentState;
 
-                        const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                        const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks, currentState.artists);
                         return {
                             tracks: nextTracks,
                             albums,
@@ -962,7 +962,7 @@ export const useLibraryStore = create<LibraryStore>()(
                 // Re-organize to maintain consistency in albums/artists
                 const tracksArray = Array.from(newTracks.values());
                 const nextAlbums = organizeIntoAlbums(tracksArray);
-                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums);
+                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums, get().artists);
 
                 set({
                     tracks: newTracks,
@@ -1032,7 +1032,7 @@ export const useLibraryStore = create<LibraryStore>()(
                 // 4. Re-organize Albums and Artists
                 const tracksArray = Array.from(nextTracks.values());
                 const nextAlbums = organizeIntoAlbums(tracksArray);
-                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums);
+                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums, get().artists);
 
                 set({
                     tracks: nextTracks,
@@ -1385,7 +1385,7 @@ export const useLibraryStore = create<LibraryStore>()(
 
                 if (removedIds.size === 0) return 0;
 
-                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks);
+                const { albums, artists } = rebuildDerivedLibraryCollections(nextTracks, get().artists);
                 const playlistResult = removeTrackIdsFromPlaylists(playlists, removedIds);
 
                 set(state => ({

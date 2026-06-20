@@ -222,7 +222,7 @@ internal fun drawVisualWordCharactersWithLift(
             val originalColor = paint.color
             val shadowAlpha = (255f * shadowIntensity).toInt().coerceIn(0, 220)
             val renderColor = if (whiteCoreMix > 0f) {
-                blendColorsInt(originalColor, Color.WHITE, whiteCoreMix)
+                blendColorsInt(originalColor, luminousTint(originalColor), whiteCoreMix)
             } else originalColor
 
             canvas.save()
@@ -471,7 +471,7 @@ internal fun drawGrowableVisualWordUnifiedWipe(
             val shadowAlpha = (255f * shadowIntensity).toInt().coerceIn(0, 210)
             val whiteCoreMix = (0.14f + 0.52f * revealEnvelope).coerceIn(0f, 0.66f) * revealEnvelope
             val renderColor = if (whiteCoreMix > 0f) {
-                blendColorsInt(originalColor, Color.WHITE, whiteCoreMix)
+                blendColorsInt(originalColor, luminousTint(originalColor), whiteCoreMix)
             } else originalColor
 
             canvas.save()

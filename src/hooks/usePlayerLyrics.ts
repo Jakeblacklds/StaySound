@@ -74,6 +74,8 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
 
   const [lyricsMode, setLyricsMode] = useState<'synced' | 'lrc'>('synced');
   const [trackLyricsOptions, setTrackLyricsOptions] = useState<AppleWordLyricsCandidate[]>([]);
+  const [suggestedLyricsOptions, setSuggestedLyricsOptions] = useState<AppleWordLyricsCandidate[]>([]);
+  const [isLyricsSuggestionModalVisible, setIsLyricsSuggestionModalVisible] = useState(false);
   const [selectedTrackLyricsOptionIndex, setSelectedTrackLyricsOptionIndex] = useState(0);
   const [lrcLyrics, setLrcLyrics] = useState<KaraokeLyricsJSON | null>(null);
   const [isLyricsLoading, setIsLyricsLoading] = useState(false);
@@ -89,6 +91,7 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
   const [lastRenderedLyrics, setLastRenderedLyrics] = useState<KaraokeLyricsJSON | null>(null);
 
   const lyricsRequestIdRef = useRef(0);
+  const hasManualLyricsSelectionRef = useRef(false);
   const lyricsOffsetCacheRef = useRef<LyricsOffsetCacheMap>({});
   const lyricsOffsetSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefetchedTrackIdRef = useRef<string | null>(null);
@@ -98,6 +101,8 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
 
   const resetLyricsState = useCallback(() => {
     setTrackLyricsOptions([]);
+    setSuggestedLyricsOptions([]);
+    setIsLyricsSuggestionModalVisible(false);
     setSelectedTrackLyricsOptionIndex(0);
     setLrcLyrics(null);
     setLyricsMode('synced');
@@ -107,6 +112,7 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
     setHasResolvedLyricsAttempt(false);
     setNativePositionMs(0);
     setLastRenderedLyrics(null);
+    hasManualLyricsSelectionRef.current = false;
   }, []);
 
   const hasMeaningfulLyricsValue = useCallback((value?: string | null) => {
@@ -349,7 +355,6 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
       return;
     }
 
-    setIsLyricsLoading(true);
     setIsDownloadingLrc(false);
     setLrcError(null);
     setHasResolvedLyricsAttempt(false);
@@ -358,7 +363,10 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
       let cachedLrcFound = false;
 
       try {
-        const cached = await LyricsRepository.getCachedLrcLibLyrics(songTitle, artist, trackId);
+        const [cached, cachedAppleOptions] = await Promise.all([
+          LyricsRepository.getCachedLrcLibLyrics(songTitle, artist, trackId),
+          LyricsRepository.getCachedAppleWordLyricsOptions(songTitle, artist, trackId),
+        ]);
         if (lyricsRequestIdRef.current !== requestId) return;
 
         if (cached?.lyrics?.length) {
@@ -367,11 +375,39 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
           setLyricsMode(prev => prev === 'synced' ? 'lrc' : prev);
         }
 
-        const appleOptions = await LyricsRepository.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc);
-        if (lyricsRequestIdRef.current !== requestId) return;
+        let appleOptions = cachedAppleOptions;
+        let exactAppleOptions = appleOptions.filter(option => option.isExactMatch);
 
-        const bestApplePayload = appleOptions[0]?.payload ?? null;
-        const hasAppleWords = appleOptions.length > 0;
+        if (exactAppleOptions.length > 0) {
+          setTrackLyricsOptions(exactAppleOptions);
+          setSuggestedLyricsOptions([]);
+          setIsLyricsSuggestionModalVisible(false);
+          setSelectedTrackLyricsOptionIndex(0);
+          setLyricsMode('synced');
+          setLrcError(null);
+          setIsLyricsLoading(false);
+          setHasResolvedLyricsAttempt(true);
+          return;
+        }
+
+        if (appleOptions.length > 0) {
+          setTrackLyricsOptions([]);
+          setSuggestedLyricsOptions(appleOptions);
+          setIsLyricsSuggestionModalVisible(true);
+          setSelectedTrackLyricsOptionIndex(0);
+          setIsLyricsLoading(false);
+          setHasResolvedLyricsAttempt(true);
+          return;
+        }
+
+        setIsLyricsLoading(true);
+
+        appleOptions = await LyricsRepository.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc);
+        if (lyricsRequestIdRef.current !== requestId) return;
+        exactAppleOptions = appleOptions.filter(option => option.isExactMatch);
+
+        const bestApplePayload = exactAppleOptions[0]?.payload ?? null;
+        const hasAppleWords = exactAppleOptions.length > 0;
 
         let payload: KaraokeLyricsJSON | null = bestApplePayload;
         let hasWords = hasAppleWords;
@@ -382,7 +418,9 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
           hasWords = !!payload?.lyrics?.length;
         }
 
-        setTrackLyricsOptions(appleOptions);
+        setTrackLyricsOptions(exactAppleOptions);
+        setSuggestedLyricsOptions(hasAppleWords ? [] : appleOptions);
+        setIsLyricsSuggestionModalVisible(!hasAppleWords && appleOptions.length > 0);
         setSelectedTrackLyricsOptionIndex(0);
 
         if (hasWords) {
@@ -390,11 +428,9 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
           setLrcError(null);
         }
 
-        if (!cachedLrcFound) {
+        if (!cachedLrcFound && !hasWords) {
           setIsDownloadingLrc(true);
-          if (!hasWords) {
-            setLrcError(null);
-          }
+          setLrcError(null);
 
           try {
             const fallback = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId);
@@ -402,15 +438,19 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
 
             if (fallback?.lyrics?.length) {
               setLrcLyrics(fallback as KaraokeLyricsJSON);
-              if (!hasWords) {
+              if (!hasWords && !hasManualLyricsSelectionRef.current) {
                 setLyricsMode('lrc');
                 setLrcError(null);
               }
-            } else if (!hasWords) {
+            } else if (!hasWords && !hasManualLyricsSelectionRef.current) {
               setLrcError('No se encontraron letras disponibles.');
             }
           } catch {
-            if (lyricsRequestIdRef.current === requestId && !hasWords) {
+            if (
+              lyricsRequestIdRef.current === requestId &&
+              !hasWords &&
+              !hasManualLyricsSelectionRef.current
+            ) {
               setLrcError('No se pudieron cargar las letras.');
             }
           } finally {
@@ -528,10 +568,29 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
     lyricsTransitionProgress.value = 0;
   }, [lyricsTransitionProgress, trackLyricsOptions.length]);
 
+  const handleSelectSuggestedLyrics = useCallback((optionId: string) => {
+    const selectedIndex = suggestedLyricsOptions.findIndex(option => option.id === optionId);
+    if (selectedIndex < 0) return;
+
+    setTrackLyricsOptions(suggestedLyricsOptions);
+    setSelectedTrackLyricsOptionIndex(selectedIndex);
+    hasManualLyricsSelectionRef.current = true;
+    setLyricsMode('synced');
+    setLrcError(null);
+    setIsLyricsSuggestionModalVisible(false);
+    lyricsTransitionProgress.value = 0;
+  }, [lyricsTransitionProgress, suggestedLyricsOptions]);
+
+  const dismissLyricsSuggestionModal = useCallback(() => {
+    setIsLyricsSuggestionModalVisible(false);
+  }, []);
+
   return {
     lyricsMode,
     setLyricsMode,
     trackLyricsOptions,
+    suggestedLyricsOptions,
+    isLyricsSuggestionModalVisible,
     selectedTrackLyrics,
     selectedTrackLyricsOptionIndex,
     setSelectedTrackLyricsOptionIndex,
@@ -558,6 +617,8 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
     displayLyrics,
     handleDownloadLrc,
     handleCycleSyncedLyricsOption,
+    handleSelectSuggestedLyrics,
+    dismissLyricsSuggestionModal,
     lyricsTransitionProgress,
   };
 }

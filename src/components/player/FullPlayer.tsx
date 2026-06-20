@@ -13,18 +13,29 @@ import {
   usePerformanceProfile,
   useTheme,
 } from "@/src/theme";
+import { BlurView } from "expo-blur";
 import { Image } from "expo-image";
 import { usePathname, useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
-import { BackHandler, Dimensions, Share, StyleSheet } from "react-native";
+import {
+  BackHandler,
+  Dimensions,
+  processColor,
+  Share,
+  StyleSheet,
+  View,
+} from "react-native";
+import { KaraokeSpectrumView } from "karaoke-view";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
-import { useUIStore } from "@/src/stores/uiStore";
+
+import { pickReadableColor, withAlpha } from "@/src/utils/colorContrast";
 import Animated, {
   Easing,
   Extrapolation,
   interpolate,
   runOnJS,
   useAnimatedStyle,
+  useFrameCallback,
   useSharedValue,
   withSpring,
   withTiming,
@@ -39,6 +50,8 @@ import {
   PlayerLyricsLayer,
 } from "./parts/PlayerLyricsLayer";
 import { PlayerQueueOverlayLayer } from "./parts/PlayerQueueOverlayLayer";
+import { PlayerOptionsModal, PlayerOptionAction } from "./parts/PlayerOptionsModal";
+import { useSettingsStore } from "@/src/stores/settingsStore";
 import { SharedPlayerShell } from "./SharedPlayerShell";
 import {
   BG_CROSSFADE_END,
@@ -61,6 +74,7 @@ import { ImmersiveVariant } from "./variants/ImmersiveVariant";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
+const CD_SPIN_DEGREES_PER_MS = 360 / 42000;
 const M3_EMPHASIZED = Easing.bezier(0.2, 0.0, 0, 1.0);
 const M3_EMPHASIZED_ACCEL = Easing.bezier(0.3, 0.0, 0.8, 0.15);
 
@@ -106,7 +120,7 @@ export function FullPlayer() {
   );
   const shuffleEnabled = usePlayerStore((state) => state.shuffleEnabled);
   const repeatMode = usePlayerStore((state) => state.repeatMode);
-  const openActionSheet = useUIStore((s) => s.openActionSheet);
+  const [showOptions, setShowOptions] = useState(false);
 
   // Track-switching & seek debounce: prevents icon flicker during track changes or seeking.
   // When the track ID changes we hold isPlayingVisual=true for 800ms.
@@ -125,8 +139,16 @@ export function FullPlayer() {
     }
   }, [currentTrack?.id]);
 
-  // Animated glow progress (0 = paused, 1 = playing) — drives smooth opacity/scale
+  // Animated glow progress (0 = paused, 1 = playing) — drives the cover's
+  // play/pause breathing scale.
   const playGlowProgress = useSharedValue(0);
+  React.useEffect(() => {
+    playGlowProgress.value = withSpring(isPlayingVisual ? 1 : 0, {
+      damping: 18,
+      stiffness: 150,
+      mass: 0.7,
+    });
+  }, [isPlayingVisual]);
 
   // Actions
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
@@ -176,13 +198,25 @@ export function FullPlayer() {
     : animColors;
   const textColor = playerColors.text;
   const accentColor = playerColors.primary;
-  const onPrimaryColor = playerColors.onPrimary;
+  const onPrimaryColor = pickReadableColor(accentColor, [
+    playerColors.onPrimary,
+    theme.colors.onPrimary,
+    "#05070D",
+    "#FFFFFF",
+  ]);
   const shouldShowTidalLoading =
     Boolean(pendingTrackPreview) ||
     (isLoading &&
       (currentTrack?.source === "tidal" ||
         currentTrack?.source === "tidal_stream"));
-  const { playerSurfaceColor } = usePlayerColors({
+  const {
+    playerSurfaceColor,
+    protectedSpectrumGlowColor,
+    chromeBorderColor,
+    chromeSurfaceColor,
+    chromeSurfaceStrongColor,
+    accentBorderColor,
+  } = usePlayerColors({
     themeBackground: theme.colors.background,
     themePrimary: theme.colors.primary,
     isDark,
@@ -218,12 +252,13 @@ export function FullPlayer() {
     : miniCollapsedBottom;
   const miniHeight = isDetailRoute ? DETAIL_HEIGHT : MINI_HEIGHT;
   const miniWidth = SCREEN_WIDTH - miniLeft * 2;
-  const miniRadius = 18;
+  const miniRadius = 22;
 
   // Expansion & Breathing
   const expansion = useSharedValue(0);
   const lyricsExpansion = useSharedValue(0);
   const trackChangeScale = useSharedValue(1);
+  const cdSpin = useSharedValue(0);
   const [animationsActive, setAnimationsActive] = useState(false);
   const [isLyricsExpanded, setIsLyricsExpanded] = useState(false);
   const lrcPreviewState = usePlayerLyrics({
@@ -273,6 +308,7 @@ export function FullPlayer() {
     // On track change: do NOT close the lyrics — let the crossfade handle the transition.
     // Only reset the artwork scale animation.
     trackChangeScale.value = isVisible ? 0.94 : 1;
+    cdSpin.value = 0;
     if (isVisible && !lightweightMode) {
       trackChangeScale.value = withSpring(1, {
         damping: 12,
@@ -280,7 +316,13 @@ export function FullPlayer() {
         mass: 0.5,
       });
     }
-  }, [currentTrack?.id, lightweightMode]);
+  }, [cdSpin, currentTrack?.id, lightweightMode]);
+
+  useFrameCallback((frameInfo) => {
+    if (!isVisible || !isPlayingVisual || lightweightMode) return;
+    const deltaMs = frameInfo.timeSincePreviousFrame ?? 16.67;
+    cdSpin.value = (cdSpin.value + deltaMs * CD_SPIN_DEGREES_PER_MS) % 360;
+  }, true);
 
   React.useEffect(() => {
     if (!currentTrack?.id) {
@@ -344,48 +386,14 @@ export function FullPlayer() {
     }
   }, [currentTrack]);
 
-  function handleOpenMoreOptions() {
+  const handleOpenMoreOptions = useCallback(() => {
     if (!currentTrack) return;
+    setShowOptions(true);
+  }, [currentTrack]);
 
-    openActionSheet({
-      title: currentTrack.title,
-      subtitle: currentTrack.artist,
-      track: currentTrack,
-      actions: [
-        {
-          label: "Ir al Artista",
-          icon: "account-music",
-          onPress: handleArtistPress,
-        },
-        {
-          label: "Ir al Álbum",
-          icon: "album",
-          onPress: handleAlbumPress,
-        },
-        {
-          label: "Añadir a Playlist",
-          icon: "playlist-plus",
-          onPress: () => {
-            // TODO: Implement Playlist Selector Modal
-          },
-        },
-        {
-          label: "Ecualizador",
-          icon: "equalizer",
-          onPress: () => {
-            setPlayerVisible(false);
-            // @ts-ignore
-            router.push("/equalizer");
-          },
-        },
-        {
-          label: "Compartir canción",
-          icon: "share-variant",
-          onPress: handleShareSong,
-        },
-      ],
-    });
-  }
+  const handleCloseOptions = useCallback(() => {
+    setShowOptions(false);
+  }, []);
 
   const handleArtistPress = useCallback(async () => {
     const artistName = currentTrack?.artist?.trim();
@@ -450,6 +458,40 @@ export function FullPlayer() {
     );
   }, []);
 
+  const playerOptionsActions: PlayerOptionAction[] = React.useMemo(() => [
+    {
+      label: "Ir al Artista",
+      icon: "account-music",
+      onPress: handleArtistPress,
+    },
+    {
+      label: "Ir al Álbum",
+      icon: "album",
+      onPress: handleAlbumPress,
+    },
+    {
+      label: "Añadir a Playlist",
+      icon: "playlist-plus",
+      onPress: () => {
+        // TODO: Implement Playlist Selector Modal
+      },
+    },
+    {
+      label: "Ecualizador",
+      icon: "equalizer",
+      onPress: () => {
+        setPlayerVisible(false);
+        // @ts-ignore
+        router.push("/equalizer");
+      },
+    },
+    {
+      label: "Compartir canción",
+      icon: "share-variant",
+      onPress: handleShareSong,
+    },
+  ], [handleArtistPress, handleAlbumPress, handleShareSong, setPlayerVisible, router]);
+
   // Gestures
   const panGesture = Gesture.Pan()
     .enabled(isVisible && !isLyricsExpanded)
@@ -503,9 +545,13 @@ export function FullPlayer() {
         [miniHeight, SCREEN_HEIGHT],
         Extrapolation.CLAMP,
       ),
+      // Reach the screen bottom early (~p=0.32) so the player's own glass
+      // covers the tab-bar region quickly. This is synced with the tab bar's
+      // glass fade (same 0.32 endpoint) so the dock dissolves into a single
+      // continuous glass surface instead of two overlapping translucent layers.
       bottom: interpolate(
         p,
-        [0, 0.5, 1],
+        [0, 0.32, 1],
         [miniBottom, 0, 0],
         Extrapolation.CLAMP,
       ),
@@ -521,7 +567,42 @@ export function FullPlayer() {
     };
   });
 
-  const ARTWORK_SIZE = SCREEN_WIDTH - 64;
+  // --- Expanded-player layout zones -------------------------------------
+  // The cover is absolutely positioned (it morphs out of the mini player), so
+  // its geometry MUST be derived from the SAME zones the ImmersiveVariant
+  // reserves in flow. Otherwise, on shorter screens the flex placeholder
+  // collapses, the transport rises, and the absolute cover ends up painted on
+  // top of the title + favorite button. We size the cover from the real
+  // vertical budget so it can never overlap the lower stack.
+  const playerTopInset = Math.max(insets.top + 22, 42);
+  const HEADER_ZONE = 51; // grabber (21) + whisper context label (30)
+  const LOWER_STACK_ZONE = 330; // title block + progress + transport + footer row
+  const playerBottomPad = Math.max(insets.bottom + 18, 40);
+  const artworkVerticalAvail =
+    SCREEN_HEIGHT -
+    playerTopInset -
+    HEADER_ZONE -
+    LOWER_STACK_ZONE -
+    playerBottomPad;
+  const ARTWORK_SIZE = Math.max(
+    200,
+    Math.min(SCREEN_WIDTH - 56, artworkVerticalAvail),
+  );
+  const ARTWORK_TOP = playerTopInset + HEADER_ZONE;
+
+  // Audio-reactive atmosphere. In artwork mode the native spectrum treats the cover
+  // as the light source, so the AGSL field breathes outward from the album center.
+  const spectrumFocusY = Math.min(
+    0.78,
+    Math.max(0.24, (ARTWORK_TOP + ARTWORK_SIZE * 0.5) / SCREEN_HEIGHT),
+  );
+  const spectrumDelayMs = useSettingsStore((s) => s.spectrumDelayMs);
+  const spectrumEnabled =
+    isVisible &&
+    !showLyrics &&
+    !showQueue &&
+    performanceProfile.enableAnimatedBackgrounds &&
+    performanceProfile.mode !== "lite";
 
   const artworkShadowStyle = useAnimatedStyle(() => {
     const p = expansion.value;
@@ -534,14 +615,19 @@ export function FullPlayer() {
     const miniArtworkTop = (miniHeight - MINI_ARTWORK_SIZE) / 2;
     const targetSize = ARTWORK_SIZE;
     const targetLeft = (SCREEN_WIDTH - targetSize) / 2;
-    const targetTop = 96;
+    const targetTop = ARTWORK_TOP;
     const settleScale = interpolate(
       p,
       [0, 0.9, 0.97, 1],
       [1, 1, 1.018, 1],
       Extrapolation.CLAMP,
     );
-    const scale = p > 0.9 ? settleScale * trackChangeScale.value : settleScale;
+    // Apple-style: the cover shrinks while paused and blooms back when playing.
+    // Only applied once expanded so the mini-player morph is untouched.
+    const playScale = interpolate(playGlowProgress.value, [0, 1], [0.86, 1]);
+    const expandedPlayScale = 1 + (playScale - 1) * p;
+    const baseScale = p > 0.9 ? settleScale * trackChangeScale.value : settleScale;
+    const scale = baseScale * expandedPlayScale;
 
     return {
       width: interpolate(
@@ -584,13 +670,34 @@ export function FullPlayer() {
     const radius = interpolate(
       p,
       [0, 0.35, 1],
-      [12, 18, 24],
+      [12, 20, ARTWORK_SIZE / 2],
       Extrapolation.CLAMP,
     );
     return {
       flex: 1,
       borderRadius: radius,
       overflow: "hidden",
+    };
+  });
+
+  const artworkCdOverlayStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(
+      expansion.value,
+      [0, 0.55, 1],
+      [0, 0, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
+
+  const artworkCdSpinStyle = useAnimatedStyle(() => {
+    const spinVisibility = interpolate(
+      expansion.value,
+      [0, 0.62, 1],
+      [0, 0, 1],
+      Extrapolation.CLAMP,
+    );
+    return {
+      transform: [{ rotate: `${cdSpin.value * spinVisibility}deg` }],
     };
   });
 
@@ -634,12 +741,29 @@ export function FullPlayer() {
     ],
   }));
 
-  const mainContainerStyle = useAnimatedStyle(() => ({
-    // Keep one continuous container background from mini to full.
+  // Collapsed, the surface is the same frosted glass as the tab bar (blur +
+  // dynamic tint @ 0.78) so mini + navbar read as one continuous dock; the
+  // tint becomes fully opaque early in the expansion so the full player keeps
+  // its solid background.
+  const glassTintAlpha = lightweightMode ? 0.94 : 0.78;
+  const glassTintStyle = useAnimatedStyle(() => ({
     backgroundColor:
       playerAnimColors?.background?.value ||
       (isDark ? playerColors.background : playerSurfaceColor) ||
       theme.colors.background,
+    // Keep the glass alpha throughout most of the expansion so the growing
+    // rectangle looks identical to the mini player's frosted glass.  Only
+    // transition to fully opaque near the end so the full player gets its
+    // solid background.
+    opacity: interpolate(
+      expansion.value,
+      [0, 0.8, 1],
+      [glassTintAlpha, glassTintAlpha, 1],
+      Extrapolation.CLAMP,
+    ),
+  }));
+  const glassEdgeStyle = useAnimatedStyle(() => ({
+    opacity: interpolate(expansion.value, [0, 0.18], [1, 0], Extrapolation.CLAMP),
   }));
   const themeBackgroundFadeStyle = useAnimatedStyle(() => ({
     opacity: interpolate(
@@ -774,7 +898,12 @@ export function FullPlayer() {
     showLyrics,
     lrcPreviewText,
     isLyricsExpanded,
+    lrcAccentBorderColor: accentBorderColor,
+    controlSurfaceColor: chromeSurfaceColor,
+    controlSurfaceStrongColor: chromeSurfaceStrongColor,
+    controlBorderColor: chromeBorderColor,
     topInset: Math.max(insets.top + 22, 42),
+    bottomInset: insets.bottom,
   };
 
   return (
@@ -782,7 +911,35 @@ export function FullPlayer() {
       <SharedPlayerShell />
       <Animated.View style={[styles.root, rootAnimatedStyle]}>
         <GestureDetector gesture={Gesture.Exclusive(panGesture, tapGesture)}>
-          <Animated.View style={[styles.mainContainer, mainContainerStyle]}>
+          <Animated.View style={styles.mainContainer}>
+            {!lightweightMode ? (
+              <BlurView
+                style={StyleSheet.absoluteFill}
+                intensity={isDark ? 28 : 40}
+                tint={isDark ? "dark" : "light"}
+              />
+            ) : null}
+            <Animated.View
+              style={[StyleSheet.absoluteFill, glassTintStyle]}
+              pointerEvents="none"
+            />
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                {
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  bottom: -2,
+                  borderWidth: StyleSheet.hairlineWidth,
+                  borderTopLeftRadius: miniRadius,
+                  borderTopRightRadius: miniRadius,
+                  borderColor: chromeBorderColor,
+                },
+                glassEdgeStyle,
+              ]}
+            />
             {shouldRenderThemeBackground ? (
               <Animated.View
                 style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
@@ -799,6 +956,27 @@ export function FullPlayer() {
                 />
               </Animated.View>
             ) : null}
+
+            {spectrumEnabled ? (
+              <Animated.View
+                style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
+                pointerEvents="none"
+              >
+                <KaraokeSpectrumView
+                  style={StyleSheet.absoluteFill}
+                  enabled={spectrumEnabled}
+                  isPlaying={isPlaying}
+                  anchorMode="artwork"
+                  spectrumTheme="waveformArc"
+                  focusY={spectrumFocusY}
+                  artworkSize={ARTWORK_SIZE}
+                  particleIntensity={0.42}
+                  renderDelayMs={spectrumDelayMs}
+                  glowColor={processColor(protectedSpectrumGlowColor)}
+                />
+              </Animated.View>
+            ) : null}
+
             <Animated.View
               style={[
                 StyleSheet.absoluteFill,
@@ -811,14 +989,31 @@ export function FullPlayer() {
             {!isLyricsExpanded && !showQueue && (
               <Animated.View style={[artworkShadowStyle, { zIndex: 10 }]}>
                 <Animated.View style={artworkContainerStyle}>
-                  <Image
-                    source={{ uri: track.artwork || track.artworkThumb }}
-                    style={styles.fullImage}
-                    contentFit="cover"
-                    cachePolicy={performanceProfile.imageCachePolicyPrimary}
-                    transition={0}
-                    recyclingKey={track.id}
-                  />
+                  <Animated.View style={[styles.fullImage, artworkCdSpinStyle]}>
+                    <Image
+                      source={{ uri: track.artwork || track.artworkThumb }}
+                      style={styles.fullImage}
+                      contentFit="cover"
+                      cachePolicy={performanceProfile.imageCachePolicyPrimary}
+                      transition={0}
+                      recyclingKey={track.id}
+                    />
+                  </Animated.View>
+                  <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, artworkCdOverlayStyle]}>
+                    <View style={[styles.fullPlayerCdOuterRim, { borderColor: withAlpha("#FFFFFF", 0.42) }]} />
+                    <View style={[styles.fullPlayerCdOuterRimShadow, { borderColor: withAlpha("#000000", 0.34) }]} />
+                    <View style={[styles.fullPlayerCdGroove, { borderColor: withAlpha(textColor, 0.26) }]} />
+                    <View style={[styles.fullPlayerCdRing, { borderColor: withAlpha(textColor, 0.52) }]} />
+                    <View
+                      style={[
+                        styles.fullPlayerCdHole,
+                        {
+                          backgroundColor: playerSurfaceColor,
+                          borderColor: withAlpha(textColor, 0.48),
+                        },
+                      ]}
+                    />
+                  </Animated.View>
                 </Animated.View>
               </Animated.View>
             )}
@@ -836,6 +1031,19 @@ export function FullPlayer() {
               animStyle={queueOverlayAnimStyle}
               onClose={handleCloseQueue}
             />
+
+            {isVisible && currentTrack ? (
+              <PlayerOptionsModal
+                visible={showOptions}
+                track={currentTrack}
+                actions={playerOptionsActions}
+                accentColor={accentColor}
+                textColor={textColor}
+                onClose={handleCloseOptions}
+                spectrumTunerVisible={spectrumEnabled}
+                spectrumThemeSelectorVisible={false}
+              />
+            ) : null}
           </Animated.View>
         </GestureDetector>
       </Animated.View>

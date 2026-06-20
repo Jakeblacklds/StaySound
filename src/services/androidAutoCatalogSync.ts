@@ -1,4 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
+import { generateArtistId } from './metadataService';
 import { useLibraryStore } from '../stores/libraryStore';
 import type { Album, Artist, Playlist, Track } from '../types/audio';
 
@@ -36,6 +37,25 @@ const nativeCatalogModule: AndroidAutoCatalogModule | null =
 
 let syncTimeout: ReturnType<typeof setTimeout> | null = null;
 let lastSerializedCatalog = '';
+
+async function ensureLibraryStoreReady(): Promise<boolean> {
+    const libraryStore = useLibraryStore as typeof useLibraryStore & {
+        persist?: {
+            rehydrate?: () => Promise<void> | void;
+        };
+    };
+
+    const state = useLibraryStore.getState();
+    if (state._hasHydrated) return true;
+
+    try {
+        await libraryStore.persist?.rehydrate?.();
+    } catch {
+        return useLibraryStore.getState()._hasHydrated;
+    }
+
+    return useLibraryStore.getState()._hasHydrated;
+}
 
 function normalizeText(value?: string | null): string {
     return value?.trim() || '';
@@ -106,7 +126,7 @@ function serializeAlbum(album: Album, tracksById: Map<string, AndroidAutoTrack>)
 
 function serializeArtist(artist: Artist, sourceTracks: Track[]): AndroidAutoSection {
     const trackIds = sourceTracks
-        .filter(track => track.artistId === artist.id || track.artist === artist.name)
+        .filter(track => track.artistId === artist.id || generateArtistId(track.artist) === artist.id || track.artist === artist.name)
         .map(track => track.id);
 
     return {
@@ -161,8 +181,8 @@ function buildCatalogSnapshot(): AndroidAutoCatalogSnapshot {
 export async function syncAndroidAutoCatalogNow(): Promise<void> {
     if (!nativeCatalogModule) return;
 
-    const state = useLibraryStore.getState();
-    if (!state._hasHydrated) return;
+    const isReady = await ensureLibraryStoreReady();
+    if (!isReady) return;
 
     const serialized = JSON.stringify(buildCatalogSnapshot());
     if (serialized === lastSerializedCatalog) return;

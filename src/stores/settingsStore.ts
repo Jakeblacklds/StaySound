@@ -6,6 +6,9 @@ import { ThemeConfig, ThemeMode, ThemeStyle } from '../types/theme';
 
 export type AppLanguage = 'es' | 'en';
 
+/** Visual theme for the player's audio spectrum (medios+agudos layer). */
+export type SpectrumTheme = 'columns' | 'aurora' | 'caustics' | 'waveformArc';
+
 const initialEqualizerState: EqualizerSettings = {
     mode: 'off',
     enabled: false,
@@ -19,6 +22,10 @@ interface SettingsState extends ThemeConfig {
     tidalMirror: string;
     equalizer: EqualizerSettings;
     equalizerCapabilities: EqualizerCapabilities | null;
+    /** Latency compensation (ms) applied to the karaoke audio spectrum so it lines up with the sound. */
+    spectrumDelayMs: number;
+    /** Visual theme for the player spectrum's medios+agudos layer. */
+    spectrumTheme: SpectrumTheme;
     _hasHydrated: boolean;
 }
 
@@ -38,6 +45,8 @@ interface SettingsActions {
     setEqualizerBandLevel: (bandKey: string, level: number) => void;
     setEqualizerBandLevels: (bandLevels: EqualizerBandLevels) => void;
     setEqualizerCapabilities: (capabilities: EqualizerCapabilities | null) => void;
+    setSpectrumDelayMs: (delayMs: number) => void;
+    setSpectrumTheme: (theme: SpectrumTheme) => void;
     resetEqualizer: () => void;
     setHasHydrated: (hasHydrated: boolean) => void;
 }
@@ -56,12 +65,18 @@ const initialState: SettingsState = {
     schemeVariant: 'expressive',
     equalizer: initialEqualizerState,
     equalizerCapabilities: null,
+    spectrumDelayMs: 380,
+    spectrumTheme: 'aurora',
     _hasHydrated: false,
 };
 
+export const SPECTRUM_DELAY_MIN = 0;
+export const SPECTRUM_DELAY_MAX = 650;
+export const SPECTRUM_DELAY_STEP = 20;
+
 type PersistedSettingsState = Pick<
     SettingsState,
-    'language' | 'tidalDownloadQuality' | 'tidalMirror' | 'style' | 'mode' | 'accentColor' | 'dynamicColors' | 'lightweightMode' | 'schemeVariant' | 'equalizer'
+    'language' | 'tidalDownloadQuality' | 'tidalMirror' | 'style' | 'mode' | 'accentColor' | 'dynamicColors' | 'lightweightMode' | 'schemeVariant' | 'equalizer' | 'spectrumDelayMs' | 'spectrumTheme'
 >;
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -114,6 +129,12 @@ export const useSettingsStore = create<SettingsStore>()(
                 },
             })),
             setEqualizerCapabilities: (equalizerCapabilities) => set({ equalizerCapabilities }),
+            setSpectrumDelayMs: (delayMs) => set({
+                spectrumDelayMs: Math.round(
+                    Math.min(SPECTRUM_DELAY_MAX, Math.max(SPECTRUM_DELAY_MIN, delayMs)),
+                ),
+            }),
+            setSpectrumTheme: (spectrumTheme) => set({ spectrumTheme }),
             resetEqualizer: () => set({ equalizer: initialEqualizerState }),
             setHasHydrated: (hasHydrated) => set({ _hasHydrated: hasHydrated }),
         }),
@@ -131,6 +152,8 @@ export const useSettingsStore = create<SettingsStore>()(
                 lightweightMode: state.lightweightMode,
                 schemeVariant: state.schemeVariant,
                 equalizer: state.equalizer,
+                spectrumDelayMs: state.spectrumDelayMs,
+                spectrumTheme: state.spectrumTheme,
             }),
             onRehydrateStorage: () => (state) => {
                 state?.setHasHydrated(true);

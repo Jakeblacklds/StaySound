@@ -1,4 +1,4 @@
-import { CustomIcon } from '@/src/components/ui';
+﻿import { CustomIcon } from '@/src/components/ui';
 import { usePerformanceProfile } from '@/src/theme';
 import { Image } from 'expo-image';
 import React from 'react';
@@ -123,11 +123,11 @@ function MiniPlayerShellInner({
                         {showLoading ? (
                             <ActivityIndicator color={textColor} size="small" />
                         ) : showPause ? (
-                            <MiniPlayerPauseIcon color={textColor} size={24} />
+                            <MiniPlayerPauseIcon color={textColor} size={20} />
                         ) : (
                             <CustomIcon
                                 name="Play"
-                                size={24}
+                                size={20}
                                 color={textColor}
                                 style={styles.playIconOffset}
                             />
@@ -174,11 +174,11 @@ function MiniPlayerShellInner({
                         {showLoading ? (
                             <ActivityIndicator color={textColor} size="small" />
                         ) : showPause ? (
-                            <MiniPlayerPauseIcon color={textColor} size={24} />
+                            <MiniPlayerPauseIcon color={textColor} size={20} />
                         ) : (
                             <CustomIcon
                                 name="Play"
-                                size={24}
+                                size={20}
                                 color={textColor}
                                 style={styles.playIconOffset}
                             />
@@ -237,7 +237,7 @@ const styles = StyleSheet.create({
     overlayMeta: {
         position: 'absolute',
         left: 72,
-        right: 60,
+        right: 74,
         top: 0,
         bottom: 0,
         justifyContent: 'center',
@@ -253,25 +253,34 @@ const styles = StyleSheet.create({
         marginTop: 2,
         opacity: 0.7,
     },
+    // Mirrors the tab bar's liquid pill (54Ã—34, r17, soft shadow).
     rowPlayButton: {
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        borderWidth: 1.4,
+        width: 54,
+        height: 34,
+        borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+        elevation: 2,
     },
     overlayPlayButton: {
         position: 'absolute',
         right: 10,
-        top: 13,
-        width: 40,
-        height: 40,
-        borderRadius: 20,
-        borderWidth: 1.4,
+        top: 16,
+        width: 54,
+        height: 34,
+        borderRadius: 17,
         alignItems: 'center',
         justifyContent: 'center',
         zIndex: 3,
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 2 },
+        shadowOpacity: 0.15,
+        shadowRadius: 6,
+        elevation: 2,
     },
     playIconOffset: {
         marginLeft: 2,

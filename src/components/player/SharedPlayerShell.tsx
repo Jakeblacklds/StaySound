@@ -1,11 +1,11 @@
 import { useDynamicColors } from '@/src/hooks';
-import { getMiniPlayerButtonColors } from '@/src/hooks/usePlayerColors';
+import { pickReadableColor } from '@/src/utils/colorContrast';
 import { usePlayerStore } from '@/src/stores';
 import { useUIStore } from '@/src/stores/uiStore';
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, Pressable, StyleSheet } from 'react-native';
+import { Dimensions, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
     Easing,
@@ -27,7 +27,7 @@ import {
     isPlayerDetailRoute,
 } from './playerLayout';
 
-const { height: SCREEN_HEIGHT, width: SCREEN_WIDTH } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 
 const M3_EMPHASIZED = Easing.bezier(0.2, 0.0, 0, 1.0);
 const M3_EMPHASIZED_DECEL = Easing.bezier(0.05, 0.7, 0.1, 1.0);
@@ -48,7 +48,6 @@ function SharedPlayerShellInner() {
     const isLoading = usePlayerStore(s => s.isLoading);
     const togglePlayPause = usePlayerStore(s => s.togglePlayPause);
     const setPlayerVisible = usePlayerStore(s => s.setPlayerVisible);
-    const stop = usePlayerStore(s => s.stop);
     const expansion = usePlayerStore(s => s.expansion);
     const playerVisible = usePlayerStore(s => s.playerVisible);
     const actionSheetVisible = useUIStore(s => s.actionSheetVisible);
@@ -95,15 +94,17 @@ function SharedPlayerShellInner() {
             text: themeAnimatedColors.onSurface,
         }
         : animColors;
-    const playButtonBaseColor = playerColors.primary || theme.colors.primary;
-    const playButtonIconColor = playerColors.text || theme.colors.onSurface;
-    const playButtonColors = getMiniPlayerButtonColors(playButtonBaseColor, playButtonIconColor);
+    // Same pill recipe as the tab bar's liquid pill so mini + navbar match.
+    const playPillFill = theme.colors.primaryContainer;
+    const playPillIcon = pickReadableColor(theme.colors.primaryContainer, [
+        theme.colors.onPrimaryContainer,
+        theme.colors.onPrimary,
+        theme.colors.onSurface,
+        theme.colors.onBackground,
+    ]);
     const routeProgress = useSharedValue(0);
-    const translateX = useSharedValue(0);
-    const isHorizontal = useSharedValue(false);
     const isVertical = useSharedValue(false);
     const playPress = useSharedValue(0);
-    const SWIPE_THRESHOLD = SCREEN_WIDTH * 0.35;
     const collapsedBottom = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom;
     const isDetailRoute = isPlayerDetailRoute(pathname);
 
@@ -113,10 +114,6 @@ function SharedPlayerShellInner() {
             easing: M3_EMPHASIZED_DECEL,
         });
     }, [isDetailRoute, routeProgress]);
-
-    useEffect(() => {
-        translateX.value = 0;
-    }, [displayTrack?.id, translateX]);
 
     useEffect(() => {
         const nextTrackId = displayTrack?.id ?? null;
@@ -157,15 +154,10 @@ function SharedPlayerShellInner() {
             left: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
             right: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
             height: interpolate(routeP, [0, 1], [MINI_HEIGHT, DETAIL_HEIGHT], Extrapolation.CLAMP),
-            borderTopLeftRadius: interpolate(routeP, [0, 1], [24, 0], Extrapolation.CLAMP),
-            borderTopRightRadius: interpolate(routeP, [0, 1], [24, 0], Extrapolation.CLAMP),
+            borderTopLeftRadius: interpolate(routeP, [0, 1], [22, 0], Extrapolation.CLAMP),
+            borderTopRightRadius: interpolate(routeP, [0, 1], [22, 0], Extrapolation.CLAMP),
             borderBottomLeftRadius: 0,
             borderBottomRightRadius: 0,
-            transform: [
-                { translateX: translateX.value },
-                { rotate: `${interpolate(translateX.value, [-SCREEN_WIDTH, 0, SCREEN_WIDTH], [-10, 0, 10], Extrapolation.CLAMP)}deg` },
-            ],
-            opacity: interpolate(Math.abs(translateX.value), [0, SCREEN_WIDTH * 0.8], [1, 0], Extrapolation.CLAMP),
         };
     });
 
@@ -200,38 +192,31 @@ function SharedPlayerShellInner() {
         };
     });
 
+    // Title uses the contrast-managed text color (not the accent) so it stays
+    // readable over the translucent glass surface.
     const titleAnimatedStyle = useAnimatedStyle(() => ({
-        color: playerAnimColors?.primary?.value || playerColors.primary || theme.colors.primary,
+        color: playerAnimColors?.text?.value || playerColors.text || theme.colors.onSurface,
     }));
     const artistAnimatedStyle = useAnimatedStyle(() => ({
         color: playerAnimColors?.text?.value || playerColors.text || theme.colors.onSurface,
-        opacity: 0.72,
+        opacity: 0.68,
     }));
 
     const panGesture = useMemo(() => Gesture.Pan()
         .enabled(!playerVisible)
         .onStart(() => {
-            isHorizontal.value = false;
             isVertical.value = false;
         })
         .onUpdate((e) => {
-            if (!isHorizontal.value && !isVertical.value) {
+            if (!isVertical.value) {
                 if (Math.abs(e.translationX) > 5 || Math.abs(e.translationY) > 5) {
-                    if (Math.abs(e.translationX) > Math.abs(e.translationY)) {
-                        if (!expansion || expansion.value < 0.05) {
-                            isHorizontal.value = true;
-                        } else {
-                            isVertical.value = true;
-                        }
-                    } else {
+                    if (Math.abs(e.translationY) >= Math.abs(e.translationX)) {
                         isVertical.value = true;
                     }
                 }
             }
 
-            if (isHorizontal.value) {
-                translateX.value = e.translationX;
-            } else if (isVertical.value) {
+            if (isVertical.value) {
                 if (expansion) {
                     const travelRange = Math.max(240, SCREEN_HEIGHT - (collapsedBottom + MINI_HEIGHT));
                     const newVal = (-e.translationY / travelRange);
@@ -240,25 +225,7 @@ function SharedPlayerShellInner() {
             }
         })
         .onEnd((e) => {
-            if (isHorizontal.value) {
-                isHorizontal.value = false;
-                if (Math.abs(e.translationX) > SWIPE_THRESHOLD || Math.abs(e.velocityX) > 1000) {
-                    const targetX = e.translationX > 0 ? SCREEN_WIDTH : -SCREEN_WIDTH;
-                    translateX.value = withTiming(targetX, {
-                        duration: 300,
-                        easing: Easing.out(Easing.cubic)
-                    }, (finished) => {
-                        if (finished) {
-                            runOnJS(stop)();
-                        }
-                    });
-                } else {
-                    translateX.value = withTiming(0, {
-                        duration: 250,
-                        easing: M3_EMPHASIZED_DECEL
-                    });
-                }
-            } else if (isVertical.value) {
+            if (isVertical.value) {
                 isVertical.value = false;
                 if (e.translationY < -120 || e.velocityY < -800) {
                     if (expansion) expansion.value = withTiming(1, {
@@ -274,16 +241,12 @@ function SharedPlayerShellInner() {
                     runOnJS(setPlayerVisible)(false);
                 }
             } else {
-                translateX.value = withTiming(0, {
-                    duration: 250,
-                    easing: M3_EMPHASIZED_DECEL
-                });
                 if (expansion) expansion.value = withTiming(0, {
                     duration: COLLAPSE_DURATION,
                     easing: M3_EMPHASIZED_DECEL,
                 });
             }
-        }), [collapsedBottom, expansion, setPlayerVisible, stop, SWIPE_THRESHOLD, isHorizontal, isVertical, playerVisible]);
+        }), [collapsedBottom, expansion, setPlayerVisible, isVertical, playerVisible]);
 
     const handleTap = useCallback(() => {
         setPlayerVisible(true);
@@ -320,9 +283,9 @@ function SharedPlayerShellInner() {
                     variant="row"
                     track={displayTrack}
                     showArtwork={false}
-                    textColor={playButtonIconColor}
-                    buttonFillColor={playButtonColors.fill}
-                    buttonBorderColor={playButtonColors.border}
+                    textColor={playPillIcon}
+                    buttonFillColor={playPillFill}
+                    buttonBorderColor="transparent"
                     showLoading={shouldShowTidalLoading}
                     showPause={shouldHoldPauseAffordance}
                     onPress={handleTap}

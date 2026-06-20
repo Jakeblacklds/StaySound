@@ -202,10 +202,14 @@ internal class KaraokeLineRenderer {
             isAboveActive       -> 62
             else                -> 140
         }.coerceIn(50, 255)
-        // No setShadowLayer blur — only soft BlurMaskFilter for lines far below (2+)
+        // Soft BlurMaskFilter for lines far from active (both above and below)
         val blurRadius = when {
             isBelowActive && distance == 2 -> 3.5f * config.density
             isBelowActive && distance >= 3 -> 5.5f * config.density
+            // Past lines: progressive blur so they don't compete with song info header
+            isAboveActive && distance == 2 -> 2.5f * config.density
+            isAboveActive && distance == 3 -> 4.5f * config.density
+            isAboveActive && distance >= 4 -> 6f * config.density
             else -> 0f
         }
         val highlightAlpha = when {
@@ -226,7 +230,10 @@ internal class KaraokeLineRenderer {
             isBelowActive && distance == 1 -> 2.2f * config.density
             isBelowActive && distance == 2 -> 5f * config.density
             isBelowActive -> 7.2f * config.density
-            isAboveActive -> 0f
+            // Past lines: blur the highlight text so it recedes visually
+            isAboveActive && distance == 1 -> 1.5f * config.density
+            isAboveActive && distance == 2 -> 3.5f * config.density
+            isAboveActive && distance >= 3 -> 5.5f * config.density
             else -> 2f * config.density
         }
 
@@ -236,26 +243,44 @@ internal class KaraokeLineRenderer {
         if (line.isGap) {
             config.basePaint.alpha = baseAlpha
             config.highlightPaint.alpha = highlightAlpha
-            for (word in line.words) {
+
+            val dotRadius = 3.1f * config.density
+            val activeRadiusLift = 0.45f * config.density
+            val dotSpacing = 11f * config.density
+            val firstDotCenterX = config.marginLeft + dotRadius
+            val idleAlpha = (baseAlpha * 0.46f).toInt().coerceIn(34, 118)
+            val completedAlpha = (highlightAlpha * 0.64f).toInt().coerceIn(74, 178)
+            val activeAlpha = (highlightAlpha * 0.86f).toInt().coerceIn(118, 218)
+
+            for ((index, word) in line.words.withIndex()) {
                 val isWordCompleted = currentTimeMs >= word.endMs
                 val isWordCurrent = currentTimeMs in word.startMs..word.endMs
-                val dotX = config.marginLeft + word.xOffset
-                val dotY = line.y + word.yOffset + config.lineHeight * 0.7f
+                val dotCenterX = firstDotCenterX + index * dotSpacing
+                val dotCenterY = line.y + word.yOffset + config.lineHeight * 0.55f
 
                 if (isWordCurrent) {
                     val duration = (word.endMs - word.startMs).coerceAtLeast(1L).toFloat()
                     val progress = ((currentTimeMs - word.startMs).toFloat() / duration).coerceIn(0f, 1f)
-                    val bounce = kotlin.math.sin(progress * Math.PI).toFloat()
-                    val dotScale = 1.0f + bounce * 0.25f
-                    canvas.save()
-                    canvas.translate(0f, -bounce * 8f * config.density)
-                    canvas.scale(dotScale, dotScale, dotX + word.width / 2f, dotY - config.lineHeight * 0.15f)
-                    canvas.drawText("•", dotX, dotY, config.highlightPaint)
-                    canvas.restore()
+                    val ease = smoothStep(progress)
+                    val settle = 1f - smoothStep(((progress - 0.78f) / 0.22f).coerceIn(0f, 1f))
+                    val radius = dotRadius + activeRadiusLift * ease * (0.72f + 0.28f * settle)
+                    val alpha = (idleAlpha + (activeAlpha - idleAlpha) * ease).toInt().coerceIn(0, 255)
+
+                    config.highlightPaint.alpha = alpha
+                    canvas.drawCircle(dotCenterX, dotCenterY, radius, config.highlightPaint)
+                    config.highlightPaint.alpha = highlightAlpha
                 } else if (isWordCompleted || isPast) {
-                    canvas.drawText("•", dotX, dotY, config.highlightPaint)
+                    config.highlightPaint.alpha = completedAlpha
+                    canvas.drawCircle(dotCenterX, dotCenterY, dotRadius, config.highlightPaint)
+                    config.highlightPaint.alpha = highlightAlpha
                 } else {
-                    canvas.drawText("•", dotX, dotY, config.basePaint)
+                    val timeUntilMs = (word.startMs - currentTimeMs).coerceAtLeast(0L).toFloat()
+                    val anticipationWindow = 1100f
+                    val anticipation = (1f - timeUntilMs / anticipationWindow).coerceIn(0f, 1f)
+                    val alpha = (idleAlpha + 28f * smoothStep(anticipation)).toInt().coerceIn(0, 255)
+                    config.basePaint.alpha = alpha
+                    canvas.drawCircle(dotCenterX, dotCenterY, dotRadius, config.basePaint)
+                    config.basePaint.alpha = baseAlpha
                 }
             }
             canvas.restore()
@@ -715,41 +740,77 @@ internal class KaraokeLineRenderer {
             }
         }
 
+        // Check if the active highlight is a growable sustained note — those still
+        // need the per-word wipe path with character-level scale/glow.
+        val isGrowableActive = resolvedActiveHighlightState?.isGrowable == true
+
+        // ── Base (dim) text layer ──────────────────────────────────────────────
         config.backgroundBasePaint.alpha = (188f * layerVisibility).toInt().coerceIn(0, 188)
-        for ((index, word) in line.backgroundWords.withIndex()) {
-            if (resolvedActiveHighlightState != null && index in resolvedActiveHighlightState.activeRange) {
-                if (!resolvedActiveHighlightState.isContinuousRange) {
-                    callbacks.drawWordTail(
-                        canvas = canvas,
-                        line = line,
-                        word = word,
-                        paint = config.backgroundBasePaint,
-                        revealX = resolvedActiveHighlightState.sweepX,
-                        rowHeight = config.backgroundLineHeight,
-                    )
+
+        if (isGrowableActive) {
+            // Growable path: use per-word tail masking for the active range.
+            for ((index, word) in line.backgroundWords.withIndex()) {
+                if (resolvedActiveHighlightState != null && index in resolvedActiveHighlightState.activeRange) {
+                    if (!resolvedActiveHighlightState.isContinuousRange) {
+                        callbacks.drawWordTail(
+                            canvas = canvas,
+                            line = line,
+                            word = word,
+                            paint = config.backgroundBasePaint,
+                            revealX = resolvedActiveHighlightState.sweepX,
+                            rowHeight = config.backgroundLineHeight,
+                        )
+                    }
+                    continue
                 }
-                continue
+                if (index < completedWordCount) continue
+                callbacks.drawWord(canvas, line, word, config.backgroundBasePaint)
             }
-            if (index < completedWordCount) continue
-            callbacks.drawWord(canvas, line, word, config.backgroundBasePaint)
+        } else {
+            // Continuous sweep path: compute per-row sweepX and fade base text
+            // behind the sweep, matching the foreground treatment.
+            val bgTimeSec = currentTimeMs / 1000f
+            val bgIsPast = bgTimeSec > line.backgroundWords.last().endMs / 1000f
+            val bgIsActive = bgTimeSec >= line.backgroundWords.first().startMs / 1000f && !bgIsPast
+
+            if (bgIsPast) {
+                // All words past: don't draw dim base (highlight covers everything)
+            } else {
+                val bgRowGroups = line.backgroundWords.groupBy { it.yOffset }
+                for ((_, rowWords) in bgRowGroups) {
+                    if (rowWords.isEmpty()) continue
+                    val rowSweepX = if (bgIsActive) {
+                        computeRowSweepX(
+                            rowWords = rowWords,
+                            currentTimeMs = currentTimeMs,
+                            marginLeft = config.marginLeft,
+                            featherPx = config.featherPx,
+                            smootherStep = callbacks::smootherStep,
+                        )
+                    } else {
+                        // Before the background starts: draw all words in dim
+                        config.marginLeft + rowWords.first().xOffset - config.featherPx
+                    }
+                    for (word in rowWords) {
+                        val wordLeft = config.marginLeft + word.xOffset
+                        // Only draw dim text AFTER the sweep
+                        if (rowSweepX < wordLeft + word.width) {
+                            callbacks.drawWordTail(
+                                canvas = canvas,
+                                line = line,
+                                word = word,
+                                paint = config.backgroundBasePaint,
+                                revealX = rowSweepX,
+                                rowHeight = config.backgroundLineHeight,
+                            )
+                        }
+                    }
+                }
+            }
         }
 
+        // ── Highlight layer ────────────────────────────────────────────────────
         config.backgroundHighlightPaint.alpha = (255f * layerVisibility).toInt().coerceIn(0, 255)
-        val completedLimit = resolvedActiveHighlightState?.completedLimit ?: completedWordCount
-        for (index in 0 until completedLimit.coerceAtMost(line.backgroundWords.size)) {
-            callbacks.drawCompletedWordWithLift(
-                canvas = canvas,
-                line = line,
-                word = line.backgroundWords[index],
-                paint = config.backgroundHighlightPaint,
-                rowHeight = config.backgroundLineHeight,
-                finalLiftRatio = backgroundLiftRatio,
-                currentTimeMs = currentTimeMs,
-                keepCharacterLift = keepCompletedCharacterLift,
-                visualWordDurationMs = resolvedActiveHighlightState?.visualWordDurationMs ?: 0f,
-                visualWordStartMs = resolvedActiveHighlightState?.visualWordStartMs ?: 0L,
-            )
-        }
 
         callbacks.drawMotionAccent(
             canvas = canvas,
@@ -760,23 +821,36 @@ internal class KaraokeLineRenderer {
             translateY = -config.backgroundLineHeight * 0.025f,
         )
 
-        drawNextWordPreHighlight(
-            canvas = canvas,
-            line = line,
-            words = line.backgroundWords,
-            activeHighlightState = resolvedActiveHighlightState,
-            currentTimeMs = currentTimeMs,
-            marginLeft = config.marginLeft,
-            paint = config.backgroundHighlightPaint,
-            rowHeight = config.backgroundLineHeight,
-            callbacks = callbacks,
-        )
+        if (isGrowableActive) {
+            // ── GROWABLE PATH: per-word wipe with character lift ───────────────
+            val completedLimit = resolvedActiveHighlightState!!.completedLimit
+            for (index in 0 until completedLimit.coerceAtMost(line.backgroundWords.size)) {
+                callbacks.drawCompletedWordWithLift(
+                    canvas = canvas,
+                    line = line,
+                    word = line.backgroundWords[index],
+                    paint = config.backgroundHighlightPaint,
+                    rowHeight = config.backgroundLineHeight,
+                    finalLiftRatio = backgroundLiftRatio,
+                    currentTimeMs = currentTimeMs,
+                    keepCharacterLift = keepCompletedCharacterLift,
+                    visualWordDurationMs = resolvedActiveHighlightState.visualWordDurationMs,
+                    visualWordStartMs = resolvedActiveHighlightState.visualWordStartMs,
+                )
+            }
 
-        if (resolvedActiveHighlightState == null) {
-            return
-        }
+            drawNextWordPreHighlight(
+                canvas = canvas,
+                line = line,
+                words = line.backgroundWords,
+                activeHighlightState = resolvedActiveHighlightState,
+                currentTimeMs = currentTimeMs,
+                marginLeft = config.marginLeft,
+                paint = config.backgroundHighlightPaint,
+                rowHeight = config.backgroundLineHeight,
+                callbacks = callbacks,
+            )
 
-        if (resolvedActiveHighlightState.isContinuousRange) {
             callbacks.drawGrowableVisualWordWipeHighlight(
                 canvas = canvas,
                 line = line,
@@ -789,19 +863,41 @@ internal class KaraokeLineRenderer {
                 currentTimeMs = currentTimeMs,
             )
         } else {
-            callbacks.drawWordWipeHighlight(
-                canvas = canvas,
-                line = line,
-                word = line.backgroundWords[resolvedActiveHighlightState.activeWordIndex],
-                progress = resolvedActiveHighlightState.progress,
-                paint = config.backgroundHighlightPaint,
-                rowHeight = config.backgroundLineHeight,
-                finalLiftRatio = backgroundLiftRatio,
-                useCharacterLift = true,
-                currentTimeMs = currentTimeMs,
-                visualWordDurationMs = resolvedActiveHighlightState.visualWordDurationMs,
-                visualWordStartMs = resolvedActiveHighlightState.visualWordStartMs,
-            )
+            // ── CONTINUOUS ROW SWEEP: same engine as foreground ────────────────
+            val bgTimeSec = currentTimeMs / 1000f
+            val bgFirstStartSec = line.backgroundWords.first().startMs / 1000f
+            val bgLastEndSec = line.backgroundWords.last().endMs / 1000f
+            val bgIsPast = bgTimeSec > bgLastEndSec
+            val bgIsActive = bgTimeSec >= bgFirstStartSec
+
+            if (!bgIsActive && !bgIsPast) {
+                // Nothing to highlight yet
+                return
+            }
+
+            val rowGroups = line.backgroundWords.groupBy { it.yOffset }
+            for ((_, rowWords) in rowGroups) {
+                if (rowWords.isEmpty()) continue
+                val rowComplete = currentTimeMs >= rowWords.last().endMs
+                val sweepX = computeRowSweepX(
+                    rowWords = rowWords,
+                    currentTimeMs = currentTimeMs,
+                    marginLeft = config.marginLeft,
+                    featherPx = config.featherPx,
+                    smootherStep = callbacks::smootherStep,
+                )
+                callbacks.drawRowSweepHighlight(
+                    canvas = canvas,
+                    line = line,
+                    rowWords = rowWords,
+                    sweepX = sweepX,
+                    paint = config.backgroundHighlightPaint,
+                    rowHeight = config.backgroundLineHeight,
+                    finalLiftRatio = backgroundLiftRatio,
+                    currentTimeMs = currentTimeMs,
+                    isRowComplete = rowComplete || bgIsPast,
+                )
+            }
         }
     }
 

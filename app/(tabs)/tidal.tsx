@@ -1,4 +1,13 @@
-import { CustomIcon, DownloadAnimatedButton, EmptyState, Skeleton } from '@/src/components/ui';
+import { EmptyState, Skeleton, TidalCoverCard, TidalTrackRow } from '@/src/components/ui';
+import {
+    GlassPanel,
+    MediaRail,
+    MediaRailItem,
+    OptionRow,
+    SectionHeader,
+    TidalBottomSheet,
+} from '@/src/components/tidal';
+import { Ionicons } from '@expo/vector-icons';
 import { useTidalDownload } from '@/src/hooks';
 import { getSoulseekCredentials, searchSoulseekTracksByQuery, setSoulseekCredentials, SoulseekCompressedFallbackError, type SoulseekSearchResult } from '@/src/services/soulseekDownloadService';
 import { FileSystemStorage } from '@/src/services/storage';
@@ -20,16 +29,15 @@ import {
     TidalMirrorAvailability,
 } from '@/src/services/tidalService';
 import { useLibraryStore, useNotificationStore, usePlayerStore, useSettingsStore } from '@/src/stores';
-import { typeScale, useTheme } from '@/src/theme';
+import { radius, typeScale, useTheme, withAlpha } from '@/src/theme';
 import { TidalAlbum, TidalArtist, TidalPlaylist, TidalTrack } from '@/src/types/audio';
 import { FlashList, type ListRenderItemInfo } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router, useRootNavigationState } from 'expo-router';
 import React, { startTransition, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Alert, InteractionManager, Keyboard, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { Button, Divider, IconButton, Menu, Searchbar, Text, TextInput } from 'react-native-paper';
-import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import { Alert, InteractionManager, Keyboard, Pressable, ScrollView, StyleSheet, useWindowDimensions, View } from 'react-native';
+import { Button, Searchbar, Text, TextInput } from 'react-native-paper';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type TidalTab = 'all' | 'artists' | 'albums' | 'tracks' | 'playlists';
@@ -49,13 +57,14 @@ type TidalVirtualListItem =
     | { type: 'soulseek-summary'; count: number }
     | { type: 'soulseek-folder-header'; group: SoulseekFolderGroup }
     | { type: 'soulseek-track'; result: SoulseekSearchResult }
-    | { type: 'discovery' }
+    | { type: 'home' }
     | { type: 'empty' }
-    | { type: 'tidal-artists' }
-    | { type: 'tidal-albums' }
-    | { type: 'tidal-playlists' }
-    | { type: 'tidal-tracks-header' }
-    | { type: 'tidal-track'; track: TidalTrack };
+    | { type: 'feature'; artist: TidalArtist }
+    | { type: 'label'; key: string; label: string }
+    | { type: 'track'; track: TidalTrack }
+    | { type: 'albums-rail' }
+    | { type: 'artists-rail' }
+    | { type: 'playlists-rail' };
 const RECENT_SEARCHES_STORAGE_KEY = 'tidal-recent-searches';
 const MAX_RECENT_SEARCHES = 8;
 const SOULSEEK_FLOW_LOG = '[SoulseekFlow]';
@@ -113,6 +122,69 @@ function normalizeTrackText(value: string): string {
         .trim();
 }
 
+// Bounded edit distance between two short strings (Levenshtein).
+function levenshtein(a: string, b: string): number {
+    if (a === b) return 0;
+    const al = a.length;
+    const bl = b.length;
+    if (al === 0) return bl;
+    if (bl === 0) return al;
+    let prev = new Array<number>(bl + 1);
+    let curr = new Array<number>(bl + 1);
+    for (let j = 0; j <= bl; j++) prev[j] = j;
+    for (let i = 1; i <= al; i++) {
+        curr[0] = i;
+        const ai = a.charCodeAt(i - 1);
+        for (let j = 1; j <= bl; j++) {
+            const cost = ai === b.charCodeAt(j - 1) ? 0 : 1;
+            curr[j] = Math.min(prev[j] + 1, curr[j - 1] + 1, prev[j - 1] + cost);
+        }
+        const tmp = prev;
+        prev = curr;
+        curr = tmp;
+    }
+    return prev[bl];
+}
+
+// 0..1 score of how well `candidate` matches the typed `query`, tolerant to typos
+// and word order. Used to re-rank API results so the closest match floats to the top.
+function fuzzyRelevance(query: string, candidate: string): number {
+    const q = normalizeTrackText(query);
+    const c = normalizeTrackText(candidate);
+    if (!q || !c) return 0;
+    if (c === q) return 1;
+    if (c.startsWith(q)) return 0.95;
+    if (c.includes(q)) return 0.85;
+
+    const qTokens = q.split(' ').filter(Boolean);
+    const cTokens = c.split(' ').filter(Boolean);
+    let tokenScore = 0;
+    for (const qt of qTokens) {
+        let best = 0;
+        for (const ct of cTokens) {
+            if (ct === qt) { best = 1; break; }
+            if (ct.startsWith(qt) || qt.startsWith(ct)) { best = Math.max(best, 0.8); continue; }
+            const dist = levenshtein(qt, ct);
+            best = Math.max(best, 1 - dist / Math.max(qt.length, ct.length));
+        }
+        tokenScore += best;
+    }
+    tokenScore = qTokens.length ? tokenScore / qTokens.length : 0;
+
+    const whole = 1 - levenshtein(q, c) / Math.max(q.length, c.length);
+    return Math.max(tokenScore, whole) * 0.8;
+}
+
+// Stable re-rank by fuzzy relevance (ties keep the original API order).
+function rankByRelevance<T>(items: T[], query: string, getText: (item: T) => string): T[] {
+    const trimmed = query.trim();
+    if (!trimmed || items.length < 2) return items;
+    return items
+        .map((item, index) => ({ item, index, score: fuzzyRelevance(trimmed, getText(item)) }))
+        .sort((a, b) => (b.score - a.score) || (a.index - b.index))
+        .map(entry => entry.item);
+}
+
 function scoreDownloadCandidate(source: TidalTrack, candidate: TidalTrack): number {
     let score = 0;
 
@@ -143,37 +215,7 @@ function scoreDownloadCandidate(source: TidalTrack, candidate: TidalTrack): numb
 }
 
 const GRID_GAP = 12;
-const CARD_HEIGHT_SQUARE = 180;
-const CARD_HEIGHT_TALL = 260;
-const SEARCH_COMMIT_DELAY_MS = 2_000;
-const DISCOVERY_GENRES: Array<{ label: string; query: string; id: string }> = [
-    { id: 'hip_hop', label: 'Hip-Hop', query: 'hip hop' },
-    { id: 'rnb', label: 'R&B / Soul', query: 'rnb soul' },
-    { id: 'blues', label: 'Blues', query: 'blues' },
-    { id: 'classical', label: 'Classical', query: 'classical' },
-    { id: 'country', label: 'Country', query: 'country' },
-    { id: 'dance_electronic', label: 'Electronic', query: 'dance electronic' },
-    { id: 'americana', label: 'Folk', query: 'folk americana' },
-    { id: 'world', label: 'Global', query: 'world' },
-    { id: 'jazz', label: 'Jazz', query: 'jazz' },
-    { id: 'kpop', label: 'K-Pop', query: 'kpop' },
-    { id: 'latin', label: 'Latin', query: 'latin' },
-    { id: 'metal', label: 'Metal', query: 'metal' },
-    { id: 'pop', label: 'Pop', query: 'pop' },
-    { id: 'reggae', label: 'Reggae', query: 'reggae dancehall' },
-    { id: 'retro', label: 'Legacy', query: 'retro' },
-    { id: 'indierock', label: 'Rock / Indie', query: 'rock indie' },
-];
-
-// ─── Standalone card to prevent remounting flicker ─────────────────────────
-interface GridCardProps {
-    item: any;
-    colIndex: number;
-    isLeft: boolean;
-    type: 'artists' | 'albums' | 'playlists';
-    artistArtworkUri?: string;
-    onPress: () => void;
-}
+const SEARCH_COMMIT_DELAY_MS = 350;
 
 function normalizeCardImageUri(value: unknown): string | undefined {
     if (typeof value !== 'string') return undefined;
@@ -184,143 +226,6 @@ function normalizeCardImageUri(value: unknown): string | undefined {
         .replace('100x100', '500x500')
         .replace('200x200', '500x500')
         .replace('300x300', '500x500');
-}
-
-const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, isLeft, type, artistArtworkUri, onPress }: GridCardProps) {
-    const { theme } = useTheme();
-
-    let height = CARD_HEIGHT_TALL;
-    if (type === 'albums') {
-        // Zig-zag pattern for albums: 
-        // Left: [Tall, Square, Tall...]
-        // Right: [Square, Tall, Square...]
-        const isSquare = isLeft ? (colIndex % 2 !== 0) : (colIndex % 2 === 0);
-        height = isSquare ? CARD_HEIGHT_SQUARE : CARD_HEIGHT_TALL;
-    } else {
-        // Simple unaligned pattern for artists/playlists:
-        // Right col starts with a square to shift the whole column
-        const isSquare = !isLeft && colIndex === 0;
-        height = isSquare ? CARD_HEIGHT_SQUARE : CARD_HEIGHT_TALL;
-    }
-
-    const title = type === 'artists' ? item.name : item.title;
-    const subtitle = type === 'artists' ? 'Artista' : type === 'playlists' ? 'Playlist' : item.artistName;
-    const rawImageUri = type === 'artists' ? (artistArtworkUri || item.artworkUrl) : item.artworkUrl;
-    const imageUri = normalizeCardImageUri(rawImageUri);
-
-    const fallbackBg = theme.colors.surfaceVariant || '#1E1E1E';
-
-    return (
-        <View style={{ height, borderRadius: 28, overflow: 'hidden', backgroundColor: fallbackBg }}>
-            <Pressable
-                onPress={onPress}
-                style={StyleSheet.absoluteFill}
-            >
-                {/* Background color placeholder/fallback */}
-                <View style={[StyleSheet.absoluteFill, { backgroundColor: fallbackBg }]} />
-
-                {imageUri ? (
-                    <Image
-                        source={{ uri: imageUri }}
-                        style={StyleSheet.absoluteFill}
-                        contentFit="cover"
-                        cachePolicy="memory-disk"
-                        transition={400}
-                    />
-                ) : (
-                    <LinearGradient
-                        colors={[fallbackBg, withAlpha(fallbackBg, 'CC')]}
-                        style={StyleSheet.absoluteFill}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 1, y: 1 }}
-                    />
-                )}
-
-                {/* Calm footer overlay so artwork stays the focus */}
-                <View style={styles.gridCardFooter}>
-                    <LinearGradient
-                        colors={['transparent', 'rgba(12,12,14,0.34)', 'rgba(12,12,14,0.78)']}
-                        style={StyleSheet.absoluteFill}
-                        start={{ x: 0, y: 0 }}
-                        end={{ x: 0, y: 1 }}
-                    />
-
-                    {/* Content */}
-                    <View style={styles.gridCardContent}>
-                        <Text numberOfLines={2} style={styles.gridCardTitle}>{title}</Text>
-                        <Text numberOfLines={1} style={styles.gridCardSubtitle}>{subtitle}</Text>
-                    </View>
-                </View>
-            </Pressable>
-        </View>
-    );
-});
-
-interface MasonryGridProps {
-    items: any[];
-    type: 'artists' | 'albums' | 'playlists';
-    artistArtworkOverrides: Map<number, string>;
-    openArtist: (a: any) => void;
-    openAlbum: (a: any) => void;
-    openPlaylist: (p: any) => void;
-}
-
-const MasonryGrid = React.memo(function MasonryGrid({ items, type, artistArtworkOverrides, openArtist, openAlbum, openPlaylist }: MasonryGridProps) {
-    const leftCol: any[] = [];
-    const rightCol: any[] = [];
-    items.forEach((item, index) => {
-        if (index % 2 === 0) leftCol.push(item);
-        else rightCol.push(item);
-    });
-
-    return (
-        <View style={styles.gridContainer}>
-            <View style={styles.gridColumn}>
-                {leftCol.map((item, idx) => (
-                    <MasonryGridCard
-                        key={String(item.id || item.uuid)}
-                        item={item}
-                        colIndex={idx}
-                        isLeft={true}
-                        type={type}
-                        artistArtworkUri={type === 'artists' ? artistArtworkOverrides.get(item.id) : undefined}
-                        onPress={() => {
-                            if (type === 'artists') openArtist(item);
-                            else if (type === 'albums') openAlbum(item);
-                            else openPlaylist(item);
-                        }}
-                    />
-                ))}
-            </View>
-            <View style={styles.gridColumn}>
-                {rightCol.map((item, idx) => (
-                    <MasonryGridCard
-                        key={String(item.id || item.uuid)}
-                        item={item}
-                        colIndex={idx}
-                        isLeft={false}
-                        type={type}
-                        artistArtworkUri={type === 'artists' ? artistArtworkOverrides.get(item.id) : undefined}
-                        onPress={() => {
-                            if (type === 'artists') openArtist(item);
-                            else if (type === 'albums') openAlbum(item);
-                            else openPlaylist(item);
-                        }}
-                    />
-                ))}
-            </View>
-        </View>
-    );
-});
-
-function withAlpha(color: string, alphaHex: string): string {
-    if (!color) return color;
-    if (color.startsWith('#')) {
-        const hex = color.slice(1);
-        if (hex.length === 6) return `#${hex}${alphaHex}`;
-        if (hex.length === 8) return `#${hex.slice(0, 6)}${alphaHex}`;
-    }
-    return color;
 }
 
 function formatMirrorStatus(availability?: TidalMirrorAvailability): string {
@@ -355,6 +260,8 @@ function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
 export default function TidalScreen() {
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
+    const { width: windowWidth } = useWindowDimensions();
+    const coverSize = Math.floor((windowWidth - 32 - GRID_GAP) / 2);
 
     const palette = useMemo(() => ({
         searchBackground: withAlpha(theme.colors.surface, 'F2'),
@@ -392,7 +299,8 @@ export default function TidalScreen() {
     const [showLegacyMirrors, setShowLegacyMirrors] = useState(false);
     const rootNavigationState = useRootNavigationState();
     const canNavigate = Boolean(rootNavigationState?.key);
-    const [showSettingsMenu, setShowSettingsMenu] = useState(false);
+    const [showSettingsSheet, setShowSettingsSheet] = useState(false);
+    const accentColor = theme.colors.primary;
     const [mirrorAvailability, setMirrorAvailability] = useState<Record<string, TidalMirrorAvailability>>({});
     const [isRefreshingMirrors, setIsRefreshingMirrors] = useState(false);
     const [recommendedArtists, setRecommendedArtists] = useState<TidalArtist[]>([]);
@@ -1143,7 +1051,7 @@ export default function TidalScreen() {
         artistArtworkAttempted.current.add(artist.id);
 
         try {
-            const artistInfo = await getTidalArtistInfo(artist.id);
+            const artistInfo = await getTidalArtistInfo(artist.id, artist.name);
             const nextArtwork = artistInfo.artworkUrl;
             if (!nextArtwork) return;
 
@@ -1265,77 +1173,30 @@ export default function TidalScreen() {
         });
     }, [artistArtworkOverrides, resolveArtistArtwork, visibleArtistsForArtwork]);
 
-    const renderTrackRow = useCallback((track: TidalTrack) => {
+    const renderTidalTrackRow = useCallback((track: TidalTrack) => {
         const state = downloads.get(track.id);
         const downloaded = isDownloaded(track.id) || state?.status === 'done';
         const isDownloadingItem = state?.status === 'downloading';
         const isError = state?.status === 'error';
-        const progressLabel = `${Math.round((state?.progress ?? 0) * 100)}%`;
         const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
 
         return (
-            <Pressable
-                key={track.id}
+            <TidalTrackRow
+                title={track.title}
+                artist={track.artist}
+                artworkUrl={normalizeCardImageUri(track.artworkUrl)}
+                durationMs={track.durationMs}
+                tone="glass"
+                accentColor={accentColor}
+                isActive={isTrackActive}
+                isPlaying={isPlayerPlaying}
+                downloadStatus={isDownloadingItem ? 'downloading' : downloaded ? 'done' : isError ? 'error' : 'idle'}
+                progress={state?.progress ?? 0}
                 onPress={() => handleTidalPlay(track)}
-                style={[
-                    styles.trackRow,
-                    {
-                        backgroundColor: isTrackActive ? withAlpha(theme.colors.primaryContainer, 'A0') : 'transparent',
-                        borderBottomColor: palette.cardBorder,
-                        borderBottomWidth: 1,
-                    },
-                ]}
-            >
-                <Image
-                    source={track.artworkUrl ? { uri: track.artworkUrl } : undefined}
-                    style={styles.artwork}
-                    contentFit="cover"
-                    transition={200}
-                />
-                <View style={[styles.trackContent, { marginLeft: 4 }]}>
-                    <Text numberOfLines={1} style={[styles.trackTitle, { color: isTrackActive ? theme.colors.primary : theme.colors.onSurface }]}>
-                        {track.title}
-                    </Text>
-                    <View style={styles.metaRow}>
-                    <Text numberOfLines={1} style={[typeScale.body, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
-                            {track.artist}
-                        </Text>
-                        <View style={[styles.qualityPill, { backgroundColor: withAlpha(theme.colors.onSurfaceVariant, '0A'), paddingHorizontal: 6, borderRadius: 4 }]}>
-                            <Text style={[typeScale.micro, { color: theme.colors.onSurfaceVariant, fontSize: 9 }]}>
-                                {track.isHiRes ? 'HI-RES' : 'LOSSLESS'}
-                            </Text>
-                        </View>
-                    </View>
-                </View>
-                
-                <View style={styles.trackRowActions}>
-                    <Text style={[typeScale.body, { color: theme.colors.onSurfaceVariant, marginRight: 12 }]}>
-                        {formatTrackDuration(track.durationMs)}
-                    </Text>
-                    <DownloadAnimatedButton
-                        status={
-                            isDownloadingItem ? 'downloading' :
-                            downloaded ? 'done' :
-                            isError ? 'error' : 'idle'
-                        }
-                        progress={state?.progress ?? 0}
-                        size={22}
-                        onPress={(event) => {
-                            event.stopPropagation();
-                            console.log(`${SOULSEEK_FLOW_LOG} row download button press`, {
-                                rowSource: 'tidal',
-                                activeSourceRef: activeSourceTabRef.current,
-                                id: track.id,
-                                title: track.title,
-                                artist: track.artist,
-                            });
-                            void handleTidalDownload(track, 'tidal');
-                        }}
-                    />
-                </View>
-            </Pressable>
+                onDownloadPress={() => void handleTidalDownload(track, 'tidal')}
+            />
         );
-    }, [activeTidalTrackId, downloads, handleTidalDownload, handleTidalPlay, isDownloaded, isPlayerPlaying, palette.cardBorder, pendingTrackPreview, theme.colors]);
+    }, [accentColor, activeTidalTrackId, downloads, handleTidalDownload, handleTidalPlay, isDownloaded, isPlayerPlaying, pendingTrackPreview]);
 
     const renderSoulseekMirrorTrackRow = useCallback((track: TidalTrack) => {
         const state = downloads.get(track.id);
@@ -1343,98 +1204,24 @@ export default function TidalScreen() {
         const isDownloadingItem = state?.status === 'downloading';
         const isError = state?.status === 'error';
         const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
-        const progressValue = Math.round((state?.progress ?? 0) * 100);
-        const buttonLabel = isDownloadingItem
-            ? `${progressValue}%`
-            : downloaded
-                ? 'SS ✓'
-                : isError
-                    ? 'SS !'
-                    : 'SS ↓';
-        const buttonTextColor = isError
-            ? theme.colors.error
-            : downloaded
-                ? theme.colors.primary
-                : isDownloadingItem
-                    ? theme.colors.primary
-                    : theme.colors.onSurface;
-        const buttonBorderColor = isError
-            ? withAlpha(theme.colors.error, '70')
-            : downloaded
-                ? withAlpha(theme.colors.primary, '6E')
-                : withAlpha(theme.colors.onSurfaceVariant, '4A');
-        const buttonBackgroundColor = isError
-            ? withAlpha(theme.colors.error, '12')
-            : downloaded
-                ? withAlpha(theme.colors.primary, '16')
-                : isDownloadingItem
-                    ? withAlpha(theme.colors.primary, '0F')
-                    : withAlpha(theme.colors.surfaceVariant, '94');
 
         return (
-            <View
-                key={`soulseek-mirror-${track.id}`}
-                style={[
-                    styles.trackRow,
-                    {
-                        backgroundColor: isTrackActive ? withAlpha(theme.colors.primaryContainer, 'A0') : 'transparent',
-                        borderBottomColor: palette.cardBorder,
-                        borderBottomWidth: 1,
-                    },
-                ]}
-            >
-                <Image
-                    source={track.artworkUrl ? { uri: track.artworkUrl } : undefined}
-                    style={styles.artwork}
-                    contentFit="cover"
-                    transition={200}
-                />
-                <View style={[styles.trackContent, { marginLeft: 4 }]}>
-                    <Text numberOfLines={1} style={[styles.trackTitle, { color: isTrackActive ? theme.colors.primary : theme.colors.onSurface }]}>
-                        {track.title}
-                    </Text>
-                    <View style={styles.metaRow}>
-                        <Text numberOfLines={1} style={[typeScale.body, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
-                            {track.artist}
-                        </Text>
-                        <View style={[styles.qualityPill, styles.soulseekRoutePill, { backgroundColor: withAlpha(theme.colors.primary, '14') }]}>
-                            <Text style={[typeScale.micro, styles.soulseekRoutePillLabel, { color: theme.colors.primary }]}>
-                                SS Route
-                            </Text>
-                        </View>
-                    </View>
-                </View>
-
-                <View style={styles.trackRowActions}>
-                    <Text style={[typeScale.body, { color: theme.colors.onSurfaceVariant, marginRight: 12 }]}>
-                        {formatTrackDuration(track.durationMs)}
-                    </Text>
-                    <Pressable
-                        hitSlop={12}
-                        onPress={() => {
-                            console.log(`${SOULSEEK_FLOW_LOG} soulseek-only row button`, {
-                                id: track.id,
-                                title: track.title,
-                                artist: track.artist,
-                            });
-                            void handleSoulseekOnlyDownload(track);
-                        }}
-                        style={[
-                            styles.soulseekDownloadButton,
-                            {
-                                borderColor: buttonBorderColor,
-                                backgroundColor: buttonBackgroundColor,
-                            },
-                        ]}
-                    >
-                        <Text style={[styles.soulseekDownloadLabel, { color: buttonTextColor }]}>
-                            {buttonLabel}
-                        </Text>
-                    </Pressable>
-                </View>
-            </View>
+            <TidalTrackRow
+                title={track.title}
+                artist={track.artist}
+                artworkUrl={normalizeCardImageUri(track.artworkUrl)}
+                durationMs={track.durationMs}
+                tone="glass"
+                accentColor={accentColor}
+                isActive={isTrackActive}
+                isPlaying={isPlayerPlaying}
+                downloadStatus={isDownloadingItem ? 'downloading' : downloaded ? 'done' : isError ? 'error' : 'idle'}
+                progress={state?.progress ?? 0}
+                onPress={() => void handleSoulseekOnlyDownload(track)}
+                onDownloadPress={() => void handleSoulseekOnlyDownload(track)}
+            />
         );
-    }, [activeTidalTrackId, downloads, handleSoulseekOnlyDownload, isDownloaded, isPlayerPlaying, palette.cardBorder, pendingTrackPreview, theme.colors]);
+    }, [accentColor, activeTidalTrackId, downloads, handleSoulseekOnlyDownload, isDownloaded, isPlayerPlaying, pendingTrackPreview]);
 
     const renderSoulseekTrackRow = useCallback((result: SoulseekSearchResult) => {
         const track = result.track;
@@ -1448,69 +1235,27 @@ export default function TidalScreen() {
         const normalizedLeaf = normalizeTrackText(stripSoulseekLeafExtension(rawLeafFilename));
         const normalizedTitle = normalizeTrackText(track.title || '');
         const showRawLeafFilename = normalizedLeaf.length > 0 && normalizedLeaf !== normalizedTitle;
+        const subtitleArtist = track.artist || result.match.username;
 
         return (
-            <Pressable
-                key={`${track.id}:${result.match.id ?? result.match.filename}`}
+            <TidalTrackRow
+                title={track.title}
+                artist={`${subtitleArtist}${formatLabel ? ` · ${formatLabel}` : ''}`}
+                durationMs={track.durationMs > 0 ? track.durationMs : undefined}
+                showArtwork
+                tone="glass"
+                accentColor={accentColor}
+                isActive={isTrackActive}
+                isPlaying={isPlayerPlaying}
+                extraLine={showRawLeafFilename ? rawLeafFilename : undefined}
+                downloadStatus={isDownloadingItem ? 'downloading' : downloaded ? 'done' : isError ? 'error' : 'idle'}
+                progress={state?.progress ?? 0}
                 onPress={() => handleSoulseekMatchPlay(result)}
-                style={[
-                    styles.trackRow,
-                    {
-                        backgroundColor: isTrackActive ? withAlpha(theme.colors.primaryContainer, 'A0') : 'transparent',
-                        borderBottomColor: palette.cardBorder,
-                        borderBottomWidth: 1,
-                    },
-                ]}
-            >
-                <View style={[styles.artwork, styles.soulseekArtworkFallback, { backgroundColor: withAlpha(theme.colors.primary, '14') }]}>
-                    <Text style={[typeScale.micro, { color: theme.colors.primary }]}>SS</Text>
-                </View>
-                <View style={[styles.trackContent, { marginLeft: 4 }]}>
-                    <Text numberOfLines={1} style={[styles.trackTitle, { color: isTrackActive ? theme.colors.primary : theme.colors.onSurface }]}>
-                        {track.title}
-                    </Text>
-                    <View style={styles.metaRow}>
-                        <Text numberOfLines={1} style={[typeScale.body, { color: theme.colors.onSurfaceVariant, flex: 1 }]}>
-                            {track.artist || result.match.username}
-                        </Text>
-                        {formatLabel ? (
-                            <View style={[styles.qualityPill, { backgroundColor: withAlpha(theme.colors.onSurfaceVariant, '0A'), paddingHorizontal: 6, borderRadius: 4 }]}>
-                                <Text style={[typeScale.micro, { color: theme.colors.onSurfaceVariant, fontSize: 9 }]}>
-                                    {formatLabel}
-                                </Text>
-                            </View>
-                        ) : null}
-                    </View>
-                    {showRawLeafFilename ? (
-                        <Text numberOfLines={1} style={[styles.soulseekRawFilename, { color: withAlpha(theme.colors.onSurfaceVariant, 'BD') }]}>
-                            {rawLeafFilename}
-                        </Text>
-                    ) : null}
-                </View>
-                <View style={styles.trackRowActions}>
-                    <Text style={[typeScale.body, { color: theme.colors.onSurfaceVariant, marginRight: 12 }]}>
-                        {track.durationMs > 0 ? formatTrackDuration(track.durationMs) : '--:--'}
-                    </Text>
-                    <DownloadAnimatedButton
-                        status={
-                            isDownloadingItem ? 'downloading'
-                                : downloaded ? 'done'
-                                    : isError ? 'error'
-                                        : 'idle'
-                        }
-                        progress={state?.progress ?? 0}
-                        size={22}
-                        onPress={(event) => {
-                            event.stopPropagation();
-                            void handleSoulseekMatchDownload(result);
-                        }}
-                    />
-                </View>
-            </Pressable>
+                onDownloadPress={() => void handleSoulseekMatchDownload(result)}
+            />
         );
-    }, [activeTidalTrackId, downloads, handleSoulseekMatchDownload, handleSoulseekMatchPlay, isDownloaded, isPlayerPlaying, palette.cardBorder, pendingTrackPreview, theme.colors]);
+    }, [accentColor, activeTidalTrackId, downloads, handleSoulseekMatchDownload, handleSoulseekMatchPlay, isDownloaded, isPlayerPlaying, pendingTrackPreview]);
 
-    // MasonryGrid and MasonryGridCard are defined at module level above
 
     const [isFocused, setIsFocused] = useState(false);
     const [availableMirrors, setAvailableMirrors] = useState<string[]>(() => [
@@ -1672,17 +1417,6 @@ export default function TidalScreen() {
         triggerSearch(nextQuery, activeTabRef.current);
     }, [triggerSearch]);
 
-    const applyGenreSuggestion = useCallback((genre: { id: string; label: string; query: string }) => {
-        if (!canNavigate) {
-            console.warn('[TidalScreen] Navigation blocked: root layout not mounted yet (genre).');
-            return;
-        }
-        router.push({
-            pathname: '/tidal-genre/[id]',
-            params: { id: genre.id, name: genre.label },
-        });
-    }, [canNavigate]);
-
     const resultTabs = useMemo(() => ([
         { key: 'all' as const, label: 'Todo' },
         { key: 'artists' as const, label: 'Artistas' },
@@ -1692,20 +1426,20 @@ export default function TidalScreen() {
     ]), []);
 
     const visibleArtistResults = useMemo(
-        () => artists.slice(0, activeTab === 'all' ? 6 : artists.length),
-        [activeTab, artists],
+        () => rankByRelevance(artists, committedQuery, a => a.name).slice(0, activeTab === 'all' ? 6 : artists.length),
+        [activeTab, artists, committedQuery],
     );
     const visibleAlbumResults = useMemo(
-        () => albums.slice(0, activeTab === 'all' ? 8 : albums.length),
-        [activeTab, albums],
+        () => rankByRelevance(albums, committedQuery, a => `${a.title} ${a.artistName ?? ''}`).slice(0, activeTab === 'all' ? 8 : albums.length),
+        [activeTab, albums, committedQuery],
     );
     const visiblePlaylistResults = useMemo(
-        () => playlists.slice(0, activeTab === 'all' ? 6 : playlists.length),
-        [activeTab, playlists],
+        () => rankByRelevance(playlists, committedQuery, p => p.title).slice(0, activeTab === 'all' ? 6 : playlists.length),
+        [activeTab, playlists, committedQuery],
     );
     const visibleTrackResults = useMemo(
-        () => tracks.slice(0, activeTab === 'all' ? 12 : tracks.length),
-        [activeTab, tracks],
+        () => rankByRelevance(tracks, committedQuery, t => `${t.artist} ${t.title}`).slice(0, activeTab === 'all' ? 12 : tracks.length),
+        [activeTab, tracks, committedQuery],
     );
 
     const virtualListData = useMemo<TidalVirtualListItem[]>(() => {
@@ -1737,28 +1471,44 @@ export default function TidalScreen() {
         }
 
         if (!hasQuery && !isFocused) {
-            return [{ type: 'discovery' }];
+            return [{ type: 'home' }];
         }
 
         if (hasResolvedSearch && !tracks.length && !albums.length && !artists.length && !playlists.length) {
             return [{ type: 'empty' }];
         }
 
+        const showArtists = activeTab === 'all' || activeTab === 'artists';
+        const showAlbums = activeTab === 'all' || activeTab === 'albums';
+        const showPlaylists = activeTab === 'all' || activeTab === 'playlists';
+        const showTracks = activeTab === 'all' || activeTab === 'tracks';
+
         const nextItems: TidalVirtualListItem[] = [];
-        if ((activeTab === 'all' || activeTab === 'artists') && visibleArtistResults.length > 0) {
-            nextItems.push({ type: 'tidal-artists' });
-        }
-        if ((activeTab === 'all' || activeTab === 'albums') && visibleAlbumResults.length > 0) {
-            nextItems.push({ type: 'tidal-albums' });
-        }
-        if ((activeTab === 'all' || activeTab === 'playlists') && visiblePlaylistResults.length > 0) {
-            nextItems.push({ type: 'tidal-playlists' });
-        }
-        if ((activeTab === 'all' || activeTab === 'tracks') && visibleTrackResults.length > 0) {
-            nextItems.push({ type: 'tidal-tracks-header' });
-            for (const track of visibleTrackResults) {
-                nextItems.push({ type: 'tidal-track', track });
+        if (showArtists && visibleArtistResults.length > 0) {
+            if (activeTab === 'artists') {
+                nextItems.push({ type: 'label', key: 'label-artists', label: 'Artistas' });
+                nextItems.push({ type: 'artists-rail' });
+            } else {
+                nextItems.push({ type: 'feature', artist: visibleArtistResults[0] });
             }
+        }
+        if (showTracks && visibleTrackResults.length > 0) {
+            nextItems.push({ type: 'label', key: 'label-tracks', label: 'Canciones' });
+            for (const track of visibleTrackResults) {
+                nextItems.push({ type: 'track', track });
+            }
+        }
+        if (showAlbums && visibleAlbumResults.length > 0) {
+            nextItems.push({ type: 'label', key: 'label-albums', label: 'Álbumes' });
+            nextItems.push({ type: 'albums-rail' });
+        }
+        if (activeTab !== 'artists' && showArtists && visibleArtistResults.length > 1) {
+            nextItems.push({ type: 'label', key: 'label-artists', label: 'Más artistas' });
+            nextItems.push({ type: 'artists-rail' });
+        }
+        if (showPlaylists && visiblePlaylistResults.length > 0) {
+            nextItems.push({ type: 'label', key: 'label-playlists', label: 'Playlists' });
+            nextItems.push({ type: 'playlists-rail' });
         }
         return nextItems;
     }, [
@@ -1793,8 +1543,12 @@ export default function TidalScreen() {
                 return `soulseek-folder-${item.group.key}`;
             case 'soulseek-track':
                 return `soulseek-track-${item.result.track.id}-${item.result.match.id ?? item.result.match.filename ?? index}`;
-            case 'tidal-track':
-                return `tidal-track-${item.track.id}`;
+            case 'label':
+                return item.key;
+            case 'feature':
+                return `feature-${item.artist.id}`;
+            case 'track':
+                return `track-${item.track.id}`;
             default:
                 return item.type;
         }
@@ -1813,54 +1567,30 @@ export default function TidalScreen() {
 
     const virtualListHeader = useMemo(() => (
         <>
-            <Animated.View style={styles.header}>
-                <View pointerEvents="none" style={[styles.headerOrbit, { borderColor: withAlpha(theme.colors.primary, '24') }]} />
-                <View pointerEvents="none" style={[styles.headerOrbitSecondary, { borderColor: withAlpha(theme.colors.tertiary ?? theme.colors.primary, '18') }]} />
+            <View style={styles.header}>
                 <View style={styles.headerTitleRow}>
                     <View style={styles.headerTitleBlock}>
-                        <Text variant="headlineMedium" style={[styles.headerTitle, { color: theme.colors.onBackground }]}>Buscar</Text>
+                        <Text style={[styles.headerKicker, { color: accentColor }]}>EXPLORAR</Text>
+                        <Text style={[styles.headerTitle, { color: theme.colors.onBackground }]}>Buscar</Text>
                     </View>
-                    <Menu
-                        visible={showSettingsMenu}
-                        onDismiss={() => setShowSettingsMenu(false)}
-                        anchor={
-                            <IconButton
-                                icon="cog-outline"
-                                iconColor={theme.colors.onSurface}
-                                size={20}
-                                onPress={() => setShowSettingsMenu(true)}
-                                style={styles.settingsButton}
-                                containerColor={withAlpha(theme.colors.surfaceVariant, 'B8')}
-                            />
-                        }
-                        contentStyle={{ backgroundColor: theme.colors.surface, borderRadius: 16 }}
+                    <Pressable
+                        onPress={() => setShowSettingsSheet(true)}
+                        hitSlop={8}
+                        style={({ pressed }) => [styles.settingsButton, { opacity: pressed ? 0.62 : 1 }]}
                     >
-                        <Menu.Item
-                            onPress={() => { setShowSettingsMenu(false); setShowQualityModal(true); }}
-                            title="Calidad de audio"
-                            leadingIcon="tune-variant"
-                        />
-                        <Divider style={{ opacity: 0.1 }} />
-                        <Menu.Item
-                            onPress={() => { setShowSettingsMenu(false); setShowMirrorModal(true); }}
-                            title="Servidor"
-                            leadingIcon="server-network"
-                        />
-                        <Divider style={{ opacity: 0.1 }} />
-                        <Menu.Item
-                            onPress={() => {
-                                setShowSettingsMenu(false);
-                                setHasSoulseekCredentials(false);
-                            }}
-                            title="Sesion Soulseek"
-                            leadingIcon="account-cog-outline"
-                        />
-                    </Menu>
+                        <Ionicons name="options" size={21} color={theme.colors.onSurface} />
+                    </Pressable>
                 </View>
 
-                <View style={[styles.searchShell, { borderColor: palette.searchBorder }]}>
+                <View style={[
+                    styles.searchDock,
+                    {
+                        backgroundColor: palette.searchBackground,
+                        borderColor: isFocused ? withAlpha(accentColor, '8A') : palette.searchBorder,
+                    },
+                ]}>
                     <Searchbar
-                        placeholder="Buscar"
+                        placeholder="Artistas, canciones, álbumes…"
                         value={query}
                         onChangeText={setQuery}
                         onFocus={() => setIsFocused(true)}
@@ -1868,50 +1598,69 @@ export default function TidalScreen() {
                         onSubmitEditing={handleSubmitSearch}
                         returnKeyType="search"
                         submitBehavior="submit"
-                        style={[styles.searchbar, { backgroundColor: 'transparent', minHeight: 52 }]}
-                        iconColor={theme.colors.primary}
+                        style={[styles.searchbar, { backgroundColor: 'transparent' }]}
+                        iconColor={accentColor}
                         inputStyle={[styles.searchInput, { color: theme.colors.onSurface }]}
-                        placeholderTextColor={withAlpha(theme.colors.onSurfaceVariant, '40')}
+                        placeholderTextColor={withAlpha(theme.colors.onSurfaceVariant, '66')}
                     />
                 </View>
 
                 <View style={styles.sourceTabsRow}>
-                    <Pressable onPress={() => handleSourceTabChange('tidal')} style={styles.sourceTab}>
-                        <Text style={[styles.sourceTabLabel, { color: !isSoulseekSource ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
+                    <Pressable
+                        onPress={() => handleSourceTabChange('tidal')}
+                        style={styles.sourceTab}
+                    >
+                        <Text style={[styles.sourceTabLabel, { color: !isSoulseekSource ? theme.colors.onSurface : withAlpha(theme.colors.onSurfaceVariant, 'A0') }]}>
                             Tidal
                         </Text>
-                        <View style={[styles.sourceTabUnderline, { backgroundColor: !isSoulseekSource ? theme.colors.primary : 'transparent' }]} />
+                        <View style={[styles.sourceTabUnderline, { backgroundColor: !isSoulseekSource ? accentColor : 'transparent' }]} />
                     </Pressable>
-                    <Pressable onPress={() => handleSourceTabChange('soulseek')} style={styles.sourceTab}>
-                        <Text style={[styles.sourceTabLabel, { color: isSoulseekSource ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
+                    <Pressable
+                        onPress={() => handleSourceTabChange('soulseek')}
+                        style={styles.sourceTab}
+                    >
+                        <Text style={[styles.sourceTabLabel, { color: isSoulseekSource ? theme.colors.onSurface : withAlpha(theme.colors.onSurfaceVariant, 'A0') }]}>
                             Soulseek
                         </Text>
-                        <View style={[styles.sourceTabUnderline, { backgroundColor: isSoulseekSource ? theme.colors.primary : 'transparent' }]} />
+                        <View style={[styles.sourceTabUnderline, { backgroundColor: isSoulseekSource ? accentColor : 'transparent' }]} />
                     </Pressable>
                 </View>
-            </Animated.View>
+            </View>
 
             {hasCommittedQuery ? (
-                <Animated.ScrollView
+                <ScrollView
                     horizontal
                     showsHorizontalScrollIndicator={false}
+                    bounces={false}
                     contentContainerStyle={styles.filterRow}
                     style={styles.filterScroller}
                 >
                     {resultTabs.map((tab) => {
                         const selected = activeTab === tab.key;
                         return (
-                            <Pressable key={tab.key} onPress={() => setActiveTab(tab.key)} style={styles.filterChip}>
-                                <View style={styles.filterChipInner}>
-                                    <Text style={[styles.filterChipLabel, { color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant }]}>
-                                        {tab.label}
-                                    </Text>
-                                    <View style={[styles.filterChipUnderline, { backgroundColor: selected ? theme.colors.primary : 'transparent' }]} />
-                                </View>
+                            <Pressable
+                                key={tab.key}
+                                onPress={() => setActiveTab(tab.key)}
+                                style={[
+                                    styles.filterChip,
+                                    {
+                                        backgroundColor: selected ? accentColor : withAlpha(theme.colors.surfaceVariant, '5A'),
+                                        borderColor: selected ? accentColor : palette.cardBorder,
+                                    },
+                                ]}
+                            >
+                                <Text
+                                    style={[
+                                        styles.filterChipLabel,
+                                        { color: selected ? theme.colors.onPrimary : theme.colors.onSurfaceVariant },
+                                    ]}
+                                >
+                                    {tab.label}
+                                </Text>
                             </Pressable>
                         );
                     })}
-                </Animated.ScrollView>
+                </ScrollView>
             ) : null}
 
             {searchHealthBanner && (hasCommittedQuery || hasQuery) ? (
@@ -1948,7 +1697,7 @@ export default function TidalScreen() {
             ) : null}
 
             {!hasQuery && isFocused && recentSearches.length > 0 ? (
-                <Animated.View entering={FadeInDown.duration(300)} style={styles.recentSection}>
+                <View style={styles.recentSection}>
                     <View style={styles.sectionHeader}>
                         <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Búsquedas recientes</Text>
                     </View>
@@ -1967,14 +1716,15 @@ export default function TidalScreen() {
                                         {formatRecentSearchTitle(item)}
                                     </Text>
                                 </View>
-                                <CustomIcon name="Next" size={16} color={theme.colors.onSurfaceVariant} />
+                                <Ionicons name="chevron-forward" size={16} color={theme.colors.onSurfaceVariant} />
                             </Pressable>
                         ))}
                     </View>
-                </Animated.View>
+                </View>
             ) : null}
         </>
     ), [
+        accentColor,
         activeTab,
         applySuggestion,
         handleSourceTabChange,
@@ -1984,12 +1734,10 @@ export default function TidalScreen() {
         isFocused,
         isSoulseekSource,
         palette.cardBorder,
-        palette.searchBorder,
         query,
         recentSearches,
         resultTabs,
         searchHealthBanner,
-        showSettingsMenu,
         theme.colors,
     ]);
 
@@ -1998,9 +1746,13 @@ export default function TidalScreen() {
             case 'auth':
                 return (
                     <View style={styles.centered}>
-                        <View style={[styles.soulseekAuthPanel, { borderColor: palette.cardBorder, backgroundColor: palette.cardBackground }]}>
+                        <GlassPanel style={styles.soulseekAuthPanel} radius={radius.xl}>
+                            <View style={[styles.soulseekAuthIcon, { backgroundColor: withAlpha(accentColor, '22') }]}>
+                                <Ionicons name="lock-closed" size={22} color={accentColor} />
+                            </View>
+                            <Text style={[styles.soulseekAuthKicker, { color: accentColor }]}>SOULSEEK</Text>
                             <Text variant="titleMedium" style={[styles.soulseekAuthTitle, { color: theme.colors.onBackground }]}>
-                                Inicia sesion en Soulseek
+                                Inicia sesión
                             </Text>
                             <TextInput
                                 mode="outlined"
@@ -2030,69 +1782,29 @@ export default function TidalScreen() {
                             >
                                 Guardar
                             </Button>
-                        </View>
+                        </GlassPanel>
                     </View>
                 );
             case 'loading':
                 return (
-                    <Animated.View entering={FadeIn.duration(180)} exiting={FadeOut.duration(220)} style={styles.resultsContent}>
-                        {(activeTab === 'all' || activeTab === 'artists') && (
-                            <View style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Skeleton height={24} width={100} borderRadius={6} />
+                    <View>
+                        <View style={styles.feature}>
+                            <Skeleton height={232} width={windowWidth - 32} borderRadius={26} />
+                        </View>
+                        <View style={styles.labelRow}>
+                            <Skeleton height={12} width={90} borderRadius={4} />
+                        </View>
+                        {[1, 2, 3, 4, 5, 6].map((i) => (
+                            <View key={`s-tra-${i}`} style={styles.songRow}>
+                                <Skeleton height={52} width={52} borderRadius={12} />
+                                <View style={styles.songCopy}>
+                                    <Skeleton height={15} width="70%" borderRadius={4} style={{ marginBottom: 7 }} />
+                                    <Skeleton height={12} width="45%" borderRadius={4} />
                                 </View>
-                                <View style={styles.gridContainer}>
-                                    <View style={styles.gridColumn}>
-                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
-                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
-                                    </View>
-                                    <View style={styles.gridColumn}>
-                                        <Skeleton height={CARD_HEIGHT_SQUARE} width="100%" borderRadius={28} />
-                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
-                                    </View>
-                                </View>
+                                <Skeleton height={26} width={26} borderRadius={13} />
                             </View>
-                        )}
-                        {(activeTab === 'all' || activeTab === 'albums') && (
-                            <View style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Skeleton height={24} width={100} borderRadius={6} />
-                                </View>
-                                <View style={styles.gridContainer}>
-                                    <View style={styles.gridColumn}>
-                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
-                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
-                                    </View>
-                                    <View style={styles.gridColumn}>
-                                        <Skeleton height={CARD_HEIGHT_SQUARE} width="100%" borderRadius={28} />
-                                        <Skeleton height={CARD_HEIGHT_TALL} width="100%" borderRadius={28} />
-                                    </View>
-                                </View>
-                            </View>
-                        )}
-                        {(activeTab === 'all' || activeTab === 'tracks') && (
-                            <View style={styles.section}>
-                                <View style={styles.sectionHeader}>
-                                    <Skeleton height={24} width={100} borderRadius={6} />
-                                </View>
-                                {[1, 2, 3, 4, 5].map((i) => (
-                                    <View key={`s-tra-${i}`} style={[styles.trackRow, { backgroundColor: palette.cardBackground, borderColor: palette.cardBorder, opacity: 0.6 }]}>
-                                        <Skeleton height={62} width={62} borderRadius={12} />
-                                        <View style={styles.trackContent}>
-                                            <Skeleton height={16} width="80%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                            <Skeleton height={14} width="60%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                            <View style={styles.metaRow}>
-                                                <Skeleton height={12} width={40} borderRadius={4} />
-                                                <Skeleton height={18} width={60} borderRadius={10} />
-                                            </View>
-                                        </View>
-                                        <Skeleton height={36} width={36} borderRadius={18} />
-                                        <Skeleton height={32} width={80} borderRadius={20} />
-                                    </View>
-                                ))}
-                            </View>
-                        )}
-                    </Animated.View>
+                        ))}
+                    </View>
                 );
             case 'error':
                 return (
@@ -2111,19 +1823,17 @@ export default function TidalScreen() {
                 );
             case 'soulseek-summary':
                 return (
-                    <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Carpetas</Text>
-                            <Text style={[typeScale.micro, { color: theme.colors.onSurfaceVariant }]}>
-                                {item.count} pistas
-                            </Text>
-                        </View>
+                    <View style={styles.soulseekSummary}>
+                        <SectionHeader kicker="Soulseek" title="Carpetas" meta={`${item.count} pistas`} accent={accentColor} />
                     </View>
                 );
             case 'soulseek-folder-header':
                 return (
                     <View style={styles.soulseekVirtualGroupHeader}>
-                        <View style={[styles.soulseekFolderHeader, { borderBottomColor: palette.cardBorder }]}>
+                        <View style={[styles.soulseekFolderHeader, { backgroundColor: withAlpha(theme.colors.onSurface, '0C'), borderColor: withAlpha(theme.colors.outline, '3A') }]}>
+                            <View style={[styles.soulseekFolderIcon, { backgroundColor: withAlpha(accentColor, '22') }]}>
+                                <Ionicons name="folder-open" size={16} color={accentColor} />
+                            </View>
                             <View style={styles.soulseekFolderTitleBlock}>
                                 <Text numberOfLines={1} style={[styles.soulseekFolderPath, { color: theme.colors.onSurface }]}>
                                     {item.group.folderPath}
@@ -2132,118 +1842,76 @@ export default function TidalScreen() {
                                     {item.group.username}
                                 </Text>
                             </View>
-                            <Text style={[styles.soulseekFolderCount, { color: theme.colors.onSurfaceVariant }]}>
-                                {item.group.results.length}
-                            </Text>
+                            <View style={[styles.soulseekFolderBadge, { backgroundColor: withAlpha(theme.colors.onSurface, '14') }]}>
+                                <Text style={[styles.soulseekFolderCount, { color: theme.colors.onSurface }]}>
+                                    {item.group.results.length}
+                                </Text>
+                            </View>
                         </View>
                     </View>
                 );
             case 'soulseek-track':
-                return <View style={styles.virtualTrackRow}>{renderSoulseekTrackRow(item.result)}</View>;
-            case 'discovery':
+                return renderSoulseekTrackRow(item.result);
+            case 'home':
                 return (
-                    <Animated.View entering={FadeInDown.duration(320)} style={styles.discoveryContainer}>
-                        {isRecommending && recommendedTracks.length === 0 ? (
-                            <View style={styles.sectionNoPadding}>
-                                <View style={styles.sectionHeader}>
-                                    <Skeleton height={24} width={180} borderRadius={6} />
+                    <View style={styles.coverWall}>
+                        <View>
+                            <View style={styles.homeHeaderRow}>
+                                <View style={{ gap: 4 }}>
+                                    <Text style={[styles.headerKicker, { color: accentColor }]}>PARA TI</Text>
+                                    <Text style={[styles.homeTitle, { color: theme.colors.onBackground }]}>Descubre</Text>
                                 </View>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-                                    {[1, 2, 3, 4, 5].map((i) => (
-                                        <View key={`s-rec-tra-${i}`} style={styles.trackCard}>
-                                            <Skeleton height={150} width={150} borderRadius={24} />
-                                            <View style={[styles.trackCardContent, { marginTop: 8 }]}>
-                                                <Skeleton height={14} width="90%" borderRadius={4} style={{ marginBottom: 6 }} />
-                                                <Skeleton height={12} width="60%" borderRadius={4} />
-                                            </View>
+                                <Button mode="text" compact onPress={fetchHomeRecommendations} textColor={accentColor}>
+                                    Refrescar
+                                </Button>
+                            </View>
+                            {isRecommending && recommendedTracks.length === 0 ? (
+                                <View style={styles.coverWallGrid}>
+                                    {[1, 2, 3, 4].map((i) => (
+                                        <View key={`s-rec-tra-${i}`} style={{ width: coverSize }}>
+                                            <Skeleton height={coverSize} width={coverSize} borderRadius={20} />
+                                            <Skeleton height={13} width="80%" borderRadius={4} style={{ marginTop: 8 }} />
                                         </View>
                                     ))}
-                                </ScrollView>
-                            </View>
-                        ) : recommendedTracks.length > 0 ? (
-                            <View style={styles.sectionNoPadding}>
-                                <View style={styles.sectionHeader}>
-                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Recomendados para ti</Text>
                                 </View>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
+                            ) : recommendedTracks.length > 0 ? (
+                                <View style={styles.coverWallGrid}>
                                     {recommendedTracks.map(track => (
-                                        <Pressable key={track.id} onPress={() => handleTidalPlay(track)} style={styles.trackCard}>
-                                            <Image source={track.artworkUrl ? { uri: track.artworkUrl } : undefined} style={styles.trackCardImage} contentFit="cover" />
-                                            <View style={styles.trackCardContent}>
-                                                <Text numberOfLines={1} style={[styles.trackCardTitle, { color: theme.colors.onSurface }]}>{track.title}</Text>
-                                                <Text numberOfLines={1} style={[styles.trackCardArtist, { color: theme.colors.onSurfaceVariant }]}>{track.artist}</Text>
-                                            </View>
-                                        </Pressable>
+                                        <TidalCoverCard
+                                            key={track.id}
+                                            imageUri={normalizeCardImageUri(track.artworkUrl)}
+                                            title={track.title}
+                                            subtitle={track.artist}
+                                            size={coverSize}
+                                            badge="play"
+                                            tone="glass"
+                                            onPress={() => handleTidalPlay(track)}
+                                        />
                                     ))}
-                                </ScrollView>
-                            </View>
-                        ) : null}
-
-                        <View style={styles.sectionNoPadding}>
-                            <View style={styles.sectionHeader}>
-                                <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Géneros</Text>
-                            </View>
-                            <View style={styles.genreGrid}>
-                                {DISCOVERY_GENRES.map((genre) => (
-                                    <Pressable
-                                        key={genre.id}
-                                        onPress={() => applyGenreSuggestion(genre)}
-                                        style={[
-                                            styles.genreCard,
-                                            {
-                                                backgroundColor: theme.colors.surfaceVariant + '35',
-                                                borderColor: theme.colors.outline + '10',
-                                            },
-                                        ]}
-                                    >
-                                        <Text style={[styles.genreCardLabel, { color: theme.colors.onSurface }]}>
-                                            {genre.label}
-                                        </Text>
-                                    </Pressable>
-                                ))}
-                            </View>
+                                </View>
+                            ) : null}
                         </View>
 
-                        {isRecommending && recommendedArtists.length === 0 ? (
-                            <View style={styles.sectionNoPadding}>
-                                <View style={styles.sectionHeader}>
-                                    <Skeleton height={24} width={150} borderRadius={6} />
-                                </View>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-                                    {[1, 2, 3, 4, 5].map((i) => (
-                                        <View key={`s-rec-art-${i}`} style={styles.artistCircleCard}>
-                                            <Skeleton height={80} width={80} borderRadius={40} />
-                                            <Skeleton height={12} width={60} borderRadius={4} style={{ marginTop: 8 }} />
-                                        </View>
+                        {recommendedArtists.length > 0 ? (
+                            <View>
+                                <Text style={[styles.homeSubLabel, { color: withAlpha(theme.colors.onSurfaceVariant, 'CC') }]}>Artistas para ti</Text>
+                                <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} contentContainerStyle={styles.homeRail}>
+                                    {recommendedArtists.map(artist => (
+                                        <TidalCoverCard
+                                            key={artist.id}
+                                            imageUri={normalizeCardImageUri(artistArtworkOverrides.get(artist.id) || artist.artworkUrl)}
+                                            title={artist.name}
+                                            size={104}
+                                            variant="circle"
+                                            fallbackIcon="person"
+                                            tone="glass"
+                                            onPress={() => openArtist(artist)}
+                                        />
                                     ))}
                                 </ScrollView>
                             </View>
-                        ) : recommendedArtists.length > 0 ? (
-                            <View style={styles.sectionNoPadding}>
-                                <View style={styles.sectionHeader}>
-                                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Artistas para ti</Text>
-                                    <Button mode="text" compact onPress={fetchHomeRecommendations} textColor={theme.colors.primary}>Refrescar</Button>
-                                </View>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.horizontalScroll}>
-                                    {recommendedArtists.map(artist => {
-                                        const finalArtwork = normalizeCardImageUri(artistArtworkOverrides.get(artist.id) || artist.artworkUrl);
-                                        return (
-                                            <Pressable key={artist.id} onPress={() => openArtist(artist)} style={styles.artistCircleCard}>
-                                                <View style={[styles.artistCircleImage, { backgroundColor: theme.colors.surfaceVariant + '60', justifyContent: 'center', alignItems: 'center' }]}>
-                                                    {finalArtwork ? (
-                                                        <Image source={{ uri: finalArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" />
-                                                    ) : (
-                                                        <CustomIcon name="Artista" size={24} color={theme.colors.onSurfaceVariant + '80'} />
-                                                    )}
-                                                </View>
-                                                <Text numberOfLines={1} style={[styles.artistCircleName, { color: theme.colors.onSurface }]}>{artist.name}</Text>
-                                            </Pressable>
-                                        );
-                                    })}
-                                </ScrollView>
-                            </View>
                         ) : null}
-                    </Animated.View>
+                    </View>
                 );
             case 'empty':
                 return (
@@ -2251,49 +1919,107 @@ export default function TidalScreen() {
                         <EmptyState title="Sin resultados" description={`No encontramos resultados para "${committedQuery.trim()}"`} />
                     </View>
                 );
-            case 'tidal-artists':
+            case 'feature': {
+                const heroArtwork = normalizeCardImageUri(artistArtworkOverrides.get(item.artist.id) || item.artist.artworkUrl);
                 return (
-                    <View style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Artistas</Text>
-                        </View>
-                        <MasonryGrid items={visibleArtistResults} type="artists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />
+                    <View style={styles.feature}>
+                        <Pressable onPress={() => openArtist(item.artist)} style={StyleSheet.absoluteFill}>
+                            {heroArtwork ? (
+                                <Image source={{ uri: heroArtwork }} style={StyleSheet.absoluteFill} contentFit="cover" transition={350} />
+                            ) : (
+                                <View style={[StyleSheet.absoluteFill, styles.centerFill, { backgroundColor: theme.colors.surfaceVariant }]}>
+                                    <Ionicons name="person" size={52} color={theme.colors.onSurfaceVariant} />
+                                </View>
+                            )}
+                            <LinearGradient
+                                colors={['transparent', 'rgba(0,0,0,0.35)', 'rgba(0,0,0,0.86)']}
+                                locations={[0, 0.5, 1]}
+                                style={StyleSheet.absoluteFill}
+                            />
+                            <View style={styles.featureCopy}>
+                                <Text style={[styles.featureKicker, { color: withAlpha('#FFFFFF', 'C0') }]}>Mejor resultado</Text>
+                                <Text numberOfLines={2} style={styles.featureName}>{item.artist.name}</Text>
+                                <View style={styles.featureCta}>
+                                    <Text style={styles.featureCtaLabel}>Ver artista</Text>
+                                    <Ionicons name="chevron-forward" size={14} color="#0B0B0C" />
+                                </View>
+                            </View>
+                        </Pressable>
                     </View>
                 );
-            case 'tidal-albums':
+            }
+            case 'label':
                 return (
-                    <Animated.View entering={FadeInDown.delay(120).duration(260)} style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Álbumes</Text>
-                        </View>
-                        <MasonryGrid items={visibleAlbumResults} type="albums" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />
-                    </Animated.View>
-                );
-            case 'tidal-playlists':
-                return (
-                    <Animated.View entering={FadeInDown.delay(160).duration(260)} style={styles.section}>
-                        <View style={styles.sectionHeader}>
-                            <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Playlists</Text>
-                        </View>
-                        <MasonryGrid items={visiblePlaylistResults} type="playlists" artistArtworkOverrides={artistArtworkOverrides} openArtist={openArtist} openAlbum={openAlbum} openPlaylist={openPlaylist} />
-                    </Animated.View>
-                );
-            case 'tidal-tracks-header':
-                return (
-                    <View style={styles.sectionHeaderOnly}>
-                        <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Canciones</Text>
+                    <View style={styles.labelRow}>
+                        <Text style={[styles.labelText, { color: withAlpha(theme.colors.onSurfaceVariant, 'CC') }]}>{item.label}</Text>
                     </View>
                 );
-            case 'tidal-track':
-                return <View style={styles.virtualTrackRow}>{isSoulseekSource ? renderSoulseekMirrorTrackRow(item.track) : renderTrackRow(item.track)}</View>;
+            case 'track':
+                return isSoulseekSource ? renderSoulseekMirrorTrackRow(item.track) : renderTidalTrackRow(item.track);
+            case 'albums-rail':
+                return (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.resultRail}>
+                        {visibleAlbumResults.map(album => (
+                            <TidalCoverCard
+                                key={album.id}
+                                imageUri={normalizeCardImageUri(album.artworkUrl)}
+                                title={album.title}
+                                subtitle={album.artistName || 'Álbum'}
+                                size={150}
+                                fallbackIcon="disc"
+                                tone="glass"
+                                onPress={() => openAlbum(album)}
+                            />
+                        ))}
+                    </ScrollView>
+                );
+            case 'artists-rail': {
+                const artistRailResults = activeTab === 'artists'
+                    ? visibleArtistResults
+                    : visibleArtistResults.slice(1);
+                return (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.resultRail}>
+                        {artistRailResults.map(artist => (
+                            <TidalCoverCard
+                                key={artist.id}
+                                imageUri={normalizeCardImageUri(artistArtworkOverrides.get(artist.id) || artist.artworkUrl)}
+                                title={artist.name}
+                                subtitle="Artista"
+                                size={118}
+                                variant="portrait"
+                                fallbackIcon="person"
+                                tone="glass"
+                                onPress={() => openArtist(artist)}
+                            />
+                        ))}
+                    </ScrollView>
+                );
+            }
+            case 'playlists-rail':
+                return (
+                    <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.resultRail}>
+                        {visiblePlaylistResults.map(playlist => (
+                            <TidalCoverCard
+                                key={playlist.uuid}
+                                imageUri={normalizeCardImageUri(playlist.artworkUrl)}
+                                title={playlist.title}
+                                subtitle="Playlist"
+                                size={150}
+                                fallbackIcon="musical-notes"
+                                tone="glass"
+                                onPress={() => openPlaylist(playlist)}
+                            />
+                        ))}
+                    </ScrollView>
+                );
             default:
                 return null;
         }
     }, [
-        activeTab,
-        applyGenreSuggestion,
+        accentColor,
         artistArtworkOverrides,
         committedQuery,
+        coverSize,
         error,
         fetchHomeRecommendations,
         handleSaveSoulseekCredentials,
@@ -2304,13 +2030,11 @@ export default function TidalScreen() {
         openAlbum,
         openArtist,
         openPlaylist,
-        palette.cardBackground,
-        palette.cardBorder,
         recommendedArtists,
         recommendedTracks,
         renderSoulseekMirrorTrackRow,
         renderSoulseekTrackRow,
-        renderTrackRow,
+        renderTidalTrackRow,
         soulseekError,
         soulseekPassword,
         soulseekUsername,
@@ -2318,300 +2042,165 @@ export default function TidalScreen() {
         visibleAlbumResults,
         visibleArtistResults,
         visiblePlaylistResults,
+        windowWidth,
     ]);
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'left', 'right']}>
-            <FlashList
-                data={virtualListData}
-                extraData={virtualListExtraData}
-                renderItem={renderVirtualListItem}
-                keyExtractor={virtualListKeyExtractor}
-                ListHeaderComponent={virtualListHeader}
-                contentContainerStyle={virtualListContentStyle}
-                showsVerticalScrollIndicator={false}
-                keyboardShouldPersistTaps="handled"
-                keyboardDismissMode="none"
-                drawDistance={640}
-                getItemType={getVirtualListItemType}
-            />
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            <SafeAreaView style={styles.flex} edges={['top', 'left', 'right']}>
+                <FlashList
+                    data={virtualListData}
+                    extraData={virtualListExtraData}
+                    renderItem={renderVirtualListItem}
+                    keyExtractor={virtualListKeyExtractor}
+                    ListHeaderComponent={virtualListHeader}
+                    contentContainerStyle={virtualListContentStyle}
+                    showsVerticalScrollIndicator={false}
+                    keyboardShouldPersistTaps="handled"
+                    keyboardDismissMode="none"
+                    drawDistance={640}
+                    getItemType={getVirtualListItemType}
+                />
+            </SafeAreaView>
 
-            {/* Mirror Selection Modal */}
-            <Modal
+            {/* Mirror Selection Sheet */}
+            <TidalBottomSheet
                 visible={showMirrorModal}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowMirrorModal(false)}
+                onClose={() => setShowMirrorModal(false)}
+                title="Servidores"
+                subtitle="Elige el origen de streaming y descargas"
             >
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
-                        <View style={styles.modalHeader}>
-                            <View>
-                                <Text variant="titleLarge" style={[typeScale.titleLarge, { color: theme.colors.onSurface }]}>
-                                    Servidores
-                                </Text>
-                            </View>
-                            <IconButton icon="close" mode="contained-tonal" onPress={() => setShowMirrorModal(false)} />
-                        </View>
+                <OptionRow
+                    icon="sparkles"
+                    title="Enrutamiento automático"
+                    description="Alterna servidores si falla la conexión."
+                    selected={tidalMirror === 'auto'}
+                    onPress={() => handleMirrorChange('auto')}
+                />
+                {recommendedMirrors.map((mirror) => {
+                    const availability = mirrorAvailability[mirror];
+                    const isUnavailable = availability?.status === 'unavailable';
+                    const isSlow = availability?.status === 'slow';
+                    return (
+                        <OptionRow
+                            key={mirror}
+                            icon="server"
+                            title={TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                            description={mirror.replace('https://', '')}
+                            status={`${formatMirrorStatus(availability)} · ${formatMirrorCapabilities(availability)}`}
+                            statusTone={isUnavailable ? 'error' : isSlow ? 'warning' : 'success'}
+                            selected={tidalMirror === mirror}
+                            disabled={isUnavailable}
+                            onPress={() => handleMirrorChange(mirror)}
+                        />
+                    );
+                })}
+                <Button
+                    mode="text"
+                    compact
+                    onPress={() => setShowLegacyMirrors(value => !value)}
+                    textColor={accentColor}
+                    style={{ alignSelf: 'flex-start', marginTop: 2, marginLeft: 6 }}
+                >
+                    {showLegacyMirrors ? 'Ocultar otros servidores' : 'Mostrar otros servidores'}
+                </Button>
+                {showLegacyMirrors ? legacyMirrors.map((mirror) => {
+                    const availability = mirrorAvailability[mirror];
+                    const isUnavailable = availability?.status === 'unavailable';
+                    return (
+                        <OptionRow
+                            key={mirror}
+                            icon="server-outline"
+                            title={TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
+                            description={mirror.replace('https://', '')}
+                            status={formatMirrorCapabilities(availability)}
+                            selected={tidalMirror === mirror}
+                            disabled={isUnavailable}
+                            onPress={() => handleMirrorChange(mirror)}
+                        />
+                    );
+                }) : null}
+            </TidalBottomSheet>
 
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 10, paddingBottom: 20 }}>
-                            <Pressable
-                                onPress={() => handleMirrorChange('auto')}
-                                style={({ pressed }) => [
-                                    styles.premiumOption,
-                                    {
-                                        backgroundColor: tidalMirror === 'auto' ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
-                                        borderColor: tidalMirror === 'auto' ? theme.colors.primary : 'transparent',
-                                        opacity: pressed ? 0.7 : 1
-                                    }
-                                ]}
-                            >
-                                <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
-                                    <IconButton icon="auto-fix" size={20} iconColor={tidalMirror === 'auto' ? theme.colors.onPrimary : theme.colors.onSurface} style={{ margin: 0 }} />
-                                </View>
-                                <View style={{ flex: 1 }}>
-                                    <Text variant="titleMedium" style={[typeScale.title, { color: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.onSurface }]}>
-                                        Enrutamiento Automático
-                                    </Text>
-                                    <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                        Alterna servidores si falla la conexión.
-                                    </Text>
-                                </View>
-                                {tidalMirror === 'auto' && (
-                                    <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
-                                        <CustomIcon name="Play" size={12} color={theme.colors.onPrimary} />
-                                    </View>
-                                )}
-                            </Pressable>
-
-                            {recommendedMirrors.map((mirror) => {
-                                const availability = mirrorAvailability[mirror];
-                                const isUnavailable = availability?.status === 'unavailable';
-                                const isSlow = availability?.status === 'slow';
-                                const titleColor = isUnavailable
-                                    ? theme.colors.onSurfaceVariant
-                                    : tidalMirror === mirror
-                                        ? theme.colors.primary
-                                        : theme.colors.onSurface;
-                                const statusColor = isUnavailable
-                                    ? theme.colors.error
-                                    : isSlow
-                                        ? '#F59E0B'
-                                        : '#10B981';
-
-                                return (
-                                    <Pressable
-                                        key={mirror}
-                                        disabled={isUnavailable}
-                                        onPress={() => handleMirrorChange(mirror)}
-                                        style={({ pressed }) => [
-                                            styles.premiumOption,
-                                            {
-                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
-                                                borderColor: tidalMirror === mirror ? theme.colors.primary : (isUnavailable ? withAlpha(theme.colors.error, '7D') : 'transparent'),
-                                                opacity: isUnavailable ? 0.5 : (pressed ? 0.7 : 1)
-                                            }
-                                        ]}
-                                    >
-                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
-                                            <IconButton
-                                                icon="server"
-                                                size={20}
-                                                iconColor={tidalMirror === mirror ? theme.colors.onPrimary : theme.colors.onSurface}
-                                                style={{ margin: 0 }}
-                                            />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text variant="titleMedium" style={[typeScale.title, { color: titleColor }]}>
-                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                            </Text>
-                                            <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>
-                                                {mirror.replace('https://', '')}
-                                            </Text>
-                                            <Text variant="labelSmall" style={{ color: statusColor, marginTop: 4 }}>
-                                                {formatMirrorStatus(availability)}
-                                            </Text>
-                                            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
-                                                {formatMirrorCapabilities(availability)}
-                                            </Text>
-                                        </View>
-                                        {tidalMirror === mirror && (
-                                            <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
-                                                <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
-                                            </View>
-                                        )}
-                                    </Pressable>
-                                );
-                            })}
-
-                            <Button
-                                mode="text"
-                                compact
-                                onPress={() => setShowLegacyMirrors(value => !value)}
-                                textColor={theme.colors.primary}
-                                style={{ alignSelf: 'flex-start', marginTop: 2 }}
-                            >
-                                {showLegacyMirrors ? 'Ocultar otros servidores' : 'Mostrar otros servidores'}
-                            </Button>
-
-                            {showLegacyMirrors ? legacyMirrors.map((mirror) => {
-                                const availability = mirrorAvailability[mirror];
-                                const isUnavailable = availability?.status === 'unavailable';
-                                const titleColor = isUnavailable
-                                    ? theme.colors.onSurfaceVariant
-                                    : tidalMirror === mirror
-                                        ? theme.colors.primary
-                                        : theme.colors.onSurface;
-
-                                return (
-                                    <Pressable
-                                        key={mirror}
-                                        disabled={isUnavailable}
-                                        onPress={() => handleMirrorChange(mirror)}
-                                        style={({ pressed }) => [
-                                            styles.premiumOption,
-                                            {
-                                                backgroundColor: tidalMirror === mirror ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
-                                                borderColor: tidalMirror === mirror ? theme.colors.primary : 'transparent',
-                                                opacity: isUnavailable ? 0.45 : (pressed ? 0.7 : 0.88),
-                                            }
-                                        ]}
-                                    >
-                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalMirror === mirror ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
-                                            <IconButton
-                                                icon="server-outline"
-                                                size={20}
-                                                iconColor={tidalMirror === mirror ? theme.colors.onPrimary : theme.colors.onSurface}
-                                                style={{ margin: 0 }}
-                                            />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text variant="titleMedium" style={[typeScale.title, { color: titleColor }]}>
-                                                {TIDAL_MIRROR_NAMES[mirror] || mirror.replace('https://', '')}
-                                            </Text>
-                                            <Text variant="bodySmall" numberOfLines={1} style={{ color: theme.colors.onSurfaceVariant }}>
-                                                {mirror.replace('https://', '')}
-                                            </Text>
-                                            <Text variant="labelSmall" style={{ color: theme.colors.onSurfaceVariant, marginTop: 2 }}>
-                                                {formatMirrorCapabilities(availability)}
-                                            </Text>
-                                        </View>
-                                        {tidalMirror === mirror && (
-                                            <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
-                                                <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
-                                            </View>
-                                        )}
-                                    </Pressable>
-                                );
-                            }) : null}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
-
-            {/* Quality Selection Modal */}
-            <Modal
+            {/* Quality Selection Sheet */}
+            <TidalBottomSheet
                 visible={showQualityModal}
-                transparent
-                animationType="slide"
-                onRequestClose={() => setShowQualityModal(false)}
+                onClose={() => setShowQualityModal(false)}
+                title="Fidelidad"
+                subtitle="Calidad de flujo y descarga"
             >
-                <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
-                        <View style={styles.modalHeader}>
-                            <View>
-                                <Text variant="titleLarge" style={[typeScale.titleLarge, { color: theme.colors.onSurface }]}>
-                                    Fidelidad
-                                </Text>
-                                <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                    Calidad de flujo y descarga
-                                </Text>
-                            </View>
-                            <IconButton icon="close" mode="contained-tonal" onPress={() => setShowQualityModal(false)} />
-                        </View>
+                {qualityModalOptions.map((q) => {
+                    const details = {
+                        HI_RES_LOSSLESS: {
+                            title: 'Hi-Res Lossless (FLAC)',
+                            desc: 'Calidad de estudio (24-bit). El mejor sonido posible.',
+                            adv: '✓ Máximo detalle · ✗ Archivos gigantes',
+                            icon: 'diamond' as const,
+                        },
+                        LOSSLESS: {
+                            title: 'Lossless (FLAC)',
+                            desc: 'Calidad de CD (16-bit). Sonido puro sin pérdida.',
+                            adv: '✓ Alta fidelidad · ✗ Archivos grandes',
+                            icon: 'disc' as const,
+                        },
+                        MP3: {
+                            title: 'MP3 (320kbps)',
+                            desc: 'Compatibilidad amplia y buen balance tamaño/calidad.',
+                            adv: '✓ Más compatible · ✓ Tamaño moderado',
+                            icon: 'musical-note' as const,
+                        },
+                        LOW: {
+                            title: 'Básica (AAC)',
+                            desc: 'Calidad estándar eficiente (96kbps).',
+                            adv: '✓ Ahorro máximo · ✓ Poco espacio',
+                            icon: 'leaf' as const,
+                        },
+                    } as const;
+                    const selectedQuality = q as keyof typeof details;
+                    const optionDetails = details[selectedQuality];
+                    return (
+                        <OptionRow
+                            key={selectedQuality}
+                            icon={optionDetails.icon}
+                            title={optionDetails.title}
+                            description={optionDetails.desc}
+                            status={optionDetails.adv}
+                            statusTone="success"
+                            selected={tidalDownloadQuality === selectedQuality}
+                            onPress={() => {
+                                setTidalDownloadQuality(selectedQuality);
+                                setShowQualityModal(false);
+                            }}
+                        />
+                    );
+                })}
+            </TidalBottomSheet>
 
-                        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={{ gap: 12, paddingBottom: 20 }}>
-                            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 8 }}>
-                                Selecciona el formato preferido para tus descargas de Tidal.
-                            </Text>
-
-                            {qualityModalOptions.map((q) => {
-                                const details = {
-                                    HI_RES_LOSSLESS: {
-                                        title: 'Hi-Res Lossless (FLAC)',
-                                        desc: 'Calidad de estudio (24-bit). El mejor sonido posible.',
-                                        adv: '✓ Máximo detalle / ✗ Archivos gigantes (~100MB)',
-                                        icon: 'crown'
-                                    },
-                                    LOSSLESS: {
-                                        title: 'Lossless (FLAC)',
-                                        desc: 'Calidad de CD (16-bit). Sonido puro sin pérdida.',
-                                        adv: '✓ Alta fidelidad / ✗ Archivos grandes (~30-50MB)',
-                                        icon: 'disc'
-                                    },
-                                    MP3: {
-                                        title: 'MP3 (320kbps)',
-                                        desc: 'Compatibilidad amplia y buen balance entre tamaño y calidad.',
-                                        adv: '✓ Más compatible / ✓ Tamaño moderado',
-                                        icon: 'file-music-outline'
-                                    },
-                                    LOW: {
-                                        title: 'Básica (AAC)',
-                                        desc: 'Calidad estándar eficiente (96kbps).',
-                                        adv: '✓ Ahorro máximo / ✓ Ideal para poco espacio',
-                                        icon: 'leaf'
-                                    }
-                                } as const;
-                                const selectedQuality = q as keyof typeof details;
-                                const optionDetails = details[selectedQuality];
-
-                                return (
-                                    <Pressable
-                                        key={selectedQuality}
-                                        onPress={() => {
-                                            setTidalDownloadQuality(selectedQuality);
-                                            setShowQualityModal(false);
-                                        }}
-                                        style={({ pressed }) => [
-                                            styles.premiumOption,
-                                            {
-                                                backgroundColor: tidalDownloadQuality === selectedQuality ? `${theme.colors.primary}20` : theme.colors.surfaceVariant + '40',
-                                                borderColor: tidalDownloadQuality === selectedQuality ? theme.colors.primary : 'transparent',
-                                                opacity: pressed ? 0.7 : 1
-                                            }
-                                        ]}
-                                    >
-                                        <View style={[styles.optionIconContainer, { backgroundColor: tidalDownloadQuality === selectedQuality ? theme.colors.primary : theme.colors.onSurfaceVariant + '20' }]}>
-                                            <IconButton
-                                                icon={optionDetails.icon}
-                                                size={22}
-                                                iconColor={tidalDownloadQuality === selectedQuality ? theme.colors.onPrimary : theme.colors.onSurface}
-                                                style={{ margin: 0 }}
-                                            />
-                                        </View>
-                                        <View style={{ flex: 1 }}>
-                                            <Text variant="titleMedium" style={[typeScale.title, { color: tidalDownloadQuality === selectedQuality ? theme.colors.primary : theme.colors.onSurface }]}>
-                                                {optionDetails.title}
-                                            </Text>
-                                            <Text variant="labelSmall" style={[typeScale.micro, { color: theme.colors.primary, marginBottom: 2 }]}>
-                                                {optionDetails.adv.split(' / ')[0]}
-                                            </Text>
-                                            <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant }}>
-                                                {optionDetails.desc}
-                                            </Text>
-                                        </View>
-                                        {tidalDownloadQuality === selectedQuality && (
-                                            <View style={[styles.checkCircle, { backgroundColor: theme.colors.primary }]}>
-                                                <IconButton icon="check" size={12} iconColor={theme.colors.onPrimary} style={{ margin: 0 }} />
-                                            </View>
-                                        )}
-                                    </Pressable>
-                                );
-                            })}
-                        </ScrollView>
-                    </View>
-                </View>
-            </Modal>
-        </SafeAreaView>
+            {/* Settings Sheet */}
+            <TidalBottomSheet
+                visible={showSettingsSheet}
+                onClose={() => setShowSettingsSheet(false)}
+                title="Ajustes de Tidal"
+            >
+                <OptionRow
+                    icon="musical-notes"
+                    title="Calidad de audio"
+                    description="Formato de flujo y descarga"
+                    onPress={() => { setShowSettingsSheet(false); setShowQualityModal(true); }}
+                />
+                <OptionRow
+                    icon="server"
+                    title="Servidor"
+                    description="Origen de streaming y descargas"
+                    onPress={() => { setShowSettingsSheet(false); setShowMirrorModal(true); }}
+                />
+                <OptionRow
+                    icon="person-circle-outline"
+                    title="Sesión Soulseek"
+                    description="Cambia tus credenciales"
+                    onPress={() => { setShowSettingsSheet(false); setHasSoulseekCredentials(false); }}
+                />
+            </TidalBottomSheet>
+        </View>
     );
 }
 
@@ -2623,49 +2212,22 @@ const styles = StyleSheet.create({
     pageContent: {
         paddingBottom: 120,
     },
-    headerGlow: {
-        position: 'absolute',
-        top: 10,
-        right: 8,
-        width: 180,
-        height: 180,
-        borderRadius: 120,
+    flex: {
+        flex: 1,
     },
     header: {
         marginHorizontal: 16,
-        marginTop: 6,
+        marginTop: 8,
         marginBottom: 18,
         paddingHorizontal: 0,
         paddingTop: 8,
-        paddingBottom: 4,
         gap: 16,
         elevation: 0,
-        overflow: 'hidden',
-    },
-    headerOrbit: {
-        position: 'absolute',
-        width: 220,
-        height: 220,
-        borderRadius: 220,
-        borderWidth: 1.5,
-        top: -126,
-        right: -104,
-        transform: [{ rotate: '18deg' }],
-    },
-    headerOrbitSecondary: {
-        position: 'absolute',
-        width: 140,
-        height: 140,
-        borderRadius: 140,
-        borderWidth: 1,
-        top: -38,
-        right: 54,
-        transform: [{ rotate: '-12deg' }],
     },
     headerTitleRow: {
         flexDirection: 'row',
         justifyContent: 'space-between',
-        alignItems: 'flex-start',
+        alignItems: 'center',
         zIndex: 4,
         elevation: 4,
     },
@@ -2673,92 +2235,154 @@ const styles = StyleSheet.create({
         flex: 1,
         paddingRight: 10,
         justifyContent: 'center',
+        gap: 4,
+    },
+    headerKicker: {
+        ...typeScale.micro,
+        letterSpacing: 1.6,
     },
     headerTitle: {
-        ...typeScale.screenTitle,
-        letterSpacing: -1,
+        ...typeScale.hero,
+    },
+    headerSubtitle: {
+        ...typeScale.body,
+        fontSize: 14,
+        marginTop: 3,
+        letterSpacing: -0.1,
     },
     settingsButton: {
-        margin: 0,
         width: 40,
         height: 40,
-        borderRadius: 12,
-        zIndex: 5,
-        elevation: 5,
+        borderRadius: 20,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     title: {
         ...typeScale.titleLarge,
     },
+    searchDock: {
+        borderRadius: 18,
+        borderWidth: StyleSheet.hairlineWidth,
+        paddingHorizontal: 2,
+        overflow: 'hidden',
+        zIndex: 1,
+    },
     searchShell: {
-        borderRadius: 0,
-        borderBottomWidth: 1,
-        paddingHorizontal: 0,
-        paddingVertical: 2,
+        borderRadius: 20,
+        borderWidth: 1.5,
+        paddingHorizontal: 4,
+        overflow: 'hidden',
         zIndex: 1,
     },
     searchbar: {
-        borderRadius: 0,
-        minHeight: 52,
+        borderRadius: 18,
+        minHeight: 56,
         elevation: 0,
     },
     searchInput: {
         ...typeScale.bodyStrong,
-        paddingLeft: 0,
-        fontSize: 20,
-        lineHeight: 28,
-        letterSpacing: -0.35,
+        fontSize: 16,
+        lineHeight: 22,
+        letterSpacing: 0,
+        alignSelf: 'center',
     },
     sourceTabsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 22,
-        marginTop: -2,
+        gap: 24,
+        minHeight: 36,
+    },
+    sourceTabsCaption: {
+        ...typeScale.micro,
+        fontSize: 11,
+        textTransform: 'uppercase',
+        letterSpacing: 1.1,
+        fontWeight: '700',
+        marginRight: -6,
     },
     sourceTab: {
-        paddingVertical: 4,
+        minWidth: 58,
+        paddingTop: 2,
+        paddingBottom: 6,
+        alignItems: 'flex-start',
     },
     sourceTabLabel: {
         ...typeScale.label,
-        fontWeight: '700',
-        letterSpacing: 0.35,
-        fontSize: 13,
+        fontWeight: '800',
+        letterSpacing: 0,
+        fontSize: 15,
     },
     sourceTabUnderline: {
-        width: 22,
+        alignSelf: 'stretch',
         height: 2,
         borderRadius: 999,
-        marginTop: 8,
+        marginTop: 6,
     },
     filterScroller: {
         paddingHorizontal: 16,
         marginBottom: 22,
     },
     filterRow: {
-        gap: 18,
+        gap: 10,
         paddingRight: 16,
     },
     filterChip: {
-        borderRadius: 0,
-        borderWidth: 0,
-        paddingHorizontal: 0,
-        paddingVertical: 2,
+        borderRadius: 999,
+        borderWidth: 1,
+        paddingHorizontal: 16,
+        paddingVertical: 8,
         justifyContent: 'center',
         alignItems: 'center',
-    },
-    filterChipInner: {
-        alignItems: 'flex-start',
     },
     filterChipLabel: {
         ...typeScale.label,
         fontWeight: '700',
-        letterSpacing: 0.3,
+        letterSpacing: 0.2,
         fontSize: 13,
     },
-    filterChipUnderline: {
-        width: 24,
-        height: 2,
+    artistHeroCard: {
+        marginHorizontal: 16,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 16,
+        padding: 14,
+        borderRadius: 24,
+        borderWidth: 1,
+    },
+    artistHeroAvatar: {
+        width: 84,
+        height: 84,
+        borderRadius: 42,
+        overflow: 'hidden',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    artistHeroCopy: {
+        flex: 1,
+        gap: 6,
+    },
+    artistHeroName: {
+        fontSize: 22,
+        lineHeight: 26,
+        fontWeight: '800',
+        letterSpacing: -0.5,
+    },
+    artistHeroMeta: {
+        fontSize: 13,
+    },
+    artistHeroCta: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 4,
+        marginTop: 2,
+        paddingHorizontal: 12,
+        paddingVertical: 6,
         borderRadius: 999,
-        marginTop: 8,
+    },
+    artistHeroCtaLabel: {
+        fontSize: 13,
+        fontWeight: '700',
     },
     searchBanner: {
         marginHorizontal: 16,
@@ -2826,26 +2450,46 @@ const styles = StyleSheet.create({
         marginTop: 4,
         marginBottom: 8,
     },
+    soulseekSummary: {
+        marginTop: 6,
+        marginBottom: 6,
+    },
     soulseekFolderHeader: {
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        borderBottomWidth: 1,
-        paddingBottom: 8,
-        marginBottom: 2,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderRadius: 16,
+        paddingVertical: 10,
+        paddingHorizontal: 12,
+        gap: 12,
+    },
+    soulseekFolderIcon: {
+        width: 34,
+        height: 34,
+        borderRadius: 12,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     soulseekFolderTitleBlock: {
         flex: 1,
         minWidth: 0,
-        marginRight: 12,
     },
     soulseekFolderPath: {
         ...typeScale.label,
         fontWeight: '700',
     },
+    soulseekFolderBadge: {
+        minWidth: 28,
+        height: 24,
+        borderRadius: 12,
+        paddingHorizontal: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     soulseekFolderCount: {
         ...typeScale.micro,
-        fontWeight: '700',
+        fontWeight: '800',
     },
     soulseekFolderPeer: {
         ...typeScale.micro,
@@ -2918,7 +2562,9 @@ const styles = StyleSheet.create({
     },
     sectionTitle: {
         ...typeScale.title,
-        letterSpacing: -0.35,
+        fontSize: 19,
+        fontWeight: '800',
+        letterSpacing: -0.5,
     },
     trackRow: {
         borderRadius: 18,
@@ -3073,13 +2719,26 @@ const styles = StyleSheet.create({
     },
     soulseekAuthPanel: {
         width: '100%',
-        borderWidth: 1,
-        borderRadius: 18,
-        padding: 16,
-        gap: 10,
+        padding: 22,
+        gap: 12,
+        alignItems: 'stretch',
+    },
+    soulseekAuthIcon: {
+        width: 48,
+        height: 48,
+        borderRadius: 24,
+        alignItems: 'center',
+        justifyContent: 'center',
+        alignSelf: 'flex-start',
+    },
+    soulseekAuthKicker: {
+        ...typeScale.micro,
+        letterSpacing: 1.6,
+        marginTop: 2,
     },
     soulseekAuthTitle: {
-        ...typeScale.title,
+        ...typeScale.titleLarge,
+        marginBottom: 2,
     },
     soulseekAuthInput: {
         backgroundColor: 'transparent',
@@ -3196,5 +2855,192 @@ const styles = StyleSheet.create({
     gridImageGradientOverlay: {
         ...StyleSheet.absoluteFillObject,
         zIndex: 1,
+    },
+
+    // ─── Editorial redesign ────────────────────────────────────────────────
+    centerFill: {
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    labelRow: {
+        paddingHorizontal: 16,
+        marginTop: 18,
+        marginBottom: 8,
+    },
+    labelText: {
+        ...typeScale.micro,
+        fontSize: 12,
+        fontWeight: '800',
+        letterSpacing: 1.4,
+        textTransform: 'uppercase',
+    },
+    feature: {
+        marginHorizontal: 16,
+        marginTop: 4,
+        marginBottom: 8,
+        height: 264,
+        borderRadius: 28,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(127,127,127,0.12)',
+    },
+    featureCopy: {
+        position: 'absolute',
+        left: 20,
+        right: 20,
+        bottom: 20,
+        gap: 10,
+    },
+    featureKicker: {
+        ...typeScale.micro,
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 1.6,
+        textTransform: 'uppercase',
+    },
+    featureName: {
+        fontSize: 30,
+        lineHeight: 33,
+        fontWeight: '800',
+        letterSpacing: -0.8,
+        color: '#FFFFFF',
+    },
+    featureCta: {
+        alignSelf: 'flex-start',
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingHorizontal: 16,
+        paddingVertical: 9,
+        borderRadius: 999,
+        backgroundColor: '#FFFFFF',
+        marginTop: 2,
+    },
+    featureCtaLabel: {
+        ...typeScale.label,
+        fontSize: 13,
+        fontWeight: '800',
+        color: '#0B0B0C',
+    },
+    band: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+    },
+    bandArt: {
+        width: 58,
+        height: 58,
+        overflow: 'hidden',
+    },
+    bandCopy: {
+        flex: 1,
+        gap: 3,
+    },
+    bandTitle: {
+        fontSize: 16,
+        fontWeight: '700',
+        letterSpacing: -0.3,
+    },
+    bandSubtitle: {
+        fontSize: 13,
+    },
+    songRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 14,
+        paddingVertical: 8,
+        paddingHorizontal: 16,
+        borderRadius: 14,
+    },
+    songArt: {
+        width: 52,
+        height: 52,
+        borderRadius: 12,
+        overflow: 'hidden',
+        backgroundColor: 'rgba(127,127,127,0.1)',
+    },
+    songArtScrim: {
+        ...StyleSheet.absoluteFillObject,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(0,0,0,0.42)',
+    },
+    songCopy: {
+        flex: 1,
+        gap: 3,
+    },
+    songTitle: {
+        fontSize: 15,
+        fontWeight: '700',
+        letterSpacing: -0.2,
+    },
+    songSub: {
+        fontSize: 13,
+    },
+    songFile: {
+        ...typeScale.micro,
+        marginTop: 1,
+    },
+    coverWall: {
+        paddingHorizontal: 16,
+        paddingTop: 4,
+        paddingBottom: 24,
+        gap: 26,
+    },
+    coverWallGrid: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: GRID_GAP,
+    },
+    coverTileTitle: {
+        fontSize: 14,
+        fontWeight: '700',
+        letterSpacing: -0.2,
+        marginTop: 8,
+    },
+    coverTileSub: {
+        fontSize: 12,
+        marginTop: 2,
+        opacity: 0.82,
+    },
+    coverPlayBadge: {
+        position: 'absolute',
+        right: 10,
+        bottom: 10,
+        width: 34,
+        height: 34,
+        borderRadius: 17,
+        backgroundColor: 'rgba(0,0,0,0.55)',
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    homeHeaderRow: {
+        flexDirection: 'row',
+        alignItems: 'flex-end',
+        justifyContent: 'space-between',
+        marginBottom: 16,
+    },
+    homeTitle: {
+        ...typeScale.hero,
+        fontSize: 34,
+        lineHeight: 38,
+    },
+    homeSubLabel: {
+        ...typeScale.micro,
+        fontSize: 12,
+        fontWeight: '800',
+        letterSpacing: 1.4,
+        textTransform: 'uppercase',
+        marginBottom: 14,
+    },
+    homeRail: {
+        paddingRight: 16,
+        gap: 16,
+    },
+    resultRail: {
+        paddingHorizontal: 16,
+        paddingBottom: 4,
+        gap: 16,
     },
 });

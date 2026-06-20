@@ -3,6 +3,7 @@
  */
 
 import { AlphabetScrubber, ArtistCard, CustomIcon, EmptyState, ScanButton, TrackListItem } from '@/src/components/ui';
+import { TidalAtmosphere } from '@/src/components/tidal';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n } from '@/src/i18n';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
@@ -385,8 +386,11 @@ export default function LibraryScreen() {
     }, [filteredTracks.length, firstIndexByLetter, scrubAnimatedIndexThreshold, trackSize]);
 
     const aC = useAnimatedColors();
-    const animBg = useAnimatedStyle(() => ({ backgroundColor: aC.background.value }));
     const animSearchbarBg = useAnimatedStyle(() => ({ backgroundColor: aC.surfaceVariant.value + 'A6' }));
+    const heroArtwork = useMemo(
+        () => albums[0]?.artwork ?? albums[0]?.artworkThumb ?? tracks[0]?.artworkThumb ?? tracks[0]?.artwork,
+        [albums, tracks]
+    );
     // Icon inside the circle — search glyph fades out, X fades in
     const searchGlyphStyle = useAnimatedStyle(() => ({
         opacity: 1 - searchProgress.value,
@@ -421,7 +425,8 @@ export default function LibraryScreen() {
     }, [searchQuery]);
 
     return (
-        <Animated.View style={[styles.container, animBg]}>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+            <TidalAtmosphere sourceUri={heroArtwork} mode="fog" />
             <SafeAreaView style={styles.container} edges={['top']}>
                 <Animated.View
                     style={[
@@ -646,7 +651,7 @@ export default function LibraryScreen() {
                     ) : null}
                 </Animated.View>
             </SafeAreaView>
-        </Animated.View>
+        </View>
     );
 }
 

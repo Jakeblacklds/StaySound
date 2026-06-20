@@ -11,12 +11,13 @@ import { TidalQuality, Track } from '@/src/types/audio';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { Image } from 'expo-image';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
-import { Alert, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
-import { ActivityIndicator, Button, Divider, IconButton, List, Switch, Text, TextInput } from 'react-native-paper';
-import { runOnJS } from 'react-native-reanimated';
+import { Alert, Modal, Pressable, ScrollView, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import { ActivityIndicator, Button, IconButton, Switch, Text, TextInput } from 'react-native-paper';
+import Animated, { FadeInDown, runOnJS, useAnimatedStyle, useSharedValue, withSpring } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import ColorPicker, { HueSlider, Panel1, Swatches } from 'reanimated-color-picker';
 
@@ -316,13 +317,13 @@ export default function SettingsScreen() {
         runOnJS(_jsSetTempColor)(hex);
     };
 
-    // tempColor is the single source of truth â€” always up-to-date on JS thread.
+    // tempColor is the single source of truth — always up-to-date on JS thread.
     const applyColor = () => {
         setAccentColor(tempColor);
         setShowPicker(false);
     };
 
-    // Live palette preview â€” regenerated whenever tempColor changes
+    // Live palette preview — regenerated whenever tempColor changes
     const previewPalette = useMemo(() => {
         const color = tempColor.startsWith('#') ? tempColor : `#${tempColor}`;
         if (color.length !== 7) return null;
@@ -419,106 +420,114 @@ export default function SettingsScreen() {
             ? 'Actualizar'
             : 'Buscar';
 
+    const showThemeColors = config.style === 'material3' && !config.dynamicColors;
+    const heroGradient = [theme.colors.primary, (theme.colors as any).tertiary ?? theme.colors.secondary] as const;
+
     return (
         <ScrollView
             style={[styles.container, { backgroundColor: theme.colors.background }]}
             contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
+            showsVerticalScrollIndicator={false}
         >
-            {/* Hero Section */}
-            <View style={styles.heroSection}>
-                <Text variant="displaySmall" style={[styles.heroTitle, { color: theme.colors.onBackground }]}>
-                    Ajustes
-                </Text>
-                <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, opacity: 0.7 }}>
-                    Personaliza tu experiencia StaySound
-                </Text>
-            </View>
+            {/* ——— HERO: gradient banner + integrated profile ——— */}
+            <Animated.View entering={FadeInDown.duration(520).springify().damping(16)} style={styles.heroWrap}>
+                <LinearGradient
+                    colors={heroGradient}
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={styles.hero}
+                >
+                    <View style={styles.heroGlowA} />
+                    <View style={styles.heroGlowB} />
 
-            {/* Profile Section */}
-            <SectionGroup theme={theme}>
-                <View style={styles.profileHeader}>
-                    <Pressable onPress={handlePickImage} style={styles.avatarContainer}>
-                        <View style={[styles.avatarCircle, { borderColor: theme.colors.primary + '40', backgroundColor: theme.colors.surfaceVariant }]}>
-                            {userAvatarUri ? (
-                                <Image source={{ uri: userAvatarUri }} style={styles.avatarImage} />
-                            ) : (
-                                <View style={[styles.avatarPlaceholder, { backgroundColor: theme.colors.primaryContainer }]}>
-                                    <Text style={{ color: theme.colors.primary, fontSize: 32, fontWeight: '800' }}>
-                                        {userName ? userName.charAt(0).toUpperCase() : 'U'}
-                                    </Text>
+                    <Text style={[styles.heroEyebrow, { color: theme.colors.onPrimary }]}>
+                        AJUSTES
+                    </Text>
+
+                    <View style={styles.heroProfileRow}>
+                        <Pressable onPress={handlePickImage} style={styles.avatarContainer}>
+                            <View style={[styles.avatarCircle, { borderColor: 'rgba(255,255,255,0.55)', backgroundColor: 'rgba(255,255,255,0.16)' }]}>
+                                {userAvatarUri ? (
+                                    <Image source={{ uri: userAvatarUri }} style={styles.avatarImage} />
+                                ) : (
+                                    <View style={[styles.avatarPlaceholder, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
+                                        <Text style={{ color: theme.colors.onPrimary, fontSize: 30, fontWeight: '800' }}>
+                                            {userName ? userName.charAt(0).toUpperCase() : 'U'}
+                                        </Text>
+                                    </View>
+                                )}
+                                <View style={[styles.avatarBadge, { backgroundColor: theme.colors.onPrimary }]}>
+                                    <MaterialCommunityIcons name="camera" size={13} color={theme.colors.primary} />
                                 </View>
+                            </View>
+                        </Pressable>
+
+                        <View style={styles.heroMeta}>
+                            {editingName ? (
+                                <View style={styles.nameEditGroup}>
+                                    <TextInput
+                                        value={tempName}
+                                        onChangeText={setTempName}
+                                        mode="flat"
+                                        dense
+                                        autoFocus
+                                        underlineColor="rgba(255,255,255,0.45)"
+                                        activeUnderlineColor={theme.colors.onPrimary}
+                                        textColor={theme.colors.onPrimary}
+                                        style={{ flex: 1, backgroundColor: 'transparent' }}
+                                        placeholder={t('settings.profile.namePlaceholder')}
+                                    />
+                                    <IconButton
+                                        icon="check"
+                                        mode="contained"
+                                        containerColor={theme.colors.onPrimary}
+                                        iconColor={theme.colors.primary}
+                                        onPress={handleSaveName}
+                                        size={18}
+                                    />
+                                </View>
+                            ) : (
+                                <Pressable onPress={() => { setTempName(userName); setEditingName(true); }} style={styles.nameActionRow}>
+                                    <Text variant="headlineSmall" numberOfLines={1} style={{ color: theme.colors.onPrimary, fontWeight: '800', flexShrink: 1 }}>
+                                        {userName || 'StaySound User'}
+                                    </Text>
+                                    <MaterialCommunityIcons name="pencil" size={16} color={theme.colors.onPrimary} style={{ marginLeft: 8, opacity: 0.85 }} />
+                                </Pressable>
                             )}
-                            <View style={[styles.avatarBadge, { backgroundColor: theme.colors.primary }]}>
-                                <MaterialCommunityIcons name="camera" size={14} color={theme.colors.onPrimary} />
-                            </View>
+                            <Text variant="bodyMedium" style={{ color: theme.colors.onPrimary, opacity: 0.82, marginTop: 2 }}>
+                                Personaliza tu experiencia StaySound
+                            </Text>
                         </View>
-                    </Pressable>
-
-                    <View style={styles.profileMeta}>
-                        {editingName ? (
-                            <View style={styles.nameEditGroup}>
-                                <TextInput
-                                    value={tempName}
-                                    onChangeText={setTempName}
-                                    mode="outlined"
-                                    dense
-                                    autoFocus
-                                    style={{ flex: 1, backgroundColor: 'transparent' }}
-                                    placeholder={t('settings.profile.namePlaceholder')}
-                                    outlineColor={theme.colors.outline}
-                                    activeOutlineColor={theme.colors.primary}
-                                />
-                                <IconButton
-                                    icon="check"
-                                    mode="contained"
-                                    containerColor={theme.colors.primary}
-                                    iconColor={theme.colors.onPrimary}
-                                    onPress={handleSaveName}
-                                    size={20}
-                                />
-                            </View>
-                        ) : (
-                            <Pressable onPress={() => { setTempName(userName); setEditingName(true); }} style={styles.nameActionRow}>
-                                <Text variant="headlineSmall" style={{ color: theme.colors.onSurface, fontWeight: '800' }}>
-                                    {userName || 'StaySound User'}
-                                </Text>
-                                <MaterialCommunityIcons name="pencil-circle" size={20} color={theme.colors.primary} style={{ marginLeft: 8 }} />
-                            </Pressable>
-                        )}
-                        <Text variant="labelMedium" style={{ color: theme.colors.onSurfaceVariant, opacity: 0.8 }}>
-                            {t('settings.profile.tapToEdit')}
-                        </Text>
                     </View>
-                </View>
-            </SectionGroup>
+                </LinearGradient>
+            </Animated.View>
 
-            {/* Account Management */}
-            <SectionGroup title="Cuentas" theme={theme}>
-                <List.Item
+            {/* ——— Cuentas ——— */}
+            <Section title="Cuentas" index={0} theme={theme}>
+                <SettingRow
+                    theme={theme}
+                    icon="shield-account-outline"
                     title={appSession?.email || 'Cuenta de Invitado'}
                     description={appSession ? 'Sesion principal activa' : 'Sin cuenta vinculada'}
-                    left={(props) => <MaterialCommunityIcons name="shield-account-outline" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={appSession ? () => (
-                        <IconButton icon="logout" iconColor={theme.colors.error} onPress={handleMainSignOut} />
-                    ) : undefined}
+                    right={appSession ? <IconButton icon="logout" iconColor={theme.colors.error} onPress={handleMainSignOut} /> : undefined}
                 />
-                
-                <Divider style={styles.cardDivider} />
-                
-                <List.Item
+                <RowDivider theme={theme} />
+                <SettingRow
+                    theme={theme}
+                    tint={theme.colors.secondary}
+                    icon="bridge"
                     title="Digital Audio Bridge (DAB)"
                     description={dabSession ? `Conectado como ${dabSession.username || dabSession.email}` : 'Conecta tu cuenta para streaming'}
-                    left={(props) => <MaterialCommunityIcons name="bridge" size={24} color={theme.colors.secondary} style={props.style} />}
-                    right={() => (
-                        <Button mode={dabSession ? 'text' : 'contained-tonal'} onPress={dabSession ? handleDabSignOut : handleOpenDabAuth}>
+                    right={(
+                        <Button mode={dabSession ? 'text' : 'contained-tonal'} onPress={dabSession ? handleDabSignOut : handleOpenDabAuth} compact>
                             {dabSession ? 'Cerrar' : 'Conectar'}
                         </Button>
                     )}
                 />
-            </SectionGroup>
+            </Section>
 
-            {/* Locale Settings */}
-            <SectionGroup title={t('settings.section.language')} theme={theme}>
+            {/* ——— Idioma ——— */}
+            <Section title={t('settings.section.language')} index={1} theme={theme}>
                 <View style={styles.languageContainer}>
                     <Text variant="bodySmall" style={{ color: theme.colors.onSurfaceVariant, marginBottom: 12 }}>
                         {t('settings.language.desc', { language: currentLanguageLabel })}
@@ -541,9 +550,9 @@ export default function SettingsScreen() {
                                         },
                                     ]}
                                 >
-                                    <Text style={{ 
-                                        color: isSelected ? theme.colors.onPrimary : theme.colors.onSurface, 
-                                        fontWeight: isSelected ? '700' : '500' 
+                                    <Text style={{
+                                        color: isSelected ? theme.colors.onPrimary : theme.colors.onSurface,
+                                        fontWeight: isSelected ? '700' : '500'
                                     }}>
                                         {option.label}
                                     </Text>
@@ -552,50 +561,38 @@ export default function SettingsScreen() {
                         })}
                     </View>
                 </View>
-            </SectionGroup>
+            </Section>
 
-            {/* General Display */}
-            <SectionGroup title="Personalización" theme={theme}>
-                <List.Item
+            {/* ——— Personalización ——— */}
+            <Section title="Personalización" index={2} theme={theme}>
+                <SettingRow
+                    theme={theme}
+                    icon="moon-waning-crescent"
                     title={t('settings.appearance.darkMode')}
                     description={config.mode === 'system' ? t('settings.appearance.followSystem') : isDark ? t('settings.appearance.on') : t('settings.appearance.off')}
-                    left={(props) => <MaterialCommunityIcons name="moon-waning-crescent" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={() => (
-                        <Switch
-                            value={isDark}
-                            onValueChange={() => setThemeMode(isDark ? 'light' : 'dark')}
-                        />
-                    )}
+                    right={<Switch value={isDark} onValueChange={() => setThemeMode(isDark ? 'light' : 'dark')} />}
                 />
-                <Divider style={styles.cardDivider} />
-                <List.Item
+                <RowDivider theme={theme} />
+                <SettingRow
+                    theme={theme}
+                    icon="auto-fix"
                     title={t('settings.appearance.dynamicColors')}
                     description="Colores basados en tu musica"
-                    left={(props) => <MaterialCommunityIcons name="auto-fix" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={() => (
-                        <Switch
-                            value={config.dynamicColors}
-                            onValueChange={toggleDynamicColors}
-                        />
-                    )}
+                    right={<Switch value={config.dynamicColors} onValueChange={toggleDynamicColors} />}
                 />
-                <Divider style={styles.cardDivider} />
-                <List.Item
+                <RowDivider theme={theme} />
+                <SettingRow
+                    theme={theme}
+                    icon="leaf"
                     title={t('settings.appearance.lightweightMode')}
                     description="Optimiza para dispositivos lentos"
-                    left={(props) => <MaterialCommunityIcons name="leaf" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={() => (
-                        <Switch
-                            value={config.lightweightMode}
-                            onValueChange={toggleLightweightMode}
-                        />
-                    )}
+                    right={<Switch value={config.lightweightMode} onValueChange={toggleLightweightMode} />}
                 />
-            </SectionGroup>
+            </Section>
 
-            {/* Custom Color Picking */}
-            {config.style === 'material3' && !config.dynamicColors && (
-                <SectionGroup title={t('settings.section.themeColors')} theme={theme}>
+            {/* ——— Colores del tema ——— */}
+            {showThemeColors && (
+                <Section title={t('settings.section.themeColors')} index={3} theme={theme}>
                     <View style={styles.colorSelectionBody}>
                         <Text variant="labelSmall" style={styles.colorSectionLabel}>
                             Preajustes recomendados
@@ -618,7 +615,7 @@ export default function SettingsScreen() {
                             ))}
                         </View>
 
-                        <Divider style={[styles.cardDivider, { marginVertical: 16 }]} />
+                        <View style={[styles.rowDivider, { backgroundColor: theme.colors.outline + '22', marginLeft: 0, marginVertical: 16 }]} />
 
                         <Pressable
                             style={[styles.customColorTile, { backgroundColor: theme.colors.surfaceVariant + '30' }]}
@@ -698,24 +695,27 @@ export default function SettingsScreen() {
                             </View>
                         </Modal>
                     </View>
-                </SectionGroup>
+                </Section>
             )}
 
-            {/* Audio & Engine */}
-            <SectionGroup title="Audio & Motor" theme={theme}>
-                <List.Item
+            {/* ——— Audio & Motor ——— */}
+            <Section title="Audio & Motor" index={4} theme={theme}>
+                <SettingRow
+                    theme={theme}
+                    icon="tune-variant"
                     title={t('settings.playback.equalizer')}
                     description={equalizer.mode === 'system' ? 'Controlado por el sistema' : 'Motor DSP de StaySound'}
-                    left={(props) => <MaterialCommunityIcons name="tune-variant" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => router.push('/equalizer')}
                 />
-                <Divider style={styles.cardDivider} />
-                <List.Item
+                <RowDivider theme={theme} />
+                <SettingRow
+                    theme={theme}
+                    icon="folder-music-outline"
                     title="Biblioteca de Musica"
                     description={isScanning ? 'Escaneando archivos...' : missingMetadataCount > 0 ? `${trackCount} pistas, ${missingMetadataCount} sin metadata` : `${trackCount} pistas encontradas`}
-                    left={(props) => <MaterialCommunityIcons name="folder-music-outline" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={() => isScanning || isRepairingMetadata ? (
+                    onPress={handleScan}
+                    disabled={isScanning || isRepairingMetadata}
+                    right={isScanning || isRepairingMetadata ? (
                         <ActivityIndicator size="small" />
                     ) : missingMetadataCount > 0 ? (
                         <Button mode="contained-tonal" compact onPress={handleMetadataRepair}>
@@ -724,49 +724,50 @@ export default function SettingsScreen() {
                     ) : (
                         <MaterialCommunityIcons name="refresh" size={20} color={theme.colors.primary} />
                     )}
-                    onPress={handleScan}
-                    disabled={isScanning || isRepairingMetadata}
                 />
-                <Divider style={styles.cardDivider} />
-                <List.Item
+                <RowDivider theme={theme} />
+                <SettingRow
+                    theme={theme}
+                    icon="database-search-outline"
                     title="Encontrar metadata en TIDAL"
                     description="Busca solo artwork faltante en tu biblioteca usando TIDAL"
-                    left={(props) => <MaterialCommunityIcons name="database-search-outline" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={() => isHydratingTidalMetadata ? (
+                    onPress={handleHydrateMetadataFromTidal}
+                    disabled={isHydratingTidalMetadata || isScanning || isRepairingMetadata}
+                    right={isHydratingTidalMetadata ? (
                         <ActivityIndicator size="small" />
                     ) : (
                         <Button mode="contained-tonal" compact onPress={handleHydrateMetadataFromTidal}>
                             Buscar
                         </Button>
                     )}
-                    onPress={handleHydrateMetadataFromTidal}
-                    disabled={isHydratingTidalMetadata || isScanning || isRepairingMetadata}
                 />
-            </SectionGroup>
+            </Section>
 
-            {/* Downloads & Quality */}
-            <SectionGroup title="Descargas" theme={theme}>
-                <List.Item
+            {/* ——— Descargas ——— */}
+            <Section title="Descargas" index={5} theme={theme}>
+                <SettingRow
+                    theme={theme}
+                    icon="download-circle-outline"
                     title="Calidad de Descarga"
                     description={qualityDescription[tidalDownloadQuality]}
-                    left={(props) => <MaterialCommunityIcons name="download-circle-outline" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => setShowQualityModal(true)}
                 />
-                <Divider style={styles.cardDivider} />
-                <List.Item
+                <RowDivider theme={theme} />
+                <SettingRow
+                    theme={theme}
+                    icon="server-network"
                     title="Servidor de Contenido"
                     description={TIDAL_MIRROR_NAMES[tidalMirror] || 'Automatico'}
-                    left={(props) => <MaterialCommunityIcons name="server-network" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={(props) => <MaterialCommunityIcons name="chevron-right" size={24} color={theme.colors.onSurfaceVariant} style={props.style} />}
                     onPress={() => setShowMirrorModal(true)}
                 />
-                <Divider style={styles.cardDivider} />
-                <List.Item
+                <RowDivider theme={theme} />
+                <SettingRow
+                    theme={theme}
+                    icon="update"
                     title="Actualizacion de la app"
                     description={appUpdateDescription}
-                    left={(props) => <MaterialCommunityIcons name="update" size={24} color={theme.colors.primary} style={props.style} />}
-                    right={() => (
+                    onPress={handleAppUpdateAction}
+                    right={(
                         appUpdateStatus === 'checking' || appUpdateStatus === 'downloading' || appUpdateStatus === 'installing'
                             ? <ActivityIndicator size="small" />
                             : (
@@ -774,14 +775,14 @@ export default function SettingsScreen() {
                                     mode={availableBinaryRelease || otaReady ? 'contained-tonal' : 'text'}
                                     onPress={handleAppUpdateAction}
                                     disabled={!appUpdatesConfig.binaryUpdatesEnabled}
+                                    compact
                                 >
                                     {appUpdateActionLabel}
                                 </Button>
                             )
                     )}
-                    onPress={handleAppUpdateAction}
                 />
-            </SectionGroup>
+            </Section>
 
             {/* Modals for Quality and Mirror */}
             <Modal visible={showQualityModal} transparent animationType="fade" onRequestClose={() => setShowQualityModal(false)}>
@@ -793,8 +794,8 @@ export default function SettingsScreen() {
                         </View>
                         <ScrollView contentContainerStyle={{ gap: 12 }}>
                             {qualityModalOptions.map(q => (
-                                <Pressable 
-                                    key={q} 
+                                <Pressable
+                                    key={q}
                                     onPress={() => { setTidalDownloadQuality(q); setShowQualityModal(false); }}
                                     style={[styles.qualityOption, { borderColor: tidalDownloadQuality === q ? theme.colors.primary : theme.colors.outline + '20', borderWidth: 1, borderRadius: 16, padding: 16, backgroundColor: tidalDownloadQuality === q ? theme.colors.primary + '10' : 'transparent' }]}
                                 >
@@ -821,7 +822,7 @@ export default function SettingsScreen() {
                             <IconButton icon="close" onPress={() => setShowMirrorModal(false)} />
                         </View>
                         <ScrollView contentContainerStyle={{ gap: 12 }}>
-                            <Pressable 
+                            <Pressable
                                 onPress={() => handleMirrorChange('auto')}
                                 style={[styles.qualityOption, { borderColor: tidalMirror === 'auto' ? theme.colors.primary : theme.colors.outline + '20', borderWidth: 1, borderRadius: 16, padding: 16, backgroundColor: tidalMirror === 'auto' ? theme.colors.primary + '10' : 'transparent' }]}
                             >
@@ -829,8 +830,8 @@ export default function SettingsScreen() {
                                 <Text variant="bodySmall">Selecciona el servidor mas rapido cerca de ti.</Text>
                             </Pressable>
                             {recommendedMirrors.map(m => (
-                                <Pressable 
-                                    key={m} 
+                                <Pressable
+                                    key={m}
                                     onPress={() => handleMirrorChange(m)}
                                     style={[styles.qualityOption, { borderColor: tidalMirror === m ? theme.colors.primary : theme.colors.outline + '20', borderWidth: 1, borderRadius: 16, padding: 16, backgroundColor: tidalMirror === m ? theme.colors.primary + '10' : 'transparent' }]}
                                 >
@@ -885,77 +886,180 @@ export default function SettingsScreen() {
                 </View>
             </Modal>
 
-            <View style={styles.footer}>
-                <Image 
-                    source={require('@/assets/images/icon.png')} 
+            <Animated.View entering={FadeInDown.delay(560).duration(500)} style={styles.footer}>
+                <Image
+                    source={require('@/assets/images/icon.png')}
                     style={styles.footerLogo}
                     contentFit="contain"
                 />
                 <Text variant="labelLarge" style={{ fontWeight: '800', opacity: 0.9 }}>{footerVersionLabel}</Text>
                 <Text variant="bodySmall" style={{ opacity: 0.5 }}>{t('settings.about.madeWith')}</Text>
-            </View>
+            </Animated.View>
         </ScrollView>
     );
 }
 
-const SectionGroup = ({ title, children, theme }: { title?: string, children: React.ReactNode, theme: any }) => (
-    <View style={styles.sectionGroup}>
-        {title && (
-            <Text variant="labelSmall" style={[styles.sectionGroupTitle, { color: theme.colors.primary }]}>
-                {title}
-            </Text>
-        )}
-        <View style={[styles.sectionCard, { backgroundColor: theme.colors.surfaceVariant + '30', borderColor: theme.colors.outline + '15' }]}>
+// ——————————————————————————————————————————————————————————————————————————————
+// Presentation primitives — bold, animated, reusable.
+
+const ROW_SPRING = { damping: 20, stiffness: 240, mass: 0.6 };
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+function PressableScale({
+    onPress,
+    disabled,
+    children,
+    style,
+}: {
+    onPress?: () => void;
+    disabled?: boolean;
+    children: React.ReactNode;
+    style?: StyleProp<ViewStyle>;
+}) {
+    const scale = useSharedValue(1);
+    const animStyle = useAnimatedStyle(() => ({ transform: [{ scale: scale.value }] }));
+    return (
+        <AnimatedPressable
+            onPress={onPress}
+            disabled={disabled}
+            onPressIn={() => { scale.value = withSpring(0.97, ROW_SPRING); }}
+            onPressOut={() => { scale.value = withSpring(1, ROW_SPRING); }}
+            style={[style, animStyle]}
+        >
             {children}
+        </AnimatedPressable>
+    );
+}
+
+function SettingRow({
+    theme,
+    icon,
+    title,
+    description,
+    onPress,
+    right,
+    disabled,
+    tint,
+}: {
+    theme: any;
+    icon: string;
+    title: string;
+    description?: string;
+    onPress?: () => void;
+    right?: React.ReactNode;
+    disabled?: boolean;
+    tint?: string;
+}) {
+    const color = tint || theme.colors.primary;
+    const inner = (
+        <View style={[styles.row, disabled && { opacity: 0.55 }]}>
+            <View style={[styles.iconTile, { backgroundColor: color + '22' }]}>
+                <MaterialCommunityIcons name={icon as any} size={22} color={color} />
+            </View>
+            <View style={styles.rowText}>
+                <Text variant="titleMedium" numberOfLines={1} style={[styles.rowTitle, { color: theme.colors.onSurface }]}>
+                    {title}
+                </Text>
+                {description ? (
+                    <Text variant="bodySmall" numberOfLines={2} style={{ color: theme.colors.onSurfaceVariant, opacity: 0.82, marginTop: 2 }}>
+                        {description}
+                    </Text>
+                ) : null}
+            </View>
+            <View style={styles.rowRight}>
+                {right ?? (onPress ? (
+                    <MaterialCommunityIcons name="chevron-right" size={22} color={theme.colors.onSurfaceVariant} style={{ opacity: 0.5 }} />
+                ) : null)}
+            </View>
         </View>
-    </View>
-);
+    );
+
+    if (onPress) {
+        return <PressableScale onPress={onPress} disabled={disabled}>{inner}</PressableScale>;
+    }
+    return inner;
+}
+
+function RowDivider({ theme }: { theme: any }) {
+    return <View style={[styles.rowDivider, { backgroundColor: theme.colors.outline + '22' }]} />;
+}
+
+function Section({
+    title,
+    index = 0,
+    theme,
+    children,
+}: {
+    title?: string;
+    index?: number;
+    theme: any;
+    children: React.ReactNode;
+}) {
+    return (
+        <Animated.View
+            entering={FadeInDown.delay(90 + index * 70).duration(460).springify().damping(18)}
+            style={styles.section}
+        >
+            {title ? (
+                <Text style={[styles.sectionTitle, { color: theme.colors.primary }]}>
+                    {title}
+                </Text>
+            ) : null}
+            <View style={[styles.card, { backgroundColor: theme.colors.surfaceVariant + '26', borderColor: theme.colors.outline + '1F' }]}>
+                {children}
+            </View>
+        </Animated.View>
+    );
+}
 
 const styles = StyleSheet.create({
     container: { flex: 1 },
     content: { padding: 16, paddingBottom: 140 },
-    
-    // Grid & Cards
-    sectionGroup: {
-        marginBottom: 28,
+
+    // ——— Hero ———
+    heroWrap: {
+        marginBottom: 26,
     },
-    sectionGroupTitle: {
-        marginLeft: 8,
-        marginBottom: 8,
-        fontWeight: '800',
-        textTransform: 'uppercase',
-        letterSpacing: 2,
-        fontSize: 11,
-        opacity: 0.7,
-    },
-    sectionCard: {
-        borderRadius: 24,
+    hero: {
+        borderRadius: 30,
+        padding: 22,
         overflow: 'hidden',
-        borderWidth: 1.5,
     },
-    cardDivider: {
-        height: 1,
-        marginHorizontal: 16,
-        opacity: 0.3,
+    heroGlowA: {
+        position: 'absolute',
+        width: 180,
+        height: 180,
+        borderRadius: 90,
+        backgroundColor: 'rgba(255,255,255,0.12)',
+        top: -64,
+        right: -34,
     },
-
-    // Hero Header
-    heroSection: {
-        paddingTop: 12,
-        paddingBottom: 24,
-        paddingHorizontal: 8,
+    heroGlowB: {
+        position: 'absolute',
+        width: 130,
+        height: 130,
+        borderRadius: 65,
+        backgroundColor: 'rgba(255,255,255,0.08)',
+        bottom: -46,
+        left: -22,
     },
-    heroTitle: {
+    heroEyebrow: {
+        fontSize: 12,
         fontWeight: '900',
-        letterSpacing: -1,
+        letterSpacing: 3,
+        opacity: 0.88,
+        marginBottom: 18,
     },
-
-    // Profile Refined
-    profileHeader: {
+    heroProfileRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 20,
     },
+    heroMeta: {
+        flex: 1,
+        marginLeft: 16,
+    },
+
+    // ——— Profile / avatar ———
     avatarContainer: {
         position: 'relative',
     },
@@ -989,11 +1093,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         borderWidth: 3,
-        borderColor: '#fff', 
-    },
-    profileMeta: {
-        flex: 1,
-        marginLeft: 20,
+        borderColor: '#fff',
     },
     nameActionRow: {
         flexDirection: 'row',
@@ -1006,7 +1106,56 @@ const styles = StyleSheet.create({
         gap: 8,
     },
 
-    // Language switcher bubbles
+    // ——— Sections / cards / rows ———
+    section: {
+        marginBottom: 24,
+    },
+    sectionTitle: {
+        marginLeft: 6,
+        marginBottom: 10,
+        fontWeight: '800',
+        textTransform: 'uppercase',
+        letterSpacing: 1.8,
+        fontSize: 11,
+        opacity: 0.75,
+    },
+    card: {
+        borderRadius: 24,
+        borderWidth: 1,
+        overflow: 'hidden',
+    },
+    row: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        paddingHorizontal: 16,
+        paddingVertical: 14,
+        minHeight: 66,
+    },
+    iconTile: {
+        width: 40,
+        height: 40,
+        borderRadius: 13,
+        alignItems: 'center',
+        justifyContent: 'center',
+        marginRight: 14,
+    },
+    rowText: {
+        flex: 1,
+    },
+    rowTitle: {
+        fontWeight: '700',
+    },
+    rowRight: {
+        marginLeft: 8,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    rowDivider: {
+        height: StyleSheet.hairlineWidth,
+        marginLeft: 70,
+    },
+
+    // ——— Language switcher ———
     languageContainer: {
         padding: 16,
     },
@@ -1016,13 +1165,13 @@ const styles = StyleSheet.create({
     },
     langBubble: {
         flex: 1,
-        paddingVertical: 10,
+        paddingVertical: 12,
         borderRadius: 16,
         borderWidth: 1,
         alignItems: 'center',
     },
 
-    // Color controls
+    // ——— Color controls ———
     colorSelectionBody: {
         padding: 16,
     },
@@ -1061,7 +1210,7 @@ const styles = StyleSheet.create({
         borderColor: 'rgba(255,255,255,0.2)',
     },
 
-    // Modals
+    // ——— Modals ———
     modalOverlay: {
         flex: 1,
         backgroundColor: 'rgba(0,0,0,0.8)',
@@ -1081,15 +1230,15 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
 
-    // Picker
+    // ——— Picker ———
     pickerPanel: { height: 220, borderRadius: 24 },
     pickerSlider: { height: 24, borderRadius: 12, marginTop: 12 },
     swatches: { marginTop: 16 },
     swatchItem: { width: 34, height: 34, borderRadius: 17 },
 
-    // Footer
+    // ——— Footer ———
     footer: {
-        paddingTop: 40,
+        paddingTop: 28,
         paddingBottom: 60,
         alignItems: 'center',
         gap: 4,
@@ -1101,56 +1250,12 @@ const styles = StyleSheet.create({
         opacity: 0.8,
     },
 
-    // Legacy or needed refs
+    // ——— Palette preview / misc ———
     palettePreview: { gap: 10, paddingVertical: 4 },
     paletteLabel: { letterSpacing: 1, fontWeight: '700', opacity: 0.7 },
-    paletteGroup: { gap: 4 },
-    paletteGroupLabel: { fontSize: 10, fontWeight: '600', opacity: 0.6 },
     paletteRow: { flexDirection: 'row', gap: 6, flexWrap: 'wrap' },
     paletteChip: { flex: 1, minWidth: 80, borderRadius: 12, paddingVertical: 8, paddingHorizontal: 10, gap: 2 },
-    paletteChipLabel: { fontSize: 10, fontWeight: '700' },
-    paletteChipHex: { fontSize: 9, fontFamily: 'monospace' },
     hexRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 16 },
     applyBtn: { borderRadius: 16 },
     qualityOption: { marginVertical: 4 },
-    about: {
-        marginTop: 40,
-        alignItems: 'center',
-    },
-    profileItem: {
-        padding: 20,
-        flexDirection: 'row',
-        alignItems: 'center',
-    },
-    avatarWrapper: {
-        marginRight: 20,
-    },
-    editBadge: {
-        position: 'absolute',
-        bottom: 0,
-        right: 0,
-        width: 24,
-        height: 24,
-        borderRadius: 10,
-        alignItems: 'center',
-        justifyContent: 'center',
-        borderWidth: 2,
-    },
-    nameRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 4,
-    },
-    nameEditRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        marginBottom: 4,
-    },
 });
-
-
-
-
-
-
-

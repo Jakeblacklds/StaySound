@@ -12,6 +12,7 @@ import { extractMetadata, findArtworkInFolder, withTimeout } from '../services/f
 import { isTrackPlayable } from '../services/trackPlayerService';
 import { FileSystemStorage } from '../services/storage';
 import { getPerformanceProfile } from '../theme/performanceProfile';
+import { balancedShuffle } from '../services/shuffle';
 import { RepeatMode, Track } from '../types/audio';
 import { useLibraryStore } from './libraryStore';
 
@@ -45,7 +46,11 @@ function getLinearContextLimit(): number {
 }
 
 
-function shuffleQueueKeepingCurrent(tracks: Track[], currentIndex: number): { queue: Track[]; queueIndex: number } {
+function shuffleQueueKeepingCurrent(
+    tracks: Track[],
+    currentIndex: number,
+    recentIds?: readonly string[],
+): { queue: Track[]; queueIndex: number } {
     if (tracks.length === 0) {
         return { queue: [], queueIndex: -1 };
     }
@@ -54,12 +59,12 @@ function shuffleQueueKeepingCurrent(tracks: Track[], currentIndex: number): { qu
     const currentTrack = tracks[safeIndex];
     const remainingTracks = tracks.filter((_, index) => index !== safeIndex);
 
-    for (let i = remainingTracks.length - 1; i > 0; i--) {
-        const j = Math.floor(Math.random() * (i + 1));
-        [remainingTracks[i], remainingTracks[j]] = [remainingTracks[j], remainingTracks[i]];
-    }
+    // Professional balanced shuffle: disperses same-artist tracks and pushes
+    // recently played songs toward the back so playback never feels like the
+    // same handful of songs on repeat. See src/services/shuffle.ts.
+    const shuffledRemaining = balancedShuffle(remainingTracks, { recentIds });
 
-    const shuffledQueue = [currentTrack, ...remainingTracks];
+    const shuffledQueue = [currentTrack, ...shuffledRemaining];
     if (shuffledQueue.length <= MAX_QUEUE_ITEMS) {
         return { queue: shuffledQueue, queueIndex: 0 };
     }
@@ -692,7 +697,11 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
         const linearWindow = normalizeQueueWindow(linearPlaybackContextQueue, boundedLinearContext.focusIndex);
         const shouldShuffleQueue = get().shuffleEnabled && linearPlaybackContextQueue.length > 1;
         const { queue: nextQueue, queueIndex } = shouldShuffleQueue
-            ? shuffleQueueKeepingCurrent(linearPlaybackContextQueue, boundedLinearContext.focusIndex)
+            ? shuffleQueueKeepingCurrent(
+                linearPlaybackContextQueue,
+                boundedLinearContext.focusIndex,
+                get().recentlyPlayed.map(t => t.id),
+            )
             : linearWindow;
 
         // Single atomic update to avoid multiple subscription flushes.
@@ -1065,7 +1074,11 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
         linearPlaybackContextQueue = [...linearBaseQueue];
 
         const { queue: nextQueue, queueIndex: nextQueueIndex } = nextShuffleEnabled
-            ? shuffleQueueKeepingCurrent(linearPlaybackContextQueue, Math.max(0, linearPlaybackContextQueue.findIndex(track => track.id === currentTrackId)))
+            ? shuffleQueueKeepingCurrent(
+                linearPlaybackContextQueue,
+                Math.max(0, linearPlaybackContextQueue.findIndex(track => track.id === currentTrackId)),
+                state.recentlyPlayed.map(t => t.id),
+            )
             : restoreLinearQueueKeepingCurrent(linearPlaybackContextQueue, currentTrackId);
 
         const targetTrack = nextQueue[nextQueueIndex];

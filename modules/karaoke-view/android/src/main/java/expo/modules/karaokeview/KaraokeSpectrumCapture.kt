@@ -46,6 +46,6 @@ internal class KaraokeSpectrumCapture(private val bandCount: Int = 16) {
     }
 
     companion object {
-        private const val DEFAULT_RENDER_DELAY_MS = 350L
+        private const val DEFAULT_RENDER_DELAY_MS = 380L
     }
 }

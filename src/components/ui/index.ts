@@ -13,3 +13,7 @@ export { ScanButton } from './ScanButton';
 export { Skeleton } from './Skeleton';
 export { TrackListItem as MemoizedTrackListItem, TrackListItem } from './TrackListItem';
 export { DownloadAnimatedButton } from './DownloadAnimatedButton';
+export { TidalTrackRow } from './TidalTrackRow';
+export type { TidalTrackRowProps } from './TidalTrackRow';
+export { TidalCoverCard } from './TidalCoverCard';
+export type { TidalCoverCardProps } from './TidalCoverCard';

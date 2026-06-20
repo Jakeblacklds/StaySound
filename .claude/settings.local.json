@@ -13,7 +13,19 @@
       "Bash(find src *)",
       "Bash(ls src/components/player/backgrounds/)",
       "Bash(./gradlew :karaoke-view:compileDebugKotlin -q)",
-      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\),indent=2\\)\\)\")"
+      "Bash(python -c \"import sys,json; d=json.load\\(sys.stdin\\); print\\(json.dumps\\(d.get\\('scripts',{}\\),indent=2\\)\\)\")",
+      "Bash(findstr /C:\"FullPlayer\" /C:\"KaraokeSpectrum\" /C:\"error TS\")",
+      "Bash(node *)",
+      "PowerShell(Set-Content *)",
+      "PowerShell(npx tsc --noEmit 2>$null | Select-Object -First 30)",
+      "PowerShell(npx tsc --noEmit; echo \"EXIT=$LASTEXITCODE\")",
+      "Bash(cd /d D:\\\\StaySound)",
+      "Bash(grep -rn \"renderDelay\\\\|RENDER_DELAY\\\\|snapshot\\(\" modules/karaoke-view/android/src modules/karaoke-view/src)",
+      "Bash(grep -rl \"publishBands\\\\|KaraokePcmSpectrumBridge\" node_modules/react-native-track-player)",
+      "Bash(ls patches *)",
+      "Bash(git *)",
+      "PowerShell($p = Get-Content D:\\\\StaySound\\\\package.json -Raw | ConvertFrom-Json; $deps = $p.dependencies; @\\('expo-linear-gradient','expo-blur','react-native-reanimated','react-native-gesture-handler','@expo/vector-icons','react-native-paper'\\) | ForEach-Object { \"$_ = $\\($deps.$_\\)\" })",
+      "Bash(echo \"EXIT=$?\")"
     ]
   }
 }

@@ -1,37 +1,79 @@
-import { CustomIcon, EmptyState, Skeleton } from '@/src/components/ui';
+import { EmptyState, Skeleton, TidalTrackRow } from '@/src/components/ui';
+import {
+    DetailActionBar,
+    DetailTopBar,
+    GlassPanel,
+    MediaRail,
+    MediaRailItem,
+    SectionHeader,
+    TidalAtmosphere,
+    TidalAtmosphereColors,
+} from '@/src/components/tidal';
+import { Ionicons } from '@expo/vector-icons';
 import { useTidalDownload } from '@/src/hooks';
 import { SoulseekCompressedFallbackError } from '@/src/services/soulseekDownloadService';
-import { createTidalStreamTrack, getTidalAlbumDetail, isValidAudioFile } from '@/src/services/tidalService';
-import { useLibraryStore, usePlayerStore } from '@/src/stores';
-import { useTheme } from '@/src/theme';
-import { TidalAlbumDetail, TidalTrack } from '@/src/types';
-import { BlurView } from 'expo-blur';
+import { createRng, fisherYates } from '@/src/services/shuffle';
+import { createTidalStreamTrack, getTidalAlbumDetail, getTidalSimilarAlbums, isValidAudioFile } from '@/src/services/tidalService';
+import { useLibraryStore, useNotificationStore, usePlayerStore } from '@/src/stores';
+import { radius, typeScale, useTheme, withAlpha } from '@/src/theme';
+import { TidalAlbum, TidalAlbumDetail, TidalTrack, Track } from '@/src/types';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
-import Animated, { FadeIn, FadeInDown, FadeOut } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeInRight, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-function formatTrackDuration(ms: number): string {
-    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+async function resolveTidalQueue(tracks: TidalTrack[], qobuzOnly: boolean, batchSize = 6): Promise<Track[]> {
+    const opts = qobuzOnly ? { qobuzOnly: true } : {};
+    const out: Track[] = [];
+    for (let i = 0; i < tracks.length; i += batchSize) {
+        const slice = tracks.slice(i, i + batchSize);
+        const settled = await Promise.allSettled(slice.map(track => createTidalStreamTrack(track, opts)));
+        for (const result of settled) {
+            if (result.status === 'fulfilled') out.push(result.value);
+        }
+    }
+    return out;
+}
+
+function deriveQualityLabel(tracks: TidalTrack[]): string | null {
+    let lossless = false;
+    for (const track of tracks) {
+        const q = (track.quality || '').toUpperCase();
+        if (track.isHiRes || q.includes('HI_RES') || q.includes('HIRES')) return 'Hi-Res';
+        if (q.includes('LOSSLESS') || q.includes('FLAC')) lossless = true;
+    }
+    return lossless ? 'Lossless' : null;
+}
+
+function formatTotalDuration(ms: number): string {
+    const totalMinutes = Math.round(ms / 60000);
+    if (totalMinutes < 60) return `${totalMinutes} min`;
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return `${hours} h ${minutes} min`;
 }
 
 export default function TidalAlbumScreen() {
     const { id, source } = useLocalSearchParams<{ id: string; source?: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
+    const scrollY = useSharedValue(0);
     const isSoulseekSource = source === 'soulseek';
     const isQobuzSource = source === 'qobuz';
 
     const [albumDetail, setAlbumDetail] = useState<TidalAlbumDetail | null>(null);
+    const [similarAlbums, setSimilarAlbums] = useState<TidalAlbum[]>([]);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [isPreparing, setIsPreparing] = useState<null | 'play' | 'shuffle'>(null);
+    const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+    const [atmos, setAtmos] = useState<TidalAtmosphereColors | null>(null);
+    const accentColor = atmos?.colors.primary ?? theme.colors.primary;
+
+    const showNotification = useNotificationStore(s => s.showNotification);
 
     const {
         downloads,
@@ -89,6 +131,29 @@ export default function TidalAlbumScreen() {
             cancelled = true;
         };
     }, [id]);
+
+    useEffect(() => {
+        const numericId = Number(id);
+        if (!Number.isFinite(numericId)) return;
+
+        let cancelled = false;
+        setSimilarAlbums([]);
+        getTidalSimilarAlbums(numericId)
+            .then(list => {
+                if (!cancelled) setSimilarAlbums(list.slice(0, 12));
+            })
+            .catch(() => { /* similar albums are optional enrichment */ });
+
+        return () => {
+            cancelled = true;
+        };
+    }, [id]);
+
+    const scrollHandler = useAnimatedScrollHandler({
+        onScroll: (event) => {
+            scrollY.value = event.contentOffset.y;
+        },
+    });
 
     const handleTrackDownload = useCallback(async (track: TidalTrack) => {
         try {
@@ -202,43 +267,122 @@ export default function TidalAlbumScreen() {
         }
     }, [download, forgetDownloadedTrack, getDownloadedTrack, handleTrackDownload, isQobuzSource, isSoulseekSource, play, setPendingTrackPreview]);
 
+    const handlePlayAll = useCallback(async (shuffle: boolean) => {
+        const tracks = albumDetail?.tracks ?? [];
+        if (tracks.length === 0 || isPreparing) return;
+
+        setIsPreparing(shuffle ? 'shuffle' : 'play');
+        const ordered = shuffle ? fisherYates(tracks, createRng()) : tracks;
+        const first = ordered[0];
+        setPendingTrackPreview({
+            id: `tidal_pending_${first.id}`,
+            title: first.title,
+            artist: first.artist,
+            artwork: first.artworkUrl ?? albumDetail?.album.artworkUrl,
+            tidalId: first.id,
+        });
+
+        try {
+            const resolved = await resolveTidalQueue(ordered, isQobuzSource);
+            if (resolved.length === 0) {
+                throw new Error('No se pudo preparar la reproducción');
+            }
+            await play(resolved[0], resolved);
+        } catch (playError) {
+            setPendingTrackPreview(null);
+            const message = playError instanceof Error ? playError.message : 'No se pudo reproducir';
+            showNotification(message, 'error');
+        } finally {
+            setIsPreparing(null);
+        }
+    }, [albumDetail?.album.artworkUrl, albumDetail?.tracks, isPreparing, isQobuzSource, play, setPendingTrackPreview, showNotification]);
+
+    const handleDownloadAll = useCallback(async () => {
+        const tracks = albumDetail?.tracks ?? [];
+        if (tracks.length === 0 || isDownloadingAll) return;
+
+        const pending = tracks.filter(track => {
+            const state = downloads.get(track.id);
+            return !isDownloaded(track.id) && state?.status !== 'done' && state?.status !== 'downloading';
+        });
+
+        if (pending.length === 0) {
+            showNotification('El álbum ya está descargado', 'info');
+            return;
+        }
+
+        setIsDownloadingAll(true);
+        showNotification(`Descargando ${pending.length} canciones…`, 'info');
+        try {
+            for (const track of pending) {
+                await handleTrackDownload(track);
+            }
+        } finally {
+            setIsDownloadingAll(false);
+        }
+    }, [albumDetail?.tracks, downloads, handleTrackDownload, isDownloaded, isDownloadingAll, showNotification]);
+
+    const openArtist = useCallback(() => {
+        const artistId = albumDetail?.album.artistId;
+        if (!artistId) return;
+        router.push({
+            pathname: '/tidal-artist/[id]',
+            params: {
+                id: String(artistId),
+                name: albumDetail?.album.artistName,
+                source: isSoulseekSource ? 'soulseek' : isQobuzSource ? 'qobuz' : 'tidal',
+            },
+        });
+    }, [albumDetail?.album.artistId, albumDetail?.album.artistName, isQobuzSource, isSoulseekSource]);
+
+    const openAlbum = useCallback((albumId: number) => {
+        router.push({
+            pathname: '/tidal-album/[id]',
+            params: {
+                id: String(albumId),
+                source: isSoulseekSource ? 'soulseek' : isQobuzSource ? 'qobuz' : 'tidal',
+            },
+        });
+    }, [isQobuzSource, isSoulseekSource]);
+
+    const albumMeta = useMemo(() => {
+        const tracks = albumDetail?.tracks ?? [];
+        const totalMs = tracks.reduce((sum, track) => sum + (track.durationMs || 0), 0);
+        return {
+            qualityLabel: deriveQualityLabel(tracks),
+            durationLabel: totalMs > 0 ? formatTotalDuration(totalMs) : null,
+            explicit: albumDetail?.album.explicit || tracks.some(track => track.explicit),
+        };
+    }, [albumDetail?.album.explicit, albumDetail?.tracks]);
+
+    const similarRailItems = useMemo<MediaRailItem[]>(() => (
+        similarAlbums.map(similar => ({
+            key: String(similar.id),
+            imageUri: similar.artworkUrl,
+            title: similar.title,
+            subtitle: similar.artistName,
+            fallbackIcon: 'disc' as const,
+            onPress: () => openAlbum(similar.id),
+        }))
+    ), [similarAlbums, openAlbum]);
+
     if (isLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <LinearGradient
-                    colors={[theme.colors.primaryContainer, theme.colors.background, theme.colors.background]}
-                    style={StyleSheet.absoluteFill}
-                />
-                <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 18 }]}>
-                    <View style={styles.topBar}>
-                        <Skeleton height={44} width={120} borderRadius={999} />
-                    </View>
-
-                    <View style={styles.heroWrap}>
-                        <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant, overflow: 'hidden' }]}>
-                            <Skeleton height={300} width="100%" borderRadius={24} />
-                            <View style={styles.heroContent}>
-                                <Skeleton height={32} width="80%" borderRadius={8} style={{ marginBottom: 12 }} />
-                                <Skeleton height={18} width="40%" borderRadius={4} style={{ marginBottom: 16 }} />
-                                <View style={styles.statsRow}>
-                                    <Skeleton height={32} width={150} borderRadius={16} />
-                                    <Skeleton height={32} width={150} borderRadius={16} />
-                                </View>
-                            </View>
+                <ScrollView contentContainerStyle={{ paddingTop: insets.top + 64, paddingHorizontal: 20 }}>
+                    <View style={{ flexDirection: 'row', gap: 18, marginBottom: 28 }}>
+                        <Skeleton height={148} width={148} borderRadius={radius.lg} />
+                        <View style={{ flex: 1, justifyContent: 'flex-end', gap: 10 }}>
+                            <Skeleton height={14} width="40%" borderRadius={6} />
+                            <Skeleton height={26} width="90%" borderRadius={8} />
+                            <Skeleton height={18} width="55%" borderRadius={6} />
                         </View>
                     </View>
-
-                    <View style={styles.section}>
-                        <Skeleton height={24} width={170} borderRadius={4} style={{ marginBottom: 16 }} />
+                    <Skeleton height={54} width="100%" borderRadius={radius.lg} style={{ marginBottom: 28 }} />
+                    <View style={{ width: '100%' }}>
                         {[1, 2, 3, 4, 5].map((i) => (
-                            <View key={`s-tra-${i}`} style={[styles.trackRow, { backgroundColor: theme.colors.surface, opacity: 0.6 }]}>
-                                <View style={styles.trackContent}>
-                                    <Skeleton height={18} width="70%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                    <Skeleton height={14} width="30%" borderRadius={4} />
-                                </View>
-                                <Skeleton height={36} width={94} borderRadius={18} />
-                            </View>
+                            <Skeleton key={`s-tra-${i}`} height={56} width="100%" borderRadius={14} style={{ marginBottom: 8 }} />
                         ))}
                     </View>
                 </ScrollView>
@@ -252,109 +396,126 @@ export default function TidalAlbumScreen() {
                 <Stack.Screen options={{ headerShown: false }} />
                 <SafeAreaView style={[styles.centered, { backgroundColor: theme.colors.background }]}>
                     <EmptyState title="Álbum no disponible" description={error ?? 'No se pudo cargar'} />
-                    <Button onPress={() => router.back()}>Volver / Back</Button>
+                    <Button onPress={() => router.back()}>Volver</Button>
                 </SafeAreaView>
             </>
         );
     }
 
+    const coverUri = albumDetail.album.artworkUrl;
+    const hasArtist = !!albumDetail.album.artistId;
+
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
             <Stack.Screen options={{ headerShown: false }} />
-            <StatusBar barStyle="light-content" />
+            <StatusBar barStyle={theme.id.includes('dark') ? 'light-content' : 'dark-content'} />
 
-            <LinearGradient
-                colors={[theme.colors.primaryContainer, theme.colors.background, theme.colors.background]}
-                style={StyleSheet.absoluteFill}
-            />
+            <TidalAtmosphere sourceUri={coverUri} mode="artwork" scrollY={scrollY} onColors={setAtmos} />
 
-            <ScrollView contentContainerStyle={[styles.content, { paddingTop: insets.top + 18 }]}>
-                <View style={styles.topBar}>
-                    <Pressable onPress={() => router.back()}>
-                        <BlurView intensity={45} tint="light" style={styles.backChip}>
-                            <Text style={[styles.backChipLabel, { color: theme.colors.onSurface }]}>Volver / Back</Text>
-                        </BlurView>
-                    </Pressable>
-                </View>
+            <DetailTopBar title={albumDetail.album.title} scrollY={scrollY} onBack={() => router.back()} />
 
-                <Animated.View entering={FadeIn.duration(500)} style={styles.heroWrap}>
-                    <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant }]}>
-                        <Image source={albumDetail.album.artworkUrl ? { uri: albumDetail.album.artworkUrl } : undefined} style={styles.cover} contentFit="cover" />
-                        <LinearGradient
-                            colors={['rgba(0,0,0,0.08)', 'rgba(0,0,0,0.72)']}
-                            style={styles.heroOverlay}
+            <Animated.ScrollView
+                onScroll={scrollHandler}
+                scrollEventThrottle={16}
+                contentContainerStyle={[styles.content, { paddingTop: insets.top + 64 }]}
+                showsVerticalScrollIndicator={false}
+            >
+                {/* Editorial cover-left hero */}
+                <Animated.View entering={FadeIn.duration(450)} style={styles.hero}>
+                    <View style={[styles.coverShadow, { shadowColor: theme.id.includes('dark') ? '#000' : '#475569' }]}>
+                        <Image
+                            source={coverUri ? { uri: coverUri } : undefined}
+                            style={[styles.cover, { backgroundColor: theme.colors.surfaceVariant }]}
+                            contentFit="cover"
+                            transition={300}
                         />
-                        <View style={styles.heroContent}>
-                            <Text variant="headlineSmall" numberOfLines={2} style={styles.heroTitle}>
-                                {albumDetail.album.title}
-                            </Text>
-                            <Text numberOfLines={1} style={styles.heroSubtitle}>
+                    </View>
+                    <View style={styles.heroCopy}>
+                        <Text style={[styles.kicker, { color: accentColor }]}>
+                            ÁLBUM{albumDetail.album.year ? ` · ${albumDetail.album.year}` : ''}
+                        </Text>
+                        <Text numberOfLines={3} style={[styles.albumTitle, { color: theme.colors.onBackground }]}>
+                            {albumDetail.album.title}
+                        </Text>
+                        <Pressable onPress={openArtist} disabled={!hasArtist} hitSlop={8} style={styles.artistChip}>
+                            {hasArtist ? <Ionicons name="person" size={12} color={accentColor} /> : null}
+                            <Text numberOfLines={1} style={[styles.albumArtist, { color: hasArtist ? accentColor : theme.colors.onSurfaceVariant }]}>
                                 {albumDetail.album.artistName}
                             </Text>
-                            <View style={styles.statsRow}>
-                                <View style={styles.statChip}>
-                                    <Text style={styles.statChipLabel}>{albumDetail.tracks.length} Tracks / Canciones</Text>
-                                </View>
-                                <View style={styles.statChip}>
-                                    <Text style={styles.statChipLabel}>{albumDetail.album.year ?? 'Año / Year desconocido'}</Text>
-                                </View>
+                        </Pressable>
+                        <Text style={[styles.albumMeta, { color: withAlpha(theme.colors.onSurfaceVariant, 'D0') }]}>
+                            {albumDetail.tracks.length} canciones{albumMeta.durationLabel ? ` · ${albumMeta.durationLabel}` : ''}
+                        </Text>
+                        {(albumMeta.qualityLabel || albumMeta.explicit) ? (
+                            <View style={styles.badgeRow}>
+                                {albumMeta.qualityLabel ? (
+                                    <View style={[styles.qualityBadge, { backgroundColor: withAlpha(accentColor, '26'), borderColor: withAlpha(accentColor, '55') }]}>
+                                        <Text style={[styles.qualityBadgeLabel, { color: theme.colors.onBackground }]}>{albumMeta.qualityLabel}</Text>
+                                    </View>
+                                ) : null}
+                                {albumMeta.explicit ? (
+                                    <View style={[styles.explicitBadge, { borderColor: withAlpha(theme.colors.onSurfaceVariant, '55') }]}>
+                                        <Text style={[styles.explicitBadgeLabel, { color: theme.colors.onSurfaceVariant }]}>E</Text>
+                                    </View>
+                                ) : null}
                             </View>
-                        </View>
+                        ) : null}
                     </View>
                 </Animated.View>
 
-                <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
-                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Tracks / Canciones</Text>
-                    {albumDetail.tracks.map(track => {
-                        const state = downloads.get(track.id);
-                        const downloaded = isDownloaded(track.id) || state?.status === 'done';
-                        const isDownloadingItem = state?.status === 'downloading';
-                        const isError = state?.status === 'error';
-                        const progressLabel = `${Math.round((state?.progress ?? 0) * 100)}%`;
-                        const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
-
-                        return (
-                            <Pressable
-                                key={track.id}
-                                onPress={() => handleTidalPlay(track)}
-                                style={[
-                                    styles.trackRow,
-                                    {
-                                        backgroundColor: isTrackActive ? 'rgba(255,255,255,0.16)' : theme.colors.surface,
-                                        borderColor: isTrackActive ? theme.colors.primary : 'rgba(255,255,255,0.08)',
-                                    },
-                                ]}
-                            >
-                                {isTrackActive ? (
-                                    <Animated.View
-                                        entering={FadeIn.duration(180)}
-                                        exiting={FadeOut.duration(180)}
-                                        pointerEvents="none"
-                                        style={[StyleSheet.absoluteFillObject, styles.trackRowActiveOverlay, { backgroundColor: 'rgba(255,255,255,0.05)' }]}
-                                    />
-                                ) : null}
-                                <View style={styles.trackContent}>
-                                    <Text numberOfLines={1} style={[styles.trackTitle, { color: theme.colors.onSurface }]}>{track.title}</Text>
-                                    <Text style={{ color: theme.colors.onSurfaceVariant }}>{formatTrackDuration(track.durationMs)}</Text>
-                                </View>
-                                <Button
-                                    compact
-                                    mode={downloaded ? 'contained' : 'contained-tonal'}
-                                    onPress={(event) => {
-                                        event.stopPropagation();
-                                        void handleTrackDownload(track);
-                                    }}
-                                    style={{ minWidth: 94 }}
-                                    icon={downloaded ? undefined : () => <CustomIcon name="Descargar" size={14} color={theme.colors.primary} />}
-                                >
-                                    {downloaded ? 'Guardado' : isDownloadingItem ? progressLabel : isError ? 'Reintentar' : 'Descargar'}
-                                </Button>
-                            </Pressable>
-                        );
-                    })}
+                <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.actionWrap}>
+                    <DetailActionBar
+                        accent={atmos?.animated.primary}
+                        accentColor={accentColor}
+                        onPrimaryColor={atmos?.colors.onPrimary ?? theme.colors.onPrimary}
+                        preparing={isPreparing}
+                        downloadingAll={isDownloadingAll}
+                        onPlay={() => handlePlayAll(false)}
+                        onShuffle={() => handlePlayAll(true)}
+                        onDownloadAll={handleDownloadAll}
+                    />
                 </Animated.View>
-            </ScrollView>
-        </SafeAreaView>
+
+                <Animated.View entering={FadeInDown.delay(150)} style={styles.section}>
+                    <GlassPanel style={styles.tracksPanel} radius={radius.xl} blurred={false}>
+                        {albumDetail.tracks.map((track, index) => {
+                            const state = downloads.get(track.id);
+                            const downloaded = isDownloaded(track.id) || state?.status === 'done';
+                            const isDownloading = state?.status === 'downloading';
+                            const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
+
+                            return (
+                                <Animated.View key={track.id} entering={FadeInRight.delay(180 + Math.min(index, 8) * 35)}>
+                                    <TidalTrackRow
+                                        title={track.title || 'Unknown Title'}
+                                        artist={track.artist || albumDetail.album.artistName || 'Unknown Artist'}
+                                        durationMs={track.durationMs}
+                                        index={index}
+                                        showArtwork={false}
+                                        showIndex
+                                        tone="glass"
+                                        accentColor={accentColor}
+                                        isActive={isTrackActive}
+                                        isPlaying={isPlayerPlaying}
+                                        downloadStatus={isDownloading ? 'downloading' : downloaded ? 'done' : state?.status === 'error' ? 'error' : 'idle'}
+                                        progress={state?.progress ?? 0}
+                                        onPress={() => handleTidalPlay(track)}
+                                        onDownloadPress={() => handleTrackDownload(track)}
+                                    />
+                                </Animated.View>
+                            );
+                        })}
+                    </GlassPanel>
+                </Animated.View>
+
+                {similarRailItems.length > 0 && (
+                    <Animated.View entering={FadeInDown.delay(300)} style={styles.section}>
+                        <SectionHeader kicker="Descubre" title="Más álbumes" accent={accentColor} />
+                        <MediaRail items={similarRailItems} cardSize={150} />
+                    </Animated.View>
+                )}
+            </Animated.ScrollView>
+        </View>
     );
 }
 
@@ -368,96 +529,91 @@ const styles = StyleSheet.create({
         paddingHorizontal: 20,
     },
     content: {
-        paddingBottom: 120,
-    },
-    topBar: {
-        paddingHorizontal: 16,
-        marginBottom: 14,
-    },
-    backChip: {
-        alignSelf: 'flex-start',
-        borderRadius: 999,
-        overflow: 'hidden',
-        paddingHorizontal: 16,
-        paddingVertical: 10,
-    },
-    backChipLabel: {
-        fontWeight: '700',
-    },
-    heroWrap: {
-        paddingHorizontal: 16,
+        paddingBottom: 140,
     },
     hero: {
-        height: 300,
-        borderRadius: 24,
-        overflow: 'hidden',
+        flexDirection: 'row',
+        gap: 18,
+        paddingHorizontal: 20,
+        marginBottom: 22,
+        alignItems: 'flex-end',
     },
-    heroOverlay: {
-        ...StyleSheet.absoluteFillObject,
+    coverShadow: {
+        borderRadius: radius.lg,
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.45,
+        shadowRadius: 24,
+        elevation: 14,
     },
     cover: {
-        width: '100%',
-        height: '100%',
-        backgroundColor: 'rgba(127,127,127,0.2)',
+        width: 148,
+        height: 148,
+        borderRadius: radius.lg,
     },
-    heroContent: {
-        position: 'absolute',
-        bottom: 18,
-        left: 18,
-        right: 18,
+    heroCopy: {
+        flex: 1,
+        gap: 6,
+        paddingBottom: 2,
     },
-    heroTitle: {
-        color: '#FFFFFF',
-        fontWeight: '800',
+    kicker: {
+        ...typeScale.micro,
+        letterSpacing: 1.4,
     },
-    heroSubtitle: {
-        color: 'rgba(255,255,255,0.85)',
-        marginTop: 6,
-        marginBottom: 10,
+    albumTitle: {
+        ...typeScale.headline,
     },
-    statsRow: {
-        flexDirection: 'row',
-        gap: 8,
-        flexWrap: 'wrap',
-    },
-    statChip: {
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.18)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
-    },
-    statChipLabel: {
-        color: '#FFFFFF',
-        fontWeight: '600',
-    },
-    section: {
-        marginTop: 18,
-        marginBottom: 8,
-        paddingHorizontal: 16,
-    },
-    sectionTitle: {
-        marginBottom: 12,
-        fontWeight: '800',
-    },
-    trackRow: {
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        padding: 10,
-        marginBottom: 10,
+    artistChip: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 5,
+        marginTop: 2,
     },
-    trackRowActiveOverlay: {
-        borderRadius: 16,
-    },
-    trackContent: {
-        flex: 1,
-    },
-    trackTitle: {
+    albumArtist: {
+        ...typeScale.title,
         fontWeight: '700',
+    },
+    albumMeta: {
+        ...typeScale.caption,
+    },
+    badgeRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 8,
+        marginTop: 6,
+    },
+    qualityBadge: {
+        paddingHorizontal: 9,
+        paddingVertical: 3,
+        borderRadius: 8,
+        borderWidth: StyleSheet.hairlineWidth,
+    },
+    qualityBadgeLabel: {
+        fontSize: 11,
+        fontWeight: '800',
+        letterSpacing: 0.6,
+    },
+    explicitBadge: {
+        width: 20,
+        height: 20,
+        borderRadius: 5,
+        borderWidth: 1,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    explicitBadgeLabel: {
+        fontSize: 11,
+        fontWeight: '800',
+    },
+    actionWrap: {
+        paddingHorizontal: 20,
+        marginBottom: 30,
+    },
+    section: {
+        marginBottom: 32,
+    },
+    tracksPanel: {
+        marginHorizontal: 16,
+        paddingVertical: 8,
+        paddingHorizontal: 4,
     },
 });

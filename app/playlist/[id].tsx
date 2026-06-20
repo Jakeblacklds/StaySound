@@ -3,6 +3,7 @@
  */
 
 import { CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
+import { TidalAtmosphere } from '@/src/components/tidal';
 import { useTidalDownload } from '@/src/hooks';
 import { formatDuration } from '@/src/services';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
@@ -17,7 +18,6 @@ import { Track } from '@/src/types';
 import { BlurView } from 'expo-blur';
 import * as FileSystem from 'expo-file-system/legacy';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo, useState } from 'react';
 import {
@@ -41,11 +41,8 @@ import {
 } from 'react-native-paper';
 import Animated, {
   FadeIn,
-  FadeInDown,
   LinearTransition,
-  interpolate,
   useAnimatedScrollHandler,
-  useAnimatedStyle,
   useSharedValue,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -216,10 +213,6 @@ export default function PlaylistDetailScreen() {
       scrollY.value = event.contentOffset.y;
     },
   });
-
-  const headerStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(scrollY.value, [0, HEADER_HEIGHT - 50], [1, 0]),
-  }));
 
   const showSnackbar = useCallback((message: string) => {
     setSnackbarText(message);
@@ -557,12 +550,10 @@ export default function PlaylistDetailScreen() {
 
   return (
     <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <Animated.View style={[styles.gradientContainer, headerStyle]}>
-        <LinearGradient
-          colors={[theme.colors.primary + '30', theme.colors.background]}
-          style={StyleSheet.absoluteFill}
-        />
-      </Animated.View>
+      <TidalAtmosphere
+        sourceUri={playlist.artwork}
+        mode={playlist.artwork ? 'artwork' : 'fog'}
+      />
 
       <View style={[styles.backButton, { top: insets.top + 8 }]}>
         <BlurView intensity={40} tint={isDark ? 'dark' : 'light'} style={styles.blurButton}>

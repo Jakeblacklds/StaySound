@@ -2,6 +2,7 @@ package expo.modules.karaokeview
 
 import android.content.Context
 import android.graphics.*
+import android.os.Build
 import android.view.MotionEvent
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.views.ExpoView
@@ -23,6 +24,18 @@ import expo.modules.karaokeview.motionprofiles.VelvetProfileRenderer
  * - 120FPS: Choreographer-synced animator for butter-smooth rendering
  */
 class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
+    private companion object {
+        private const val MONOCHROME_FONT_ASSET = "fonts/SFPRODISPLAYMEDIUM.ttf"
+        private const val MONOCHROME_FONT_WEIGHT = 600
+        private const val MONOCHROME_FONT_SIZE_MIN_DP = 28f
+        private const val MONOCHROME_FONT_SIZE_MAX_DP = 37.6f
+        private const val MONOCHROME_FONT_SIZE_VW = 0.07f
+        private const val MONOCHROME_LINE_HEIGHT = 1.2f
+        private const val MONOCHROME_PADDING_LINE_DP = 6f
+        private const val MONOCHROME_LETTER_SPACING_EM = -0.04f
+        private const val MONOCHROME_SUBTEXT_SCALE = 0.6f
+    }
+
     private val lyricsParser = LyricsParser()
     private val lyricsLayoutEngine = LyricsLayoutEngine()
     private val touchController = KaraokeTouchController(resources.displayMetrics.density)
@@ -243,10 +256,11 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var enableBottomSpectrum = false
 
     // --- Paints ---
+    private val monochromeTypeface: Typeface by lazy { createMonochromeTypeface() }
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        // binimum relies on the platform UI stack; on Android the closest match is the sans-serif family.
-        typeface = Typeface.create("sans-serif", Typeface.NORMAL)
+        typeface = monochromeTypeface
         textAlign = Paint.Align.LEFT
+        letterSpacing = MONOCHROME_LETTER_SPACING_EM
     }
     private val highlightPaint = Paint(basePaint)
     private val backgroundBasePaint = Paint(basePaint)
@@ -265,6 +279,10 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
     private var fadeShaderTop: Shader? = null
     private var fadeShaderBottom: Shader? = null
+    // Edge fades ("blur") melt away while the user is browsing the lyrics and ease back
+    // in once auto-scroll resumes. 1f = full fade, 0f = no fade (edges fully visible).
+    private var edgeFadeStrength = 1f
+    private var builtFadeStrength = -1f
 
     // --- Data ---
     private var lines: List<LyricLine> = emptyList()
@@ -317,28 +335,17 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     init {
         density = resources.displayMetrics.density
-        fontSize = 30f * density
-        lineHeight = 47f * density
-        marginLeft = 24f * density
-        marginRight = 58f * density
+        marginLeft = 42f * density
+        marginRight = 42f * density
         fadeHeight = 180f * density
-        lineSpacing = 14f * density
-        backgroundFontSize = fontSize * 0.6f
-        backgroundLineHeight = backgroundFontSize * 1.45f
-        backgroundGap = fontSize * 0.2f
         FEATHER_PX = 22f * density // Wider feather for organic liquid fill
         LEADING_GLOW_WIDTH_PX = 24f * density
 
         basePaint.color = inactiveColor
-        basePaint.textSize = fontSize
         highlightPaint.color = activeColor
-        highlightPaint.textSize = fontSize
         backgroundBasePaint.color = inactiveColor
-        backgroundBasePaint.textSize = backgroundFontSize
         backgroundHighlightPaint.color = activeColor
-        backgroundHighlightPaint.textSize = backgroundFontSize
-        spaceWidth = basePaint.measureText(" ")
-        backgroundSpaceWidth = backgroundBasePaint.measureText(" ")
+        applyMonochromeTypography()
         applyReadablePalette()
 
         setBackgroundColor(Color.TRANSPARENT)
@@ -403,21 +410,60 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         return if (isLineByLine) scrollDampingLineByLine else scrollDampingDefault
     }
 
-    fun setFontSize(size: Float) {
-        fontSize = size * density
-        lineHeight = fontSize * 1.44f
-        lineSpacing = fontSize * 0.46f
-        backgroundFontSize = fontSize * 0.6f
-        backgroundLineHeight = backgroundFontSize * 1.45f
-        backgroundGap = fontSize * 0.2f
-        basePaint.textSize = fontSize
-        highlightPaint.textSize = fontSize
-        backgroundBasePaint.textSize = backgroundFontSize
-        backgroundHighlightPaint.textSize = backgroundFontSize
-        spaceWidth = basePaint.measureText(" ")
-        backgroundSpaceWidth = backgroundBasePaint.measureText(" ")
+    fun setFontSize(_size: Float) {
+        applyMonochromeTypography()
         precomputePositions()
         invalidate()
+    }
+
+    private fun createMonochromeTypeface(): Typeface {
+        return try {
+            val assetTypeface = Typeface.createFromAsset(context.assets, MONOCHROME_FONT_ASSET)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                Typeface.create(assetTypeface, MONOCHROME_FONT_WEIGHT, false)
+            } else {
+                assetTypeface
+            }
+        } catch (_: Throwable) {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                Typeface.create(Typeface.create("sans-serif", Typeface.NORMAL), MONOCHROME_FONT_WEIGHT, false)
+            } else {
+                Typeface.create("sans-serif-medium", Typeface.NORMAL)
+            }
+        }
+    }
+
+    private fun resolveMonochromeFontSizePx(viewWidthPx: Int = width): Float {
+        val widthDp = if (viewWidthPx > 0 && density > 0f) {
+            viewWidthPx / density
+        } else {
+            360f
+        }
+        return (widthDp * MONOCHROME_FONT_SIZE_VW)
+            .coerceIn(MONOCHROME_FONT_SIZE_MIN_DP, MONOCHROME_FONT_SIZE_MAX_DP) * density
+    }
+
+    private fun applyMonochromeTypography(viewWidthPx: Int = width) {
+        fontSize = resolveMonochromeFontSizePx(viewWidthPx)
+        lineHeight = fontSize * MONOCHROME_LINE_HEIGHT
+        lineSpacing = MONOCHROME_PADDING_LINE_DP * density
+        backgroundFontSize = fontSize * MONOCHROME_SUBTEXT_SCALE
+        backgroundLineHeight = backgroundFontSize * 1.15f
+        backgroundGap = fontSize * 0.3f
+
+        listOf(basePaint, highlightPaint).forEach { paint ->
+            paint.typeface = monochromeTypeface
+            paint.textSize = fontSize
+            paint.letterSpacing = MONOCHROME_LETTER_SPACING_EM
+        }
+        listOf(backgroundBasePaint, backgroundHighlightPaint).forEach { paint ->
+            paint.typeface = monochromeTypeface
+            paint.textSize = backgroundFontSize
+            paint.letterSpacing = MONOCHROME_LETTER_SPACING_EM
+        }
+
+        spaceWidth = basePaint.measureText(" ")
+        backgroundSpaceWidth = backgroundBasePaint.measureText(" ")
     }
 
     fun setActiveColor(color: Int) {
@@ -487,20 +533,40 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
         super.onSizeChanged(w, h, oldw, oldh)
-        // Multi-stop gradient for a premium cinematic fade (not cheap 2-stop)
+        applyMonochromeTypography(w)
+        buildFadeShaders(edgeFadeStrength)
+        precomputePositions()
+    }
+
+    /**
+     * Multi-stop DST_IN mask gradient for a premium cinematic edge fade.
+     *
+     * [strength] scales how much the top/bottom edges are eaten away:
+     *  - 1f → full fade (top/bottom fully transparent, the default cinematic look).
+     *  - 0f → no fade at all (the gradient becomes solid black, so DST_IN keeps every
+     *         pixel and the lyrics are fully visible to the screen edges).
+     * Interpolating the per-stop alpha lets the fade dissolve smoothly while scrolling.
+     */
+    private fun buildFadeShaders(strength: Float) {
+        val s = strength.coerceIn(0f, 1f)
+        val inv = 1f - s
+        // Edge stop: TRANSPARENT at full strength → BLACK as the fade dissolves.
+        val edgeAlpha = (255f * inv).toInt().coerceIn(0, 255)
+        // Mid stop: argb(80) at full strength → BLACK as the fade dissolves.
+        val midAlpha = (80f + (255f - 80f) * inv).toInt().coerceIn(0, 255)
         fadeShaderTop = LinearGradient(
             0f, 0f, 0f, fadeHeight,
-            intArrayOf(Color.TRANSPARENT, Color.argb(80, 0, 0, 0), Color.BLACK),
+            intArrayOf(Color.argb(edgeAlpha, 0, 0, 0), Color.argb(midAlpha, 0, 0, 0), Color.BLACK),
             floatArrayOf(0f, 0.45f, 1f),
             Shader.TileMode.CLAMP,
         )
         fadeShaderBottom = LinearGradient(
             0f, 0f, 0f, fadeHeight,
-            intArrayOf(Color.BLACK, Color.argb(80, 0, 0, 0), Color.TRANSPARENT),
+            intArrayOf(Color.BLACK, Color.argb(midAlpha, 0, 0, 0), Color.argb(edgeAlpha, 0, 0, 0)),
             floatArrayOf(0f, 0.55f, 1f),
             Shader.TileMode.CLAMP,
         )
-        precomputePositions()
+        builtFadeStrength = s
     }
 
     fun setLyrics(lyricsData: List<Map<String, Any>>) {
@@ -606,6 +672,14 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             } else {
                 touchController.scrollY = touchController.targetScrollY
             }
+
+            // Dissolve the edge fades while browsing, ease them back when auto-scroll resumes.
+            val fadeTarget = if (touchController.isManualScrolling) 0f else 1f
+            if (edgeFadeStrength != fadeTarget) {
+                edgeFadeStrength += (fadeTarget - edgeFadeStrength) * 0.12f
+                if (Math.abs(edgeFadeStrength - fadeTarget) < 0.004f) edgeFadeStrength = fadeTarget
+            }
+
             invalidate()
         }.also { it.start() }
     }
@@ -856,7 +930,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         // the reveal edge jump BACKWARD at each word boundary, which is what made the
         // barrido look like it "starts from zero" on every word instead of flowing
         // continuously across the whole phrase.
-        val isFirstWord = word.xOffset <= 0.01f
+        val isFirstWord = line.words
+            .filter { !it.isBackground && Math.abs(it.yOffset - word.yOffset) < density }
+            .minByOrNull { it.xOffset } == word
         val initialOffset = if (isFirstWord) {
             -paint.textSize * 0.375f * (1f - smootherStep((clampedProgress * 4f).coerceIn(0f, 1f)))
         } else {
@@ -1049,12 +1125,19 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 // Different visual word → standard release from completion
                 1f + (completedAgeMs / wordDurationMs)
             }
-            val sustainedPhraseTiming = buildSustainedPhraseTiming(line.words)
-            val phraseVisualWord = sustainedPhraseTiming?.words?.firstOrNull {
-                word.startMs >= it.startMs && word.endMs <= it.endMs
-            }
-            if (sustainedPhraseTiming != null && phraseVisualWord != null) {
-                liftProgress = getSustainedPhraseLiftProgress(phraseVisualWord, sustainedPhraseTiming, currentTimeMs)
+            val sustainedPhraseTiming = findSustainedPhraseTiming(
+                phraseTimings = buildSustainedPhraseTimings(line.words),
+                wordStartMs = word.startMs,
+                wordEndMs = word.endMs,
+                exactBounds = false,
+            )
+            val phraseVisualWord = sustainedPhraseTiming?.second
+            if (sustainedPhraseTiming != null) {
+                liftProgress = getSustainedPhraseLiftProgress(
+                    wordTiming = sustainedPhraseTiming.second,
+                    phraseTiming = sustainedPhraseTiming.first,
+                    currentTimeMs = currentTimeMs,
+                )
             }
             // For sustained words that just completed, keep glow enabled so the
             // animT release curve fades it naturally (instead of cutting to 0 instantly).
@@ -1210,7 +1293,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         if (rowWords.isEmpty()) return
 
         val visualWordGroups = buildRowVisualWordGroups(rowWords)
-        val sustainedPhraseTiming = buildSustainedPhraseTiming(line.words)
+        val sustainedPhraseTimings = buildSustainedPhraseTimings(line.words)
 
         if (isRowComplete) {
             for (visualWord in visualWordGroups) {
@@ -1218,7 +1301,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                     canvas = canvas,
                     line = line,
                     words = visualWord,
-                    progress = getVisualWordLiftProgress(visualWord, currentTimeMs, sustainedPhraseTiming),
+                    progress = getVisualWordLiftProgress(visualWord, currentTimeMs, sustainedPhraseTimings),
                     paint = paint,
                     rowHeight = rowHeight,
                     finalLiftRatio = finalLiftRatio,
@@ -1249,7 +1332,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 canvas = canvas,
                 line = line,
                 words = visualWord,
-                progress = getVisualWordLiftProgress(visualWord, currentTimeMs, sustainedPhraseTiming),
+                progress = getVisualWordLiftProgress(visualWord, currentTimeMs, sustainedPhraseTimings),
                 paint = paint,
                 rowHeight = rowHeight,
                 finalLiftRatio = finalLiftRatio,
@@ -1318,17 +1401,37 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val words: List<SustainedVisualWordTiming>,
     )
 
-    private fun buildSustainedPhraseTiming(words: List<LyricWord>): SustainedPhraseTiming? {
-        val sustainedWords = buildRowVisualWordGroups(words).mapNotNull { visualWord ->
-            val startMs = visualWord.firstOrNull()?.startMs ?: return@mapNotNull null
-            val endMs = visualWord.lastOrNull()?.endMs ?: return@mapNotNull null
+    private fun buildSustainedPhraseTimings(words: List<LyricWord>): List<SustainedPhraseTiming> {
+        val phraseTimings = mutableListOf<SustainedPhraseTiming>()
+        var currentRun = mutableListOf<SustainedVisualWordTiming>()
+
+        fun appendCurrentRun() {
+            if (currentRun.size >= 2) {
+                val run = currentRun.toList()
+                phraseTimings += SustainedPhraseTiming(
+                    phraseEndMs = run.maxOf { it.endMs },
+                    sharedReleaseDurationMs = run.maxOf { it.releaseDurationMs }.coerceAtLeast(1f),
+                    words = run,
+                )
+            }
+            currentRun = mutableListOf()
+        }
+
+        for (visualWord in buildRowVisualWordGroups(words)) {
+            val startMs = visualWord.firstOrNull()?.startMs
+            val endMs = visualWord.lastOrNull()?.endMs
+            if (startMs == null || endMs == null) {
+                appendCurrentRun()
+                continue
+            }
             val combinedText = visualWord.joinToString(separator = "") { it.text }
             if (!LyricsVisualWords.isGrowableVisualWord(combinedText, startMs, endMs)) {
-                return@mapNotNull null
+                appendCurrentRun()
+                continue
             }
 
             val durationMs = (endMs - startMs).coerceAtLeast(1L).toFloat()
-            SustainedVisualWordTiming(
+            currentRun += SustainedVisualWordTiming(
                 startMs = startMs,
                 endMs = endMs,
                 durationMs = durationMs,
@@ -1336,18 +1439,34 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             )
         }
 
-        if (sustainedWords.size < 2) return null
+        appendCurrentRun()
 
-        return SustainedPhraseTiming(
-            phraseEndMs = sustainedWords.maxOf { it.endMs },
-            sharedReleaseDurationMs = sustainedWords.maxOf { it.releaseDurationMs }.coerceAtLeast(1f),
-            words = sustainedWords,
-        )
+        return phraseTimings
     }
 
     private fun getSustainedReleaseDurationMs(durationMs: Float): Float {
         val riseDurationMs = (1200f + (durationMs / 1000f) * 600f).coerceIn(1200f, 2500f)
         return (riseDurationMs * 0.25f).coerceIn(250f, 600f)
+    }
+
+    private fun findSustainedPhraseTiming(
+        phraseTimings: List<SustainedPhraseTiming>,
+        wordStartMs: Long,
+        wordEndMs: Long,
+        exactBounds: Boolean,
+    ): Pair<SustainedPhraseTiming, SustainedVisualWordTiming>? {
+        for (phraseTiming in phraseTimings) {
+            val wordTiming = phraseTiming.words.firstOrNull {
+                if (exactBounds) {
+                    it.startMs == wordStartMs && it.endMs == wordEndMs
+                } else {
+                    wordStartMs >= it.startMs && wordEndMs <= it.endMs
+                }
+            }
+            if (wordTiming != null) return phraseTiming to wordTiming
+        }
+
+        return null
     }
 
     private fun getSustainedPhraseLiftProgress(
@@ -1373,7 +1492,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private fun getVisualWordLiftProgress(
         words: List<LyricWord>,
         currentTimeMs: Long,
-        sustainedPhraseTiming: SustainedPhraseTiming? = null,
+        sustainedPhraseTimings: List<SustainedPhraseTiming> = emptyList(),
     ): Float {
         if (words.isEmpty()) return 0f
 
@@ -1383,12 +1502,21 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val combinedText = words.joinToString(separator = "") { it.text }
         val isSustained = LyricsVisualWords.isGrowableVisualWord(combinedText, startMs, endMs)
         val sustainedTiming = if (isSustained) {
-            sustainedPhraseTiming?.words?.firstOrNull { it.startMs == startMs && it.endMs == endMs }
+            findSustainedPhraseTiming(
+                phraseTimings = sustainedPhraseTimings,
+                wordStartMs = startMs,
+                wordEndMs = endMs,
+                exactBounds = true,
+            )
         } else {
             null
         }
-        if (sustainedPhraseTiming != null && sustainedTiming != null) {
-            return getSustainedPhraseLiftProgress(sustainedTiming, sustainedPhraseTiming, currentTimeMs)
+        if (sustainedTiming != null) {
+            return getSustainedPhraseLiftProgress(
+                wordTiming = sustainedTiming.second,
+                phraseTiming = sustainedTiming.first,
+                currentTimeMs = currentTimeMs,
+            )
         }
 
         val maxProgress = if (isSustained) 1.6f else 1.5f
@@ -1757,12 +1885,16 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     companion object {
         private const val MAX_SPECTRAL_PARTICLES = 128
         private const val MAX_RETAINED_PROFILE_ACCENTS = 128
-        private const val SPECTRUM_BANDS = 16
+        private const val SPECTRUM_BANDS = 28
     }
     // EDGE FADES
     // ========================================================================
 
     private fun drawFades(canvas: Canvas) {
+        // Rebuild the gradients only when the browse-driven strength has actually moved.
+        if (Math.abs(edgeFadeStrength - builtFadeStrength) > 0.01f) {
+            buildFadeShaders(edgeFadeStrength)
+        }
         fadeShaderTop?.let {
             fadePaint.shader = it
             canvas.drawRect(0f, 0f, width.toFloat(), fadeHeight, fadePaint)

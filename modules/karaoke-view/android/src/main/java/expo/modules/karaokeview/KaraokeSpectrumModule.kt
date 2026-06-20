@@ -32,6 +32,26 @@ class KaraokeSpectrumModule : Module() {
             Prop("glowColor") { view: KaraokeSpectrumView, color: Int? ->
                 color?.let { view.setGlowColor(it) }
             }
+
+            Prop("anchorMode") { view: KaraokeSpectrumView, value: String? ->
+                view.setAnchorMode(value ?: "lyrics")
+            }
+
+            Prop("spectrumTheme") { view: KaraokeSpectrumView, value: String? ->
+                view.setSpectrumTheme(value ?: "aurora")
+            }
+
+            Prop("focusY") { view: KaraokeSpectrumView, value: Double? ->
+                value?.let { view.setFocusY(it.toFloat()) }
+            }
+
+            Prop("artworkSize") { view: KaraokeSpectrumView, value: Double? ->
+                value?.let { view.setArtworkSize(it.toFloat()) }
+            }
+
+            Prop("particleIntensity") { view: KaraokeSpectrumView, value: Double? ->
+                view.setParticleIntensity((value ?: 1.0).toFloat())
+            }
         }
     }
 }

@@ -101,24 +101,28 @@ export function organizeIntoAlbums(tracks: Track[]): Map<string, Album> {
 }
 
 /**
- * Organize tracks into artists
+ * Organize tracks into artists.
+ *
+ * Artist artwork should come from a dedicated API (e.g. Deezer) via
+ * refreshArtistPhotos, NOT from track/album covers. When an optional
+ * `existingArtists` map is supplied, previously-fetched remote artwork
+ * (https:// URLs) is preserved across rebuilds so Deezer photos are
+ * not overwritten by album covers.
  */
-export function organizeIntoArtists(tracks: Track[], albums: Map<string, Album>): Map<string, Artist> {
+export function organizeIntoArtists(
+    tracks: Track[],
+    albums: Map<string, Album>,
+    existingArtists?: Map<string, Artist>,
+): Map<string, Artist> {
     const artists = new Map<string, Artist>();
 
     for (const track of tracks) {
         const artistId = generateArtistId(track.artist);
         const albumId = generateAlbumId(track.album, track.artist);
-        const albumArtwork = albums.get(albumId)?.artwork;
-        const artworkCandidate = track.artwork || albumArtwork;
 
         if (artists.has(artistId)) {
             const artist = artists.get(artistId)!;
             artist.trackCount++;
-
-            if (!artist.artwork && artworkCandidate) {
-                artist.artwork = artworkCandidate;
-            }
 
             // Add album if not already included
             if (!artist.albums.includes(albumId)) {
@@ -126,10 +130,17 @@ export function organizeIntoArtists(tracks: Track[], albums: Map<string, Album>)
                 artist.albumCount++;
             }
         } else {
+            // Preserve existing remote artwork (Deezer artist photo) if available
+            const existingArtwork = existingArtists?.get(artistId)?.artwork;
+            const preservedArtwork =
+                (typeof existingArtwork === 'string' && existingArtwork.startsWith('https://'))
+                    ? existingArtwork
+                    : undefined;
+
             artists.set(artistId, {
                 id: artistId,
                 name: track.artist,
-                artwork: artworkCandidate,
+                artwork: preservedArtwork,
                 albumCount: 1,
                 trackCount: 1,
                 albums: [albumId],

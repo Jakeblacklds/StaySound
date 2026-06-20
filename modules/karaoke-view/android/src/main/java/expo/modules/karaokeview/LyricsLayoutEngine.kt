@@ -94,7 +94,6 @@ internal class LyricsLayoutEngine {
                     LyricsBidiHelper.adjustOffsetsForRtl(rowWords, maxWidth)
                 }
             }
-
             // Translation & Romanization block layouts
             var blockY = maxOf(
                 line.mainTopOffset + line.mainHeight,

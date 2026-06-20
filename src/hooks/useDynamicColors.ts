@@ -49,10 +49,18 @@ export function useDynamicColors(imageUri: string | undefined, options?: UseDyna
 
 interface UseDynamicColorsOptions {
     enabled?: boolean;
+    /**
+     * Whether the extracted palette is pushed to the global ThemeProvider.
+     * Defaults to true (FullPlayer behavior). Screens that only want LOCAL
+     * atmosphere colors (e.g. the Tidal redesign) pass false so they don't
+     * hijack the app-wide theme while the player is showing a different track.
+     */
+    applyToTheme?: boolean;
 }
 
 export function useDynamicColorsWithOptions(imageUri: string | undefined, options?: UseDynamicColorsOptions) {
     const { config, isDark, theme, setDynamicPalette } = useTheme();
+    const applyToTheme = options?.applyToTheme ?? true;
 
     // Theme-based fallback — adapts to light/dark app theme.
     const fallbackColors = useMemo<AlbumColors>(() => ({
@@ -116,7 +124,7 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
             setRawColors(fallbackColors);
             animatePalette(fallbackColors);
             // Reset theme to default colors when no artwork.
-            if (config.dynamicColors) {
+            if (applyToTheme && config.dynamicColors) {
                 setDynamicPalette(fallbackColors);
             }
             return;
@@ -136,7 +144,7 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
                 animatePalette(extracted);
 
                 // Push the full palette to ThemeProvider → allows using REAL background/primary.
-                if (config.dynamicColors && config.style === 'material3') {
+                if (applyToTheme && config.dynamicColors && config.style === 'material3') {
                     setDynamicPalette(extracted);
                 }
             })
@@ -151,7 +159,7 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [animatePalette, config.dynamicColors, enabled, fallbackColors, imageUri, setDynamicPalette]);
+    }, [animatePalette, applyToTheme, config.dynamicColors, enabled, fallbackColors, imageUri, setDynamicPalette]);
 
     return {
         colors: rawColors,

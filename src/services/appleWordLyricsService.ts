@@ -8,6 +8,11 @@ export type AppleWordLyricsOption = {
     payload: KaraokeLyricsJSON;
     lyricsUrl?: string;
     timingType?: string;
+    trackName?: string;
+    artistName?: string;
+    albumName?: string;
+    durationSec?: number;
+    isExactMatch: boolean;
 };
 
 type LyricsApiSearchResult = {
@@ -74,6 +79,30 @@ class AppleWordLyricsService {
         const normalized = (timingType ?? '').trim().toLowerCase();
         if (!normalized) return false;
         return normalized === 'text' || normalized === 'plain' || normalized === 'unsynced' || normalized === 'static';
+    }
+
+    private isWordLevelTimingType(timingType?: string | null): boolean {
+        const normalized = (timingType ?? '').trim().toLowerCase();
+        return normalized === 'word' || normalized === 'syllable' || normalized === 'word-synced';
+    }
+
+    private isLineLevelTimingType(timingType?: string | null): boolean {
+        const normalized = (timingType ?? '').trim().toLowerCase();
+        return normalized === 'line' || normalized === 'line-synced' || normalized === 'linesync';
+    }
+
+    /**
+     * True only when the parsed payload carries REAL per-word (ELRC) timing.
+     *
+     * A line-level result stores exactly one fragment per line, so every fragment is a
+     * line terminator (`n === true`). Genuine word/syllable timing always produces at
+     * least one intra-line fragment (`n !== true`). We discard line-level payloads so
+     * the karaoke view never shows a whole line lit at once ("todo iluminado").
+     */
+    private hasWordLevelTiming(payload: KaraokeLyricsJSON | null | undefined): boolean {
+        const lyrics = payload?.lyrics;
+        if (!Array.isArray(lyrics) || lyrics.length === 0) return false;
+        return lyrics.some(word => word.n !== true);
     }
 
     private cleanMetadata(value?: string | null): string {
@@ -408,6 +437,10 @@ class AppleWordLyricsService {
 
         if (result.lyricsUrl) score += 5;
         if (!this.isLikelyUnsyncedTimingType(result.timing_type)) score += 20;
+        // Strongly favour real word-by-word (ELRC) over line-level so a word candidate
+        // is always fetched/selected before a line-level one when both exist.
+        if (this.isWordLevelTimingType(result.timing_type)) score += 14;
+        else if (this.isLineLevelTimingType(result.timing_type)) score -= 12;
         if (resultTitle && resultTitle === normalizedTitle) score += 18;
         if (resultArtist && resultArtist === normalizedArtist) score += 14;
         if (isrc && result.isrc && isrc.trim().toLowerCase() === result.isrc.trim().toLowerCase()) score += 30;
@@ -420,6 +453,32 @@ class AppleWordLyricsService {
         }
 
         return score;
+    }
+
+    private isExactSearchResult(
+        result: LyricsApiSearchResult,
+        title: string,
+        artist: string,
+        durationSec?: number,
+        isrc?: string,
+    ): boolean {
+        const requestedIsrc = isrc?.trim().toLowerCase();
+        const resultIsrc = result.isrc?.trim().toLowerCase();
+        if (requestedIsrc && resultIsrc && requestedIsrc === resultIsrc) {
+            return true;
+        }
+
+        const titleMatches =
+            this.normalizeComparisonValue(result.track_name) === this.normalizeComparisonValue(title);
+        const artistMatches =
+            this.normalizeComparisonValue(result.artist_name) === this.normalizeComparisonValue(artist);
+        if (!titleMatches || !artistMatches) return false;
+
+        if (durationSec && result.duration) {
+            return Math.abs(result.duration - durationSec) <= 4;
+        }
+
+        return true;
     }
 
     private buildLyricsPayload(song: string, artist: string, lyrics: KaraokeWordRaw[], fallbackDurationSec?: number): KaraokeLyricsJSON | null {
@@ -752,6 +811,13 @@ class AppleWordLyricsService {
                 continue;
             }
 
+            // Discard line-level (non-ELRC) results: they make the renderer light the whole
+            // line at once. Skip this candidate and keep looking for real word-by-word timing.
+            if (!this.hasWordLevelTiming(ttmlLyrics)) {
+                console.log('[AppleWordLyrics] discarding line-level TTML candidate (no word timing):', result.lyricsUrl);
+                continue;
+            }
+
             const optionIndex = options.length;
             options.push({
                 id: `binimum-${optionIndex + 1}`,
@@ -760,6 +826,17 @@ class AppleWordLyricsService {
                 payload: ttmlLyrics,
                 lyricsUrl: result.lyricsUrl,
                 timingType: result.timing_type,
+                trackName: this.cleanMetadata(result.track_name) || undefined,
+                artistName: this.cleanMetadata(result.artist_name) || undefined,
+                albumName: this.cleanMetadata(result.album_name) || undefined,
+                durationSec: result.duration,
+                isExactMatch: this.isExactSearchResult(
+                    result,
+                    cleanTitle,
+                    cleanArtist,
+                    durationSec,
+                    isrc,
+                ),
             });
 
             if (options.length >= this.MAX_WORD_OPTIONS) {
@@ -773,7 +850,9 @@ class AppleWordLyricsService {
         }
 
         const kpoeLyrics = await this.fetchKpoeLyrics(cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);
-        if (kpoeLyrics?.lyrics?.length) {
+        if (kpoeLyrics?.lyrics?.length && !this.hasWordLevelTiming(kpoeLyrics)) {
+            console.log('[AppleWordLyrics] discarding line-level KPoe result (no word timing):', cleanTitle, '/', cleanArtist);
+        } else if (kpoeLyrics?.lyrics?.length) {
             console.log('[AppleWordLyrics] KPoe JSON result:', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
             return [
                 {
@@ -788,6 +867,11 @@ class AppleWordLyricsService {
                             artist,
                         },
                     },
+                    trackName: cleanTitle,
+                    artistName: cleanArtist,
+                    albumName: cleanAlbum || undefined,
+                    durationSec,
+                    isExactMatch: true,
                 },
             ];
         }

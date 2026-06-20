@@ -1,35 +1,53 @@
-import { EmptyState, Skeleton } from '@/src/components/ui';
+import { EmptyState, Skeleton, TidalTrackRow } from '@/src/components/ui';
+import {
+    DetailActionBar,
+    DetailTopBar,
+    GlassPanel,
+    SectionHeader,
+    TidalAtmosphere,
+    TidalAtmosphereColors,
+} from '@/src/components/tidal';
 import { useTidalDownload } from '@/src/hooks';
+import { createRng, fisherYates } from '@/src/services/shuffle';
 import { createTidalStreamTrack, getTidalPlaylistDetail, isValidAudioFile } from '@/src/services/tidalService';
-import { useLibraryStore, usePlayerStore } from '@/src/stores';
-import { useTheme } from '@/src/theme';
-import { TidalPlaylistDetail, TidalTrack } from '@/src/types/audio';
-import { BlurView } from 'expo-blur';
+import { useLibraryStore, useNotificationStore, usePlayerStore } from '@/src/stores';
+import { radius, typeScale, useTheme, withAlpha } from '@/src/theme';
+import { TidalPlaylistDetail, TidalTrack, Track } from '@/src/types/audio';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, Stack, useLocalSearchParams } from 'expo-router';
-import React, { useCallback, useEffect, useState } from 'react';
-import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
-import { Button, IconButton, Text } from 'react-native-paper';
-import Animated, { FadeIn, FadeInDown } from 'react-native-reanimated';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Alert, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { Button, Text } from 'react-native-paper';
+import Animated, { FadeIn, FadeInDown, FadeInRight, useAnimatedScrollHandler, useSharedValue } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
-function formatTrackDuration(ms: number): string {
-    const totalSeconds = Math.max(0, Math.floor(ms / 1000));
-    const minutes = Math.floor(totalSeconds / 60);
-    const seconds = totalSeconds % 60;
-    return `${minutes}:${String(seconds).padStart(2, '0')}`;
+async function resolveTidalQueue(tracks: TidalTrack[], batchSize = 6): Promise<Track[]> {
+    const out: Track[] = [];
+    for (let i = 0; i < tracks.length; i += batchSize) {
+        const slice = tracks.slice(i, i + batchSize);
+        const settled = await Promise.allSettled(slice.map(track => createTidalStreamTrack(track)));
+        for (const result of settled) {
+            if (result.status === 'fulfilled') out.push(result.value);
+        }
+    }
+    return out;
 }
 
 export function TidalPlaylistScreen() {
-
     const { id } = useLocalSearchParams<{ id: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
+    const scrollY = useSharedValue(0);
 
     const [playlistDetail, setPlaylistDetail] = useState<TidalPlaylistDetail | null>(null);
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
+    const [isPreparing, setIsPreparing] = useState<null | 'play' | 'shuffle'>(null);
+    const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+    const [atmos, setAtmos] = useState<TidalAtmosphereColors | null>(null);
+    const accentColor = atmos?.colors.primary ?? theme.colors.primary;
+
+    const showNotification = useNotificationStore(s => s.showNotification);
 
     const {
         downloads,
@@ -41,6 +59,24 @@ export function TidalPlaylistScreen() {
     } = useTidalDownload();
 
     const play = usePlayerStore(s => s.play);
+    const currentPlayerTrack = usePlayerStore(s => s.currentTrack);
+    const pendingTrackPreview = usePlayerStore(s => s.pendingTrackPreview);
+    const isPlayerPlaying = usePlayerStore(s => s.isPlaying);
+    const setPendingTrackPreview = usePlayerStore(s => s.setPendingTrackPreview);
+
+    const activeTidalTrackId = useMemo(() => {
+        const sourceTrack = pendingTrackPreview ?? currentPlayerTrack;
+        if (!sourceTrack) return null;
+        if (typeof sourceTrack.tidalId === 'number') return sourceTrack.tidalId;
+        const match = sourceTrack.id?.match(/tidal(?:_stream)?_(\d+)/);
+        return match ? Number(match[1]) : null;
+    }, [currentPlayerTrack, pendingTrackPreview]);
+
+    const scrollHandler = useAnimatedScrollHandler({
+        onScroll: (event) => {
+            scrollY.value = event.contentOffset.y;
+        },
+    });
 
     useEffect(() => {
         if (!id) {
@@ -75,6 +111,13 @@ export function TidalPlaylistScreen() {
     }, [id]);
 
     const handleTidalPlay = useCallback(async (track: TidalTrack) => {
+        setPendingTrackPreview({
+            id: `tidal_pending_${track.id}`,
+            title: track.title,
+            artist: track.artist,
+            artwork: track.artworkUrl,
+            tidalId: track.id,
+        });
         try {
             const downloadedTrack = getDownloadedTrack(track.id);
             if (downloadedTrack) {
@@ -119,10 +162,11 @@ export function TidalPlaylistScreen() {
                 await play(localTrack, [localTrack]);
             }
         } catch (playError) {
+            setPendingTrackPreview(null);
             const message = playError instanceof Error ? playError.message : 'No se pudo reproducir esta pista';
             Alert.alert('Error de reproduccion', message);
         }
-    }, [download, forgetDownloadedTrack, getDownloadedTrack, play]);
+    }, [download, forgetDownloadedTrack, getDownloadedTrack, play, setPendingTrackPreview]);
 
     const handleTidalDownload = useCallback(async (track: TidalTrack) => {
         try {
@@ -139,42 +183,78 @@ export function TidalPlaylistScreen() {
         }
     }, [cancelDownload, download, downloads]);
 
+    const handlePlayAll = useCallback(async (shuffle: boolean) => {
+        const tracks = playlistDetail?.tracks ?? [];
+        if (tracks.length === 0 || isPreparing) return;
+
+        setIsPreparing(shuffle ? 'shuffle' : 'play');
+        const ordered = shuffle ? fisherYates(tracks, createRng()) : tracks;
+        const first = ordered[0];
+        setPendingTrackPreview({
+            id: `tidal_pending_${first.id}`,
+            title: first.title,
+            artist: first.artist,
+            artwork: first.artworkUrl ?? playlistDetail?.playlist.artworkUrl,
+            tidalId: first.id,
+        });
+
+        try {
+            const resolved = await resolveTidalQueue(ordered);
+            if (resolved.length === 0) {
+                throw new Error('No se pudo preparar la reproducción');
+            }
+            await play(resolved[0], resolved);
+        } catch (playError) {
+            setPendingTrackPreview(null);
+            const message = playError instanceof Error ? playError.message : 'No se pudo reproducir';
+            showNotification(message, 'error');
+        } finally {
+            setIsPreparing(null);
+        }
+    }, [isPreparing, play, playlistDetail?.playlist.artworkUrl, playlistDetail?.tracks, setPendingTrackPreview, showNotification]);
+
+    const handleDownloadAll = useCallback(async () => {
+        const tracks = playlistDetail?.tracks ?? [];
+        if (tracks.length === 0 || isDownloadingAll) return;
+
+        const pending = tracks.filter(track => {
+            const state = downloads.get(track.id);
+            return !isDownloaded(track.id) && state?.status !== 'done' && state?.status !== 'downloading';
+        });
+
+        if (pending.length === 0) {
+            showNotification('La playlist ya está descargada', 'info');
+            return;
+        }
+
+        setIsDownloadingAll(true);
+        showNotification(`Descargando ${pending.length} canciones…`, 'info');
+        try {
+            for (const track of pending) {
+                await handleTidalDownload(track);
+            }
+        } finally {
+            setIsDownloadingAll(false);
+        }
+    }, [downloads, handleTidalDownload, isDownloaded, isDownloadingAll, playlistDetail?.tracks, showNotification]);
+
     if (isLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
                 <Stack.Screen options={{ headerShown: false }} />
-                <LinearGradient
-                    colors={[theme.colors.secondaryContainer, theme.colors.background, theme.colors.background]}
-                    style={StyleSheet.absoluteFill}
-                />
-                <ScrollView contentContainerStyle={styles.content}>
-                    <View style={styles.heroWrap}>
-                        <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant, overflow: 'hidden' }]}>
-                            <Skeleton height={300} width="100%" borderRadius={24} />
-                            <View style={styles.heroContent}>
-                                <Skeleton height={32} width="80%" borderRadius={8} style={{ marginBottom: 12 }} />
-                                <Skeleton height={18} width="40%" borderRadius={4} style={{ marginBottom: 16 }} />
-                                <View style={styles.statsRow}>
-                                    <Skeleton height={32} width={100} borderRadius={16} />
-                                    <Skeleton height={32} width={100} borderRadius={16} />
-                                </View>
-                            </View>
+                <ScrollView contentContainerStyle={{ paddingTop: insets.top + 64, paddingHorizontal: 20 }}>
+                    <View style={{ flexDirection: 'row', gap: 18, marginBottom: 28 }}>
+                        <Skeleton height={148} width={148} borderRadius={radius.lg} />
+                        <View style={{ flex: 1, justifyContent: 'flex-end', gap: 10 }}>
+                            <Skeleton height={14} width="40%" borderRadius={6} />
+                            <Skeleton height={26} width="90%" borderRadius={8} />
+                            <Skeleton height={18} width="55%" borderRadius={6} />
                         </View>
                     </View>
-
-                    <View style={styles.section}>
-                        <Skeleton height={24} width={100} borderRadius={4} style={{ marginBottom: 16 }} />
-                        {[1, 2, 3, 4, 5].map((i) => (
-                            <View key={`s-tra-${i}`} style={[styles.trackRow, { backgroundColor: theme.colors.surface, opacity: 0.6 }]}>
-                                <View style={styles.trackContent}>
-                                    <Skeleton height={18} width="70%" borderRadius={4} style={{ marginBottom: 8 }} />
-                                    <Skeleton height={14} width="30%" borderRadius={4} />
-                                </View>
-                                <Skeleton height={36} width={36} borderRadius={18} />
-                                <Skeleton height={36} width={80} borderRadius={18} />
-                            </View>
-                        ))}
-                    </View>
+                    <Skeleton height={54} width="100%" borderRadius={radius.lg} style={{ marginBottom: 28 }} />
+                    {[1, 2, 3, 4, 5].map((i) => (
+                        <Skeleton key={`s-tra-${i}`} height={56} width="100%" borderRadius={14} style={{ marginBottom: 8 }} />
+                    ))}
                 </ScrollView>
             </SafeAreaView>
         );
@@ -186,83 +266,100 @@ export function TidalPlaylistScreen() {
                 <Stack.Screen options={{ headerShown: false }} />
                 <SafeAreaView style={[styles.centered, { backgroundColor: theme.colors.background }]}>
                     <EmptyState title="Playlist no disponible" description={error ?? 'No se pudo cargar'} />
-                    <Button onPress={() => router.back()}>Back</Button>
+                    <Button onPress={() => router.back()}>Volver</Button>
                 </SafeAreaView>
             </>
         );
     }
 
+    const coverUri = playlistDetail.playlist.artworkUrl;
+
     return (
-        <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
+        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
             <Stack.Screen options={{ headerShown: false }} />
-            <StatusBar barStyle="light-content" />
+            <StatusBar barStyle={theme.id.includes('dark') ? 'light-content' : 'dark-content'} />
 
-            <LinearGradient
-                colors={[theme.colors.secondaryContainer, theme.colors.background, theme.colors.background]}
-                style={StyleSheet.absoluteFill}
-            />
+            <TidalAtmosphere sourceUri={coverUri} mode="artwork" scrollY={scrollY} onColors={setAtmos} />
 
-            <View style={[styles.backButton, { top: insets.top + 8 }]}>
-                <BlurView intensity={60} tint="dark" style={styles.backButtonBlur}>
-                    <IconButton icon="arrow-left" iconColor="#FFFFFF" onPress={() => router.back()} />
-                </BlurView>
-            </View>
+            <DetailTopBar title={playlistDetail.playlist.title} scrollY={scrollY} onBack={() => router.back()} />
 
-            <ScrollView contentContainerStyle={styles.content}>
-                <Animated.View entering={FadeIn.duration(500)} style={styles.heroWrap}>
-                    <View style={[styles.hero, { backgroundColor: theme.colors.surfaceVariant }]}>
-                        <Image source={playlistDetail.playlist.artworkUrl ? { uri: playlistDetail.playlist.artworkUrl } : undefined} style={styles.cover} contentFit="cover" />
-                        <LinearGradient
-                            colors={['rgba(0,0,0,0.08)', 'rgba(0,0,0,0.72)']}
-                            style={styles.heroOverlay}
+            <Animated.ScrollView
+                onScroll={scrollHandler}
+                scrollEventThrottle={16}
+                contentContainerStyle={[styles.content, { paddingTop: insets.top + 64 }]}
+                showsVerticalScrollIndicator={false}
+            >
+                <Animated.View entering={FadeIn.duration(450)} style={styles.hero}>
+                    <View style={[styles.coverShadow, { shadowColor: theme.id.includes('dark') ? '#000' : '#475569' }]}>
+                        <Image
+                            source={coverUri ? { uri: coverUri } : undefined}
+                            style={[styles.cover, { backgroundColor: theme.colors.surfaceVariant }]}
+                            contentFit="cover"
+                            transition={300}
                         />
-                        <View style={styles.heroContent}>
-                            <Text variant="headlineSmall" numberOfLines={2} style={styles.heroTitle}>
-                                {playlistDetail.playlist.title}
+                    </View>
+                    <View style={styles.heroCopy}>
+                        <Text style={[styles.kicker, { color: accentColor }]}>PLAYLIST</Text>
+                        <Text numberOfLines={3} style={[styles.title, { color: theme.colors.onBackground }]}>
+                            {playlistDetail.playlist.title}
+                        </Text>
+                        {playlistDetail.playlist.description ? (
+                            <Text numberOfLines={2} style={[styles.desc, { color: withAlpha(theme.colors.onSurfaceVariant, 'D0') }]}>
+                                {playlistDetail.playlist.description}
                             </Text>
-                            <Text numberOfLines={2} style={styles.heroSubtitle}>
-                                {playlistDetail.playlist.description || 'Playlist de Tidal'}
-                            </Text>
-                            <View style={styles.statsRow}>
-                                <View style={styles.statChip}>
-                                    <Text style={styles.statChipLabel}>{playlistDetail.tracks.length} tracks</Text>
-                                </View>
-                            </View>
-                        </View>
+                        ) : null}
+                        <Text style={[styles.meta, { color: withAlpha(theme.colors.onSurfaceVariant, 'C0') }]}>
+                            {playlistDetail.tracks.length} canciones
+                        </Text>
                     </View>
                 </Animated.View>
 
-                <Animated.View entering={FadeInDown.delay(200).duration(400)} style={styles.section}>
-                    <Text variant="titleMedium" style={[styles.sectionTitle, { color: theme.colors.onBackground }]}>Tracks</Text>
-                    {playlistDetail.tracks.map(track => {
-                        const state = downloads.get(track.id);
-                        const downloaded = isDownloaded(track.id) || state?.status === 'done';
-                        const isDownloadingItem = state?.status === 'downloading';
-                        const isError = state?.status === 'error';
-                        const progressLabel = `${Math.round((state?.progress ?? 0) * 100)}%`;
-                        const buttonLabel = downloaded ? 'Saved' : isDownloadingItem ? progressLabel : isError ? 'Retry' : 'Save';
-
-                        return (
-                            <View key={track.id} style={[styles.trackRow, { backgroundColor: theme.colors.surface }]}>
-                                <Pressable style={styles.trackContent} onPress={() => handleTidalPlay(track)}>
-                                    <Text numberOfLines={1} style={[styles.trackTitle, { color: theme.colors.onSurface }]}>{track.title}</Text>
-                                    <Text style={{ color: theme.colors.onSurfaceVariant }}>{track.artist} • {formatTrackDuration(track.durationMs)}</Text>
-                                </Pressable>
-                                <IconButton icon="play" mode="contained" size={18} onPress={() => handleTidalPlay(track)} />
-                                <Button
-                                    compact
-                                    mode={downloaded ? 'contained' : 'contained-tonal'}
-                                    onPress={() => handleTidalDownload(track)}
-                                    style={{ minWidth: 80 }}
-                                >
-                                    {buttonLabel}
-                                </Button>
-                            </View>
-                        );
-                    })}
+                <Animated.View entering={FadeIn.delay(120).duration(400)} style={styles.actionWrap}>
+                    <DetailActionBar
+                        accent={atmos?.animated.primary}
+                        accentColor={accentColor}
+                        onPrimaryColor={atmos?.colors.onPrimary ?? theme.colors.onPrimary}
+                        preparing={isPreparing}
+                        downloadingAll={isDownloadingAll}
+                        onPlay={() => handlePlayAll(false)}
+                        onShuffle={() => handlePlayAll(true)}
+                        onDownloadAll={handleDownloadAll}
+                    />
                 </Animated.View>
-            </ScrollView>
-        </SafeAreaView>
+
+                <Animated.View entering={FadeInDown.delay(150)} style={styles.section}>
+                    <SectionHeader kicker="En esta lista" title="Canciones" accent={accentColor} />
+                    <GlassPanel style={styles.tracksPanel} radius={radius.xl} blurred={false}>
+                        {playlistDetail.tracks.map((track, index) => {
+                            const state = downloads.get(track.id);
+                            const downloaded = isDownloaded(track.id) || state?.status === 'done';
+                            const isDownloading = state?.status === 'downloading';
+                            const isTrackActive = activeTidalTrackId === track.id && (isPlayerPlaying || !!pendingTrackPreview);
+
+                            return (
+                                <Animated.View key={track.id} entering={FadeInRight.delay(180 + Math.min(index, 8) * 30)}>
+                                    <TidalTrackRow
+                                        title={track.title || 'Unknown Title'}
+                                        artist={track.artist || 'Unknown Artist'}
+                                        artworkUrl={track.artworkUrl}
+                                        durationMs={track.durationMs}
+                                        showArtwork
+                                        tone="glass"
+                                        accentColor={accentColor}
+                                        isActive={isTrackActive}
+                                        isPlaying={isPlayerPlaying}
+                                        downloadStatus={isDownloading ? 'downloading' : downloaded ? 'done' : state?.status === 'error' ? 'error' : 'idle'}
+                                        progress={state?.progress ?? 0}
+                                        onPress={() => handleTidalPlay(track)}
+                                        onDownloadPress={() => handleTidalDownload(track)}
+                                    />
+                                </Animated.View>
+                            );
+                        })}
+                    </GlassPanel>
+                </Animated.View>
+            </Animated.ScrollView>
+        </View>
     );
 }
 
@@ -275,93 +372,58 @@ const styles = StyleSheet.create({
         gap: 12,
         paddingHorizontal: 20,
     },
-    backButton: {
-        position: 'absolute',
-        left: 12,
-        zIndex: 20,
-    },
-    backButtonBlur: {
-        borderRadius: 22,
-        overflow: 'hidden',
-    },
     content: {
-        paddingTop: 64,
-        paddingBottom: 120,
-    },
-    heroWrap: {
-        paddingHorizontal: 16,
+        paddingBottom: 140,
     },
     hero: {
-        height: 300,
-        borderRadius: 24,
-        overflow: 'hidden',
+        flexDirection: 'row',
+        gap: 18,
+        paddingHorizontal: 20,
+        marginBottom: 22,
+        alignItems: 'flex-end',
     },
-    heroOverlay: {
-        ...StyleSheet.absoluteFillObject,
+    coverShadow: {
+        borderRadius: radius.lg,
+        shadowOffset: { width: 0, height: 16 },
+        shadowOpacity: 0.45,
+        shadowRadius: 24,
+        elevation: 14,
     },
     cover: {
-        width: '100%',
-        height: '100%',
-        backgroundColor: 'rgba(127,127,127,0.2)',
+        width: 148,
+        height: 148,
+        borderRadius: radius.lg,
     },
-    heroContent: {
-        position: 'absolute',
-        bottom: 18,
-        left: 18,
-        right: 18,
+    heroCopy: {
+        flex: 1,
+        gap: 6,
+        paddingBottom: 2,
     },
-    heroTitle: {
-        color: '#FFFFFF',
-        fontWeight: '800',
+    kicker: {
+        ...typeScale.micro,
+        letterSpacing: 1.4,
     },
-    heroSubtitle: {
-        color: 'rgba(255,255,255,0.85)',
-        marginTop: 6,
-        marginBottom: 10,
-        fontSize: 13,
+    title: {
+        ...typeScale.headline,
     },
-    statsRow: {
-        flexDirection: 'row',
-        gap: 8,
+    desc: {
+        ...typeScale.caption,
     },
-    statChip: {
-        borderRadius: 999,
-        backgroundColor: 'rgba(255,255,255,0.18)',
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.25)',
-        paddingHorizontal: 12,
-        paddingVertical: 6,
+    meta: {
+        ...typeScale.caption,
     },
-    statChipLabel: {
-        color: '#FFFFFF',
-        fontWeight: '600',
+    actionWrap: {
+        paddingHorizontal: 20,
+        marginBottom: 30,
     },
     section: {
-        marginTop: 18,
-        marginBottom: 8,
-        paddingHorizontal: 16,
+        marginBottom: 32,
     },
-    sectionTitle: {
-        marginBottom: 12,
-        fontWeight: '800',
-    },
-    trackRow: {
-        borderRadius: 16,
-        borderWidth: 1,
-        borderColor: 'rgba(255,255,255,0.08)',
-        padding: 10,
-        marginBottom: 10,
-        flexDirection: 'row',
-        alignItems: 'center',
-        gap: 10,
-    },
-    trackContent: {
-        flex: 1,
-    },
-    trackTitle: {
-        fontWeight: '700',
+    tracksPanel: {
+        marginHorizontal: 16,
+        paddingVertical: 8,
+        paddingHorizontal: 4,
     },
 });
 
 export default TidalPlaylistScreen;
-

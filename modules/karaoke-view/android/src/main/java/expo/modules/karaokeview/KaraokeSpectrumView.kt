@@ -73,6 +73,42 @@ class KaraokeSpectrumView(context: Context, appContext: AppContext) : ExpoView(c
         invalidate()
     }
 
+    fun setAnchorMode(value: String) {
+        val mode = if (value == "artwork") {
+            KaraokeSpectrumRenderer.AnchorMode.ARTWORK
+        } else {
+            KaraokeSpectrumRenderer.AnchorMode.LYRICS
+        }
+        renderer.setAnchorMode(mode)
+        invalidate()
+    }
+
+    fun setSpectrumTheme(value: String) {
+        val t = when (value) {
+            "columns" -> KaraokeSpectrumRenderer.Theme.COLUMNS
+            "caustics" -> KaraokeSpectrumRenderer.Theme.CAUSTICS
+            "waveformArc" -> KaraokeSpectrumRenderer.Theme.WAVEFORM_ARC
+            else -> KaraokeSpectrumRenderer.Theme.AURORA
+        }
+        renderer.setTheme(t)
+        invalidate()
+    }
+
+    fun setFocusY(value: Float) {
+        renderer.setFocusY(value)
+        invalidate()
+    }
+
+    fun setArtworkSize(value: Float) {
+        renderer.setArtworkSize(value * density)
+        invalidate()
+    }
+
+    fun setParticleIntensity(value: Float) {
+        renderer.setParticleIntensity(value)
+        invalidate()
+    }
+
     private fun resolveSessionId(): Int {
         if (audioSessionId > 0) return audioSessionId
         return try {
@@ -142,8 +178,8 @@ class KaraokeSpectrumView(context: Context, appContext: AppContext) : ExpoView(c
     }
 
     companion object {
-        private const val BANDS = 16
-        private const val DEFAULT_RENDER_DELAY_MS = 350L
+        private const val BANDS = 28
+        private const val DEFAULT_RENDER_DELAY_MS = 380L
         private const val MAX_RENDER_DELAY_MS = 650L
         private const val PLAYING_FRAME_NS = 16_000_000L // ~60fps
         private const val IDLE_FRAME_NS = 33_000_000L    // ~30fps

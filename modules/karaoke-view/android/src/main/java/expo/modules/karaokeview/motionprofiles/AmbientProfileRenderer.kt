@@ -1,11 +1,10 @@
 package expo.modules.karaokeview.motionprofiles
 
-import android.graphics.Color
 import android.graphics.Paint
 import expo.modules.karaokeview.KaraokeAccentContext
 import expo.modules.karaokeview.KaraokeContinuousContext
 import expo.modules.karaokeview.MotionProfileRenderer
-import expo.modules.karaokeview.blendColors
+import expo.modules.karaokeview.luminousTint
 import kotlin.math.sin
 
 /**
@@ -43,7 +42,8 @@ class AmbientProfileRenderer : MotionProfileRenderer {
         val auraAlpha = ((12f + ctx.glowProgress * 18f) * heldProgress).toInt().coerceIn(0, 36)
         if (auraAlpha <= 1) return
 
-        val auraColor = blendColors(ctx.glowColor, Color.WHITE, 0.15f)
+        // Luminous tint of the album glow (was a wash toward white).
+        val auraColor = luminousTint(ctx.glowColor, lift = 0.3f, satBoost = 0.08f)
 
         ctx.sparklePaint.style = Paint.Style.FILL
         ctx.sparklePaint.color = auraColor

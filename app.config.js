@@ -85,6 +85,8 @@ module.exports = {
                     microphonePermission: false,
                 },
             ],
+            './plugins/withAndroidAutoCatalogModule',
+            './plugins/withKaraokeFonts',
             'expo-sqlite',
             [
                 'expo-media-library',

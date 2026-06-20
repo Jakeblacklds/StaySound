@@ -1,21 +1,21 @@
+import { Ionicons } from '@expo/vector-icons';
+import * as Haptics from 'expo-haptics';
 import React, { useEffect } from 'react';
 import { GestureResponderEvent, Pressable, StyleSheet, View } from 'react-native';
-import Animated, { 
-    useAnimatedStyle, 
-    useSharedValue, 
-    withSpring, 
-    withTiming, 
+import { Text } from 'react-native-paper';
+import Animated, {
+    cancelAnimation,
     Easing,
-    interpolate,
     Extrapolate,
-    useAnimatedProps,
+    interpolate,
+    useAnimatedStyle,
+    useSharedValue,
     withRepeat,
     withSequence,
-    cancelAnimation
+    withSpring,
+    withTiming,
 } from 'react-native-reanimated';
-import { CustomIcon } from './CustomIcon';
 import { useTheme } from '@/src/theme';
-import { Text } from 'react-native-paper';
 
 interface DownloadAnimatedButtonProps {
     status: 'idle' | 'downloading' | 'done' | 'error';
@@ -23,8 +23,6 @@ interface DownloadAnimatedButtonProps {
     onPress: (event: GestureResponderEvent) => void;
     size?: number;
 }
-
-const AnimatedCustomIcon = Animated.createAnimatedComponent(CustomIcon);
 
 export const DownloadAnimatedButton: React.FC<DownloadAnimatedButtonProps> = ({
     status,
@@ -39,12 +37,9 @@ export const DownloadAnimatedButton: React.FC<DownloadAnimatedButtonProps> = ({
     const opacityDownloading = useSharedValue(status === 'downloading' ? 1 : 0);
     const opacityDone = useSharedValue(status === 'done' ? 1 : 0);
     const opacityError = useSharedValue(status === 'error' ? 1 : 0);
-    
-    // Pulse for downloading state
     const pulse = useSharedValue(1);
 
     useEffect(() => {
-        // Handle opacity transitions between states
         opacityIdle.value = withTiming(status === 'idle' ? 1 : 0, { duration: 250 });
         opacityDownloading.value = withTiming(status === 'downloading' ? 1 : 0, { duration: 250 });
         opacityDone.value = withTiming(status === 'done' ? 1 : 0, { duration: 350 });
@@ -53,29 +48,39 @@ export const DownloadAnimatedButton: React.FC<DownloadAnimatedButtonProps> = ({
         if (status === 'downloading') {
             pulse.value = withRepeat(
                 withSequence(
-                    withTiming(1.15, { duration: 800, easing: Easing.inOut(Easing.ease) }),
-                    withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) })
+                    withTiming(1.12, { duration: 800, easing: Easing.inOut(Easing.ease) }),
+                    withTiming(1, { duration: 800, easing: Easing.inOut(Easing.ease) }),
                 ),
                 -1,
-                true
+                true,
             );
             progressRotation.value = withRepeat(
                 withTiming(360, { duration: 2000, easing: Easing.linear }),
-                -1
+                -1,
             );
         } else {
             cancelAnimation(pulse);
             pulse.value = withSpring(1);
             cancelAnimation(progressRotation);
         }
+
+        // Celebratory haptic when a download lands.
+        if (status === 'done') {
+            void Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+        }
     }, [status]);
 
+    const handlePress = (event: GestureResponderEvent) => {
+        void Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        onPress(event);
+    };
+
     const handlePressIn = () => {
-        scale.value = withSpring(0.85, { damping: 10, stiffness: 300 });
+        scale.value = withSpring(0.82, { damping: 12, stiffness: 320 });
     };
 
     const handlePressOut = () => {
-        scale.value = withSpring(1, { damping: 10, stiffness: 300 });
+        scale.value = withSpring(1, { damping: 12, stiffness: 320 });
     };
 
     const animatedContainerStyle = useAnimatedStyle(() => ({
@@ -101,7 +106,7 @@ export const DownloadAnimatedButton: React.FC<DownloadAnimatedButtonProps> = ({
         width: size + 8,
         height: size + 8,
         borderRadius: (size + 8) / 2,
-        borderWidth: 1.5,
+        borderWidth: 2,
         borderColor: theme.colors.primary,
         borderTopColor: 'transparent',
     }));
@@ -109,8 +114,8 @@ export const DownloadAnimatedButton: React.FC<DownloadAnimatedButtonProps> = ({
     const doneIconStyle = useAnimatedStyle(() => ({
         opacity: opacityDone.value,
         transform: [
-            { scale: interpolate(opacityDone.value, [0, 0.5, 1], [0.5, 1.2, 1], Extrapolate.CLAMP) },
-            { rotate: `${interpolate(opacityDone.value, [0, 1], [-15, 0])}deg` }
+            { scale: interpolate(opacityDone.value, [0, 0.5, 1], [0.4, 1.25, 1], Extrapolate.CLAMP) },
+            { rotate: `${interpolate(opacityDone.value, [0, 1], [-20, 0])}deg` },
         ],
         position: 'absolute',
     }));
@@ -123,25 +128,17 @@ export const DownloadAnimatedButton: React.FC<DownloadAnimatedButtonProps> = ({
 
     return (
         <Pressable
-            onPress={onPress}
+            onPress={handlePress}
             onPressIn={handlePressIn}
             onPressOut={handlePressOut}
             hitSlop={12}
             style={styles.container}
         >
             <Animated.View style={[styles.inner, { width: size + 12, height: size + 12 }, animatedContainerStyle]}>
-                
-                {/* IDLE STATE */}
                 <Animated.View style={idleIconStyle}>
-                    <CustomIcon 
-                        name="Descargar" 
-                        size={size} 
-                        color={theme.colors.onSurfaceVariant} 
-                        style={{ opacity: 0.7 }}
-                    />
+                    <Ionicons name="arrow-down-circle-outline" size={size + 4} color={theme.colors.onSurfaceVariant} />
                 </Animated.View>
 
-                {/* DOWNLOADING STATE */}
                 <Animated.View style={downloadingContainerStyle}>
                     <Animated.View style={progressRingStyle} />
                     <View style={[StyleSheet.absoluteFillObject, styles.center]}>
@@ -151,24 +148,13 @@ export const DownloadAnimatedButton: React.FC<DownloadAnimatedButtonProps> = ({
                     </View>
                 </Animated.View>
 
-                {/* DONE STATE */}
                 <Animated.View style={doneIconStyle}>
-                    <CustomIcon 
-                        name="Checkmark" 
-                        size={size + 2} 
-                        color={theme.colors.primary} 
-                    />
+                    <Ionicons name="checkmark-circle" size={size + 6} color={theme.colors.primary} />
                 </Animated.View>
 
-                {/* ERROR STATE */}
                 <Animated.View style={errorIconStyle}>
-                    <CustomIcon 
-                        name="Descargar" 
-                        size={size} 
-                        color={theme.colors.error} 
-                    />
+                    <Ionicons name="alert-circle-outline" size={size + 4} color={theme.colors.error} />
                 </Animated.View>
-
             </Animated.View>
         </Pressable>
     );
@@ -191,5 +177,5 @@ const styles = StyleSheet.create({
     progressText: {
         fontSize: 7,
         fontWeight: '900',
-    }
+    },
 });

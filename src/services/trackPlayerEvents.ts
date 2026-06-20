@@ -1,4 +1,5 @@
 const { playFromMediaId, playFromSearch } = require('./androidAutoService');
+const { syncAndroidAutoCatalogNow } = require('./androidAutoCatalogSync');
 
 module.exports = async function () {
     try {
@@ -113,6 +114,7 @@ module.exports = async function () {
         TrackPlayer.default.addEventListener(Event.AndroidConnectorConnected, (event) => {
             if (event?.isAutomotiveController) {
                 console.log('[TrackPlayerEvents] Android Auto connected:', event.package);
+                syncAndroidAutoCatalogNow?.();
             }
         });
     } catch (e) {
