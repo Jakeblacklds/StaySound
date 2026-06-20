@@ -34,6 +34,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         private const val MONOCHROME_PADDING_LINE_DP = 6f
         private const val MONOCHROME_LETTER_SPACING_EM = -0.04f
         private const val MONOCHROME_SUBTEXT_SCALE = 0.6f
+        private const val MAX_SPECTRAL_PARTICLES = 128
+        private const val MAX_RETAINED_PROFILE_ACCENTS = 128
+        private const val SPECTRUM_BANDS = 28
     }
 
     private val lyricsParser = LyricsParser()
@@ -1882,11 +1885,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         spectrumRenderer.setGlowColor(readableGlow)
     }
 
-    companion object {
-        private const val MAX_SPECTRAL_PARTICLES = 128
-        private const val MAX_RETAINED_PROFILE_ACCENTS = 128
-        private const val SPECTRUM_BANDS = 28
-    }
+
     // EDGE FADES
     // ========================================================================
 
