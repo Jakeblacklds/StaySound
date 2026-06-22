@@ -554,6 +554,11 @@ private fun lerpInt(start: Int, end: Int, amount: Float): Int {
 
 private fun buildFallbackGlyphUnits(text: String, paint: Paint): List<LyricGlyphUnit> {
     if (text.isEmpty()) return emptyList()
+    // Run-context advances (getTextWidths) so letterSpacing is distributed exactly like
+    // drawText. Isolated measureText per glyph drifts from the whole-word draw when
+    // letterSpacing != 0 (ghosting / jammed glyphs).
+    val charWidths = FloatArray(text.length)
+    paint.getTextWidths(text, charWidths)
     val iterator = BreakIterator.getCharacterInstance()
     iterator.setText(text)
     val units = mutableListOf<LyricGlyphUnit>()
@@ -562,7 +567,8 @@ private fun buildFallbackGlyphUnits(text: String, paint: Paint): List<LyricGlyph
     var end = iterator.next()
     while (end != BreakIterator.DONE) {
         val glyphText = text.substring(start, end)
-        val glyphWidth = paint.measureText(glyphText)
+        var glyphWidth = 0f
+        for (i in start until end) glyphWidth += charWidths[i]
         units += LyricGlyphUnit(
             text = glyphText,
             width = glyphWidth,

@@ -227,6 +227,14 @@ internal class LyricsLayoutEngine {
     ): Pair<List<LyricGlyphUnit>, Int> {
         if (text.isEmpty()) return emptyList<LyricGlyphUnit>() to 0
 
+        // Per-character advances measured IN RUN CONTEXT (getTextWidths) so they include
+        // the paint's letterSpacing exactly the way drawText lays the whole word out.
+        // Measuring each glyph in isolation (measureText) diverges from the run once
+        // letterSpacing != 0, which desynced the per-glyph highlight/sweep from the
+        // whole-word base text — producing ghosting ("double letters") and jammed glyphs.
+        val charWidths = FloatArray(text.length)
+        paint.getTextWidths(text, charWidths)
+
         val iterator = BreakIterator.getCharacterInstance()
         iterator.setText(text)
         val rawUnits = mutableListOf<LyricGlyphUnit>()
@@ -238,7 +246,8 @@ internal class LyricsLayoutEngine {
 
         while (end != BreakIterator.DONE) {
             val glyphText = text.substring(start, end)
-            val glyphWidth = paint.measureText(glyphText)
+            var glyphWidth = 0f
+            for (i in start until end) glyphWidth += charWidths[i]
             val isWhitespace = glyphText.all { it.isWhitespace() }
             rawUnits += LyricGlyphUnit(
                 text = glyphText,
