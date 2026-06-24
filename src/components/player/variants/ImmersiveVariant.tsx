@@ -1,7 +1,7 @@
 import { Track } from '@/src/types/audio';
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
-import Animated, { Easing, interpolate, useAnimatedStyle, useSharedValue, withTiming } from 'react-native-reanimated';
+import Animated, { Easing, interpolate, interpolateColor, runOnJS, useAnimatedReaction, useAnimatedStyle, useDerivedValue, useSharedValue, withSpring, withSequence, withTiming } from 'react-native-reanimated';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { AnimatedFavoriteButton } from '../parts/PlayerButtons';
 import { playerStyles as styles } from '../playerStyles';
@@ -133,22 +133,153 @@ const PlayPauseGlyph = React.memo(function PlayPauseGlyph({
     );
 });
 
+/* ------------------------------------------------------------------ *
+ *  ActiveGlyph — naked toggle glyph (shuffle / repeat). Animates its
+ *  color between an inactive ghost and the album accent, and gives a
+ *  little spring "pop" the moment it becomes active.
+ * ------------------------------------------------------------------ */
+const ActiveGlyph = React.memo(function ActiveGlyph({
+    name,
+    size,
+    active,
+    activeColor,
+    inactiveColor,
+    onPress,
+    accessibilityLabel,
+    accessibilityState,
+    style,
+}: {
+    name: React.ComponentProps<typeof MaterialCommunityIcons>['name'];
+    size: number;
+    active: boolean;
+    activeColor: string;
+    inactiveColor: string;
+    onPress: () => void;
+    accessibilityLabel: string;
+    accessibilityState?: { selected?: boolean };
+    style?: any;
+}) {
+    const pressed = useSharedValue(0);
+    const activeProgress = useSharedValue(active ? 1 : 0);
+    const pop = useSharedValue(0);
+    const firstRun = useRef(true);
+
+    useEffect(() => {
+        activeProgress.value = withTiming(active ? 1 : 0, {
+            duration: 220,
+            easing: Easing.out(Easing.cubic),
+        });
+        // Pop only when turning ON, and never on the very first mount.
+        if (!firstRun.current && active) {
+            pop.value = withSequence(
+                withTiming(1, { duration: 130, easing: Easing.out(Easing.quad) }),
+                withSpring(0, { damping: 9, stiffness: 240, mass: 0.5 }),
+            );
+        }
+        firstRun.current = false;
+    }, [active, activeProgress, pop]);
+
+    const iconColor = useDerivedValue(() =>
+        interpolateColor(activeProgress.value, [0, 1], [inactiveColor, activeColor]),
+    );
+    const [resolvedColor, setResolvedColor] = useState(active ? activeColor : inactiveColor);
+    useAnimatedReaction(
+        () => iconColor.value,
+        (c) => runOnJS(setResolvedColor)(c),
+        [inactiveColor, activeColor],
+    );
+
+    const aStyle = useAnimatedStyle(() => ({
+        transform: [
+            { scale: interpolate(pressed.value, [0, 1], [1, 0.84]) * interpolate(pop.value, [0, 1], [1, 1.28]) },
+        ],
+        opacity: interpolate(pressed.value, [0, 1], [1, 0.6]),
+    }));
+
+    return (
+        <Pressable
+            onPressIn={() => { pressed.value = withTiming(1, { duration: 80, easing: Easing.out(Easing.quad) }); }}
+            onPressOut={() => { pressed.value = withTiming(0, { duration: 150, easing: Easing.out(Easing.cubic) }); }}
+            onPress={onPress}
+            hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
+            accessibilityRole="button"
+            accessibilityLabel={accessibilityLabel}
+            accessibilityState={accessibilityState}
+            style={style}
+        >
+            <Animated.View style={aStyle}>
+                <MaterialCommunityIcons name={name} size={size} color={resolvedColor} />
+            </Animated.View>
+        </Pressable>
+    );
+});
+
+/* ------------------------------------------------------------------ *
+ *  LrcPreviewLine — single current-phrase line from the LRC engine.
+ *  Each new phrase fades + slides up; while loading it whispers "…".
+ *  Tapping it opens the full lyrics view.
+ * ------------------------------------------------------------------ */
+const LrcPreviewLine = React.memo(function LrcPreviewLine({
+    text,
+    color,
+    onPress,
+}: {
+    text?: string;
+    color: string;
+    onPress: () => void;
+}) {
+    const enter = useSharedValue(1);
+    const visibleText = text && text.length > 0 ? text : '···';
+
+    useEffect(() => {
+        enter.value = 1;
+        enter.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) });
+    }, [visibleText, enter]);
+
+    const lineStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(enter.value, [0, 1], [1, 0]),
+        transform: [{ translateY: interpolate(enter.value, [0, 1], [0, 10]) }],
+    }));
+
+    return (
+        <Pressable
+            onPress={onPress}
+            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+            accessibilityRole="button"
+            accessibilityLabel="Mostrar letras"
+            style={styles.lrcLineMinimal}
+        >
+            <Animated.Text
+                style={[styles.lrcLineText, { color }, lineStyle]}
+                numberOfLines={1}
+            >
+                {visibleText}
+            </Animated.Text>
+        </Pressable>
+    );
+});
+
 export function ImmersiveVariant({
     track,
     topInset,
     bottomInset,
     isPlaying,
     isFavorite,
+    shuffleEnabled,
+    repeatMode,
     accentColor,
     textColor,
     trackTechLabel,
     showLyrics,
+    lrcPreviewText,
     isLyricsExpanded,
     onOpenMoreOptions,
     onToggleLyrics,
     onArtistPress,
     onOpenQueue,
     onToggleFavorite,
+    onToggleShuffle,
+    onCycleRepeatMode,
     onPlayPause,
     onNext,
     onPrevious,
@@ -226,6 +357,15 @@ export function ImmersiveVariant({
                         />
                     </View>
 
+                    {/* Current lyric phrase (lrclib engine) — taps open full lyrics */}
+                    {showLyrics ? null : (
+                        <LrcPreviewLine
+                            text={lrcPreviewText}
+                            color={accentColor}
+                            onPress={onToggleLyrics}
+                        />
+                    )}
+
                     {/* Progress */}
                     <View style={styles.progressMinimal}>
                         <ProgressSlider
@@ -237,11 +377,22 @@ export function ImmersiveVariant({
                         />
                     </View>
 
-                    {/* Transport — naked glyphs, evenly weighted, play largest */}
+                    {/* Transport — naked glyphs: shuffle · prev · play · next · repeat */}
                     <View style={styles.transportMinimal}>
+                        <ActiveGlyph
+                            name="shuffle"
+                            size={24}
+                            active={shuffleEnabled}
+                            activeColor={accentColor}
+                            inactiveColor={textColor + '66'}
+                            onPress={onToggleShuffle}
+                            accessibilityLabel={shuffleEnabled ? 'Desactivar aleatorio' : 'Activar aleatorio'}
+                            accessibilityState={{ selected: shuffleEnabled }}
+                            style={styles.transportEdge}
+                        />
                         <Glyph
                             name="skip-previous"
-                            size={38}
+                            size={36}
                             color={textColor}
                             onPress={onPrevious}
                             accessibilityLabel="Pista anterior"
@@ -252,15 +403,32 @@ export function ImmersiveVariant({
                             accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
                             style={styles.transportPlay}
                         >
-                            <PlayPauseGlyph isPlaying={isPlaying} color={textColor} size={64} />
+                            <PlayPauseGlyph isPlaying={isPlaying} color={textColor} size={62} />
                         </Glyph>
                         <Glyph
                             name="skip-next"
-                            size={38}
+                            size={36}
                             color={textColor}
                             onPress={onNext}
                             accessibilityLabel="Siguiente pista"
                             style={styles.transportSide}
+                        />
+                        <ActiveGlyph
+                            name={repeatMode === 'one' ? 'repeat-once' : 'repeat'}
+                            size={24}
+                            active={repeatMode !== 'off'}
+                            activeColor={accentColor}
+                            inactiveColor={textColor + '66'}
+                            onPress={onCycleRepeatMode}
+                            accessibilityLabel={
+                                repeatMode === 'off'
+                                    ? 'Activar repetición'
+                                    : repeatMode === 'one'
+                                        ? 'Repetir una vez, toca para desactivar'
+                                        : 'Repetir cola, toca para repetir una vez'
+                            }
+                            accessibilityState={{ selected: repeatMode !== 'off' }}
+                            style={styles.transportEdge}
                         />
                     </View>
 

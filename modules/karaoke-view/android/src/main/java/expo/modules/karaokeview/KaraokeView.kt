@@ -30,8 +30,11 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         private const val MONOCHROME_FONT_SIZE_MIN_DP = 28f
         private const val MONOCHROME_FONT_SIZE_MAX_DP = 37.6f
         private const val MONOCHROME_FONT_SIZE_VW = 0.07f
+        // Leading WITHIN a phrase (between wrapped rows of the same line). Matches the
+        // web reference's "normal" (~1.2) so wrapped rows read as one phrase instead of
+        // looking like separate verses. Inter-phrase separation comes from PADDING_LINE.
         private const val MONOCHROME_LINE_HEIGHT = 1.2f
-        private const val MONOCHROME_PADDING_LINE_DP = 6f
+        private const val MONOCHROME_PADDING_LINE_DP = 10f
         private const val MONOCHROME_LETTER_SPACING_EM = -0.04f
         private const val MONOCHROME_SUBTEXT_SCALE = 0.6f
         private const val MAX_SPECTRAL_PARTICLES = 128

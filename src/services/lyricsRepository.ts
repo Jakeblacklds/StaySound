@@ -8,13 +8,22 @@ import {
 import type { KaraokeLyricsJSON } from '../types';
 import { appleWordLyricsService, type AppleWordLyricsOption } from './appleWordLyricsService';
 import { lrcLibService } from './lrcLibService';
+import {
+  DEFAULT_LYRICS_SOURCE_IDS,
+  getLyricsSourceMeta,
+  type LyricsSourceId,
+  sanitizeLyricsSourceIds,
+} from './lyricsSources';
 import { FileSystemStorage } from './storage';
 
 export interface LyricsPayload extends KaraokeLyricsJSON { }
 export interface AppleWordLyricsCandidate {
   id: string;
   label: string;
-  source: 'binimum' | 'kpoe';
+  source: 'binimum' | 'kpoe' | 'lrclib';
+  sourceId: LyricsSourceId;
+  providerLabel: string;
+  wordLevel: boolean;
   payload: LyricsPayload;
   lyricsUrl?: string;
   timingType?: string;
@@ -27,6 +36,10 @@ export interface AppleWordLyricsCandidate {
 
 type AppleWordLyricsCachePayload = {
   options: AppleWordLyricsCandidate[];
+  /** Which sources were queried when this entry was written (for cache invalidation). */
+  attemptedSources?: LyricsSourceId[];
+  /** Epoch ms when this entry was written (used to expire negative/empty results). */
+  savedAt?: number;
 };
 
 class LyricsRepositoryService {
@@ -34,6 +47,10 @@ class LyricsRepositoryService {
   private readonly TRACK_APPLE_CACHE_PREFIX = 'apple-word-track-cache-v3';
   private readonly LRC_CACHE_PREFIX = 'lrc-lib-cache-v1';
   private readonly TRACK_LRC_CACHE_PREFIX = 'lrc-lib-track-cache-v1';
+  // How long a "we tried and Apple/KPoe had nothing" result is trusted before re-checking.
+  // Kept short (1 day) because the word service swallows network errors as empty results,
+  // so a transient failure could otherwise suppress lyrics for too long.
+  private readonly NEGATIVE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
   private cleanCacheMetadata(value: string): string {
     return value
@@ -99,6 +116,9 @@ class LyricsRepositoryService {
       id: option.id,
       label: option.label,
       source: option.source,
+      sourceId: option.sourceId,
+      providerLabel: option.providerLabel,
+      wordLevel: option.wordLevel,
       payload: option.payload as LyricsPayload,
       lyricsUrl: option.lyricsUrl,
       timingType: option.timingType,
@@ -110,42 +130,131 @@ class LyricsRepositoryService {
     };
   }
 
-  private normalizeCachedAppleOptions(rawValue: string): AppleWordLyricsCandidate[] {
+  private hasWordLevelPayload(payload: KaraokeLyricsJSON | null | undefined): boolean {
+    const lyrics = payload?.lyrics;
+    if (!Array.isArray(lyrics) || lyrics.length === 0) return false;
+    return lyrics.some(word => word.n !== true);
+  }
+
+  /** Backfill provider fields onto candidates written before multi-source existed. */
+  private hydrateCachedOption(option: AppleWordLyricsCandidate): AppleWordLyricsCandidate {
+    const sourceId: LyricsSourceId = option.sourceId
+      ?? (option.source === 'kpoe' ? 'lyricsplus' : option.source === 'lrclib' ? 'lrclib' : 'apple');
+    const meta = getLyricsSourceMeta(sourceId);
+    return {
+      ...option,
+      sourceId,
+      providerLabel: option.providerLabel ?? meta?.label ?? sourceId,
+      wordLevel: typeof option.wordLevel === 'boolean' ? option.wordLevel : this.hasWordLevelPayload(option.payload),
+    };
+  }
+
+  private normalizeCachedAppleOptions(rawValue: string): { options: AppleWordLyricsCandidate[]; attemptedSources: LyricsSourceId[] | null; savedAt: number | null } {
     try {
       const parsed = JSON.parse(rawValue) as AppleWordLyricsCachePayload | LyricsPayload;
       if (Array.isArray((parsed as AppleWordLyricsCachePayload).options)) {
-        return (parsed as AppleWordLyricsCachePayload).options.filter(
-          option => this.hasLyrics(option?.payload) && typeof option.isExactMatch === 'boolean'
-        );
+        const payload = parsed as AppleWordLyricsCachePayload;
+        const options = payload.options
+          .filter(option => this.hasLyrics(option?.payload) && typeof option.isExactMatch === 'boolean')
+          .map(option => this.hydrateCachedOption(option));
+        const attemptedSources = Array.isArray(payload.attemptedSources)
+          ? sanitizeLyricsSourceIds(payload.attemptedSources)
+          : null;
+        const savedAt = typeof payload.savedAt === 'number' ? payload.savedAt : null;
+        return { options, attemptedSources, savedAt };
       }
 
       if (this.hasLyrics(parsed as LyricsPayload)) {
-        return [{
-          id: 'legacy-1',
-          label: 'Opción 1',
-          source: 'binimum',
-          payload: parsed as LyricsPayload,
-          isExactMatch: false,
-        }];
+        return {
+          options: [this.hydrateCachedOption({
+            id: 'legacy-1',
+            label: 'Opción 1',
+            source: 'binimum',
+            sourceId: 'apple',
+            providerLabel: 'Apple Music',
+            wordLevel: this.hasWordLevelPayload(parsed as LyricsPayload),
+            payload: parsed as LyricsPayload,
+            isExactMatch: false,
+          })],
+          attemptedSources: null,
+          savedAt: null,
+        };
       }
     } catch {
-      return [];
+      return { options: [], attemptedSources: null, savedAt: null };
     }
 
-    return [];
+    return { options: [], attemptedSources: null, savedAt: null };
   }
 
-  async getCachedAppleWordLyricsOptions(songTitle: string, artist: string, trackId?: string): Promise<AppleWordLyricsCandidate[]> {
+  /**
+   * True when we already queried Apple/KPoe for this track recently and got nothing, so
+   * there's no point hammering the network again on every replay. Expires after the TTL.
+   */
+  private async hasFreshEmptyAppleAttempt(songTitle: string, artist: string, trackId: string | undefined, requiredServiceSources: LyricsSourceId[]): Promise<boolean> {
+    const required = requiredServiceSources.filter(id => id !== 'lrclib');
+
+    const isFreshNegative = (raw: string | null): boolean => {
+      if (!raw) return false;
+      const parsed = this.normalizeCachedAppleOptions(raw);
+      if (parsed.options.length > 0) return false; // positive entry, not a negative marker
+      if (!parsed.attemptedSources || parsed.savedAt == null) return false;
+      if (Date.now() - parsed.savedAt > this.NEGATIVE_CACHE_TTL_MS) return false;
+      const attempted = new Set(parsed.attemptedSources);
+      return required.every(source => attempted.has(source));
+    };
+
+    if (trackId?.trim()) {
+      if (isFreshNegative(await FileSystemStorage.getItem(this.getTrackAppleCacheKey(trackId)))) {
+        return true;
+      }
+    }
+    for (const cacheKey of this.getAppleCacheCandidateKeys(songTitle, artist)) {
+      if (isFreshNegative(await FileSystemStorage.getItem(cacheKey))) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  /**
+   * Returns cached candidates. When `requiredSources` is provided, the cache only
+   * counts as a hit if every requested source was already attempted — otherwise we
+   * report a miss so newly-enabled sources get fetched. Returned options are then
+   * filtered to the requested sources.
+   */
+  async getCachedAppleWordLyricsOptions(songTitle: string, artist: string, trackId?: string, requiredSources?: LyricsSourceId[]): Promise<AppleWordLyricsCandidate[]> {
     if (!songTitle.trim() || !artist.trim()) return [];
+
+    // This cache only holds Apple/KPoe candidates — LRCLIB is a separate path — so the
+    // coverage check ignores 'lrclib'. Empty after stripping ⇒ no coverage requirement.
+    const requiredList: LyricsSourceId[] | null = requiredSources
+      ? sanitizeLyricsSourceIds(requiredSources).filter(id => id !== 'lrclib')
+      : null;
+    const required = requiredList && requiredList.length > 0 ? requiredList : null;
+
+    const accept = (parsed: { options: AppleWordLyricsCandidate[]; attemptedSources: LyricsSourceId[] | null }): AppleWordLyricsCandidate[] | null => {
+      if (parsed.options.length === 0) return null;
+      if (!required) return parsed.options;
+
+      // Miss when we can't prove every requested source was tried (forces refetch).
+      if (!parsed.attemptedSources) return null;
+      const attempted = new Set(parsed.attemptedSources);
+      if (!required.every(source => attempted.has(source))) return null;
+
+      const requestedSet = new Set(required);
+      const filtered = parsed.options.filter(option => requestedSet.has(option.sourceId));
+      return filtered.length > 0 ? filtered : null;
+    };
 
     if (trackId?.trim()) {
       const trackCacheKey = this.getTrackAppleCacheKey(trackId);
       const trackRaw = await FileSystemStorage.getItem(trackCacheKey);
       if (trackRaw) {
-        const parsedOptions = this.normalizeCachedAppleOptions(trackRaw);
-        if (parsedOptions.length > 0) {
-          console.log('[LyricsRepository] Apple track cache hit:', trackCacheKey, parsedOptions.length);
-          return parsedOptions;
+        const result = accept(this.normalizeCachedAppleOptions(trackRaw));
+        if (result) {
+          console.log('[LyricsRepository] Apple track cache hit:', trackCacheKey, result.length);
+          return result;
         }
       }
     }
@@ -154,19 +263,14 @@ class LyricsRepositoryService {
       const raw = await FileSystemStorage.getItem(cacheKey);
       if (!raw) continue;
 
-      const parsedOptions = this.normalizeCachedAppleOptions(raw);
-      if (parsedOptions.length > 0) {
-        console.log('[LyricsRepository] Apple cache hit:', cacheKey, parsedOptions.length);
-        return parsedOptions;
+      const result = accept(this.normalizeCachedAppleOptions(raw));
+      if (result) {
+        console.log('[LyricsRepository] Apple cache hit:', cacheKey, result.length);
+        return result;
       }
     }
 
     return [];
-  }
-
-  private async getCachedAppleWordLyrics(songTitle: string, artist: string, trackId?: string): Promise<LyricsPayload | null> {
-    const options = await this.getCachedAppleWordLyricsOptions(songTitle, artist, trackId);
-    return options[0]?.payload ?? null;
   }
 
   async getCachedLrcLibLyrics(songTitle: string, artist: string, trackId?: string): Promise<LyricsPayload | null> {
@@ -206,30 +310,21 @@ class LyricsRepositoryService {
     return null;
   }
 
-  private async saveCachedAppleWordLyricsOptions(songTitle: string, artist: string, options: AppleWordLyricsCandidate[], trackId?: string): Promise<void> {
+  private async saveCachedAppleWordLyricsOptions(songTitle: string, artist: string, options: AppleWordLyricsCandidate[], attemptedSources: LyricsSourceId[], trackId?: string): Promise<void> {
     const safeOptions = options.filter(option => this.hasLyrics(option.payload));
-    if (safeOptions.length === 0) return;
-    const serialized = JSON.stringify({ options: safeOptions });
+    // Persist even with zero results (a TTL'd negative marker) so we remember we already
+    // tried Apple/KPoe and stop re-hitting the network for LRC-only songs on every replay.
+    const serialized = JSON.stringify({ options: safeOptions, attemptedSources, savedAt: Date.now() });
 
     if (trackId?.trim()) {
       const trackCacheKey = this.getTrackAppleCacheKey(trackId);
       await FileSystemStorage.setItem(trackCacheKey, serialized);
-      console.log('[LyricsRepository] Apple track cache saved:', trackCacheKey);
+      console.log('[LyricsRepository] Apple track cache saved:', trackCacheKey, safeOptions.length);
     }
     for (const cacheKey of this.getAppleCacheCandidateKeys(songTitle, artist)) {
       await FileSystemStorage.setItem(cacheKey, serialized);
-      console.log('[LyricsRepository] Apple cache saved:', cacheKey);
+      console.log('[LyricsRepository] Apple cache saved:', cacheKey, safeOptions.length);
     }
-  }
-
-  private async saveCachedAppleWordLyrics(songTitle: string, artist: string, payload: LyricsPayload, trackId?: string): Promise<void> {
-    await this.saveCachedAppleWordLyricsOptions(songTitle, artist, [{
-      id: 'legacy-1',
-      label: 'Opción 1',
-      source: 'binimum',
-      payload,
-      isExactMatch: false,
-    }], trackId);
   }
 
   private async saveCachedLrcLibLyrics(songTitle: string, artist: string, payload: LyricsPayload, trackId?: string): Promise<void> {
@@ -264,34 +359,76 @@ class LyricsRepositoryService {
     }
   }
 
-  async getAppleWordLyrics(songTitle: string, artist: string, album?: string, durationSec?: number, trackId?: string, isrc?: string): Promise<LyricsPayload | null> {
-    const options = await this.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc);
+  async getAppleWordLyrics(songTitle: string, artist: string, album?: string, durationSec?: number, trackId?: string, isrc?: string, sources?: LyricsSourceId[]): Promise<LyricsPayload | null> {
+    const options = await this.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc, sources);
     return options[0]?.payload ?? null;
   }
 
-  async getAppleWordLyricsOptions(songTitle: string, artist: string, album?: string, durationSec?: number, trackId?: string, isrc?: string): Promise<AppleWordLyricsCandidate[]> {
+  /**
+   * Wipes every cached Apple/KPoe and LRCLIB entry for a track (track-id key + all
+   * canonical title/artist keys, including the negative markers) so the next lookup is a
+   * genuine fresh network search. Used by the "buscar de nuevo" action.
+   */
+  async clearTrackLyricsCache(songTitle: string, artist: string, trackId?: string): Promise<void> {
+    const keys = new Set<string>();
+    if (trackId?.trim()) {
+      keys.add(this.getTrackAppleCacheKey(trackId));
+      keys.add(this.getTrackLrcCacheKey(trackId));
+    }
+    for (const key of this.getAppleCacheCandidateKeys(songTitle, artist)) keys.add(key);
+    for (const key of this.getLrcCacheCandidateKeys(songTitle, artist)) keys.add(key);
+
+    await Promise.all([...keys].map(key => FileSystemStorage.removeItem(key).catch(() => { })));
+    console.log('[LyricsRepository] Cleared lyrics cache for:', songTitle, '/', artist, `(${keys.size} keys)`);
+  }
+
+  /**
+   * Aggregated lyrics candidates — one (or more) per enabled source. Apple/KPoe come
+   * from the word service; LRCLIB is fetched here so it joins the same picker. The
+   * resulting set is cached together with which sources were attempted.
+   */
+  async getAppleWordLyricsOptions(songTitle: string, artist: string, album?: string, durationSec?: number, trackId?: string, isrc?: string, sources?: LyricsSourceId[]): Promise<AppleWordLyricsCandidate[]> {
     if (!songTitle.trim() || !artist.trim()) return [];
 
-    const cached = await this.getCachedAppleWordLyricsOptions(songTitle, artist, trackId);
+    const enabledSources = sources ? sanitizeLyricsSourceIds(sources) : [...DEFAULT_LYRICS_SOURCE_IDS];
+
+    const cached = await this.getCachedAppleWordLyricsOptions(songTitle, artist, trackId, enabledSources);
     if (cached.length > 0) {
       return cached;
     }
 
-    try {
-      const result = await appleWordLyricsService.searchWordLyricsOptions(songTitle, artist, album, durationSec, isrc);
-      const options = result
-        .map(option => this.toAppleCandidate(option))
-        .filter((option): option is AppleWordLyricsCandidate => Boolean(option));
+    // Apple (binimum TTML) + KPoe come from the word service as a fast waterfall (it
+    // returns the first good source and stops). LRCLIB stays the separate fallback in
+    // the hook, so we don't slow this path down waiting on it.
+    const serviceSources = enabledSources.filter(source => source !== 'lrclib');
+    if (serviceSources.length === 0) return [];
 
-      if (options.length > 0) {
-        await this.saveCachedAppleWordLyricsOptions(songTitle, artist, options, trackId);
-        return options;
+    // Skip the network if we recently tried these exact sources and got nothing — this is
+    // what stops LRC-only songs from "reloading" on every replay. Expires after the TTL.
+    if (await this.hasFreshEmptyAppleAttempt(songTitle, artist, trackId, serviceSources)) {
+      console.log('[LyricsRepository] Apple/KPoe recently empty, skipping network:', songTitle, '/', artist);
+      return [];
+    }
+
+    const options: AppleWordLyricsCandidate[] = [];
+    let fetchFailed = false;
+    try {
+      const result = await appleWordLyricsService.searchWordLyricsOptions(songTitle, artist, album, durationSec, isrc, serviceSources);
+      for (const option of result) {
+        const candidate = this.toAppleCandidate(option);
+        if (candidate) options.push(candidate);
       }
     } catch (error) {
+      fetchFailed = true;
       console.warn('[LyricsRepository] Apple/KPoe lyrics failed:', error);
     }
 
-    return [];
+    // Persist results, and also persist a negative marker on a clean "nothing found" run.
+    // A thrown/failed fetch is NOT cached, so transient errors keep retrying next time.
+    if (options.length > 0 || !fetchFailed) {
+      await this.saveCachedAppleWordLyricsOptions(songTitle, artist, options, serviceSources, trackId);
+    }
+    return options;
   }
 
   async forceRefreshLyrics(songTitle: string, artist: string): Promise<LyricsPayload | null> {

@@ -3,7 +3,8 @@
   "android": {
     "modules": [
       "expo.modules.karaokeview.KaraokeViewModule",
-      "expo.modules.karaokeview.KaraokeSpectrumModule"
+      "expo.modules.karaokeview.KaraokeSpectrumModule",
+      "expo.modules.karaokeview.KaraokeRefractionModule"
     ]
   }
 }

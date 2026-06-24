@@ -57,7 +57,7 @@ internal class KaraokeSpectrumRenderer(
      *  · WAVEFORM_ARC : a sparse mid-frequency waveform that grazes the album edge.
      * AURORA/CAUSTICS need AGSL (API 33+); on older devices they fall back to mist + veil.
      */
-    enum class Theme { COLUMNS, AURORA, CAUSTICS, WAVEFORM_ARC }
+    enum class Theme { COLUMNS, AURORA, CAUSTICS, WAVEFORM_ARC, REFRACTION_VEIL }
 
     private var anchorMode = AnchorMode.LYRICS
     private var theme = Theme.AURORA
@@ -100,6 +100,7 @@ internal class KaraokeSpectrumRenderer(
     private var bloomShader: RadialGradient? = null
     private var horizonShader: LinearGradient? = null
     private var mistShader: LinearGradient? = null
+    private var waveformShader: SweepGradient? = null
     // Stage-light column: a cone narrow at the top-edge fixture, widening toward the far
     // tip. Three nested trapezoids (halo → body → hot core) drawn ADDITIVELY sum into a
     // soft bell across the width — feathered lateral edges with zero blur cost.
@@ -207,7 +208,15 @@ internal class KaraokeSpectrumRenderer(
         if (anchorMode == AnchorMode.ARTWORK) {
             when (theme) {
                 Theme.WAVEFORM_ARC -> {
+                    drawHorizon(canvas, w, h, alpha)
+                    drawBloom(canvas, alpha)
                     drawWaveformArc(canvas, bands, w, h, t, dt, isPlaying, alpha)
+                }
+                Theme.REFRACTION_VEIL -> {
+                    // The veil itself is a separate overlay (KaraokeRefractionView) painted ON
+                    // the cover. Here we only contribute the calm graves ambience behind it.
+                    drawHorizon(canvas, w, h, alpha)
+                    drawBloom(canvas, alpha)
                 }
                 Theme.COLUMNS -> {
                     drawHorizon(canvas, w, h, alpha)
@@ -259,16 +268,17 @@ internal class KaraokeSpectrumRenderer(
         }
         if (coverRadius <= 0f) return
 
-        val orbit = coverRadius + 7.5f * density
-        val minLen = 2.5f * density
-        val maxLen = 11.5f * density
+        val orbit = coverRadius + 10f * density
+        val minLen = 4f * density
+        val maxLen = 24f * density
         val baseStart = 18f
         val arcSweep = 128f
         val drift = if (isPlaying) sin(t * 0.00018f) * 5.5f else 0f
         val masterBreath = 0.82f + 0.18f * sin(t * 0.001f)
 
-        waveformPaint.strokeWidth = 1.45f * density
-        waveformPaint.color = luminousTint(glowColor, lift = 0.34f, satBoost = 0.04f)
+        waveformPaint.strokeWidth = 2.4f * density
+        waveformPaint.shader = waveformShader
+        waveformPaint.color = luminousTint(glowColor, lift = 0.5f, satBoost = 0.1f)
         waveformPaint.xfermode = null
 
         for (i in 0 until WAVEFORM_BARS) {
@@ -291,10 +301,10 @@ internal class KaraokeSpectrumRenderer(
             val py = cy + ny * orbit
             val inner = orbit - len * 0.42f
             val outer = orbit + len * 0.58f
-            val quietAlpha = if (isPlaying) 42f else 24f
-            val liveAlpha = if (isPlaying) 92f * shaped * tapered * masterBreath else 0f
+            val quietAlpha = if (isPlaying) 74f else 40f
+            val liveAlpha = if (isPlaying) 176f * shaped * tapered * masterBreath else 0f
 
-            waveformPaint.alpha = (alpha * (quietAlpha + liveAlpha)).toInt().coerceIn(0, 128)
+            waveformPaint.alpha = (alpha * (quietAlpha + liveAlpha)).toInt().coerceIn(0, 236)
             canvas.drawLine(
                 cx + nx * inner,
                 cy + ny * inner,
@@ -304,10 +314,11 @@ internal class KaraokeSpectrumRenderer(
             )
 
             if (i % 4 == 1 && shaped > 0.08f) {
-                waveformPaint.alpha = (alpha * 24f * shaped * tapered).toInt().coerceIn(0, 34)
+                waveformPaint.alpha = (alpha * 52f * shaped * tapered).toInt().coerceIn(0, 72)
                 canvas.drawPoint(px, py, waveformPaint)
             }
         }
+        waveformPaint.shader = null
     }
 
     // --- Horizon: a soft grounding glow rising from the bottom edge -------------------
@@ -593,6 +604,22 @@ internal class KaraokeSpectrumRenderer(
             ),
             floatArrayOf(0f, 0.5f, 0.82f, 1f),
             Shader.TileMode.CLAMP,
+        )
+
+        val arcTint = luminousTint(glowColor, lift = 0.46f, satBoost = 0.1f)
+        val arcHot = luminousTint(glowColor, lift = 0.72f, satBoost = 0.14f)
+        waveformShader = SweepGradient(
+            cx,
+            cy,
+            intArrayOf(
+                Color.argb(0, r, g, b),
+                Color.argb(215, Color.red(arcTint), Color.green(arcTint), Color.blue(arcTint)),
+                Color.argb(255, Color.red(arcHot), Color.green(arcHot), Color.blue(arcHot)),
+                Color.argb(210, r, g, b),
+                Color.argb(0, r, g, b),
+                Color.argb(0, r, g, b),
+            ),
+            floatArrayOf(0f, 0.05f, 0.22f, 0.41f, 0.50f, 1f),
         )
 
         // Stage-light column geometry, built in local space with the fixture at the origin

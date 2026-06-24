@@ -27,7 +27,7 @@ export interface KaraokeSpectrumViewProps extends ViewProps {
      *  · 'waveformArc' — a discreet mid-frequency waveform hugging the album edge.
      * 'aurora'/'caustics' need AGSL (API 33+); older devices fall back to a soft mist.
      */
-    spectrumTheme?: 'columns' | 'aurora' | 'caustics' | 'waveformArc';
+    spectrumTheme?: 'columns' | 'aurora' | 'caustics' | 'waveformArc' | 'refractionVeil';
     /** Vertical focus of the bright core, normalized [0,1] (e.g. the album-cover center). */
     focusY?: number;
     /** Album artwork diameter in React Native layout points, used by edge-anchored effects. */

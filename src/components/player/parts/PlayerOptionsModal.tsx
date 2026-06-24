@@ -5,6 +5,7 @@
  * artwork / background instead of behind or outside it.
  */
 
+import { LYRICS_SOURCES } from '@/src/services/lyricsSources';
 import {
     SPECTRUM_DELAY_MAX,
     SPECTRUM_DELAY_MIN,
@@ -38,7 +39,8 @@ const SHEET_MAX_HEIGHT = SCREEN_HEIGHT * 0.82;
 const SPECTRUM_THEME_OPTIONS: { value: SpectrumTheme; label: string; icon: string }[] = [
     { value: 'aurora', label: 'Halo', icon: 'circle-opacity' },
     { value: 'columns', label: 'Escenario', icon: 'spotlight-beam' },
-    { value: 'caustics', label: 'Liquido', icon: 'water' },
+    { value: 'caustics', label: 'Waveform', icon: 'sine-wave' },
+    { value: 'refractionVeil', label: 'Refracción', icon: 'diamond-stone' },
 ];
 
 export interface PlayerOptionAction {
@@ -80,6 +82,8 @@ export const PlayerOptionsModal = React.memo(function PlayerOptionsModal({
     const setSpectrumDelayMs = useSettingsStore((s) => s.setSpectrumDelayMs);
     const spectrumTheme = useSettingsStore((s) => s.spectrumTheme);
     const setSpectrumTheme = useSettingsStore((s) => s.setSpectrumTheme);
+    const lyricsSources = useSettingsStore((s) => s.lyricsSources);
+    const setLyricsSourceEnabled = useSettingsStore((s) => s.setLyricsSourceEnabled);
 
     const handleClose = useCallback(() => {
         progress.value = withTiming(0, {
@@ -350,6 +354,57 @@ export const PlayerOptionsModal = React.memo(function PlayerOptionsModal({
                             </View>
                         </View>
                     ) : null}
+
+                    {/* Lyrics sources — one selectable version per provider */}
+                    <View style={[modalStyles.themeSection, { borderTopColor: dividerColor }]}>
+                        <View style={modalStyles.tunerLabel}>
+                            <MaterialCommunityIcons name="text-search" size={20} color={accentColor} />
+                            <View style={modalStyles.tunerTextWrap}>
+                                <Text style={[modalStyles.tunerTitle, { color: textColor }]}>
+                                    Fuentes de letras
+                                </Text>
+                                <Text style={[modalStyles.tunerHint, { color: textColor + 'AA' }]}>
+                                    {lyricsSources.length} de {LYRICS_SOURCES.length} activas · toca para activar o quitar
+                                </Text>
+                            </View>
+                        </View>
+                        <View style={modalStyles.sourceChips}>
+                            {LYRICS_SOURCES.map((src) => {
+                                const active = lyricsSources.includes(src.id);
+                                return (
+                                    <Pressable
+                                        key={src.id}
+                                        accessibilityRole="switch"
+                                        accessibilityState={{ checked: active }}
+                                        accessibilityLabel={`Fuente ${src.label}`}
+                                        onPress={() => setLyricsSourceEnabled(src.id, !active)}
+                                        style={[
+                                            modalStyles.sourceChip,
+                                            {
+                                                borderColor: active ? accentColor : textColor + '20',
+                                                backgroundColor: active ? accentColor + '22' : 'transparent',
+                                                opacity: active ? 1 : 0.55,
+                                            },
+                                        ]}
+                                    >
+                                        <MaterialCommunityIcons
+                                            name={(active ? 'check-circle' : 'circle-outline') as any}
+                                            size={15}
+                                            color={active ? accentColor : textColor + '99'}
+                                        />
+                                        <Text
+                                            style={[
+                                                modalStyles.themeChipLabel,
+                                                { color: active ? accentColor : textColor + 'CC' },
+                                            ]}
+                                        >
+                                            {src.label}
+                                        </Text>
+                                    </Pressable>
+                                );
+                            })}
+                        </View>
+                    </View>
                     </ScrollView>
                 </Animated.View>
             </GestureDetector>
@@ -359,8 +414,10 @@ export const PlayerOptionsModal = React.memo(function PlayerOptionsModal({
 
 const modalStyles = StyleSheet.create({
     root: {
-        zIndex: 100,
-        elevation: 100,
+        // Above the lyrics overlay (zIndex 10020) so the three-dots sheet opened from the
+        // karaoke view is never hidden behind it.
+        zIndex: 10050,
+        elevation: 10050,
     },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
@@ -472,6 +529,20 @@ const modalStyles = StyleSheet.create({
     themeChips: {
         flexDirection: 'row',
         gap: 8,
+    },
+    sourceChips: {
+        flexDirection: 'row',
+        flexWrap: 'wrap',
+        gap: 8,
+    },
+    sourceChip: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 6,
+        paddingVertical: 8,
+        paddingHorizontal: 12,
+        borderRadius: 14,
+        borderWidth: 1,
     },
     themeChip: {
         flex: 1,

@@ -287,15 +287,34 @@ export const playerStyles = StyleSheet.create({
     progressMinimal: {
         marginTop: 14,
     },
+    lrcLineMinimal: {
+        marginTop: 12,
+        minHeight: 22,
+        justifyContent: 'center',
+        overflow: 'hidden',
+    },
+    lrcLineText: {
+        fontSize: 15,
+        lineHeight: 21,
+        fontWeight: '600',
+        letterSpacing: -0.2,
+        opacity: 0.92,
+    },
     transportMinimal: {
         flexDirection: 'row',
         alignItems: 'center',
-        justifyContent: 'center',
-        gap: 44,
+        justifyContent: 'space-between',
         marginTop: 10,
+        paddingHorizontal: 4,
+    },
+    transportEdge: {
+        width: 52,
+        height: 64,
+        alignItems: 'center',
+        justifyContent: 'center',
     },
     transportSide: {
-        width: 64,
+        width: 60,
         height: 64,
         alignItems: 'center',
         justifyContent: 'center',

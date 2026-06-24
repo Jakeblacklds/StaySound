@@ -4,7 +4,7 @@
  *   - Spring pop when a tab becomes active
  *   - Press-scale touch feedback (no ripple)
  *   - Liquid pill with squish-stretch spring
- *   - BlurView frosted-glass base + dynamic album art tint
+ *   - Simulated frosted-glass base (album tint + sheen) + dynamic album art tint
  */
 import { useDynamicColors } from '@/src/hooks';
 import { usePlayerStore } from '@/src/stores';
@@ -13,8 +13,9 @@ import { ColorTokens } from '@/src/types/theme';
 import { mixHexColors, pickReadableColor } from '@/src/utils/colorContrast';
 import { Ionicons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
-import { BlurView } from 'expo-blur';
+import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
+import { usePathname } from 'expo-router';
 import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
@@ -29,6 +30,13 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TAB_BAR_HEIGHT as BAR_HEIGHT } from '../player/playerLayout';
+
+// Above this expansion the dock is sliding away under the player — drop the
+// costly live blur and use an opaque album surface instead.
+const BLUR_COLLAPSE_THRESHOLD = 0.12;
+// How long to freeze the live blur (show opaque) after a route change so it
+// doesn't render a stale, still-scrolling snapshot of the previous screen.
+const NAV_FREEZE_MS = 320;
 
 const H_INSET = 12;
 const PILL_W = 54;
@@ -177,6 +185,25 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
   const currentTrack = usePlayerStore(s => s.currentTrack);
   const pendingTrackPreview = usePlayerStore(s => s.pendingTrackPreview);
   const [barWidth, setBarWidth] = useState(0);
+  const pathname = usePathname();
+
+  // ---- Simulated frost (perf) ------------------------------------------
+  // The dock used to run a live (dimezis) blur, costly on its own and doubly so
+  // stacked under the mini player's own live blur — that pair caused the jank
+  // and the seam between the two surfaces. We now fake the frost with the same
+  // recipe as the mini: an album-tinted near-opaque surface + a static glass
+  // sheen. Same tint on both → they read as one continuous pane. `forceSolid`
+  // still pushes it opaque briefly on route changes so it never flashes the
+  // incoming screen's content.
+  const forceSolid = useSharedValue(0);
+
+  useEffect(() => {
+    forceSolid.value = 1;
+    const t = setTimeout(() => {
+      forceSolid.value = withTiming(0, { duration: 160 });
+    }, NAV_FREEZE_MS);
+    return () => clearTimeout(t);
+  }, [pathname, forceSolid]);
 
   const navArtworkUri =
     pendingTrackPreview?.artwork || currentTrack?.artwork || currentTrack?.artworkThumb;
@@ -249,32 +276,53 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
     backgroundColor: aC.primaryContainer?.value ?? theme.colors.primaryContainer,
   }));
 
-  // Semi-transparent tint so the BlurView bleeds through
+  // Album-hued frost base (replaces the live blur). Near-opaque and matched to
+  // the mini player's tint (dark 0.90 / light 0.92) so the two surfaces read as
+  // a single continuous pane of glass.
   const navTintStyle = useAnimatedStyle(() => {
     const dynamicBackground = navAnimColors?.background?.value;
     return {
       backgroundColor: dynamicBackground || navSurfaceColor || aC.surface.value,
-      opacity: 0.78,
+      opacity: isDark ? 0.9 : 0.92,
     };
   });
 
-  // Fade the whole frosted-glass dock out as the player expands, in sync with
-  // the player's bottom edge sweeping down over the tab-bar region (both finish
-  // at p=0.32). The remaining (uncovered) glass strip dissolves proportionally,
-  // so the growing player glass is the only translucent layer — no double-glass
-  // band / seam where the two surfaces used to overlap.
-  const navGlassFadeStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(expansion?.value ?? 0, [0, 0.32], [1, 0], Extrapolation.CLAMP),
-  }), [expansion]);
-
-  const tabBarContentStyle = useAnimatedStyle(() => {
-    const p = expansion?.value ?? 0;
-    const travel = interpolate(
-      p,
-      [0, 0.06, 1],
-      [0, BAR_HEIGHT + insets.bottom + 12, BAR_HEIGHT + insets.bottom + 12]
+  // Opaque album surface used whenever the live blur is off: it fades in as the
+  // dock descends (matching the player turning opaque) and during a route-change
+  // freeze. When fully collapsed + settled it is transparent so the frost shows.
+  const navSolidStyle = useAnimatedStyle(() => {
+    const dynamicBackground = navAnimColors?.background?.value;
+    const ramp = interpolate(
+      expansion?.value ?? 0,
+      [0, BLUR_COLLAPSE_THRESHOLD],
+      [0, 0.94],
+      Extrapolation.CLAMP,
     );
-    return { transform: [{ translateY: travel }] };
+    return {
+      backgroundColor: dynamicBackground || navSurfaceColor || aC.surface.value,
+      opacity: Math.max(ramp, forceSolid.value * 0.94),
+    };
+  });
+
+  // As the player expands, the WHOLE dock (frosted glass + icons) slides down
+  // in perfect lockstep with the player's own bottom edge (same range, same
+  // [0, 0.32] window — see FullPlayer's rootAnimatedStyle `bottom`). The dock's
+  // top edge therefore stays glued to the player's bottom edge: no gap opens
+  // between them and they never overlap, so the two frosted surfaces read as a
+  // single continuous piece of glass sliding off-screen. No opacity fade — the
+  // dock is fully off-screen by p=0.32, so it never needs to dissolve.
+  const navExitStyle = useAnimatedStyle(() => {
+    const p = expansion?.value ?? 0;
+    return {
+      transform: [{
+        translateY: interpolate(
+          p,
+          [0, 0.32],
+          [0, BAR_HEIGHT + insets.bottom],
+          Extrapolation.CLAMP,
+        ),
+      }],
+    };
   }, [insets.bottom, expansion]);
 
   const palette = getTabColors(theme.colors);
@@ -284,23 +332,34 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
       style={[styles.outer, { height: BAR_HEIGHT + insets.bottom }]}
       pointerEvents="box-none"
     >
-      {/* Frosted glass dock (blur + dynamic tint). Fades out during player
-          expansion so it never stacks with the player's glass. */}
+      {/* Frosted glass dock (blur + dynamic tint). Descends together with the
+          icons as the player expands. */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, navGlassFadeStyle]}
+        style={[StyleSheet.absoluteFill, navExitStyle]}
         pointerEvents="none"
       >
-        {/* Frosted glass — blurs app content visible behind the bar */}
-        <BlurView
-          style={StyleSheet.absoluteFill}
-          intensity={isDark ? 28 : 40}
-          tint={isDark ? 'dark' : 'light'}
-        />
-        {/* Dynamic album art color tint over the blur */}
+        {/* Album-tinted frost base (replaces the costly live blur) */}
         <Animated.View style={[StyleSheet.absoluteFill, navTintStyle]} />
+        {/* Glass sheen — static. The dock is the BOTTOM of the combined pane,
+            so its top stays clear (continuous with the mini's faded-out bottom)
+            and it carries only a faint grounding shade toward its lower edge. */}
+        <LinearGradient
+          style={StyleSheet.absoluteFill}
+          colors={
+            isDark
+              ? ['rgba(0,0,0,0)', 'rgba(0,0,0,0.06)']
+              : ['rgba(0,0,0,0)', 'rgba(0,0,0,0.03)']
+          }
+          locations={[0.25, 1]}
+          start={{ x: 0.5, y: 0 }}
+          end={{ x: 0.5, y: 1 }}
+          pointerEvents="none"
+        />
+        {/* Opaque ramp as the dock slides under the expanding player */}
+        <Animated.View style={[StyleSheet.absoluteFill, navSolidStyle]} />
       </Animated.View>
 
-      <Animated.View style={tabBarContentStyle}>
+      <Animated.View style={navExitStyle}>
         <View
           style={styles.itemsRow}
           onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}

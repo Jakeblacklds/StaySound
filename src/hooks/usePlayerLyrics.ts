@@ -2,6 +2,7 @@ import { LyricsRepository } from '@/src/services';
 import type { AppleWordLyricsCandidate } from '@/src/services/lyricsRepository';
 import { FileSystemStorage } from '@/src/services/storage';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
+import { useSettingsStore } from '@/src/stores/settingsStore';
 import type { Track } from '@/src/types/audio';
 import type { KaraokeLyricsJSON } from '@/src/types/karaokeTypes';
 import { usePerformanceProfile } from '@/src/theme';
@@ -24,6 +25,8 @@ type LyricsLookupTrack = Partial<Track> & {
 export type UsePlayerLyricsArgs = {
   visible: boolean;
   currentTrack: Track | null;
+  /** Bump this to force a fresh network search (clears the track's lyrics cache first). */
+  refreshNonce?: number;
 };
 
 function normalizeLyricsOffsetKeyPart(value?: string | null) {
@@ -58,8 +61,9 @@ function getLyricsOffsetCacheKeys(track: {
   return keys;
 }
 
-export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) {
+export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: UsePlayerLyricsArgs) {
   const performanceProfile = usePerformanceProfile();
+  const lyricsSources = useSettingsStore(state => state.lyricsSources);
   const currentTrackId = currentTrack?.id ?? null;
   const positionShared = usePlayerStore(state => state.positionShared);
   const queue = usePlayerStore(state => state.queue);
@@ -91,6 +95,7 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
   const [lastRenderedLyrics, setLastRenderedLyrics] = useState<KaraokeLyricsJSON | null>(null);
 
   const lyricsRequestIdRef = useRef(0);
+  const prevRefreshNonceRef = useRef(refreshNonce);
   const hasManualLyricsSelectionRef = useRef(false);
   const lyricsOffsetCacheRef = useRef<LyricsOffsetCacheMap>({});
   const lyricsOffsetSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -355,6 +360,9 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
       return;
     }
 
+    const forceRefresh = refreshNonce !== prevRefreshNonceRef.current;
+    prevRefreshNonceRef.current = refreshNonce;
+
     setIsDownloadingLrc(false);
     setLrcError(null);
     setHasResolvedLyricsAttempt(false);
@@ -363,9 +371,20 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
       let cachedLrcFound = false;
 
       try {
+        if (forceRefresh) {
+          // Wipe this track's cache so the lookup below is a genuine fresh search.
+          await LyricsRepository.clearTrackLyricsCache(songTitle, artist, trackId);
+          if (lyricsRequestIdRef.current !== requestId) return;
+          hasManualLyricsSelectionRef.current = false;
+          setTrackLyricsOptions([]);
+          setSuggestedLyricsOptions([]);
+          setLrcLyrics(null);
+          setIsLyricsLoading(true);
+        }
+
         const [cached, cachedAppleOptions] = await Promise.all([
           LyricsRepository.getCachedLrcLibLyrics(songTitle, artist, trackId),
-          LyricsRepository.getCachedAppleWordLyricsOptions(songTitle, artist, trackId),
+          LyricsRepository.getCachedAppleWordLyricsOptions(songTitle, artist, trackId, lyricsSources),
         ]);
         if (lyricsRequestIdRef.current !== requestId) return;
 
@@ -400,9 +419,13 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
           return;
         }
 
-        setIsLyricsLoading(true);
+        // Only show the loading skeleton when we have nothing on screen yet. If a cached
+        // LRC is already showing, the Apple/KPoe lookup is a silent background upgrade.
+        if (!cachedLrcFound) {
+          setIsLyricsLoading(true);
+        }
 
-        appleOptions = await LyricsRepository.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc);
+        appleOptions = await LyricsRepository.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc, lyricsSources);
         if (lyricsRequestIdRef.current !== requestId) return;
         exactAppleOptions = appleOptions.filter(option => option.isExactMatch);
 
@@ -428,7 +451,9 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
           setLrcError(null);
         }
 
-        if (!cachedLrcFound && !hasWords) {
+        const lrcLibAllowed = lyricsSources.includes('lrclib');
+
+        if (!cachedLrcFound && !hasWords && lrcLibAllowed) {
           setIsDownloadingLrc(true);
           setLrcError(null);
 
@@ -460,6 +485,8 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
           }
         } else if (hasWords) {
           setLrcError(null);
+        } else if (!cachedLrcFound && !lrcLibAllowed && !hasManualLyricsSelectionRef.current) {
+          setLrcError('No se encontraron letras disponibles.');
         }
       } finally {
         if (lyricsRequestIdRef.current === requestId) {
@@ -475,7 +502,7 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
         setIsDownloadingLrc(false);
       }
     };
-  }, [lyricsLookupTrack?.album, lyricsLookupTrack?.artist, lyricsLookupTrack?.duration, lyricsLookupTrack?.id, lyricsLookupTrack?.isrc, lyricsLookupTrack?.title, visible]);
+  }, [lyricsLookupTrack?.album, lyricsLookupTrack?.artist, lyricsLookupTrack?.duration, lyricsLookupTrack?.id, lyricsLookupTrack?.isrc, lyricsLookupTrack?.title, lyricsSources, refreshNonce, visible]);
 
   const selectedTrackLyrics = trackLyricsOptions[selectedTrackLyricsOptionIndex]?.payload ?? null;
   const hasSyncedLyrics = trackLyricsOptions.length > 0 || !!selectedTrackLyrics?.lyrics?.length;
@@ -508,6 +535,8 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
 
   const nextTrackRef = useRef(nextTrackInQueue);
   nextTrackRef.current = nextTrackInQueue;
+  const lyricsSourcesRef = useRef(lyricsSources);
+  lyricsSourcesRef.current = lyricsSources;
 
   const triggerNextTrackPrefetch = useCallback(async () => {
     const next = nextTrackRef.current;
@@ -527,7 +556,7 @@ export function usePlayerLyrics({ visible, currentTrack }: UsePlayerLyricsArgs) 
 
     try {
       const [appleResult] = await Promise.allSettled([
-        LyricsRepository.getAppleWordLyricsOptions(title, artist, album, durationSec, trackId, isrc),
+        LyricsRepository.getAppleWordLyricsOptions(title, artist, album, durationSec, trackId, isrc, lyricsSourcesRef.current),
       ]);
       if (prefetchRequestIdRef.current !== myRequestId) return;
 

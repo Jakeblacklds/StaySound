@@ -86,8 +86,8 @@ class KaraokeSpectrumView(context: Context, appContext: AppContext) : ExpoView(c
     fun setSpectrumTheme(value: String) {
         val t = when (value) {
             "columns" -> KaraokeSpectrumRenderer.Theme.COLUMNS
-            "caustics" -> KaraokeSpectrumRenderer.Theme.CAUSTICS
-            "waveformArc" -> KaraokeSpectrumRenderer.Theme.WAVEFORM_ARC
+            "caustics", "waveformArc" -> KaraokeSpectrumRenderer.Theme.WAVEFORM_ARC
+            "refractionVeil" -> KaraokeSpectrumRenderer.Theme.REFRACTION_VEIL
             else -> KaraokeSpectrumRenderer.Theme.AURORA
         }
         renderer.setTheme(t)

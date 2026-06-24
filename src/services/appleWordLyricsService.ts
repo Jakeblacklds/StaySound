@@ -1,10 +1,23 @@
 import { DOMParser } from '@xmldom/xmldom';
 import type { KaraokeLyricsJSON, KaraokeWordRaw } from '../types/karaokeTypes';
+import {
+    getLyricsSourceMeta,
+    LYRICS_SOURCES,
+    type LyricsSourceId,
+    type LyricsSourceMeta,
+    sanitizeLyricsSourceIds,
+} from './lyricsSources';
 
 export type AppleWordLyricsOption = {
     id: string;
     label: string;
     source: 'binimum' | 'kpoe';
+    /** Concrete provider this candidate came from (apple, lyricsplus, …). */
+    sourceId: LyricsSourceId;
+    /** Human-facing provider name for the picker ("Apple Music", "Musixmatch", …). */
+    providerLabel: string;
+    /** True when this candidate carries real per-word/syllable timing. */
+    wordLevel: boolean;
     payload: KaraokeLyricsJSON;
     lyricsUrl?: string;
     timingType?: string;
@@ -58,7 +71,9 @@ type KpoePayload = {
 class AppleWordLyricsService {
     private readonly CACHE_API_URL = 'https://lyrics-api.binimum.org/';
     private readonly MAX_WORD_OPTIONS = 3;
-    private readonly KPOE_SOURCE_ORDER = 'apple,lyricsplus,musixmatch,spotify,musixmatch-word';
+    // Extra KPoe providers am-lyrics queries but we don't expose as toggles. Appended to
+    // the combined source order so KPoe can still fall back on them for coverage.
+    private readonly EXTRA_KPOE_SOURCES = ['qq', 'deezer', 'musixmatch-word'];
     private readonly KPOE_SERVERS = [
         'https://lyricsplus.prjktla.workers.dev',
         'https://lyricsplus.binimum.org',
@@ -722,34 +737,39 @@ class AppleWordLyricsService {
         }
     }
 
-    private async fetchKpoeLyrics(title: string, artist: string, album?: string, durationSec?: number): Promise<KaraokeLyricsJSON | null> {
+    /**
+     * Single KPoe request with a COMBINED source order (am-lyrics style): KPoe picks the
+     * best provider it has and we read which one answered. We shuffle the mirrors and try
+     * up to 3 — one combined call, not one per source — so it stays fast and cheap.
+     */
+    private async fetchKpoeLyrics(kpoeSourceOrder: string, title: string, artist: string, album?: string, durationSec?: number): Promise<{ lyrics: KaraokeLyricsJSON; providerSource: string } | null> {
         const roundedDuration = durationSec && durationSec > 0 ? Math.round(durationSec).toString() : null;
         const attempts: Array<{ includeAlbum: boolean; includeDuration: boolean }> = [
             { includeAlbum: true, includeDuration: Boolean(roundedDuration) },
-            { includeAlbum: false, includeDuration: Boolean(roundedDuration) },
-            { includeAlbum: true, includeDuration: false },
             { includeAlbum: false, includeDuration: false },
         ];
+
+        const servers = [...this.KPOE_SERVERS].sort(() => Math.random() - 0.5).slice(0, 3);
 
         for (const attempt of attempts) {
             const params = new URLSearchParams({
                 title,
                 artist,
-                source: this.KPOE_SOURCE_ORDER,
+                source: kpoeSourceOrder,
             });
 
             if (attempt.includeAlbum && album) params.append('album', album);
             if (attempt.includeDuration && roundedDuration) params.append('duration', roundedDuration);
 
-            for (const baseUrl of this.KPOE_SERVERS) {
+            for (const baseUrl of servers) {
                 try {
-                    const rawResponse = await this.requestWithFallback(`${baseUrl}/v2/lyrics/get?${params.toString()}`, 1);
+                    const rawResponse = await this.requestWithFallback(`${baseUrl}/v2/lyrics/get?${params.toString()}`, 0);
                     if (!rawResponse) continue;
 
                     const payload = JSON.parse(rawResponse) as KpoePayload;
                     const lyrics = this.convertKpoeLyrics(payload, title, artist, durationSec);
                     if (lyrics?.lyrics?.length) {
-                        return lyrics;
+                        return { lyrics, providerSource: payload.metadata?.source ?? '' };
                     }
                 } catch {
                     continue;
@@ -760,26 +780,79 @@ class AppleWordLyricsService {
         return null;
     }
 
-    async searchWordLyricsOptions(title: string, artist: string, album?: string, durationSec?: number, isrc?: string): Promise<AppleWordLyricsOption[]> {
-        const cleanTitle = this.cleanMetadata(title);
-        const cleanArtist = this.cleanMetadata(artist);
-        const cleanAlbum = this.cleanMetadata(album);
+    /** Map the provider string KPoe reports back to one of our known sources. */
+    private resolveKpoeProvider(providerSource: string): LyricsSourceMeta {
+        const lower = providerSource.toLowerCase();
+        const match = LYRICS_SOURCES.find(meta => meta.kpoeSource && lower.includes(meta.kpoeSource));
+        return match ?? getLyricsSourceMeta('lyricsplus')!;
+    }
 
-        if (!cleanTitle || !cleanArtist) return [];
+    private async fetchCombinedKpoeOption(
+        kpoeSourceOrder: string,
+        title: string,
+        artist: string,
+        cleanTitle: string,
+        cleanArtist: string,
+        cleanAlbum: string,
+        durationSec?: number,
+    ): Promise<AppleWordLyricsOption | null> {
+        const result = await this.fetchKpoeLyrics(kpoeSourceOrder, cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);
+        if (!result?.lyrics?.lyrics?.length) return null;
 
+        const provider = this.resolveKpoeProvider(result.providerSource);
+        console.log('[AppleWordLyrics] KPoe hit:', provider.id, `(reported "${result.providerSource}")`, cleanTitle, '/', cleanArtist);
+
+        return {
+            id: `kpoe-${provider.id}`,
+            label: provider.label,
+            source: 'kpoe',
+            sourceId: provider.id,
+            providerLabel: provider.label,
+            wordLevel: this.hasWordLevelTiming(result.lyrics),
+            payload: {
+                ...result.lyrics,
+                meta: {
+                    ...result.lyrics.meta,
+                    song: title,
+                    artist,
+                },
+            },
+            trackName: cleanTitle,
+            artistName: cleanArtist,
+            albumName: cleanAlbum || undefined,
+            durationSec,
+            isExactMatch: true,
+        };
+    }
+
+    /**
+     * Builds the Apple Music (binimum TTML) candidates. Line-level results are kept
+     * now — we tag them as such instead of discarding, so songs that only have
+     * line-synced lyrics still show up (matching am-lyrics' coverage).
+     */
+    private async fetchAppleTtmlOptions(
+        title: string,
+        artist: string,
+        cleanTitle: string,
+        cleanArtist: string,
+        cleanAlbum: string,
+        durationSec?: number,
+        isrc?: string,
+    ): Promise<AppleWordLyricsOption[]> {
         const searchResults = await this.fetchSearchResults(cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);
-        if (searchResults.length > 0) {
-            console.log(
-                '[AppleWordLyrics] search candidates:',
-                searchResults.length,
-                searchResults
-                    .slice(0, 5)
-                    .map(result => `${result.timing_type ?? 'unknown'}|${result.track_name ?? '?'}|${result.artist_name ?? '?'}`)
-                    .join(' || ')
-            );
-        } else {
+        if (searchResults.length === 0) {
             console.log('[AppleWordLyrics] search candidates: 0', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
+            return [];
         }
+
+        console.log(
+            '[AppleWordLyrics] search candidates:',
+            searchResults.length,
+            searchResults
+                .slice(0, 5)
+                .map(result => `${result.timing_type ?? 'unknown'}|${result.track_name ?? '?'}|${result.artist_name ?? '?'}`)
+                .join(' || ')
+        );
 
         const sortedCandidates = searchResults
             .filter(result => !!result.lyricsUrl && !this.isLikelyUnsyncedTimingType(result.timing_type))
@@ -792,18 +865,11 @@ class AppleWordLyricsService {
 
         const options: AppleWordLyricsOption[] = [];
         const seenUrls = new Set<string>();
+        const appleMeta = getLyricsSourceMeta('apple');
 
         for (const result of sortedCandidates) {
             if (!result.lyricsUrl || seenUrls.has(result.lyricsUrl)) continue;
             seenUrls.add(result.lyricsUrl);
-
-            console.log(
-                '[AppleWordLyrics] selected candidate:',
-                `timing=${result.timing_type ?? 'unknown'}`,
-                `track=${result.track_name ?? '?'}`,
-                `artist=${result.artist_name ?? '?'}`,
-                `url=${result.lyricsUrl}`
-            );
 
             const ttmlLyrics = await this.fetchTtmlLyrics(result.lyricsUrl, title, artist, result.duration ?? durationSec);
             if (!ttmlLyrics?.lyrics?.length) {
@@ -811,18 +877,14 @@ class AppleWordLyricsService {
                 continue;
             }
 
-            // Discard line-level (non-ELRC) results: they make the renderer light the whole
-            // line at once. Skip this candidate and keep looking for real word-by-word timing.
-            if (!this.hasWordLevelTiming(ttmlLyrics)) {
-                console.log('[AppleWordLyrics] discarding line-level TTML candidate (no word timing):', result.lyricsUrl);
-                continue;
-            }
-
             const optionIndex = options.length;
             options.push({
-                id: `binimum-${optionIndex + 1}`,
+                id: `apple-${optionIndex + 1}`,
                 label: this.buildCandidateLabel(optionIndex, result),
                 source: 'binimum',
+                sourceId: 'apple',
+                providerLabel: appleMeta?.label ?? 'Apple Music',
+                wordLevel: this.hasWordLevelTiming(ttmlLyrics),
                 payload: ttmlLyrics,
                 lyricsUrl: result.lyricsUrl,
                 timingType: result.timing_type,
@@ -844,43 +906,67 @@ class AppleWordLyricsService {
             }
         }
 
-        if (options.length > 0) {
-            console.log('[AppleWordLyrics] TTML options ready:', options.length, cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
-            return options;
+        return options;
+    }
+
+    async searchWordLyricsOptions(
+        title: string,
+        artist: string,
+        album?: string,
+        durationSec?: number,
+        isrc?: string,
+        sources?: LyricsSourceId[],
+    ): Promise<AppleWordLyricsOption[]> {
+        const cleanTitle = this.cleanMetadata(title);
+        const cleanArtist = this.cleanMetadata(artist);
+        const cleanAlbum = this.cleanMetadata(album);
+
+        if (!cleanTitle || !cleanArtist) return [];
+
+        const enabled = sanitizeLyricsSourceIds(sources);
+
+        // Waterfall, am-lyrics style: take the first good source and stop. This is what
+        // makes it fast and find "muchas" — we don't wait on every provider.
+
+        // 1) Apple Music (binimum TTML cache). If it answers, return immediately.
+        if (enabled.includes('apple')) {
+            const appleOptions = await this.fetchAppleTtmlOptions(
+                title, artist, cleanTitle, cleanArtist, cleanAlbum, durationSec, isrc,
+            );
+            if (appleOptions.length > 0) {
+                console.log('[AppleWordLyrics] options ready (apple):', appleOptions.length, cleanTitle, '/', cleanArtist);
+                return appleOptions;
+            }
         }
 
-        const kpoeLyrics = await this.fetchKpoeLyrics(cleanTitle, cleanArtist, cleanAlbum || undefined, durationSec);
-        if (kpoeLyrics?.lyrics?.length && !this.hasWordLevelTiming(kpoeLyrics)) {
-            console.log('[AppleWordLyrics] discarding line-level KPoe result (no word timing):', cleanTitle, '/', cleanArtist);
-        } else if (kpoeLyrics?.lyrics?.length) {
-            console.log('[AppleWordLyrics] KPoe JSON result:', cleanTitle, '/', cleanArtist, 'isrc=', isrc ?? 'n/a');
-            return [
-                {
-                    id: 'kpoe-1',
-                    label: 'KPoe',
-                    source: 'kpoe',
-                    payload: {
-                        ...kpoeLyrics,
-                        meta: {
-                            ...kpoeLyrics.meta,
-                            song: title,
-                            artist,
-                        },
-                    },
-                    trackName: cleanTitle,
-                    artistName: cleanArtist,
-                    albumName: cleanAlbum || undefined,
-                    durationSec,
-                    isExactMatch: true,
-                },
-            ];
+        // 2) One combined KPoe request over the enabled sources, in preference order.
+        const enabledKpoeSources = enabled
+            .map(sourceId => getLyricsSourceMeta(sourceId)?.kpoeSource)
+            .filter((source): source is string => Boolean(source));
+
+        // Broaden coverage like am-lyrics: append its extra KPoe providers that we don't
+        // surface as toggles, so KPoe still has them to fall back on. Deduped, in order.
+        const kpoeSourceList = enabledKpoeSources.length > 0
+            ? [...new Set([...enabledKpoeSources, ...this.EXTRA_KPOE_SOURCES])]
+            : [];
+        const kpoeSourceOrder = kpoeSourceList.join(',');
+
+        if (kpoeSourceOrder) {
+            const kpoeOption = await this.fetchCombinedKpoeOption(
+                kpoeSourceOrder, title, artist, cleanTitle, cleanArtist, cleanAlbum, durationSec,
+            );
+            if (kpoeOption) {
+                console.log('[AppleWordLyrics] options ready (kpoe):', kpoeOption.sourceId, cleanTitle, '/', cleanArtist);
+                return [kpoeOption];
+            }
         }
 
+        console.log('[AppleWordLyrics] options ready: 0', cleanTitle, '/', cleanArtist);
         return [];
     }
 
-    async searchWordLyrics(title: string, artist: string, album?: string, durationSec?: number, isrc?: string): Promise<KaraokeLyricsJSON | null> {
-        const options = await this.searchWordLyricsOptions(title, artist, album, durationSec, isrc);
+    async searchWordLyrics(title: string, artist: string, album?: string, durationSec?: number, isrc?: string, sources?: LyricsSourceId[]): Promise<KaraokeLyricsJSON | null> {
+        const options = await this.searchWordLyricsOptions(title, artist, album, durationSec, isrc, sources);
         return options[0]?.payload ?? null;
     }
 }

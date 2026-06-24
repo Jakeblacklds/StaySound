@@ -13,7 +13,7 @@ import {
   usePerformanceProfile,
   useTheme,
 } from "@/src/theme";
-import { BlurView } from "expo-blur";
+import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
 import { usePathname, useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
@@ -25,7 +25,7 @@ import {
   StyleSheet,
   View,
 } from "react-native";
-import { KaraokeSpectrumView } from "karaoke-view";
+import { KaraokeSpectrumView, KaraokeRefractionView } from "karaoke-view";
 import { Gesture, GestureDetector } from "react-native-gesture-handler";
 
 import { pickReadableColor, withAlpha } from "@/src/utils/colorContrast";
@@ -74,7 +74,7 @@ import { ImmersiveVariant } from "./variants/ImmersiveVariant";
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
-const CD_SPIN_DEGREES_PER_MS = 360 / 42000;
+const CD_SPIN_DEGREES_PER_MS = 360 / 60000;
 const M3_EMPHASIZED = Easing.bezier(0.2, 0.0, 0, 1.0);
 const M3_EMPHASIZED_ACCEL = Easing.bezier(0.3, 0.0, 0.8, 0.15);
 
@@ -88,6 +88,12 @@ const M3_SNAP_SPRING = {
 
 const EXPAND_DURATION = 280;
 const COLLAPSE_DURATION = 320;
+// Above this expansion the player is no longer "mini" — drop the costly live
+// blur and use an opaque album surface instead.
+const BLUR_COLLAPSE_THRESHOLD = 0.12;
+// How long to freeze the live blur (show opaque) after a route change so it
+// doesn't render a stale, still-scrolling snapshot of the previous screen.
+const NAV_FREEZE_MS = 320;
 
 function normalizeArtistSearchValue(value?: string | null) {
   return (value ?? "")
@@ -235,6 +241,7 @@ export function FullPlayer() {
   const repeatIcon: IconName = repeatMode === "one" ? "Repetir 1" : "Repetir 0";
 
   const [showLyrics, setShowLyrics] = useState(false);
+  const [lyricsRefreshNonce, setLyricsRefreshNonce] = useState(0);
 
   // Queue state
   const [showQueue, setShowQueue] = useState(false);
@@ -260,6 +267,25 @@ export function FullPlayer() {
   const trackChangeScale = useSharedValue(1);
   const cdSpin = useSharedValue(0);
   const [animationsActive, setAnimationsActive] = useState(false);
+
+  // ---- Simulated frost (perf) ------------------------------------------
+  // The collapsed mini + the navbar used to each run a live (dimezis) blur.
+  // Two stacked live blurs were the source of the jank (even on an S25 Ultra)
+  // and of the seam between them — each BlurView only blurs within its own
+  // bounds, so the edges never matched. We now fake the frost with an
+  // album-tinted near-opaque surface + a static glass-sheen gradient: free to
+  // render and, since both surfaces share the same tint, perfectly seamless.
+  // `forceSolid` still pushes the surface fully opaque briefly on route
+  // changes so it never flashes the incoming screen's content.
+  const forceSolid = useSharedValue(0);
+
+  React.useEffect(() => {
+    forceSolid.value = 1;
+    const t = setTimeout(() => {
+      forceSolid.value = withTiming(0, { duration: 160 });
+    }, NAV_FREEZE_MS);
+    return () => clearTimeout(t);
+  }, [pathname]);
   const [isLyricsExpanded, setIsLyricsExpanded] = useState(false);
   const lrcPreviewState = usePlayerLyrics({
     visible: isVisible && !isLyricsExpanded,
@@ -395,6 +421,11 @@ export function FullPlayer() {
     setShowOptions(false);
   }, []);
 
+  const handleResearchLyrics = useCallback(() => {
+    setShowOptions(false);
+    setLyricsRefreshNonce(prev => prev + 1);
+  }, []);
+
   const handleArtistPress = useCallback(async () => {
     const artistName = currentTrack?.artist?.trim();
     if (!artistName || artistNavigationInFlightRef.current) return;
@@ -459,6 +490,11 @@ export function FullPlayer() {
   }, []);
 
   const playerOptionsActions: PlayerOptionAction[] = React.useMemo(() => [
+    ...(showLyrics ? [{
+      label: "Buscar letras de nuevo",
+      icon: "magnify",
+      onPress: handleResearchLyrics,
+    }] : []),
     {
       label: "Ir al Artista",
       icon: "account-music",
@@ -490,7 +526,7 @@ export function FullPlayer() {
       icon: "share-variant",
       onPress: handleShareSong,
     },
-  ], [handleArtistPress, handleAlbumPress, handleShareSong, setPlayerVisible, router]);
+  ], [showLyrics, handleResearchLyrics, handleArtistPress, handleAlbumPress, handleShareSong, setPlayerVisible, router]);
 
   // Gestures
   const panGesture = Gesture.Pan()
@@ -576,7 +612,7 @@ export function FullPlayer() {
   // vertical budget so it can never overlap the lower stack.
   const playerTopInset = Math.max(insets.top + 22, 42);
   const HEADER_ZONE = 51; // grabber (21) + whisper context label (30)
-  const LOWER_STACK_ZONE = 330; // title block + progress + transport + footer row
+  const LOWER_STACK_ZONE = 366; // title block + lyric line + progress + transport + footer row
   const playerBottomPad = Math.max(insets.bottom + 18, 40);
   const artworkVerticalAvail =
     SCREEN_HEIGHT -
@@ -590,6 +626,12 @@ export function FullPlayer() {
   );
   const ARTWORK_TOP = playerTopInset + HEADER_ZONE;
 
+  // Refraction veil: the native overlay sits over the cover (a tiny margin lets the rim breathe).
+  const REFRACTION_INFLATE = 1.06;
+  const refractionSize = ARTWORK_SIZE * REFRACTION_INFLATE;
+  const refractionLeft = SCREEN_WIDTH / 2 - refractionSize / 2;
+  const refractionTop = ARTWORK_TOP + ARTWORK_SIZE / 2 - refractionSize / 2;
+
   // Audio-reactive atmosphere. In artwork mode the native spectrum treats the cover
   // as the light source, so the AGSL field breathes outward from the album center.
   const spectrumFocusY = Math.min(
@@ -597,12 +639,14 @@ export function FullPlayer() {
     Math.max(0.24, (ARTWORK_TOP + ARTWORK_SIZE * 0.5) / SCREEN_HEIGHT),
   );
   const spectrumDelayMs = useSettingsStore((s) => s.spectrumDelayMs);
+  const spectrumTheme = useSettingsStore((s) => s.spectrumTheme);
   const spectrumEnabled =
     isVisible &&
     !showLyrics &&
     !showQueue &&
     performanceProfile.enableAnimatedBackgrounds &&
     performanceProfile.mode !== "lite";
+  const refractionEnabled = spectrumEnabled && spectrumTheme === "refractionVeil";
 
   const artworkShadowStyle = useAnimatedStyle(() => {
     const p = expansion.value;
@@ -741,27 +785,30 @@ export function FullPlayer() {
     ],
   }));
 
-  // Collapsed, the surface is the same frosted glass as the tab bar (blur +
-  // dynamic tint @ 0.78) so mini + navbar read as one continuous dock; the
-  // tint becomes fully opaque early in the expansion so the full player keeps
-  // its solid background.
-  const glassTintAlpha = lightweightMode ? 0.94 : 0.78;
-  const glassTintStyle = useAnimatedStyle(() => ({
-    backgroundColor:
-      playerAnimColors?.background?.value ||
-      (isDark ? playerColors.background : playerSurfaceColor) ||
-      theme.colors.background,
-    // Keep the glass alpha throughout most of the expansion so the growing
-    // rectangle looks identical to the mini player's frosted glass.  Only
-    // transition to fully opaque near the end so the full player gets its
-    // solid background.
-    opacity: interpolate(
+  // Collapsed, the surface is a simulated frosted glass shared with the tab
+  // bar: an album-hued near-opaque tint (dark 0.90 / light 0.92) so mini +
+  // navbar read as one continuous frosted dock. The tint ramps to fully opaque
+  // late in the expansion so the full player keeps its solid background.
+  const glassTintAlpha = lightweightMode ? 0.96 : (isDark ? 0.9 : 0.92);
+  const glassTintStyle = useAnimatedStyle(() => {
+    // Collapsed → the frost alpha. As soon as the player expands past the
+    // threshold the tint ramps to fully opaque so the growing rectangle is a
+    // cheap solid surface. `forceSolid` also pushes it opaque during route
+    // changes.
+    const ramp = interpolate(
       expansion.value,
-      [0, 0.8, 1],
-      [glassTintAlpha, glassTintAlpha, 1],
+      [0, BLUR_COLLAPSE_THRESHOLD, 1],
+      [glassTintAlpha, 1, 1],
       Extrapolation.CLAMP,
-    ),
-  }));
+    );
+    return {
+      backgroundColor:
+        playerAnimColors?.background?.value ||
+        (isDark ? playerColors.background : playerSurfaceColor) ||
+        theme.colors.background,
+      opacity: Math.max(ramp, forceSolid.value),
+    };
+  });
   const glassEdgeStyle = useAnimatedStyle(() => ({
     opacity: interpolate(expansion.value, [0, 0.18], [1, 0], Extrapolation.CLAMP),
   }));
@@ -912,17 +959,33 @@ export function FullPlayer() {
       <Animated.View style={[styles.root, rootAnimatedStyle]}>
         <GestureDetector gesture={Gesture.Exclusive(panGesture, tapGesture)}>
           <Animated.View style={styles.mainContainer}>
-            {!lightweightMode ? (
-              <BlurView
-                style={StyleSheet.absoluteFill}
-                intensity={isDark ? 28 : 40}
-                tint={isDark ? "dark" : "light"}
-              />
-            ) : null}
+            {/* Album-tinted frost base (replaces the costly live blur) */}
             <Animated.View
               style={[StyleSheet.absoluteFill, glassTintStyle]}
               pointerEvents="none"
             />
+            {/* Glass sheen — a static top highlight that sells the frosted look
+                without any live blur. This is the TOP of the combined pane, so
+                it carries the bright highlight and fades to clear by its bottom
+                edge (where the navbar's frost continues). Collapsed-only. */}
+            <Animated.View
+              pointerEvents="none"
+              style={[StyleSheet.absoluteFill, glassEdgeStyle]}
+            >
+              <LinearGradient
+                style={StyleSheet.absoluteFill}
+                colors={
+                  isDark
+                    ? ["rgba(255,255,255,0.08)", "rgba(255,255,255,0)"]
+                    : ["rgba(255,255,255,0.40)", "rgba(255,255,255,0)"]
+                }
+                locations={[0, 0.85]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+              />
+            </Animated.View>
+            {/* Hairline rim — top + sides only. No bottom edge, so the mini and
+                the navbar read as one continuous pane with no seam line. */}
             <Animated.View
               pointerEvents="none"
               style={[
@@ -931,8 +994,11 @@ export function FullPlayer() {
                   top: 0,
                   left: 0,
                   right: 0,
-                  bottom: -2,
-                  borderWidth: StyleSheet.hairlineWidth,
+                  bottom: 0,
+                  borderTopWidth: StyleSheet.hairlineWidth,
+                  borderLeftWidth: StyleSheet.hairlineWidth,
+                  borderRightWidth: StyleSheet.hairlineWidth,
+                  borderBottomWidth: 0,
                   borderTopLeftRadius: miniRadius,
                   borderTopRightRadius: miniRadius,
                   borderColor: chromeBorderColor,
@@ -967,10 +1033,10 @@ export function FullPlayer() {
                   enabled={spectrumEnabled}
                   isPlaying={isPlaying}
                   anchorMode="artwork"
-                  spectrumTheme="waveformArc"
+                  spectrumTheme={spectrumTheme}
                   focusY={spectrumFocusY}
                   artworkSize={ARTWORK_SIZE}
-                  particleIntensity={0.42}
+                  particleIntensity={0.62}
                   renderDelayMs={spectrumDelayMs}
                   glowColor={processColor(protectedSpectrumGlowColor)}
                 />
@@ -1018,6 +1084,41 @@ export function FullPlayer() {
               </Animated.View>
             )}
 
+            {!isLyricsExpanded && !showQueue && refractionEnabled ? (
+              <Animated.View
+                pointerEvents="none"
+                style={[
+                  {
+                    position: "absolute",
+                    left: refractionLeft,
+                    top: refractionTop,
+                    width: refractionSize,
+                    height: refractionSize,
+                    zIndex: 11,
+                  },
+                  artworkCdOverlayStyle,
+                ]}
+              >
+                <KaraokeRefractionView
+                  style={StyleSheet.absoluteFill}
+                  enabled={refractionEnabled}
+                  isPlaying={isPlaying}
+                  artworkUri={playerArtworkUri}
+                  glowColor={processColor(protectedSpectrumGlowColor)}
+                  coverFrac={1 / REFRACTION_INFLATE}
+                  intensity={1}
+                  arcCenterDeg={-30}
+                  arcSweepDeg={180}
+                  arcFeatherDeg={20}
+                  bandInnerFrac={0.5}
+                  refractionStrength={0.18}
+                  blur={0.06}
+                  chroma={0.04}
+                  rimWidth={0.03}
+                />
+              </Animated.View>
+            ) : null}
+
             <Animated.View style={[{ flex: 1 }, contentAnimatedStyle]}>
               {!isLyricsExpanded && <ImmersiveVariant {...commonProps} />}
             </Animated.View>
@@ -1032,18 +1133,6 @@ export function FullPlayer() {
               onClose={handleCloseQueue}
             />
 
-            {isVisible && currentTrack ? (
-              <PlayerOptionsModal
-                visible={showOptions}
-                track={currentTrack}
-                actions={playerOptionsActions}
-                accentColor={accentColor}
-                textColor={textColor}
-                onClose={handleCloseOptions}
-                spectrumTunerVisible={spectrumEnabled}
-                spectrumThemeSelectorVisible={false}
-              />
-            ) : null}
           </Animated.View>
         </GestureDetector>
       </Animated.View>
@@ -1076,7 +1165,22 @@ export function FullPlayer() {
           onArtistPress={handleArtistPress}
           onAlbumPress={handleAlbumPress}
           onOpenMoreOptions={handleOpenMoreOptions}
+          refreshNonce={lyricsRefreshNonce}
           seek={seek}
+        />
+      ) : null}
+
+      {/* Options sheet is the top-most layer so it renders ABOVE the lyrics overlay —
+          otherwise the three-dots menu opened from the karaoke view stays hidden behind it. */}
+      {isVisible && currentTrack ? (
+        <PlayerOptionsModal
+          visible={showOptions}
+          track={currentTrack}
+          actions={playerOptionsActions}
+          accentColor={accentColor}
+          textColor={textColor}
+          onClose={handleCloseOptions}
+          spectrumTunerVisible={spectrumEnabled}
         />
       ) : null}
     </>

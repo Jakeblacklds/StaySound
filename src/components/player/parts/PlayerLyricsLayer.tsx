@@ -59,6 +59,7 @@ type PlayerLyricsLayerProps = {
   onArtistPress?: () => void;
   onAlbumPress?: () => void;
   onOpenMoreOptions?: () => void;
+  refreshNonce?: number;
   seek: (positionMs: number) => Promise<void>;
 };
 
@@ -344,7 +345,6 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
   trackTechLabel,
   onPrimaryColor,
   animStyle,
-  onClose,
   onPlayPause,
   onNext,
   onPrevious,
@@ -353,6 +353,7 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
   onArtistPress,
   onAlbumPress,
   onOpenMoreOptions,
+  refreshNonce,
   seek,
 }: PlayerLyricsLayerProps) {
   const { isDark, theme } = useTheme();
@@ -389,7 +390,7 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
     handleSelectSuggestedLyrics,
     dismissLyricsSuggestionModal,
     lyricsTransitionProgress,
-  } = usePlayerLyrics({ visible, currentTrack });
+  } = usePlayerLyrics({ visible, currentTrack, refreshNonce });
 
   const {
     lyricsBaseSurface,
@@ -550,16 +551,6 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
           <View style={styles.lyricsHeaderActionsRow}>
             <View style={[styles.lyricsHeaderGrabber, { backgroundColor: withAlpha(lyricsTextColor, 0.28) }]} />
             <View style={styles.lyricsHeaderButtonCluster}>
-              <AnimatedPressable
-                onPress={onClose}
-                style={[styles.lyricsHeaderIconButton, { backgroundColor: withAlpha(chromeSurfaceColor, 0.5) }]}
-                pressedScale={0.92}
-                accessibilityRole="button"
-                accessibilityLabel="Cerrar letras"
-              >
-                <MaterialCommunityIcons name="close" size={25} color={lyricsTextColor} />
-              </AnimatedPressable>
-
               <AnimatedPressable
                 onPress={onOpenMoreOptions}
                 style={[styles.lyricsHeaderIconButton, { backgroundColor: withAlpha(chromeSurfaceColor, 0.5) }]}

@@ -1,13 +1,18 @@
 import { create } from 'zustand';
 import { createJSONStorage, persist } from 'zustand/middleware';
 import { FileSystemStorage } from '../services/storage';
+import {
+    DEFAULT_LYRICS_SOURCE_IDS,
+    type LyricsSourceId,
+    sanitizeLyricsSourceIds,
+} from '../services/lyricsSources';
 import { EqualizerCapabilities, EqualizerBandLevels, EqualizerMode, EqualizerSettings, TidalQuality } from '../types';
 import { ThemeConfig, ThemeMode, ThemeStyle } from '../types/theme';
 
 export type AppLanguage = 'es' | 'en';
 
 /** Visual theme for the player's audio spectrum (medios+agudos layer). */
-export type SpectrumTheme = 'columns' | 'aurora' | 'caustics' | 'waveformArc';
+export type SpectrumTheme = 'columns' | 'aurora' | 'caustics' | 'waveformArc' | 'refractionVeil';
 
 const initialEqualizerState: EqualizerSettings = {
     mode: 'off',
@@ -26,6 +31,8 @@ interface SettingsState extends ThemeConfig {
     spectrumDelayMs: number;
     /** Visual theme for the player spectrum's medios+agudos layer. */
     spectrumTheme: SpectrumTheme;
+    /** Lyrics providers to query, in preference order. Empty falls back to defaults. */
+    lyricsSources: LyricsSourceId[];
     _hasHydrated: boolean;
 }
 
@@ -47,6 +54,7 @@ interface SettingsActions {
     setEqualizerCapabilities: (capabilities: EqualizerCapabilities | null) => void;
     setSpectrumDelayMs: (delayMs: number) => void;
     setSpectrumTheme: (theme: SpectrumTheme) => void;
+    setLyricsSourceEnabled: (sourceId: LyricsSourceId, enabled: boolean) => void;
     resetEqualizer: () => void;
     setHasHydrated: (hasHydrated: boolean) => void;
 }
@@ -67,6 +75,7 @@ const initialState: SettingsState = {
     equalizerCapabilities: null,
     spectrumDelayMs: 380,
     spectrumTheme: 'aurora',
+    lyricsSources: [...DEFAULT_LYRICS_SOURCE_IDS],
     _hasHydrated: false,
 };
 
@@ -76,7 +85,7 @@ export const SPECTRUM_DELAY_STEP = 20;
 
 type PersistedSettingsState = Pick<
     SettingsState,
-    'language' | 'tidalDownloadQuality' | 'tidalMirror' | 'style' | 'mode' | 'accentColor' | 'dynamicColors' | 'lightweightMode' | 'schemeVariant' | 'equalizer' | 'spectrumDelayMs' | 'spectrumTheme'
+    'language' | 'tidalDownloadQuality' | 'tidalMirror' | 'style' | 'mode' | 'accentColor' | 'dynamicColors' | 'lightweightMode' | 'schemeVariant' | 'equalizer' | 'spectrumDelayMs' | 'spectrumTheme' | 'lyricsSources'
 >;
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -135,6 +144,17 @@ export const useSettingsStore = create<SettingsStore>()(
                 ),
             }),
             setSpectrumTheme: (spectrumTheme) => set({ spectrumTheme }),
+            setLyricsSourceEnabled: (sourceId, enabled) => set(state => {
+                const current = new Set(state.lyricsSources);
+                if (enabled) {
+                    current.add(sourceId);
+                } else {
+                    // Keep at least one source enabled — ignore turning off the last one.
+                    if (current.size <= 1) return {};
+                    current.delete(sourceId);
+                }
+                return { lyricsSources: sanitizeLyricsSourceIds([...current]) };
+            }),
             resetEqualizer: () => set({ equalizer: initialEqualizerState }),
             setHasHydrated: (hasHydrated) => set({ _hasHydrated: hasHydrated }),
         }),
@@ -154,8 +174,13 @@ export const useSettingsStore = create<SettingsStore>()(
                 equalizer: state.equalizer,
                 spectrumDelayMs: state.spectrumDelayMs,
                 spectrumTheme: state.spectrumTheme,
+                lyricsSources: state.lyricsSources,
             }),
             onRehydrateStorage: () => (state) => {
+                if (state) {
+                    // Drop unknown ids / restore defaults if persisted empty.
+                    state.lyricsSources = sanitizeLyricsSourceIds(state.lyricsSources);
+                }
                 state?.setHasHydrated(true);
             },
         }

@@ -118,6 +118,10 @@ export const LyricsSuggestionModal = React.memo(function LyricsSuggestionModal({
                         {options.map((option, index) => {
                             const duration = formatDuration(option.durationSec);
                             const durationDelta = formatDurationDelta(option.durationSec, requestedDurationSec);
+                            const providerTag = [
+                                option.providerLabel,
+                                option.wordLevel ? 'palabra' : 'línea',
+                            ].filter(Boolean).join(' · ');
                             const metadata = [
                                 option.albumName,
                                 duration,
@@ -147,6 +151,13 @@ export const LyricsSuggestionModal = React.memo(function LyricsSuggestionModal({
                                             <Text numberOfLines={1} style={[styles.optionArtist, { color: secondaryText }]}>
                                                 {option.artistName ?? requestedArtist}
                                             </Text>
+                                            {providerTag ? (
+                                                <View style={[styles.providerBadge, { backgroundColor: withAlpha(accentColor, 0.12) }]}>
+                                                    <Text numberOfLines={1} style={[styles.providerBadgeText, { color: accentColor }]}>
+                                                        {providerTag}
+                                                    </Text>
+                                                </View>
+                                            ) : null}
                                             {metadata ? (
                                                 <Text numberOfLines={1} style={[styles.optionMeta, { color: secondaryText }]}>
                                                     {metadata}
@@ -278,6 +289,19 @@ const styles = StyleSheet.create({
         lineHeight: 15,
         letterSpacing: 0,
         opacity: 0.8,
+    },
+    providerBadge: {
+        alignSelf: 'flex-start',
+        marginTop: 4,
+        paddingHorizontal: 8,
+        paddingVertical: 2,
+        borderRadius: 8,
+    },
+    providerBadgeText: {
+        fontSize: 10.5,
+        lineHeight: 14,
+        fontWeight: '700',
+        letterSpacing: 0.2,
     },
     rowDivider: {
         height: StyleSheet.hairlineWidth,
