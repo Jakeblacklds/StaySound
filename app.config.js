@@ -107,8 +107,12 @@ module.exports = {
                 anonKey: process.env.EXPO_PUBLIC_AUTH_SUPABASE_ANON_KEY || '',
                 allowedEmails: process.env.EXPO_PUBLIC_ALLOWED_LOGIN_EMAILS || '',
             },
-            dabBeta: {
-                baseUrl: process.env.EXPO_PUBLIC_DAB_BETA_BASE_URL || 'https://dabmusic.xyz',
+            amazonMusic: {
+                baseUrl: process.env.EXPO_PUBLIC_AMAZON_MUSIC_BASE_URL || 'https://amz.geeked.wtf',
+                bypassToken: process.env.EXPO_PUBLIC_AMAZON_MUSIC_BYPASS_TOKEN || '',
+            },
+            deezerFallback: {
+                baseUrl: process.env.EXPO_PUBLIC_DEEZER_FALLBACK_BASE_URL || 'https://dzr.tabs-vs-spaces.wtf',
             },
             soulseek: {
                 username: process.env.SOULSEEK_USERNAME || '',

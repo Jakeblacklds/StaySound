@@ -25,12 +25,7 @@ function readOptionalEnv(name: string, fallbackNames: string[] = []) {
 }
 
 function getAdminEmailsSource() {
-  const explicitAdmins = readOptionalEnv('ADMIN_EMAILS');
-  if (explicitAdmins) {
-    return explicitAdmins;
-  }
-
-  return readOptionalEnv('DAB_BETA_EMAIL');
+  return readOptionalEnv('ADMIN_EMAILS');
 }
 
 function normalizeEmailList(value: string | undefined) {

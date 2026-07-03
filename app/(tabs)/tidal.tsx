@@ -249,8 +249,9 @@ function formatMirrorCapabilities(availability?: TidalMirrorAvailability): strin
 
 function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
     const pinnedMirrors = [
-        'https://dabmusic.xyz/api',
-        'https://beta.dabmusic.xyz',
+        'https://hifi.geeked.wtf',
+        'https://eu-central.monochrome.tf',
+        'https://api.monochrome.tf',
     ];
 
     return [...pinnedMirrors, ...availableMirrors.slice(0, 3)]
@@ -1259,8 +1260,6 @@ export default function TidalScreen() {
 
     const [isFocused, setIsFocused] = useState(false);
     const [availableMirrors, setAvailableMirrors] = useState<string[]>(() => [
-        'https://dabmusic.xyz/api',
-        'https://beta.dabmusic.xyz',
         ...TIDAL_API_BASES,
     ].filter((mirror, index, all) => all.indexOf(mirror) === index));
     const recommendedMirrors = useMemo(

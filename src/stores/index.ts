@@ -6,4 +6,3 @@ export { useOnboardingStore } from './onboardingStore';
 export { usePlayerStore } from './playerStore';
 export { useSettingsStore } from './settingsStore';
 export { useUIStore } from './uiStore';
-export { useDabAuthStore } from './dabAuthStore';

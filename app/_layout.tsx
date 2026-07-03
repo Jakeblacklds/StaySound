@@ -18,7 +18,7 @@ import { hasPermissions } from '@/src/services/fileScanner';
 import { addAudioLibraryChangedListenerNative } from '@/src/services/nativeLibraryIndexer';
 import { ensureSeededSpotifyTop50Playlist, hydrateSpotifyTop50GlobalPlaylist } from '@/src/services/spotifyChartsService';
 import { AudioEngine } from '@/src/services';
-import { useAuthStore, useDabAuthStore, useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
+import { useAuthStore, useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
 import { createPaperFonts, ThemeProvider, useTheme } from '@/src/theme';
 
 export {
@@ -43,14 +43,12 @@ export default function RootLayout() {
   const _hasSettingsHydrated = useSettingsStore(state => state._hasHydrated);
   const _hasOnboardingHydrated = useOnboardingStore(state => state._hasHydrated);
   const _hasAuthHydrated = useAuthStore(state => state._hasHydrated);
-  const _hasDabAuthHydrated = useDabAuthStore(state => state._hasHydrated);
   const isAppReady =
     loaded &&
     _hasLibraryHydrated &&
     _hasSettingsHydrated &&
     _hasOnboardingHydrated &&
-    _hasAuthHydrated &&
-    _hasDabAuthHydrated;
+    _hasAuthHydrated;
 
   return (
     <GestureHandlerRootView style={styles.container}>
@@ -115,17 +113,15 @@ function AudioSync() {
 
 function SessionBootstrap() {
   const bootstrap = useAuthStore(state => state.bootstrap);
-  const dabBootstrap = useDabAuthStore(state => state.bootstrap);
   const heartbeat = useAuthStore(state => state.heartbeat);
   const hasSessionLock = useAuthStore(state => state.hasSessionLock);
   const status = useAuthStore(state => state.status);
 
   useEffect(() => {
     void bootstrap();
-    void dabBootstrap();
     ensureSeededSpotifyTop50Playlist();
     void hydrateSpotifyTop50GlobalPlaylist();
-  }, [bootstrap, dabBootstrap]);
+  }, [bootstrap]);
 
   useEffect(() => {
     if (status !== 'authenticated' || !hasSessionLock) {

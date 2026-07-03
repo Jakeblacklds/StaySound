@@ -1,6 +1,6 @@
 import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
 import { applyDownloadedOtaUpdate, checkForAppUpdates, downloadAndInstallBinaryUpdate, getAppUpdateConfig, getInstalledVersionLabel } from '@/src/services/appUpdateService';
-import { useAppUpdateStore, useAuthStore, useDabAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
+import { useAppUpdateStore, useAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
 import { TidalMirrorAvailability, getTidalMirrorAvailability, getTidalMirrorOptions } from '@/src/services/tidalService';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
 import { useUIStore } from '@/src/stores/uiStore';
@@ -10,10 +10,10 @@ import { generateManualAccentPalette, SchemeVariant } from '@/src/theme/utils';
 import { TidalQuality, Track } from '@/src/types/audio';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
+import { router } from 'expo-router';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
-import { router } from 'expo-router';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
 import { ActivityIndicator, Button, IconButton, Switch, Text, TextInput } from 'react-native-paper';
@@ -48,8 +48,9 @@ function formatMirrorCapabilities(availability?: TidalMirrorAvailability): strin
 
 function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
     const pinnedMirrors = [
-        'https://dabmusic.xyz/api',
-        'https://beta.dabmusic.xyz',
+        'https://hifi.geeked.wtf',
+        'https://eu-central.monochrome.tf',
+        'https://api.monochrome.tf',
     ];
 
     return [...pinnedMirrors, ...availableMirrors.slice(0, 3)]
@@ -83,9 +84,6 @@ export default function SettingsScreen() {
     const { isScanning, scanLibrary, getAllTracks, lastScanDate, repairMissingMetadata, hydrateMetadataFromTidalForLibrary } = useLibraryStore();
     const appSession = useAuthStore(state => state.session);
     const signOut = useAuthStore(state => state.signOut);
-    const dabSession = useDabAuthStore(state => state.session);
-    const dabStatus = useDabAuthStore(state => state.status);
-    const signOutDab = useDabAuthStore(state => state.signOut);
     const openConfirmModal = useUIStore(state => state.openConfirmModal);
 
     const [hexInput, setHexInput] = useState(config.accentColor);
@@ -99,8 +97,6 @@ export default function SettingsScreen() {
     const [isHydratingTidalMetadata, setIsHydratingTidalMetadata] = useState(false);
     const [artworkHydrationLogs, setArtworkHydrationLogs] = useState<string[]>([]);
     const [availableMirrors, setAvailableMirrors] = useState<string[]>(() => [
-        'https://dabmusic.xyz/api',
-        'https://beta.dabmusic.xyz',
         ...TIDAL_API_BASES,
     ].filter((mirror, index, all) => all.indexOf(mirror) === index));
     const [mirrorAvailability, setMirrorAvailability] = useState<Record<string, TidalMirrorAvailability>>({});
@@ -263,10 +259,6 @@ export default function SettingsScreen() {
         }
     };
 
-    const handleOpenDabAuth = () => {
-        router.push('/dab-auth' as any);
-    };
-
     const handleMainSignOut = () => {
         openConfirmModal({
             title: 'Cerrar sesion',
@@ -280,13 +272,6 @@ export default function SettingsScreen() {
             },
         });
     };
-
-    const handleDabSignOut = async () => {
-        await signOutDab();
-        showNotification('La cuenta de DAB se cerro en este dispositivo.', 'info');
-    };
-
-
 
     const colorPresets = [
         '#6750A4', // Purple
@@ -510,19 +495,6 @@ export default function SettingsScreen() {
                     title={appSession?.email || 'Cuenta de Invitado'}
                     description={appSession ? 'Sesion principal activa' : 'Sin cuenta vinculada'}
                     right={appSession ? <IconButton icon="logout" iconColor={theme.colors.error} onPress={handleMainSignOut} /> : undefined}
-                />
-                <RowDivider theme={theme} />
-                <SettingRow
-                    theme={theme}
-                    tint={theme.colors.secondary}
-                    icon="bridge"
-                    title="Digital Audio Bridge (DAB)"
-                    description={dabSession ? `Conectado como ${dabSession.username || dabSession.email}` : 'Conecta tu cuenta para streaming'}
-                    right={(
-                        <Button mode={dabSession ? 'text' : 'contained-tonal'} onPress={dabSession ? handleDabSignOut : handleOpenDabAuth} compact>
-                            {dabSession ? 'Cerrar' : 'Conectar'}
-                        </Button>
-                    )}
                 />
             </Section>
 

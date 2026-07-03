@@ -3,7 +3,6 @@ import path from "node:path";
 
 const SEARCH_TERM = "deadmau5";
 const TIDAL_TRACK_ID = 31097949;
-const DAB_TRACK_ID = 31097949;
 const SLOW_LATENCY_MS = 1800;
 
 function loadDotEnv() {
@@ -37,7 +36,6 @@ const SUPABASE_ANON_KEY = (
 const SUPABASE_SERVICE_ROLE_KEY = (
   process.env.MIRROR_SUPABASE_SERVICE_ROLE_KEY || ""
 ).trim();
-const DAB_SESSION_COOKIE = (process.env.DAB_SESSION_COOKIE || "").trim();
 
 const CAN_READ_CATALOG = Boolean(
   SUPABASE_URL && (SUPABASE_SERVICE_ROLE_KEY || SUPABASE_ANON_KEY),
@@ -81,12 +79,6 @@ async function readJson(response) {
   const text = await response.text();
   if (!text.trim()) return null;
   return JSON.parse(text);
-}
-
-function isReachableStatus(status) {
-  return (
-    status < 500 || status === 401 || status === 403 || status === 404 || status === 405 || status === 429
-  );
 }
 
 async function request(url, init = {}) {
@@ -133,11 +125,6 @@ async function updateMirrorRow(id, payload) {
     const body = await response.text().catch(() => "");
     throw new Error(`Failed to update mirror ${id} (${response.status}): ${body}`);
   }
-}
-
-function getBaseRoot(baseUrl) {
-  const normalized = normalizeBaseUrl(baseUrl);
-  return normalized.endsWith("/api") ? normalized.slice(0, -4) : normalized;
 }
 
 async function probeTidalSearch(baseUrl) {
@@ -196,64 +183,6 @@ async function probeTidalTrackManifest(baseUrl) {
   };
 }
 
-async function probeDabReachability(baseUrl) {
-  const root = getBaseRoot(baseUrl);
-  const { response, latencyMs } = await request(
-    `${root}/api/featured-albums?type=new-releases&offset=0&limit=1`,
-    { headers: jsonHeaders() },
-  );
-
-  return {
-    ok: isReachableStatus(response.status),
-    latencyMs,
-    error: isReachableStatus(response.status) ? null : `HTTP ${response.status}`,
-  };
-}
-
-async function probeDabSearch(baseUrl) {
-  const root = getBaseRoot(baseUrl);
-  const { response, latencyMs } = await request(
-    `${root}/api/search?q=${encodeURIComponent(SEARCH_TERM)}&type=track&offset=0`,
-    {
-      headers: jsonHeaders({
-        Cookie: `session=${DAB_SESSION_COOKIE}`,
-      }),
-    },
-  );
-  const payload = await readJson(response).catch(() => null);
-  const hasTracks = Array.isArray(payload?.tracks);
-
-  return {
-    ok: response.ok && hasTracks,
-    latencyMs,
-    error: response.ok ? (hasTracks ? null : "DAB search missing tracks") : `HTTP ${response.status}`,
-  };
-}
-
-async function probeDabStream(baseUrl) {
-  const root = getBaseRoot(baseUrl);
-  const { response, latencyMs } = await request(
-    `${root}/api/stream?trackId=${DAB_TRACK_ID}&quality=27`,
-    {
-      headers: jsonHeaders({
-        Cookie: `session=${DAB_SESSION_COOKIE}`,
-      }),
-    },
-  );
-  const payload = await readJson(response).catch(() => null);
-
-  return {
-    ok: response.ok && typeof payload?.url === "string" && payload.url.startsWith("http"),
-    latencyMs,
-    error:
-      response.ok && typeof payload?.url === "string"
-        ? null
-        : response.ok
-          ? "DAB stream missing url"
-          : `HTTP ${response.status}`,
-  };
-}
-
 function summarizeStatus(probes, latencyMs) {
   const successful = Object.values(probes).filter((probe) => probe.ok).length;
   if (successful === 0) {
@@ -300,73 +229,6 @@ async function evaluateMirror(row) {
   const baseUrl = normalizeBaseUrl(row.base_url);
   const fallbackPriority = Number.isFinite(row.priority) ? row.priority : 999;
 
-  if (row.provider === "dab") {
-    const reachability = await probeDabReachability(baseUrl);
-    if (!DAB_SESSION_COOKIE) {
-      const status = reachability.ok
-        ? reachability.latencyMs > SLOW_LATENCY_MS
-          ? "slow"
-          : "available"
-        : "unavailable";
-
-      return {
-        baseUrl,
-        provider: row.provider,
-        probes: { reachability },
-        supports: {
-          search: row.supports_search !== false,
-          stream: row.supports_stream !== false,
-          download: row.supports_download !== false,
-        },
-        status,
-        enabled: row.enabled !== false,
-        latencyMs: reachability.latencyMs,
-        lastError: reachability.error || null,
-        priority: computePriority(
-          status,
-          {
-            search: row.supports_search !== false,
-            stream: row.supports_stream !== false,
-            download: row.supports_download !== false,
-          },
-          reachability.latencyMs,
-          fallbackPriority,
-        ),
-      };
-    }
-
-    const [searchProbe, streamProbe] = await Promise.all([
-      probeDabSearch(baseUrl),
-      probeDabStream(baseUrl),
-    ]);
-    const supports = {
-      search: searchProbe.ok,
-      stream: streamProbe.ok,
-      download: streamProbe.ok,
-    };
-    const latencyMs = Math.max(
-      reachability.latencyMs,
-      searchProbe.latencyMs,
-      streamProbe.latencyMs,
-    );
-    const status = summarizeStatus(
-      { search: searchProbe, stream: streamProbe, download: streamProbe },
-      latencyMs,
-    );
-
-    return {
-      baseUrl,
-      provider: row.provider,
-      probes: { reachability, search: searchProbe, stream: streamProbe },
-      supports,
-      status,
-      enabled: supports.search || supports.stream || supports.download,
-      latencyMs,
-      lastError: [searchProbe.error, streamProbe.error].filter(Boolean).join(" | ") || null,
-      priority: computePriority(status, supports, latencyMs, fallbackPriority),
-    };
-  }
-
   const [searchProbe, streamProbe] = await Promise.all([
     probeTidalSearch(baseUrl),
     probeTidalTrackManifest(baseUrl),
@@ -395,7 +257,7 @@ async function evaluateMirror(row) {
   };
 }
 
-function buildSummary(results, changes, skippedDabAuth, writeMode) {
+function buildSummary(results, changes, writeMode) {
   const activeSearch = results.filter((item) => item.supports.search && item.enabled);
   const activeStream = results.filter((item) => item.supports.stream && item.enabled);
   const activeDownload = results.filter((item) => item.supports.download && item.enabled);
@@ -405,9 +267,7 @@ function buildSummary(results, changes, skippedDabAuth, writeMode) {
   const lines = [
     "# Mirror catalog sync",
     "",
-    skippedDabAuth
-      ? "- DAB auth probes were skipped because `DAB_SESSION_COOKIE` is missing; existing DAB capability flags were preserved."
-      : "- DAB auth probes ran with the configured session cookie.",
+    "- Catalog probes are limited to Tidal/Monochrome-compatible mirrors.",
     writeMode
       ? "- Remote updates: enabled (service role key present)."
       : "- Remote updates: skipped (missing `MIRROR_SUPABASE_SERVICE_ROLE_KEY`).",
@@ -433,9 +293,8 @@ async function main() {
   const rows = await fetchMirrorRows();
   const results = [];
   const changes = [];
-  const skippedDabAuth = !DAB_SESSION_COOKIE;
 
-  for (const row of rows) {
+  for (const row of rows.filter((row) => !row.provider || row.provider === "tidal")) {
     const evaluated = await evaluateMirror(row);
     results.push(evaluated);
 
@@ -459,7 +318,7 @@ async function main() {
     await updateMirrorRow(row.id, payload);
   }
 
-  const summary = buildSummary(results, changes, skippedDabAuth, CAN_WRITE_CATALOG);
+  const summary = buildSummary(results, changes, CAN_WRITE_CATALOG);
   console.log(summary);
 }
 

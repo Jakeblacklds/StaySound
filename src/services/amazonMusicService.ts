@@ -1,3 +1,4 @@
+import Constants from "expo-constants";
 import { TidalQuality, TidalTrack } from "../types/audio";
 
 declare const process: {
@@ -57,8 +58,26 @@ export type AmazonMusicResolvedStream = {
   bitDepth?: number;
 };
 
+function readAmazonConfig(): Record<string, any> {
+  const extra = (Constants.expoConfig?.extra ?? Constants.manifest2?.extra ?? {}) as Record<string, any>;
+  return (extra.amazonMusic ?? {}) as Record<string, any>;
+}
+
 function getBypassToken(): string {
-  return process.env.EXPO_PUBLIC_AMAZON_MUSIC_BYPASS_TOKEN?.trim() ?? "";
+  const extraToken = readAmazonConfig().bypassToken;
+  return (
+    process.env.EXPO_PUBLIC_AMAZON_MUSIC_BYPASS_TOKEN?.trim() ||
+    (typeof extraToken === "string" ? extraToken.trim() : "")
+  );
+}
+
+function getAmazonApiBaseUrl(): string {
+  const extraBaseUrl = readAmazonConfig().baseUrl;
+  return (
+    process.env.EXPO_PUBLIC_AMAZON_MUSIC_BASE_URL?.trim() ||
+    (typeof extraBaseUrl === "string" ? extraBaseUrl.trim() : "") ||
+    AMAZON_API_BASE_URL
+  ).replace(/\/+$/, "");
 }
 
 function withTimeoutSignal(timeoutMs: number): {
@@ -227,7 +246,7 @@ export async function resolveAmazonMusicStreamFromTrack(
     quality: amazonQualityFromTidal(quality),
     bypass_token: bypassToken,
   });
-  const trackUrl = `${AMAZON_API_BASE_URL}/api/track/${encodeURIComponent(best.id)}?${params.toString()}`;
+  const trackUrl = `${getAmazonApiBaseUrl()}/api/track/${encodeURIComponent(best.id)}?${params.toString()}`;
   const trackPayload = await fetchJson<AmazonTrackResponse>(trackUrl, {}, 15000);
   const finalUrl = trackPayload.stream_url?.trim();
   if (!finalUrl) return null;
