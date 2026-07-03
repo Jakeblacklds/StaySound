@@ -34,7 +34,7 @@ index a0f995c..49fcc24 100644
              .Builder(context)
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt
 new file mode 100644
-index 0000000..4793303
+index 0000000..0c96784
 --- /dev/null
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt
 @@ -0,0 +1,258 @@
@@ -297,7 +297,7 @@ index 0000000..4793303
 +    }
 +}
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index b495b5a..3de0675 100644
+index b495b5a..4998096 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -3,6 +3,7 @@ package com.doublesymmetry.trackplayer.service
@@ -706,7 +706,7 @@ index b495b5a..3de0675 100644
              }
              return if (
                  isMediaNotificationController ||
-@@ -965,6 +1307,45 @@ class MusicService : HeadlessJsMediaService() {
+@@ -965,6 +1307,48 @@ class MusicService : HeadlessJsMediaService() {
              return super.onPlaybackResumption(mediaSession, controller)
          }
  
@@ -737,9 +737,12 @@ index b495b5a..3de0675 100644
 +
 +            val safeIndex = startIndex.coerceIn(0, resolvedItems.lastIndex)
 +            val safePosition = if (startPositionMs >= 0) startPositionMs else C.TIME_UNSET
-+            val resolvedTracks = resolveCatalogTracks(mediaItems)
-+            playCatalogSelection(resolvedTracks, safeIndex)
 +
++            // IMPORTANT: only resolve the items (which now carry a playable URI) and let
++            // Media3 set + prepare + play them on the session player. Do NOT also drive
++            // playback manually via playCatalogSelection(): the two paths fight over the
++            // same player (manual clear/add/play vs. the framework re-setting these items),
++            // which reset the queue mid-load and resulted in silent playback from the car.
 +            return Futures.immediateFuture(
 +                MediaSession.MediaItemsWithStartPosition(
 +                    resolvedItems,
@@ -752,7 +755,7 @@ index b495b5a..3de0675 100644
          override fun onSetRating(
              session: MediaSession,
              controller: MediaSession.ControllerInfo,
-@@ -976,6 +1357,44 @@ class MusicService : HeadlessJsMediaService() {
+@@ -976,6 +1360,44 @@ class MusicService : HeadlessJsMediaService() {
              }
              return super.onSetRating(session, controller, rating)
          }
@@ -797,7 +800,7 @@ index b495b5a..3de0675 100644
      }
  
      private fun getPendingIntentFlags(): Int {
-@@ -1029,5 +1448,17 @@ class MusicService : HeadlessJsMediaService() {
+@@ -1029,5 +1451,17 @@ class MusicService : HeadlessJsMediaService() {
  
          const val DEFAULT_JUMP_INTERVAL = 15.0
          const val DEFAULT_STOP_FOREGROUND_GRACE_PERIOD = 5

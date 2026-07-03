@@ -10,6 +10,8 @@ export { GlobalNotification } from './GlobalNotification';
 export { LyricsSkeleton } from './LyricsSkeleton';
 export { PlaylistCard } from './PlaylistCard';
 export { ScanButton } from './ScanButton';
+export { SegmentedTabs } from './SegmentedTabs';
+export type { SegmentedTabItem } from './SegmentedTabs';
 export { Skeleton } from './Skeleton';
 export { TrackListItem as MemoizedTrackListItem, TrackListItem } from './TrackListItem';
 export { DownloadAnimatedButton } from './DownloadAnimatedButton';

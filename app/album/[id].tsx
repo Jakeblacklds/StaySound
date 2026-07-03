@@ -77,6 +77,9 @@ export default function AlbumDetailScreen() {
             index={index}
             showIndex={true}
             showArtwork={false}
+            visualStyle="library"
+            outerInset={8}
+            contentPaddingHorizontal={16}
             isPlaying={currentTrackId === item.id}
             onPress={handleTrackPress}
         />

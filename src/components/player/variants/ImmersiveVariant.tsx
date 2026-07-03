@@ -251,7 +251,7 @@ const LrcPreviewLine = React.memo(function LrcPreviewLine({
         >
             <Animated.Text
                 style={[styles.lrcLineText, { color }, lineStyle]}
-                numberOfLines={1}
+                numberOfLines={2}
             >
                 {visibleText}
             </Animated.Text>

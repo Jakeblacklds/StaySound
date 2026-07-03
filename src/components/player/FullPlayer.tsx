@@ -44,6 +44,7 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 import { IconName } from "../ui";
 import { ThemeBackground } from "./backgrounds/ThemeBackground";
+import { PsychedelicBackground } from "./backgrounds/PsychedelicBackground";
 import {
   buildPhraseLyricsLines,
   getActivePhraseLineIndex,
@@ -646,6 +647,11 @@ export function FullPlayer() {
     !showQueue &&
     performanceProfile.enableAnimatedBackgrounds &&
     performanceProfile.mode !== "lite";
+  // The "aurora" slot is now a full psychedelic album-color field (Skia), not the
+  // native spectrum. The native renderer drives every OTHER theme.
+  const isPsychedelicTheme = spectrumTheme === "aurora";
+  const psychedelicEnabled = spectrumEnabled && isPsychedelicTheme;
+  const nativeSpectrumEnabled = spectrumEnabled && !isPsychedelicTheme;
   const refractionEnabled = spectrumEnabled && spectrumTheme === "refractionVeil";
 
   const artworkShadowStyle = useAnimatedStyle(() => {
@@ -1023,14 +1029,14 @@ export function FullPlayer() {
               </Animated.View>
             ) : null}
 
-            {spectrumEnabled ? (
+            {nativeSpectrumEnabled ? (
               <Animated.View
                 style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
                 pointerEvents="none"
               >
                 <KaraokeSpectrumView
                   style={StyleSheet.absoluteFill}
-                  enabled={spectrumEnabled}
+                  enabled={nativeSpectrumEnabled}
                   isPlaying={isPlaying}
                   anchorMode="artwork"
                   spectrumTheme={spectrumTheme}
@@ -1039,6 +1045,19 @@ export function FullPlayer() {
                   particleIntensity={0.62}
                   renderDelayMs={spectrumDelayMs}
                   glowColor={processColor(protectedSpectrumGlowColor)}
+                />
+              </Animated.View>
+            ) : null}
+
+            {psychedelicEnabled ? (
+              <Animated.View
+                style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
+                pointerEvents="none"
+              >
+                <PsychedelicBackground
+                  colors={playerColors}
+                  isPlaying={isPlaying}
+                  isDark={isDark}
                 />
               </Animated.View>
             ) : null}

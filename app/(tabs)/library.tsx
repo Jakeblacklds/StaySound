@@ -2,7 +2,7 @@
  * LibraryScreen - Main library view with tabs for songs, albums, artists, playlists
  */
 
-import { AlphabetScrubber, ArtistCard, CustomIcon, EmptyState, ScanButton, TrackListItem } from '@/src/components/ui';
+import { AlphabetScrubber, ArtistCard, CustomIcon, EmptyState, ScanButton, SegmentedTabs, TrackListItem } from '@/src/components/ui';
 import { TidalAtmosphere } from '@/src/components/tidal';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n } from '@/src/i18n';
@@ -14,7 +14,7 @@ import { FlashList } from '@shopify/flash-list';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo } from 'react';
-import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, StyleSheet, View } from 'react-native';
 import { Searchbar, Text } from 'react-native-paper';
 import Animated, {
     Easing,
@@ -466,39 +466,7 @@ export default function LibraryScreen() {
                                 exiting={FadeOut.duration(150)}
                                 style={[styles.tabsFadeWrap, isSearchExpanded && styles.tabsFadeHidden]}
                             >
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.tabRow}>
-                                    {libraryTabs.map(item => {
-                                        const selected = tab === item.value;
-                                        return (
-                                            <Pressable
-                                                key={item.value}
-                                                accessibilityRole="tab"
-                                                accessibilityState={{ selected }}
-                                                accessibilityLabel={item.label}
-                                                style={[
-                                                    styles.tabButton,
-                                                    selected ? { backgroundColor: theme.colors.primaryContainer + '80' } : null
-                                                ]}
-                                                onPress={() => setTab(item.value)}
-                                            >
-                                                <Text
-                                                    style={{
-                                                        color: selected ? theme.colors.primary : theme.colors.onSurfaceVariant,
-                                                        fontWeight: selected ? '700' : '500',
-                                                    }}
-                                                >
-                                                    {item.label}
-                                                </Text>
-                                                {selected ? (
-                                                    <View style={[
-                                                        styles.tabIndicator,
-                                                        { backgroundColor: theme.colors.primary }
-                                                    ]} />
-                                                ) : null}
-                                            </Pressable>
-                                        );
-                                    })}
-                                </ScrollView>
+                                <SegmentedTabs tabs={libraryTabs} value={tab} onChange={setTab} />
                             </Animated.View>
 
                             {/* Search input rail — overlays the tab row when open */}
@@ -678,6 +646,7 @@ const styles = StyleSheet.create({
     },
     tabsFadeWrap: {
         flex: 1,
+        justifyContent: 'center',
     },
     tabsFadeHidden: {
         opacity: 0,
@@ -726,31 +695,9 @@ const styles = StyleSheet.create({
         elevation: 0,
         borderColor: 'transparent',
     },
-    tabRow: {
-        gap: 8,
-        paddingHorizontal: 2,
-        paddingRight: 4,
-    },
     tabSection: {
         paddingTop: 6,
         paddingBottom: 10,
-    },
-    tabButton: {
-        minWidth: 96,
-        borderRadius: 14,
-        paddingHorizontal: 14,
-        paddingVertical: 13,
-        alignItems: 'center',
-        justifyContent: 'center',
-        overflow: 'hidden',
-    },
-    tabIndicator: {
-        position: 'absolute',
-        bottom: 0,
-        left: 14,
-        right: 14,
-        height: 2.5,
-        borderRadius: 2,
     },
     content: {
         flex: 1,

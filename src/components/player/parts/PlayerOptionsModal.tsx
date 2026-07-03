@@ -37,7 +37,7 @@ const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_MAX_HEIGHT = SCREEN_HEIGHT * 0.82;
 
 const SPECTRUM_THEME_OPTIONS: { value: SpectrumTheme; label: string; icon: string }[] = [
-    { value: 'aurora', label: 'Halo', icon: 'circle-opacity' },
+    { value: 'aurora', label: 'Psicodelia', icon: 'blur' },
     { value: 'columns', label: 'Escenario', icon: 'spotlight-beam' },
     { value: 'caustics', label: 'Waveform', icon: 'sine-wave' },
     { value: 'refractionVeil', label: 'Refracción', icon: 'diamond-stone' },

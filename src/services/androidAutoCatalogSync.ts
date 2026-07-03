@@ -1,5 +1,6 @@
 import { NativeModules, Platform } from 'react-native';
 import { generateArtistId } from './metadataService';
+import { isTrackPlayable } from './trackPlayerService';
 import { useLibraryStore } from '../stores/libraryStore';
 import type { Album, Artist, Playlist, Track } from '../types/audio';
 
@@ -88,6 +89,50 @@ function resolveTrackArtwork(track: Track): string | undefined {
     return normalizeArtworkUri(track.artworkThumb) ?? normalizeArtworkUri(track.artwork);
 }
 
+const MEDIA_STORE_AUDIO_RE = /^content:\/\/media\/[^/]+\/audio\/media\/\d+/i;
+
+function normalizeRelativePath(relativePath?: string): string {
+    return (relativePath ?? '').replace(/\\/g, '/').replace(/^\/+|\/+$/g, '');
+}
+
+function encodePathSegments(pathValue: string): string {
+    return pathValue
+        .split('/')
+        .filter(Boolean)
+        .map(segment => encodeURIComponent(segment))
+        .join('/');
+}
+
+function buildFilePlaybackUri(track: Track): string | undefined {
+    const relativePath = normalizeRelativePath(track.relativePath);
+    const fileName = (track._filename ?? '').trim();
+    if (!relativePath || !fileName) return undefined;
+
+    return `file:///storage/emulated/0/${encodePathSegments(relativePath)}/${encodeURIComponent(fileName)}`;
+}
+
+/**
+ * Produce a directly-playable URI for the native Android Auto catalog.
+ *
+ * The car plays from a headless service where content:// MediaStore URIs fail on
+ * many devices, so we hand the native player the reconstructed file:// path —
+ * mirroring trackPlayerService.resolveNativePlaybackUrl's primary branch. The
+ * native side has no access to Expo FileSystem to resolve this at play time, so
+ * it must be baked into the catalog snapshot.
+ */
+function resolvePlaybackUri(track: Track): string {
+    const uri = normalizeText(track.uri);
+
+    if (MEDIA_STORE_AUDIO_RE.test(uri)) {
+        const fileUri = buildFilePlaybackUri(track);
+        if (fileUri) return fileUri;
+    }
+
+    if (uri.startsWith('/')) return `file://${uri}`;
+
+    return uri;
+}
+
 function compareByName<T extends { name: string }>(a: T, b: T): number {
     return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
 }
@@ -105,7 +150,7 @@ function compareTracks(a: AndroidAutoTrack, b: AndroidAutoTrack): number {
 function serializeTrack(track: Track): AndroidAutoTrack {
     return {
         id: track.id,
-        uri: track.uri,
+        uri: resolvePlaybackUri(track),
         title: normalizeText(track.title) || 'Unknown Title',
         artist: normalizeText(track.artist) || 'Unknown Artist',
         album: normalizeText(track.album) || 'Unknown Album',
@@ -149,7 +194,9 @@ function serializePlaylist(playlist: Playlist, tracksById: Map<string, AndroidAu
 
 function buildCatalogSnapshot(): AndroidAutoCatalogSnapshot {
     const state = useLibraryStore.getState();
-    const sourceTracks = Array.from(state.tracks.values());
+    // Only expose tracks the native player can actually start; cloud-only / spotify://
+    // / unsupported-container tracks would show in the car but play silence.
+    const sourceTracks = Array.from(state.tracks.values()).filter(track => isTrackPlayable(track));
     const tracks = sourceTracks
         .map(serializeTrack)
         .sort(compareTracks);

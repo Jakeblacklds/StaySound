@@ -55,7 +55,16 @@ const STATIC_GENERIC_STREAMING_BASES = [
   "https://hund.qqdl.site",
   "https://wolf.qqdl.site",
 ];
-const TIDAL_UPTIME_CATALOG_URLS: string[] = [];
+const TIDAL_UPTIME_CATALOG_URLS = [
+  // Monochrome's canonical uptime catalog (its INSTANCES_URLS). Listed first so StaySound
+  // pulls the exact same live instance roster Monochrome publishes and auto-updates with
+  // it. While Monochrome's custom-domain DNS record is unavailable this resolves to
+  // NXDOMAIN (a fast, cached miss) and we fall through to the *.workers.dev mirrors below,
+  // which are the same uptime workers serving fresh data.
+  "https://tidal-uptime.geeked.wtf",
+  "https://tidal-uptime.jiffy-puffs-1j.workers.dev/",
+  "https://tidal-uptime.props-76styles.workers.dev/",
+];
 
 export const TIDAL_MIRROR_NAMES: Record<string, string> = {
   "https://dabmusic.xyz/api": "DAB Oficial",
@@ -332,6 +341,7 @@ type PersistedPublicDownloadsPermission = {
 };
 
 import { sanitizeFilename as utilsSanitizeFilename } from "./audioUtils";
+import { resolveAmazonMusicStreamFromTrack } from "./amazonMusicService";
 import { resolveQobuzStreamFromTrack } from "./qobuzKennyService";
 
 function sanitizeFilename(input: string): string {
@@ -2940,7 +2950,115 @@ export async function downloadTidalTrack(
     return toLibraryTrack(enrichedTrack, persistentUri);
   };
 
+  const downloadFromAmazonMusic = async (): Promise<Track | null> => {
+    const baseFilename = getTrackBaseFilename(tidalTrack);
+    const streamInfo = await resolveAmazonMusicStreamFromTrack(
+      {
+        title: tidalTrack.title,
+        artist: tidalTrack.artist,
+        album: tidalTrack.album,
+        durationMs: tidalTrack.durationMs,
+      },
+      targetQuality,
+    );
+    if (!streamInfo?.url) return null;
+
+    if (flacOnlyDownload && streamInfo.extension !== "flac") {
+      return null;
+    }
+
+    const filename = `${baseFilename}.${streamInfo.extension}`;
+    const existingPublicUri = await findExistingPublicTrackUri(filename);
+    if (existingPublicUri) {
+      await persistMetadataInPublicDownloads(tidalTrack, baseFilename);
+      if (tidalTrack.artworkUrl) {
+        await persistArtworkInPublicDownloads(
+          tidalTrack.artworkUrl,
+          tidalTrack.artist,
+          tidalTrack.album,
+        );
+      }
+      return toLibraryTrack(
+        {
+          ...tidalTrack,
+          quality: streamInfo.quality,
+          codec: streamInfo.codec,
+          sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+          bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+        },
+        existingPublicUri,
+      );
+    }
+
+    await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
+    const outputUri = getOutputUri(baseFilename, streamInfo.extension);
+    await downloadSegment(
+      streamInfo.url,
+      outputUri,
+      options.onTask,
+      options.onProgress,
+    );
+
+    const fileInfo = await FileSystem.getInfoAsync(outputUri);
+    if (!fileInfo.exists || !fileInfo.size || fileInfo.size <= 0) {
+      throw new Error("Download failed: File is empty or does not exist");
+    }
+
+    if (!(await isValidAudioFile(outputUri, streamInfo.extension))) {
+      throw new Error(
+        `Download failed: The file received is not a valid ${streamInfo.extension.toUpperCase()}`,
+      );
+    }
+
+    let persistentUri = outputUri;
+    try {
+      persistentUri = await persistInPublicDownloads(
+        outputUri,
+        baseFilename,
+        streamInfo.extension,
+      );
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
+    } catch (persistError) {
+      console.error(
+        "[TidalService] Failed to persist Amazon Music file in public folder:",
+        persistError,
+      );
+      persistentUri = await persistInPrivateDownloads(
+        outputUri,
+        baseFilename,
+        streamInfo.extension,
+      );
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
+    }
+
+    const enrichedTrack: TidalTrack = {
+      ...tidalTrack,
+      quality: streamInfo.quality,
+      codec: streamInfo.codec,
+      sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+      bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+    };
+
+    await persistMetadataInPublicDownloads(enrichedTrack, baseFilename);
+    if (enrichedTrack.artworkUrl) {
+      await persistArtworkInPublicDownloads(
+        enrichedTrack.artworkUrl,
+        enrichedTrack.artist,
+        enrichedTrack.album,
+      );
+    }
+
+    return toLibraryTrack(enrichedTrack, persistentUri);
+  };
+
   if (options.qobuzOnly) {
+    try {
+      const amazonTrack = await downloadFromAmazonMusic();
+      if (amazonTrack) return amazonTrack;
+    } catch (amazonError) {
+      console.warn("[TidalService] Amazon Music download failed:", amazonError);
+    }
+
     return await downloadFromQobuz();
   }
 
@@ -3183,7 +3301,7 @@ function buildCloudStreamTrackFromStreamInfo(
   tidalTrack: TidalTrack,
   streamInfo: {
     url: string;
-    extension: "flac" | "mp3";
+    extension: "flac" | "m4a" | "mp3";
     codec: string;
     quality: string;
     sampleRate?: number;
@@ -3233,8 +3351,69 @@ export async function createTidalStreamTrack(
   const preferredQuality = useSettingsStore.getState().tidalDownloadQuality;
   const shouldPreferDabStream =
     isSelectedDabSource() || shouldRescueWithDabBeta();
+  const buildExternalStreamTrack = (
+    streamInfo: {
+      url: string;
+      extension: "flac" | "m4a" | "mp3";
+      codec: string;
+      quality: string;
+      sampleRate?: number;
+      bitDepth?: number;
+    },
+  ): Track => {
+    const formatMap: Record<string, string> = {
+      flac: "FLAC",
+      m4a: "AAC",
+      mp3: "MP3",
+    };
+
+    return {
+      id: `tidal_stream_${tidalTrack.id}`,
+      uri: streamInfo.url,
+      title: tidalTrack.title,
+      artist: tidalTrack.artist,
+      artistId: tidalTrack.artistId ? String(tidalTrack.artistId) : undefined,
+      album: tidalTrack.album,
+      duration: tidalTrack.durationMs,
+      artwork: tidalTrack.artworkUrl,
+      trackNumber: tidalTrack.trackNumber,
+      year: tidalTrack.year,
+      format: formatMap[streamInfo.extension] || "FLAC",
+      codec: streamInfo.codec,
+      sampleRate: streamInfo.sampleRate ?? tidalTrack.sampleRate,
+      bitDepth: streamInfo.bitDepth ?? tidalTrack.bitDepth,
+      quality: streamInfo.quality,
+      source: "tidal_stream",
+      tidalId: tidalTrack.id,
+      tidalAlbumId: tidalTrack.albumId,
+      dateAdded: Date.now(),
+      cloudOnly: false,
+    };
+  };
 
   if (options.qobuzOnly || options.qobuzFallback) {
+    try {
+      const amazonStream = await resolveAmazonMusicStreamFromTrack(
+        {
+          title: tidalTrack.title,
+          artist: tidalTrack.artist,
+          album: tidalTrack.album,
+          durationMs: tidalTrack.durationMs,
+        },
+        preferredQuality,
+      );
+      if (amazonStream?.url) {
+        console.log("[TidalService] Amazon Music stream resolved", {
+          trackId: tidalTrack.id,
+          quality: amazonStream.quality,
+          extension: amazonStream.extension,
+        });
+        return buildExternalStreamTrack(amazonStream);
+      }
+    } catch (amazonError) {
+      console.warn("[TidalService] Amazon Music stream failed:", amazonError);
+    }
+
     try {
       const qobuzStream = await resolveQobuzStreamFromTrack(
         {
@@ -3250,33 +3429,7 @@ export async function createTidalStreamTrack(
           quality: qobuzStream.quality,
           extension: qobuzStream.extension,
         });
-        const formatMap: Record<string, string> = {
-          flac: "FLAC",
-          m4a: "AAC",
-          mp3: "MP3",
-        };
-        return {
-          id: `tidal_stream_${tidalTrack.id}`,
-          uri: qobuzStream.url,
-          title: tidalTrack.title,
-          artist: tidalTrack.artist,
-          artistId: tidalTrack.artistId ? String(tidalTrack.artistId) : undefined,
-          album: tidalTrack.album,
-          duration: tidalTrack.durationMs,
-          artwork: tidalTrack.artworkUrl,
-          trackNumber: tidalTrack.trackNumber,
-          year: tidalTrack.year,
-          format: formatMap[qobuzStream.extension] || "FLAC",
-          codec: qobuzStream.codec,
-          sampleRate: qobuzStream.sampleRate ?? tidalTrack.sampleRate,
-          bitDepth: qobuzStream.bitDepth ?? tidalTrack.bitDepth,
-          quality: qobuzStream.quality,
-          source: "tidal_stream",
-          tidalId: tidalTrack.id,
-          tidalAlbumId: tidalTrack.albumId,
-          dateAdded: Date.now(),
-          cloudOnly: false,
-        };
+        return buildExternalStreamTrack(qobuzStream);
       }
     } catch (qobuzError) {
       console.warn("[TidalService] Qobuz stream fallback failed:", qobuzError);

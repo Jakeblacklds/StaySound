@@ -247,7 +247,13 @@ internal class KaraokeSpectrumRenderer(
         }
     }
 
-    // --- Waveform Arc (artwork/player mode): discreet mid-band bars around the cover ----
+    // --- Waveform Arc (artwork/player mode): precise mid/full-band bars around the cover ----
+    // Same bar look as before (short ticks grazing the cover edge), but FREQUENCY-PRECISE:
+    // the old code stretched the ~10 mid bands over 34 bars, so a single note smeared across
+    // ~3 neighbouring bars at the same height. Now the 34 bars sample the full log-spaced
+    // spectrum and INTERPOLATE between the real Goertzel bands — so each bar tracks its own
+    // frequency, no two neighbours read identical, and a note lights its own bar. This is how
+    // pro visualizers spread more display bars over fewer analysis bins.
     private fun drawWaveformArc(
         canvas: Canvas,
         bands: FloatArray,
@@ -258,9 +264,10 @@ internal class KaraokeSpectrumRenderer(
         isPlaying: Boolean,
         alpha: Float,
     ) {
-        val midLo = bandCount * 25 / 100
-        val midHi = (bandCount * 62 / 100).coerceAtLeast(midLo + 1)
-        val span = midHi - midLo
+        // Full audible span (drop only sub-bass rumble + the very top air).
+        val specLo = bandCount * 8 / 100
+        val specHi = (bandCount * 95 / 100).coerceAtLeast(specLo + 1)
+        val specSpan = (specHi - specLo - 1).coerceAtLeast(1)
         val coverRadius = if (artworkDiameterPx > 0f) {
             artworkDiameterPx * 0.5f
         } else {
@@ -282,14 +289,19 @@ internal class KaraokeSpectrumRenderer(
         waveformPaint.xfermode = null
 
         for (i in 0 until WAVEFORM_BARS) {
-            val from = midLo + span * i / WAVEFORM_BARS
-            val to = (midLo + span * (i + 1) / WAVEFORM_BARS).coerceAtLeast(from + 1)
-            val target = bandAverage(bands, from, to)
+            val position = i / (WAVEFORM_BARS - 1f)
+            // Fractional band index into the real spectrum, then lerp the two nearest bands.
+            // Distinct value per bar (no smeared triplets) while staying frequency-true.
+            val bandF = specLo + position * specSpan
+            val b0 = bandF.toInt().coerceIn(0, bands.size - 1)
+            val b1 = (b0 + 1).coerceIn(0, bands.size - 1)
+            val frac = bandF - b0
+            val target = (bands.getOrElse(b0) { 0f } * (1f - frac) +
+                bands.getOrElse(b1) { 0f } * frac).coerceIn(0f, 1f)
             waveformBarDisplay[i] = ease(waveformBarDisplay[i], target, dt, attack = 0.035f, release = 0.0045f)
 
             val raw = waveformBarDisplay[i].coerceIn(0f, 1f)
             val shaped = Math.pow(raw.toDouble(), 0.72).toFloat()
-            val position = i / (WAVEFORM_BARS - 1f)
             val tapered = 0.35f + 0.65f * sin(PI.toFloat() * position)
             val micro = 0.82f + 0.18f * sin(t * 0.0014f + i * 0.73f)
             val len = minLen + (maxLen - minLen) * shaped * tapered * micro

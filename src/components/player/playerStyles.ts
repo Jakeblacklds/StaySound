@@ -289,13 +289,16 @@ export const playerStyles = StyleSheet.create({
     },
     lrcLineMinimal: {
         marginTop: 12,
-        minHeight: 22,
-        justifyContent: 'center',
+        // Fixed 2-line budget: the phrase grows DOWN into this reserved space
+        // instead of pushing the title/cover up when it wraps. Top-anchored so a
+        // single line never re-centers and a two-line phrase never shifts layout.
+        height: 52,
+        justifyContent: 'flex-start',
         overflow: 'hidden',
     },
     lrcLineText: {
-        fontSize: 15,
-        lineHeight: 21,
+        fontSize: 19,
+        lineHeight: 25,
         fontWeight: '600',
         letterSpacing: -0.2,
         opacity: 0.92,
@@ -304,7 +307,7 @@ export const playerStyles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-between',
-        marginTop: 10,
+        marginTop: 4,
         paddingHorizontal: 4,
     },
     transportEdge: {
@@ -329,7 +332,7 @@ export const playerStyles = StyleSheet.create({
         flexDirection: 'row',
         alignItems: 'center',
         justifyContent: 'space-around',
-        marginTop: 18,
+        marginTop: 6,
         paddingHorizontal: 8,
     },
     footerBtn: {

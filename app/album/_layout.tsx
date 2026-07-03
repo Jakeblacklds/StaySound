@@ -8,6 +8,9 @@ export default function AlbumLayout() {
                 options={{
                     presentation: 'card',
                     animation: 'slide_from_right',
+                    // Cap the push/pop duration so leaving the album feels snappy
+                    // instead of riding the long platform default.
+                    animationDuration: 240,
                 }}
             />
         </Stack>
