@@ -6,7 +6,10 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const ROOT = process.cwd();
-const APK_PATH = path.resolve(ROOT, "android/app/build/outputs/apk/prod/release/app-prod-release.apk");
+const APK_MIME_TYPE = "application/vnd.android.package-archive";
+const PROD_APK_PATH = path.resolve(ROOT, "android/app/build/outputs/apk/prod/release/app-prod-release.apk");
+const DIST_APK_PATH = path.resolve(ROOT, "out/android/app-prod-release.apk");
+const GRADLE_APK_PATH = path.resolve(ROOT, "android/app/build/outputs/apk/release/app-release.apk");
 
 function loadDotEnv() {
   const envPath = path.resolve(ROOT, ".env");
@@ -120,6 +123,7 @@ function getReleaseConfig() {
 
 async function uploadFile({ url, serviceRoleKey, bucket, filePath, objectPath }) {
   const body = fs.readFileSync(filePath);
+  const filename = path.basename(objectPath);
   const response = await fetch(
     `${url}/storage/v1/object/${bucket}/${objectPath}`,
     {
@@ -128,7 +132,10 @@ async function uploadFile({ url, serviceRoleKey, bucket, filePath, objectPath })
         apikey: serviceRoleKey,
         Authorization: `Bearer ${serviceRoleKey}`,
         "x-upsert": "true",
-        "Content-Type": "application/vnd.android.package-archive",
+        "Cache-Control": "no-store",
+        "Content-Disposition": `attachment; filename="${filename}"`,
+        "Content-Type": APK_MIME_TYPE,
+        "x-content-type-options": "nosniff",
       },
       body,
     },
@@ -138,6 +145,16 @@ async function uploadFile({ url, serviceRoleKey, bucket, filePath, objectPath })
     const text = await response.text().catch(() => "");
     throw new Error(`Storage upload failed (${response.status}): ${text}`);
   }
+}
+
+function getReleaseApkPath() {
+  const candidates = [PROD_APK_PATH, DIST_APK_PATH, GRADLE_APK_PATH];
+  const apkPath = candidates.find((candidate) => fs.existsSync(candidate));
+  if (apkPath) return apkPath;
+
+  throw new Error(
+    `Release APK not found. Checked: ${candidates.join(", ")}.`,
+  );
 }
 
 async function upsertReleaseRow({ url, serviceRoleKey, row }) {
@@ -169,20 +186,17 @@ async function main() {
     runCommand("npm", ["run", "android:build:release"]);
   }
 
-  if (!fs.existsSync(APK_PATH)) {
-    throw new Error(`Release APK not found at ${APK_PATH}.`);
-  }
-
   const { url, serviceRoleKey, bucket } = getSupabaseConfig();
   const releaseConfig = getReleaseConfig();
-  const sha256 = await computeFileSha256(APK_PATH);
+  const apkPath = getReleaseApkPath();
+  const sha256 = await computeFileSha256(apkPath);
   const objectPath = `android/${args.channel}/staysound-${releaseConfig.versionName}-${releaseConfig.versionCode}.apk`;
 
   await uploadFile({
     url,
     serviceRoleKey,
     bucket,
-    filePath: APK_PATH,
+    filePath: apkPath,
     objectPath,
   });
 
@@ -206,7 +220,7 @@ async function main() {
   });
 
   console.log("# Android release published");
-  console.log(`- APK: ${APK_PATH}`);
+  console.log(`- APK: ${apkPath}`);
   console.log(`- Channel: ${args.channel || releaseConfig.binaryChannel}`);
   console.log(`- Version: ${releaseConfig.versionName} (${releaseConfig.versionCode})`);
   console.log(`- Runtime: ${releaseConfig.runtimeVersion}`);

@@ -26,6 +26,11 @@ type ReleaseRow = {
   published_at: string;
 };
 
+function getApkDownloadName(row: ReleaseRow): string {
+  const versionName = row.version_name.replace(/[^0-9A-Za-z._-]+/g, '-');
+  return `staysound-${versionName}-${row.version_code}.apk`;
+}
+
 function createServiceRoleClient() {
   const { url } = getPublicSupabaseEnv();
   const { serviceRoleKey } = getServiceRoleEnv();
@@ -58,7 +63,9 @@ export async function getAndroidReleaseManifest(channel = 'prod'): Promise<Andro
   const row = data as ReleaseRow;
   const signedUrl = await client.storage
     .from(row.storage_bucket)
-    .createSignedUrl(row.storage_path, 60 * 60);
+    .createSignedUrl(row.storage_path, 60 * 60, {
+      download: getApkDownloadName(row),
+    });
 
   if (signedUrl.error) {
     throw signedUrl.error;
