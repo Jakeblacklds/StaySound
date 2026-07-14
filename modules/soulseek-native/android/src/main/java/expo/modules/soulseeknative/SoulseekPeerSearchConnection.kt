@@ -11,10 +11,19 @@ import kotlin.math.min
 internal class PeerSearchConnection(
   private val socket: Socket,
   private val onMatch: (SoulseekMatch) -> Unit,
+  private val onTransferRequest: ((IncomingTransferRequest) -> Unit)? = null,
 ) : Closeable {
   private val reader = SlskPacketReader(socket, socket.getInputStream())
+  private val output = socket.getOutputStream()
   private val running = AtomicBoolean(true)
   private var worker: Thread? = null
+
+  fun send(payload: ByteArray) {
+    synchronized(output) {
+      output.write(payload)
+      output.flush()
+    }
+  }
 
   fun start() {
     worker = Thread {
@@ -38,6 +47,11 @@ internal class PeerSearchConnection(
         val parser = SlskMessageParser(packet)
         val code = parser.readUInt32Safe()?.toInt() ?: continue
 
+        if (code == 40) {
+          handleTransferRequestPacket(parser)
+          continue
+        }
+
         if (code != 9) continue
 
         val compressed = parser.readRemainingBytes()
@@ -56,6 +70,34 @@ internal class PeerSearchConnection(
   override fun close() {
     running.set(false)
     runCatching { socket.close() }
+  }
+
+  private fun handleTransferRequestPacket(parser: SlskMessageParser) {
+    val callback = onTransferRequest ?: return
+
+    val direction = parser.readUInt32Safe()?.toInt() ?: return
+    if (direction != 1) return
+
+    val token = runCatching { parser.readBytes(4) }.getOrNull() ?: return
+    val filename = parser.readStringSafe()
+    if (filename.isBlank()) return
+
+    val sizeLow = parser.readUInt32Safe()
+    val sizeHigh = parser.readUInt32Safe()
+    val expectedSize = if (sizeLow == null) {
+      null
+    } else {
+      ((sizeHigh ?: 0L) and 0xFFFFFFFFL shl 32) or (sizeLow and 0xFFFFFFFFL)
+    }
+
+    callback(
+      IncomingTransferRequest(
+        token = token,
+        filename = filename,
+        expectedSize = expectedSize,
+        reply = ::send,
+      ),
+    )
   }
 
   private fun parseSearchReply(data: ByteArray): List<SoulseekMatch> {

@@ -1043,14 +1043,32 @@ export async function downloadSoulseekTrackFromMatch(
   options: SoulseekDownloadOptions = {},
 ): Promise<Track> {
   options.onProgress?.(0.02);
-  const candidates = await buildFallbackMatches(
+  let lastError: unknown;
+
+  // Download the selected match directly; the fallback search below is only
+  // worth its cost (extra logins + full search timeouts) after this peer fails.
+  if (isSupportedSoulseekFormat(match)) {
+    try {
+      return await downloadSoulseekTrackWithMatch(tidalTrack, qualityPreference, match, options);
+    } catch (error) {
+      if (!isRetryablePeerError(error)) throw error;
+      lastError = error;
+      console.log(`${SOULSEEK_SERVICE_LOG} direct match failed, searching fallbacks`, {
+        username: match.username,
+        filename: match.filename,
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  const triedKey = `${match.username}::${match.filename}::${match.size ?? 0}`;
+  const candidates = (await buildFallbackMatches(
     tidalTrack,
     match,
     qualityPreference,
     options.signal,
     options.allowCompressedFallback,
-  );
-  let lastError: unknown;
+  )).filter(candidate => `${candidate.username}::${candidate.filename}::${candidate.size ?? 0}` !== triedKey);
 
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];

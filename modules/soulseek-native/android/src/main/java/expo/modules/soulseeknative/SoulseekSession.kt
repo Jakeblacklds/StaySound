@@ -16,6 +16,7 @@ internal class SoulseekSession(
   private val closeables = CopyOnWriteArrayList<Closeable>()
   private val peerConnections = CopyOnWriteArrayList<PeerSearchConnection>()
   private val searchResults = LinkedBlockingQueue<SoulseekMatch>()
+  private val incomingTransferRequests = LinkedBlockingQueue<IncomingTransferRequest>()
   private val peerAddresses = ConcurrentHashMap<String, PeerAddress>()
 
   private lateinit var serverSocket: SlskSocket
@@ -162,6 +163,8 @@ internal class SoulseekSession(
       closeables = closeables,
       peerAddresses = peerAddresses,
       pumpIncomingPeerSocket = ::handleIncomingPeerSocket,
+      pumpServerPackets = { handleServerPacketsForSearchBurst(6) },
+      pollIncomingTransferRequest = { incomingTransferRequests.poll() },
       handleUnhandledServerCode = ::handleServerCode,
     ).download(match, outputPath)
   }
@@ -182,6 +185,7 @@ internal class SoulseekSession(
       val connection = PeerSearchConnection(
         socket = socket,
         onMatch = { match -> searchResults.offer(match) },
+        onTransferRequest = { request -> incomingTransferRequests.offer(request) },
       )
       peerConnections.add(connection)
       closeables.add(connection)
@@ -307,6 +311,7 @@ internal class SoulseekSession(
         val connection = PeerSearchConnection(
           socket = socket,
           onMatch = { match -> searchResults.offer(match) },
+          onTransferRequest = { request -> incomingTransferRequests.offer(request) },
         )
         peerConnections.add(connection)
         closeables.add(connection)

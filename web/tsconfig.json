@@ -1,0 +1,16 @@
+{
+  "extends": "../tsconfig.json",
+  "compilerOptions": {
+    "jsx": "react-jsx",
+    "lib": ["DOM", "DOM.Iterable", "ES2022"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "noEmit": true,
+    "paths": {
+      "@/*": ["../*"],
+      "@staysound/*": ["../src/*"]
+    },
+    "types": ["vite/client"]
+  },
+  "include": ["src", "../src/types/audio.ts", "../src/services/audioUtils.ts", "../src/services/metadataService.ts"]
+}

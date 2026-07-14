@@ -115,6 +115,13 @@ internal data class ConnectToPeerInfo(
   val token: ByteArray,
 )
 
+internal class IncomingTransferRequest(
+  val token: ByteArray,
+  val filename: String,
+  val expectedSize: Long?,
+  val reply: (ByteArray) -> Unit,
+)
+
 internal data class TransferResponse(
   val allowed: Boolean,
   val reason: String?,

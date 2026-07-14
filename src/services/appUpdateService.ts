@@ -85,6 +85,9 @@ function buildManifestUrl(baseUrl: string, channel: string): string {
   if (!url.searchParams.has('channel')) {
     url.searchParams.set('channel', channel);
   }
+  // Cache-buster: the manifest lives behind Supabase's storage CDN and must
+  // always reflect the latest published release.
+  url.searchParams.set('t', String(Date.now()));
   return url.toString();
 }
 
@@ -97,9 +100,12 @@ async function fetchBinaryManifest(config: AppUpdateRuntimeConfig): Promise<Andr
     headers: {
       Accept: 'application/json',
     },
+    cache: 'no-store',
   });
 
-  if (response.status === 404) {
+  // Supabase Storage responds 400/404 when the object does not exist yet
+  // (no release has been published for this channel).
+  if (response.status === 404 || response.status === 400) {
     return null;
   }
 
@@ -280,7 +286,13 @@ export async function checkForAppUpdates(source: AppUpdateCheckSource = 'manual'
     try {
       await refreshInstalledVersionInfo();
 
-      const handledOta = await checkOtaUpdate(source);
+      // OTA problems (e.g. EAS unreachable) must not block binary updates.
+      let handledOta = false;
+      try {
+        handledOta = await checkOtaUpdate(source);
+      } catch (otaError) {
+        console.warn('[appUpdate] OTA check failed:', otaError);
+      }
       if (handledOta) {
         return;
       }

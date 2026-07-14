@@ -332,6 +332,7 @@ import { sanitizeFilename as utilsSanitizeFilename } from "./audioUtils";
 import { resolveAmazonMusicStreamFromTrack } from "./amazonMusicService";
 import { resolveDeezerStreamFromTrack } from "./deezerFallbackService";
 import { resolveQobuzStreamFromTrack } from "./qobuzKennyService";
+import { resolveSaavnStreamFromTrack } from "./saavnFallbackService";
 
 function sanitizeFilename(input: string): string {
   return utilsSanitizeFilename(input);
@@ -2814,7 +2815,111 @@ export async function downloadTidalTrack(
     return toLibraryTrack(enrichedTrack, persistentUri);
   };
 
+  const downloadFromSaavn = async (): Promise<Track | null> => {
+    const baseFilename = getTrackBaseFilename(tidalTrack);
+    const streamInfo = await resolveSaavnStreamFromTrack(
+      {
+        title: tidalTrack.title,
+        artist: tidalTrack.artist,
+        album: tidalTrack.album,
+        durationMs: tidalTrack.durationMs,
+      },
+      targetQuality,
+    );
+    if (!streamInfo?.url) return null;
+
+    if (flacOnlyDownload) {
+      return null;
+    }
+
+    const filename = `${baseFilename}.${streamInfo.extension}`;
+    const existingPublicUri = await findExistingPublicTrackUri(filename);
+    if (existingPublicUri) {
+      await persistMetadataInPublicDownloads(tidalTrack, baseFilename);
+      if (tidalTrack.artworkUrl) {
+        await persistArtworkInPublicDownloads(
+          tidalTrack.artworkUrl,
+          tidalTrack.artist,
+          tidalTrack.album,
+        );
+      }
+      return toLibraryTrack(
+        {
+          ...tidalTrack,
+          quality: streamInfo.quality,
+          codec: streamInfo.codec,
+        },
+        existingPublicUri,
+      );
+    }
+
+    await ensureDirectoryExists(TIDAL_TEMP_DOWNLOADS_DIR);
+    const outputUri = getOutputUri(baseFilename, streamInfo.extension);
+    await downloadSegment(
+      streamInfo.url,
+      outputUri,
+      options.onTask,
+      options.onProgress,
+    );
+
+    const fileInfo = await FileSystem.getInfoAsync(outputUri);
+    if (!fileInfo.exists || !fileInfo.size || fileInfo.size <= 0) {
+      throw new Error("Download failed: File is empty or does not exist");
+    }
+
+    if (!(await isValidAudioFile(outputUri, streamInfo.extension))) {
+      throw new Error(
+        `Download failed: The file received is not a valid ${streamInfo.extension.toUpperCase()}`,
+      );
+    }
+
+    let persistentUri = outputUri;
+    try {
+      persistentUri = await persistInPublicDownloads(
+        outputUri,
+        baseFilename,
+        streamInfo.extension,
+      );
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
+    } catch (persistError) {
+      console.error(
+        "[TidalService] Failed to persist Saavn file in public folder:",
+        persistError,
+      );
+      persistentUri = await persistInPrivateDownloads(
+        outputUri,
+        baseFilename,
+        streamInfo.extension,
+      );
+      await FileSystem.deleteAsync(outputUri, { idempotent: true });
+    }
+
+    const enrichedTrack: TidalTrack = {
+      ...tidalTrack,
+      quality: streamInfo.quality,
+      codec: streamInfo.codec,
+    };
+
+    await persistMetadataInPublicDownloads(enrichedTrack, baseFilename);
+    if (enrichedTrack.artworkUrl) {
+      await persistArtworkInPublicDownloads(
+        enrichedTrack.artworkUrl,
+        enrichedTrack.artist,
+        enrichedTrack.album,
+      );
+    }
+
+    return toLibraryTrack(enrichedTrack, persistentUri);
+  };
+
   if (options.qobuzOnly) {
+    try {
+      const saavnTrack = await downloadFromSaavn();
+      if (saavnTrack) return saavnTrack;
+    } catch (saavnError) {
+      console.warn("[TidalService] Saavn download failed:", saavnError);
+    }
+
     try {
       const amazonTrack = await downloadFromAmazonMusic();
       if (amazonTrack) return amazonTrack;
@@ -2868,6 +2973,13 @@ export async function downloadTidalTrack(
   } catch (error) {
     if (options.qobuzFallback) {
       try {
+        const saavnTrack = await downloadFromSaavn();
+        if (saavnTrack) return saavnTrack;
+      } catch (saavnError) {
+        console.warn("[TidalService] Saavn download fallback failed:", saavnError);
+      }
+
+      try {
         const amazonTrack = await downloadFromAmazonMusic();
         if (amazonTrack) return amazonTrack;
       } catch (amazonError) {
@@ -2914,6 +3026,13 @@ export async function downloadTidalTrack(
   if (!sourceUrl) {
     if (options.qobuzFallback) {
       try {
+        const saavnTrack = await downloadFromSaavn();
+        if (saavnTrack) return saavnTrack;
+      } catch (saavnError) {
+        console.warn("[TidalService] Saavn direct-url fallback failed:", saavnError);
+      }
+
+      try {
         const amazonTrack = await downloadFromAmazonMusic();
         if (amazonTrack) return amazonTrack;
       } catch (amazonError) {
@@ -2944,6 +3063,13 @@ export async function downloadTidalTrack(
   const extension = resolveDownloadExtension(manifest, sourceUrl);
   if (flacOnlyDownload && extension !== "flac") {
     if (options.qobuzFallback) {
+      try {
+        const saavnTrack = await downloadFromSaavn();
+        if (saavnTrack) return saavnTrack;
+      } catch (saavnError) {
+        console.warn("[TidalService] Saavn FLAC fallback failed:", saavnError);
+      }
+
       try {
         const amazonTrack = await downloadFromAmazonMusic();
         if (amazonTrack) return amazonTrack;
@@ -3126,6 +3252,28 @@ export async function createTidalStreamTrack(
   };
 
   const tryExternalStreamFallbacks = async (): Promise<Track | null> => {
+    try {
+      const saavnStream = await resolveSaavnStreamFromTrack(
+        {
+          title: tidalTrack.title,
+          artist: tidalTrack.artist,
+          album: tidalTrack.album,
+          durationMs: tidalTrack.durationMs,
+        },
+        preferredQuality,
+      );
+      if (saavnStream?.url) {
+        console.log("[TidalService] Saavn stream resolved", {
+          trackId: tidalTrack.id,
+          quality: saavnStream.quality,
+          extension: saavnStream.extension,
+        });
+        return buildExternalStreamTrack(saavnStream);
+      }
+    } catch (saavnError) {
+      console.warn("[TidalService] Saavn stream failed:", saavnError);
+    }
+
     try {
       const amazonStream = await resolveAmazonMusicStreamFromTrack(
         {

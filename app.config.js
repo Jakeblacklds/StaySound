@@ -1,10 +1,18 @@
 const IS_DEV = process.env.APP_VARIANT === 'development';
-const APP_VERSION = '1.0.1';
-const ANDROID_VERSION_CODE = 2;
+const APP_VERSION = '1.0.2';
+const ANDROID_VERSION_CODE = 3;
 const EAS_PROJECT_ID = 'f9cff190-672e-4832-add3-4a9cb3e68343';
 const OTA_CHANNEL = IS_DEV ? 'development' : 'production';
 const RUNTIME_VERSION = `staysound-${IS_DEV ? 'dev' : 'prod'}-${APP_VERSION}-${ANDROID_VERSION_CODE}`;
 const OTA_URL = `https://u.expo.dev/${EAS_PROJECT_ID}`;
+const BINARY_CHANNEL = IS_DEV ? 'development' : 'prod';
+const RELEASES_BUCKET = process.env.APP_RELEASES_STORAGE_BUCKET || 'staysound-releases';
+const SUPABASE_URL = (process.env.EXPO_PUBLIC_AUTH_SUPABASE_URL || '').replace(/\/+$/, '');
+const RELEASE_MANIFEST_URL =
+    process.env.EXPO_PUBLIC_APP_RELEASES_URL ||
+    (SUPABASE_URL
+        ? `${SUPABASE_URL}/storage/v1/object/public/${RELEASES_BUCKET}/android/${BINARY_CHANNEL}/manifest.json`
+        : '');
 
 module.exports = {
     expo: {
@@ -110,6 +118,7 @@ module.exports = {
             amazonMusic: {
                 baseUrl: process.env.EXPO_PUBLIC_AMAZON_MUSIC_BASE_URL || 'https://amz.geeked.wtf',
                 bypassToken: process.env.EXPO_PUBLIC_AMAZON_MUSIC_BYPASS_TOKEN || '',
+                turnstileJwt: process.env.EXPO_PUBLIC_AMAZON_TURNSTILE_JWT || '',
             },
             deezerFallback: {
                 baseUrl: process.env.EXPO_PUBLIC_DEEZER_FALLBACK_BASE_URL || 'https://dzr.tabs-vs-spaces.wtf',
@@ -132,8 +141,8 @@ module.exports = {
                 otaChannel: OTA_CHANNEL,
                 otaUrl: OTA_URL,
                 runtimeVersion: RUNTIME_VERSION,
-                releaseManifestUrl: process.env.EXPO_PUBLIC_APP_RELEASES_URL || '',
-                binaryChannel: IS_DEV ? 'development' : 'prod',
+                releaseManifestUrl: RELEASE_MANIFEST_URL,
+                binaryChannel: BINARY_CHANNEL,
                 binaryUpdatesEnabled: !IS_DEV,
                 packageName: IS_DEV ? 'com.staysound.app.dev' : 'com.staysound.app.pro',
             },

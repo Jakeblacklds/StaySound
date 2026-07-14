@@ -17,6 +17,8 @@ internal class SoulseekTransferClient(
   private val closeables: CopyOnWriteArrayList<Closeable>,
   private val peerAddresses: ConcurrentHashMap<String, PeerAddress>,
   private val pumpIncomingPeerSocket: () -> Unit,
+  private val pumpServerPackets: () -> Unit,
+  private val pollIncomingTransferRequest: () -> IncomingTransferRequest?,
   private val handleUnhandledServerCode: (Int, SlskMessageParser) -> Unit,
 ) {
   fun download(match: SoulseekMatch, outputPath: String): DownloadResult {
@@ -74,7 +76,7 @@ internal class SoulseekTransferClient(
       ).firstOrNull { it != null && it > 0L } ?: 0L
 
       sendQueuedTransferAcceptance(
-        peerSocket = queuedSocket,
+        reply = queuedTransfer.reply,
         token = queuedTransfer.token,
         expectedSize = queuedExpectedSize,
       )
@@ -104,7 +106,7 @@ internal class SoulseekTransferClient(
     filename: String,
   ): TransferHandshakeResult {
     val attemptErrors = ArrayList<String>()
-    val modes = listOf("plain", "peer-init-p", "pierce-fw")
+    val modes = listOf("peer-init-p", "pierce-fw")
 
     for (mode in modes) {
       ensureNotCancelled(cancelled)
@@ -184,7 +186,31 @@ internal class SoulseekTransferClient(
     while (System.currentTimeMillis() < deadline) {
       ensureNotCancelled(cancelled)
 
-      val packet = peerSocket.readPacket(900) ?: continue
+      // The uploader may deliver its TransferRequest over a brand-new connection
+      // (direct to our listen socket or indirect via server ConnectToPeer) instead
+      // of the peer socket we opened, so pump those sources too.
+      pumpIncomingPeerSocket()
+      pumpServerPackets()
+
+      while (true) {
+        val incoming = pollIncomingTransferRequest() ?: break
+        val incomingFilename = incoming.filename.trim().lowercase(Locale.US)
+        if (normalizedExpected.isNotBlank() && incomingFilename.isNotBlank() && incomingFilename != normalizedExpected) {
+          continue
+        }
+
+        return QueuedTransferStart(
+          token = incoming.token,
+          expectedSize = incoming.expectedSize,
+          reply = incoming.reply,
+        )
+      }
+
+      val packet = try {
+        peerSocket.readPacket(400)
+      } catch (_: Exception) {
+        null
+      } ?: continue
       if (packet.isEmpty()) continue
 
       val first = packet[0].toInt() and 0xFF
@@ -222,6 +248,7 @@ internal class SoulseekTransferClient(
           return QueuedTransferStart(
             token = queuedToken,
             expectedSize = expectedSize,
+            reply = { payload -> peerSocket.send(payload) },
           )
         }
 
@@ -240,14 +267,14 @@ internal class SoulseekTransferClient(
   }
 
   private fun sendQueuedTransferAcceptance(
-    peerSocket: SlskSocket,
+    reply: (ByteArray) -> Unit,
     token: ByteArray,
     expectedSize: Long,
   ) {
     val low = expectedSize and 0xFFFFFFFFL
     val high = (expectedSize ushr 32) and 0xFFFFFFFFL
 
-    peerSocket.send(
+    reply(
       SlskMessageBuilder()
         .writeUInt32(41)
         .writeBytes(token)
@@ -272,8 +299,16 @@ internal class SoulseekTransferClient(
       for (mode in modes) {
         ensureNotCancelled(cancelled)
         try {
-          val bytesWritten = downloadFileOnce(host, port, token, targetFile, expectedSize, mode)
-          if (bytesWritten > 0L) return
+          downloadFileOnce(host, port, token, targetFile, expectedSize, mode)
+
+          val complete = if (expectedSize > 0L) {
+            targetFile.length() >= expectedSize
+          } else {
+            targetFile.length() > 0L
+          }
+          if (complete) return
+
+          errors.add("r${round + 1}-$mode: transferencia incompleta (${targetFile.length()}/$expectedSize)")
         } catch (error: Exception) {
           errors.add("r${round + 1}-$mode: ${error.message ?: error::class.java.simpleName}")
         }
@@ -295,7 +330,9 @@ internal class SoulseekTransferClient(
     expectedSize: Long,
     mode: String,
   ): Long {
-    if (targetFile.exists()) targetFile.delete()
+    // Resume from whatever a previous attempt already wrote instead of restarting.
+    val startOffset = if (targetFile.exists()) targetFile.length() else 0L
+    if (expectedSize in 1..startOffset) return 0L
 
     val fileSocket = SlskSocket.connect(host, port)
     closeables.add(fileSocket)
@@ -328,11 +365,17 @@ internal class SoulseekTransferClient(
 
     fileSocket.send(token)
 
-    fileSocket.send(ByteArray(8) { 0 })
+    val offsetBytes = ByteArray(8)
+    for (i in 0 until 8) {
+      offsetBytes[i] = ((startOffset ushr (i * 8)) and 0xFFL).toByte()
+    }
+    fileSocket.send(offsetBytes)
 
-    FileOutputStream(targetFile).use { output ->
+    FileOutputStream(targetFile, true).use { output ->
       val buffer = ByteArray(64 * 1024)
-      var totalBytes = 0L
+      var totalBytes = startOffset
+      var newBytes = 0L
+      var lastDataAtMs = System.currentTimeMillis()
       fileSocket.setReadTimeout(12_000)
 
       while (true) {
@@ -342,18 +385,23 @@ internal class SoulseekTransferClient(
           input.read(buffer)
         } catch (_: SocketTimeoutException) {
           if (expectedSize > 0L && totalBytes >= expectedSize) break
+          if (System.currentTimeMillis() - lastDataAtMs > 45_000L) {
+            throw SocketTimeoutException("Transferencia estancada")
+          }
           continue
         }
 
         if (read <= 0) break
         output.write(buffer, 0, read)
         totalBytes += read.toLong()
+        newBytes += read.toLong()
+        lastDataAtMs = System.currentTimeMillis()
         if (expectedSize > 0L && totalBytes >= expectedSize) break
       }
 
       output.flush()
-      if (totalBytes <= 0L) throw EOFException("Socket cerrado")
-      return totalBytes
+      if (newBytes <= 0L && startOffset <= 0L) throw EOFException("Socket cerrado")
+      return newBytes
     }
   }
 
@@ -411,7 +459,7 @@ internal class SoulseekTransferClient(
   }
 
   private fun waitForTransferResponse(peerSocket: SlskSocket): TransferResponse {
-    val deadline = System.currentTimeMillis() + 15000L
+    val deadline = System.currentTimeMillis() + 8000L
 
     while (System.currentTimeMillis() < deadline) {
       ensureNotCancelled(cancelled)
@@ -461,7 +509,8 @@ internal class SoulseekTransferClient(
   }
 }
 
-private data class QueuedTransferStart(
+private class QueuedTransferStart(
   val token: ByteArray,
   val expectedSize: Long?,
+  val reply: (ByteArray) -> Unit,
 )

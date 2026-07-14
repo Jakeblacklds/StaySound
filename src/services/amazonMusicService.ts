@@ -55,8 +55,11 @@ function readAmazonConfig(): Record<string, any> {
 
 function getBypassToken(): string {
   const extraToken = readAmazonConfig().bypassToken;
+  const extraJwt = readAmazonConfig().turnstileJwt;
   return (
+    process.env.EXPO_PUBLIC_AMAZON_TURNSTILE_JWT?.trim() ||
     process.env.EXPO_PUBLIC_AMAZON_MUSIC_BYPASS_TOKEN?.trim() ||
+    (typeof extraJwt === "string" ? extraJwt.trim() : "") ||
     (typeof extraToken === "string" ? extraToken.trim() : "")
   );
 }
@@ -167,6 +170,7 @@ export async function resolveAmazonMusicStreamFromTrack(
 ): Promise<AmazonMusicResolvedStream | null> {
   const bypassToken = getBypassToken();
   if (!bypassToken) return null;
+  const manualJwt = bypassToken.split(".").length === 3 ? bypassToken : "";
 
   const params = new URLSearchParams({
     track: track.title,
@@ -174,11 +178,17 @@ export async function resolveAmazonMusicStreamFromTrack(
     album: track.album,
     duration: String(Math.round(track.durationMs / 1000)),
     quality: amazonQualityFromTidal(quality),
-    bypass_token: bypassToken,
   });
+  if (bypassToken && !manualJwt) {
+    params.set("bypass_token", bypassToken);
+  }
   const trackUrl = `${getAmazonApiBaseUrl()}/api/track/?${params.toString()}`;
   const trackPayload = unwrapAmazonTrackPayload(
-    await fetchJson<AmazonTrackApiEnvelope>(trackUrl, {}, 15000),
+    await fetchJson<AmazonTrackApiEnvelope>(
+      trackUrl,
+      manualJwt ? { headers: { "X-Turnstile-JWT": manualJwt } } : {},
+      15000,
+    ),
   );
   const finalUrl = trackPayload.stream_url?.trim();
   if (!finalUrl) return null;

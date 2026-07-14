@@ -1,6 +1,8 @@
+-- Public bucket: APKs and manifest.json are served directly to the app and
+-- the web download button via /storage/v1/object/public/.
 insert into storage.buckets (id, name, public)
-values ('staysound-releases', 'staysound-releases', false)
-on conflict (id) do nothing;
+values ('staysound-releases', 'staysound-releases', true)
+on conflict (id) do update set public = true;
 
 create table if not exists public.app_binary_releases (
   platform text not null,

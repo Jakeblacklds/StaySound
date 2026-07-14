@@ -1,0 +1,286 @@
+import type { Track } from '@staysound/types/audio';
+
+export interface WebAudioState {
+  currentTrack: Track | null;
+  queue: Track[];
+  queueIndex: number;
+  isPlaying: boolean;
+  isLoading: boolean;
+  position: number;
+  duration: number;
+  volume: number;
+  repeatMode: 'off' | 'one' | 'all';
+  shuffleEnabled: boolean;
+  error: string | null;
+}
+
+type Listener = (state: WebAudioState) => void;
+
+const initialState: WebAudioState = {
+  currentTrack: null,
+  queue: [],
+  queueIndex: -1,
+  isPlaying: false,
+  isLoading: false,
+  position: 0,
+  duration: 0,
+  volume: 0.9,
+  repeatMode: 'off',
+  shuffleEnabled: false,
+  error: null,
+};
+
+class WebAudioEngine {
+  private audio = new Audio();
+  private listeners = new Set<Listener>();
+  private state: WebAudioState = { ...initialState };
+  private lastLinearQueue: Track[] = [];
+  /** Resolves a playable URL for a track whose blob: URL died between sessions. */
+  private resolveTrackUri?: (track: Track) => Promise<string | null>;
+
+  setTrackUriResolver(resolver: (track: Track) => Promise<string | null>): void {
+    this.resolveTrackUri = resolver;
+  }
+
+  constructor() {
+    this.audio.preload = 'metadata';
+    this.audio.addEventListener('loadstart', () => this.patch({ isLoading: true, error: null }));
+    this.audio.addEventListener('loadedmetadata', () => this.patch({ duration: this.secondsToMs(this.audio.duration), isLoading: false }));
+    this.audio.addEventListener('timeupdate', () => this.patch({ position: this.secondsToMs(this.audio.currentTime) }));
+    this.audio.addEventListener('play', () => this.patch({ isPlaying: true, isLoading: false }));
+    this.audio.addEventListener('pause', () => this.patch({ isPlaying: false }));
+    this.audio.addEventListener('waiting', () => this.patch({ isLoading: true }));
+    this.audio.addEventListener('canplay', () => this.patch({ isLoading: false }));
+    this.audio.addEventListener('ended', () => void this.handleEnded());
+    this.audio.addEventListener('error', () => {
+      this.patch({
+        isPlaying: false,
+        isLoading: false,
+        error: 'No se pudo reproducir este archivo. Reimpórtalo o prueba otro formato.',
+      });
+    });
+    this.setVolume(initialState.volume);
+  }
+
+  subscribe(listener: Listener): () => void {
+    this.listeners.add(listener);
+    listener(this.getState());
+    return () => this.listeners.delete(listener);
+  }
+
+  getState(): WebAudioState {
+    return { ...this.state, queue: [...this.state.queue] };
+  }
+
+  getCurrentTime(): number {
+    return this.audio.currentTime;
+  }
+
+  getAudioElement(): HTMLAudioElement {
+    return this.audio;
+  }
+
+  setQueue(track: Track, queue: Track[], autoPlay = false): void {
+    const index = Math.max(0, queue.findIndex(item => item.id === track.id));
+    this.lastLinearQueue = [...queue];
+    this.patch({
+      queue: [...queue],
+      queueIndex: index,
+      currentTrack: queue[index] ?? track,
+      position: 0,
+      duration: queue[index]?.duration ?? track.duration ?? 0,
+      error: null,
+    });
+    void this.loadCurrentTrack(autoPlay);
+  }
+
+  async play(track?: Track, queue?: Track[]): Promise<void> {
+    if (track) {
+      // setQueue drives the (possibly async) load + play for us.
+      this.setQueue(track, queue && queue.length > 0 ? queue : [track], true);
+      return;
+    }
+
+    if (!this.state.currentTrack) return;
+
+    // Resuming: if the current track was never linked this session, resolve it.
+    if (!this.audio.src) {
+      await this.loadCurrentTrack(true);
+      return;
+    }
+
+    try {
+      await this.audio.play();
+      this.patch({ isPlaying: true, error: null });
+    } catch (error) {
+      const message = error instanceof Error && error.name === 'NotAllowedError'
+        ? 'Toca play otra vez para iniciar audio en este navegador.'
+        : 'No se pudo iniciar la reproducción.';
+      this.patch({ isPlaying: false, isLoading: false, error: message });
+    }
+  }
+
+  pause(): void {
+    this.audio.pause();
+  }
+
+  toggle(): void {
+    if (this.state.isPlaying) {
+      this.pause();
+      return;
+    }
+    void this.play();
+  }
+
+  seek(positionMs: number): void {
+    this.audio.currentTime = Math.max(0, positionMs / 1000);
+    this.patch({ position: Math.max(0, positionMs) });
+  }
+
+  setVolume(volume: number): void {
+    const nextVolume = Math.max(0, Math.min(1, volume));
+    this.audio.volume = nextVolume;
+    this.patch({ volume: nextVolume });
+  }
+
+  setRepeatMode(repeatMode: WebAudioState['repeatMode']): void {
+    this.patch({ repeatMode });
+  }
+
+  setShuffleEnabled(shuffleEnabled: boolean): void {
+    if (shuffleEnabled === this.state.shuffleEnabled) return;
+
+    if (shuffleEnabled) {
+      const current = this.state.currentTrack;
+      const rest = this.state.queue.filter(track => track.id !== current?.id);
+      const shuffled = [...rest].sort(() => Math.random() - 0.5);
+      const nextQueue = current ? [current, ...shuffled] : shuffled;
+      this.patch({ shuffleEnabled, queue: nextQueue, queueIndex: current ? 0 : -1 });
+      return;
+    }
+
+    const currentId = this.state.currentTrack?.id;
+    const nextIndex = Math.max(0, this.lastLinearQueue.findIndex(track => track.id === currentId));
+    this.patch({ shuffleEnabled, queue: [...this.lastLinearQueue], queueIndex: nextIndex });
+  }
+
+  next(): void {
+    const nextIndex = this.getNextIndex();
+    if (nextIndex < 0) {
+      this.pause();
+      return;
+    }
+    this.goToIndex(nextIndex);
+  }
+
+  previous(): void {
+    if (this.state.position > 3000) {
+      this.seek(0);
+      return;
+    }
+    const previousIndex = this.state.queueIndex > 0 ? this.state.queueIndex - 1 : -1;
+    if (previousIndex >= 0) this.goToIndex(previousIndex);
+  }
+
+  private async handleEnded(): Promise<void> {
+    if (this.state.repeatMode === 'one') {
+      this.seek(0);
+      await this.play();
+      return;
+    }
+    this.next();
+  }
+
+  private getNextIndex(): number {
+    if (this.state.queue.length === 0) return -1;
+    const nextIndex = this.state.queueIndex + 1;
+    if (nextIndex < this.state.queue.length) return nextIndex;
+    return this.state.repeatMode === 'all' ? 0 : -1;
+  }
+
+  /** Jump to a specific index in the queue and start playing */
+  playAtIndex(index: number): void {
+    this.goToIndex(index, true);
+  }
+
+  private goToIndex(index: number, autoPlay = this.state.isPlaying): void {
+    const nextTrack = this.state.queue[index];
+    if (!nextTrack) return;
+    this.patch({
+      currentTrack: nextTrack,
+      queueIndex: index,
+      position: 0,
+      duration: nextTrack.duration ?? 0,
+      error: null,
+    });
+    void this.loadCurrentTrack(autoPlay);
+  }
+
+  private async loadCurrentTrack(autoPlay: boolean): Promise<void> {
+    const track = this.state.currentTrack;
+    if (!track) return;
+
+    // Lazily re-link tracks whose blob: URL didn't survive the last session.
+    let uri = track.uri;
+    if (!uri && this.resolveTrackUri) {
+      this.patch({ isLoading: true, error: null });
+      try {
+        uri = (await this.resolveTrackUri(track)) ?? '';
+      } catch {
+        uri = '';
+      }
+      // The user may have skipped to another track while we were resolving.
+      if (this.state.currentTrack?.id !== track.id) return;
+    }
+
+    if (!uri) {
+      this.patch({ isLoading: false, error: 'Este track necesita reimportarse antes de reproducir.' });
+      return;
+    }
+
+    this.audio.src = uri;
+    this.audio.load();
+    this.updateMediaSession({ ...track, uri });
+
+    if (autoPlay) {
+      try {
+        await this.audio.play();
+        this.patch({ isPlaying: true, error: null });
+      } catch (error) {
+        const message = error instanceof Error && error.name === 'NotAllowedError'
+          ? 'Toca play otra vez para iniciar audio en este navegador.'
+          : 'No se pudo iniciar la reproducción.';
+        this.patch({ isPlaying: false, isLoading: false, error: message });
+      }
+    }
+  }
+
+  private updateMediaSession(track: Track): void {
+    if (!('mediaSession' in navigator)) return;
+
+    navigator.mediaSession.metadata = new MediaMetadata({
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      artwork: track.artwork ? [{ src: track.artwork }] : undefined,
+    });
+    navigator.mediaSession.setActionHandler('play', () => void this.play());
+    navigator.mediaSession.setActionHandler('pause', () => this.pause());
+    navigator.mediaSession.setActionHandler('previoustrack', () => this.previous());
+    navigator.mediaSession.setActionHandler('nexttrack', () => this.next());
+    navigator.mediaSession.setActionHandler('seekto', details => {
+      if (typeof details.seekTime === 'number') this.seek(details.seekTime * 1000);
+    });
+  }
+
+  private secondsToMs(value: number): number {
+    return Number.isFinite(value) ? Math.round(value * 1000) : 0;
+  }
+
+  private patch(partial: Partial<WebAudioState>): void {
+    this.state = { ...this.state, ...partial };
+    for (const listener of this.listeners) listener(this.getState());
+  }
+}
+
+export const webAudioEngine = new WebAudioEngine();

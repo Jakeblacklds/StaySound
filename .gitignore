@@ -51,3 +51,4 @@ beta_*.html
 page-*.js
 [0-9]*-*.js
 src/theme/write_test.tmp
+.vercel
