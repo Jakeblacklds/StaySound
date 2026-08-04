@@ -56,8 +56,14 @@ fn ensure_soulseek_bridge(
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    let app = tauri::Builder::default()
-        .plugin(tauri_plugin_macos_refresh_rate::init())
+    let builder = tauri::Builder::default();
+
+    // AppKit-only crate, so it can't be in the cross-platform builder chain — see the
+    // macOS-gated dependency in Cargo.toml.
+    #[cfg(target_os = "macos")]
+    let builder = builder.plugin(tauri_plugin_macos_refresh_rate::init());
+
+    let app = builder
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_process::init())

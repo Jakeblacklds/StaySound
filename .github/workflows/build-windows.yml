@@ -1,0 +1,106 @@
+# Builds the Windows desktop app and publishes it to the PUBLIC releases repo.
+#
+# Windows can't be cross-compiled from macOS: rustls pulls in `ring`, whose C sources
+# need the MSVC headers. So the installer is built on a real Windows runner here rather
+# than locally.
+#
+# Required repository secrets:
+#   RELEASES_TOKEN                       PAT with `repo` scope on Jakeblacklds/staysound-releases
+#                                        (GITHUB_TOKEN can't write to another repository)
+#   TAURI_SIGNING_PRIVATE_KEY            contents of ~/.tauri/staysound-updater.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD   its passphrase, or "" if the key has none
+name: Build Windows
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag in the public releases repo (e.g. v1.0.0)'
+        required: true
+        default: 'v1.0.0'
+      publish:
+        description: 'Upload the installers to that release'
+        type: boolean
+        default: true
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      # postinstall runs patch-package, which the Soulseek sidecar depends on
+      # (patches/slsk-client+1.1.0.patch).
+      - name: Install dependencies
+        run: npm ci
+
+      # Bundles scripts/staysound-soulseek-bridge.mjs into a self-contained .exe.
+      # `--target host` means the Windows runner produces the Windows sidecar that
+      # tauri.conf.json's externalBin expects.
+      - name: Build Soulseek sidecar
+        run: npm run desktop:sidecar
+
+      # Also runs `npm run web:build` via tauri.conf.json's beforeBuildCommand.
+      - name: Build installers
+        run: npx tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      # The download page classifies assets by file name, so rename Tauri's default
+      # `StaySound_1.0.0_x64_en-US.msi` into the same scheme as the macOS/Android assets.
+      - name: Collect and rename artifacts
+        id: collect
+        shell: pwsh
+        run: |
+          $version = (Get-Content src-tauri/tauri.conf.json | ConvertFrom-Json).version
+          New-Item -ItemType Directory -Force -Path dist-windows | Out-Null
+
+          $msi = Get-ChildItem -Recurse -Path src-tauri/target/release/bundle/msi -Filter *.msi | Select-Object -First 1
+          $exe = Get-ChildItem -Recurse -Path src-tauri/target/release/bundle/nsis -Filter *-setup.exe | Select-Object -First 1
+
+          if (-not $msi -and -not $exe) { throw "No installer was produced by tauri build" }
+
+          if ($msi) { Copy-Item $msi.FullName "dist-windows/StaySound-$version-windows-x64.msi" }
+          if ($exe) { Copy-Item $exe.FullName "dist-windows/StaySound-$version-windows-x64-setup.exe" }
+
+          # Updater sidecars, ignored by the download page but needed by the auto-updater.
+          Get-ChildItem -Recurse -Path src-tauri/target/release/bundle -Include *.sig |
+            ForEach-Object { Copy-Item $_.FullName "dist-windows/$($_.Name)" }
+
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Get-ChildItem dist-windows | ForEach-Object { Write-Host $_.Name $_.Length }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: staysound-windows
+          path: dist-windows/*
+
+      - name: Publish to releases repo
+        if: ${{ inputs.publish }}
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.RELEASES_TOKEN }}
+          REPO: Jakeblacklds/staysound-releases
+          TAG: ${{ inputs.tag }}
+        run: |
+          set -euo pipefail
+          if ! gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            gh release create "$TAG" --repo "$REPO" \
+              --title "StaySound ${TAG#v}" \
+              --notes "Compilación de Windows."
+          fi
+          gh release upload "$TAG" --repo "$REPO" --clobber dist-windows/*
