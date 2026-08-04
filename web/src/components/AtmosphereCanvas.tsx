@@ -108,6 +108,7 @@ export function AtmosphereCanvas({ palette, isPlaying, motionKey, reactiveTarget
     let rafId = 0;
     let width = 0;
     let height = 0;
+    const lastWrittenVars = new Map<string, string>();
     let previousFrameTime = performance.now();
     let visualBands = { ...ZERO_BANDS };
     let activeMotionKey = motionKeyRef.current;
@@ -144,8 +145,19 @@ export function AtmosphereCanvas({ palette, isPlaying, motionKey, reactiveTarget
 
     const draw = (time: number) => {
       rafId = requestAnimationFrame(draw);
+      // Hidden windows have nothing to paint. Visible animation quality and
+      // timing remain unchanged, while background CPU/GPU work drops to zero.
+      if (document.hidden) {
+        previousFrameTime = time;
+        return;
+      }
       const currentPalette = paletteRef.current;
       if (!currentPalette || width === 0) return;
+
+      // The ambient field is deliberately soft, so 30 FPS while playing and
+      // 15 FPS while paused preserve the compositor budget for scrolling.
+      const minimumFrameMs = playingRef.current ? 30 : 60;
+      if (time - previousFrameTime < minimumFrameMs) return;
 
       if (activeMotionKey !== motionKeyRef.current) {
         activeMotionKey = motionKeyRef.current;
@@ -208,15 +220,27 @@ export function AtmosphereCanvas({ palette, isPlaying, motionKey, reactiveTarget
       beatPunch *= Math.pow(0.925, dt);
 
       // Expose live band energies as CSS vars (artwork pulse, glow, etc.).
+      // Every write invalidates style for the target's whole subtree, so the
+      // target must stay a small leaf layer (never the full-player root) and
+      // unchanged values are skipped — otherwise a silent/paused player keeps
+      // recomputing styles 30 times a second.
       const target = reactiveTarget?.current;
       if (target) {
-        target.style.setProperty('--atmo-bass', rawBands.bass.toFixed(3));
-        target.style.setProperty('--atmo-mid', rawBands.mid.toFixed(3));
-        target.style.setProperty('--atmo-treble', rawBands.treble.toFixed(3));
-        target.style.setProperty('--atmo-bass-smooth', visualBands.bass.toFixed(3));
-        target.style.setProperty('--atmo-mid-smooth', visualBands.mid.toFixed(3));
-        target.style.setProperty('--atmo-treble-smooth', visualBands.treble.toFixed(3));
-        target.style.setProperty('--atmo-beat', beatPunch.toFixed(3));
+        const writeBandVar = (name: string, value: number) => {
+          // Two decimals: coarse enough to skip most frames, far below what
+          // the eye can see on a 0.5-weighted opacity/scale mix.
+          const serialized = value.toFixed(2);
+          if (lastWrittenVars.get(name) === serialized) return;
+          lastWrittenVars.set(name, serialized);
+          target.style.setProperty(name, serialized);
+        };
+        writeBandVar('--atmo-bass', rawBands.bass);
+        writeBandVar('--atmo-mid', rawBands.mid);
+        writeBandVar('--atmo-treble', rawBands.treble);
+        writeBandVar('--atmo-bass-smooth', visualBands.bass);
+        writeBandVar('--atmo-mid-smooth', visualBands.mid);
+        writeBandVar('--atmo-treble-smooth', visualBands.treble);
+        writeBandVar('--atmo-beat', beatPunch);
       }
 
       context.clearRect(0, 0, width, height);

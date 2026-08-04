@@ -7,7 +7,6 @@ import {
 import { useLibraryStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import * as Clipboard from 'expo-clipboard';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
@@ -60,7 +59,14 @@ function PathOption({
 
   return (
     <AnimatedPressable
-      style={[styles.pathOption, animStyle]}
+      style={[
+        styles.pathOption,
+        {
+          backgroundColor: active ? `${theme.colors.primaryContainer}52` : `${theme.colors.surface}78`,
+          borderColor: active ? `${theme.colors.primary}62` : `${theme.colors.outline}28`,
+        },
+        animStyle,
+      ]}
       onPressIn={() => { scale.value = withTiming(0.97, { duration: 100, easing: Easing.out(Easing.quad) }); }}
       onPressOut={() => { scale.value = withTiming(1, { duration: 160, easing: Easing.out(Easing.quad) }); }}
       onPress={onPress}
@@ -192,12 +198,7 @@ export default function PlaylistCreateScreen() {
   }, [expandedPath, handleImportSpotify, showSnackbar, spotifyState]);
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['top', 'bottom']}>
-      <LinearGradient
-        colors={[theme.colors.primary + '14', theme.colors.secondary + '0A', theme.colors.background]}
-        style={StyleSheet.absoluteFill}
-      />
-
+    <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
       <KeyboardAvoidingView style={styles.container} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
         {/* Top bar */}
         <View style={styles.topBar}>
@@ -425,10 +426,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   scrollContent: {
-    paddingHorizontal: 0,
+    paddingHorizontal: 16,
   },
   hero: {
-    paddingHorizontal: 22,
+    paddingHorizontal: 6,
     paddingTop: 28,
     paddingBottom: 28,
     gap: 6,
@@ -446,16 +447,19 @@ const styles = StyleSheet.create({
   },
   divider: {
     height: 1,
-    marginHorizontal: 22,
-    marginVertical: 4,
+    marginHorizontal: 6,
+    marginVertical: 8,
   },
   // Path option row
   pathOption: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 22,
-    paddingVertical: 20,
+    paddingHorizontal: 16,
+    paddingVertical: 18,
     gap: 16,
+    borderRadius: 24,
+    borderWidth: StyleSheet.hairlineWidth,
+    overflow: 'hidden',
   },
   pathIndicator: {
     height: 36,

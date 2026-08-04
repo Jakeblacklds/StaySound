@@ -7,6 +7,7 @@
  * a singleton that lazily wires itself the first time playback starts.
  */
 import { webAudioEngine } from './webAudioEngine';
+import { isTauriDesktop } from '../desktop/tauriMusicLibrary';
 
 export interface SpectrumBands {
   /** 30–150 Hz energy, 0..1 */
@@ -47,6 +48,12 @@ class SpectrumEngine {
    * false when Web Audio is unavailable (playback keeps working untouched).
    */
   start(): boolean {
+    // WKWebView suspends Web Audio when the Tauri window loses foreground
+    // status. Once a media element is captured by createMediaElementSource(),
+    // that suspended graph is its only output and playback becomes silent.
+    // Keep Tauri on the native HTMLMediaElement output for reliable background
+    // playback; the ambient canvas gracefully falls back to its idle motion.
+    if (isTauriDesktop()) return false;
     if (this.failed) return false;
     if (this.analyser && this.context) {
       if (this.context.state === 'suspended') void this.context.resume();
@@ -62,11 +69,14 @@ class SpectrumEngine {
       const context = new AudioContextCtor();
       const source = context.createMediaElementSource(webAudioEngine.getAudioElement());
       const analyser = context.createAnalyser();
+      const outputGain = context.createGain();
       analyser.fftSize = 2048;
       analyser.smoothingTimeConstant = 0.5;
 
       source.connect(analyser);
-      analyser.connect(context.destination);
+      analyser.connect(outputGain);
+      outputGain.connect(context.destination);
+      webAudioEngine.attachOutputGain(outputGain);
 
       this.context = context;
       this.analyser = analyser;

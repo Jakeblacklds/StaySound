@@ -9,7 +9,6 @@
 
 import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { Artist } from '@/src/types';
-import { BlurView } from 'expo-blur';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect, useMemo, useState } from 'react';
@@ -52,7 +51,7 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, presen
     }, [artist.id, artworkUri]);
 
     // Determine radius based on theme - matching the premium Tidal card look
-    const borderRadius = cardStyles.variant === 'brutal' ? 0 : (isMasonry ? 22 : 28);
+    const borderRadius = cardStyles.variant === 'brutal' ? 0 : 24;
 
     const imageContainerStyle = useMemo(() => {
         const base: any[] = [
@@ -62,10 +61,10 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, presen
                 width: cardSize,
                 height: customHeight || cardSize,
                 borderRadius,
-                borderWidth: cardStyles.variant === 'brutal' ? globalStyles.borderWidth : 0,
+                borderWidth: cardStyles.variant === 'brutal' ? globalStyles.borderWidth : StyleSheet.hairlineWidth,
                 borderColor: cardStyles.variant === 'brutal'
                     ? globalStyles.borderColor
-                    : 'transparent',
+                    : `${theme.colors.outline}38`,
                 shadowColor: 'transparent',
                 shadowOffset: { width: 0, height: 0 },
                 shadowOpacity: 0,
@@ -134,13 +133,6 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, presen
                 )}
 
                 <View style={styles.infoOverlay}>
-                    {performanceProfile.enableBlurEffects ? (
-                        <BlurView
-                            intensity={isMasonry ? 12 : 20}
-                            tint="dark"
-                            style={StyleSheet.absoluteFill}
-                        />
-                    ) : null}
                     {/* Theme-aware gradient — adapts to dynamic palette and light/dark mode */}
                     <LinearGradient
                         colors={isMasonry
@@ -206,7 +198,8 @@ const styles = StyleSheet.create({
         marginBottom: 14,
     },
     pressed: {
-        opacity: 0.82,
+        opacity: 0.9,
+        transform: [{ scale: 0.97 }],
     },
     imageContainer: {
         alignItems: 'center',
@@ -225,6 +218,7 @@ const styles = StyleSheet.create({
         bottom: 0,
         left: 0,
         right: 0,
+        paddingTop: 42,
         paddingBottom: 10,
     },
     info: {

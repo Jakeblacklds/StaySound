@@ -52,14 +52,14 @@ export function PlaylistCard({
     }));
 
     const animatedBgStyle = useAnimatedStyle(() => ({
-        backgroundColor: size === 'row' ? theme.colors.surface : aC.surfaceVariant.value,
+        backgroundColor: size === 'row' ? `${theme.colors.surface}A8` : aC.surfaceVariant.value,
     }));
 
     const count = trackCount ?? playlist.trackIds.length;
     const finalArtwork = artwork || playlist.artwork;
 
     const renderFullGridContent = () => (
-        <Animated.View style={[styles.gridArtwork, animatedBgStyle, { height: height || 200, borderRadius: theme.components.card.imageRadius, overflow: 'hidden' }]}>
+        <Animated.View style={[styles.gridArtwork, animatedBgStyle, { height: height || 200, borderRadius: 24, borderColor: `${theme.colors.outline}38`, overflow: 'hidden' }]}>
             {finalArtwork ? (
                 <ExpoImage
                     source={{ uri: finalArtwork }}
@@ -174,13 +174,14 @@ const styles = StyleSheet.create({
     rowContainer: {
         flexDirection: 'row',
         alignItems: 'center',
-        padding: 12,
-        borderRadius: 12,
+        padding: 10,
+        borderRadius: 20,
+        borderWidth: StyleSheet.hairlineWidth,
     },
     rowArtwork: {
         width: 56,
         height: 56,
-        borderRadius: 8,
+        borderRadius: 16,
         overflow: 'hidden',
     },
     rowArtworkImage: {
@@ -203,6 +204,7 @@ const styles = StyleSheet.create({
         alignItems: 'center',
         justifyContent: 'center',
         width: '100%',
+        borderWidth: StyleSheet.hairlineWidth,
     },
     gridArtworkImage: {
         width: '100%',
@@ -217,11 +219,11 @@ const styles = StyleSheet.create({
         paddingTop: 30,
     },
     gridInfo: {
-        paddingVertical: 8,
-        paddingHorizontal: 12,
+        paddingVertical: 12,
+        paddingHorizontal: 14,
     },
     gridName: {
-        ...typeScale.bodyStrong,
+        ...typeScale.title,
         color: '#FFFFFF',
     },
     gridSubtitle: {

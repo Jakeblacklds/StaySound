@@ -27,6 +27,8 @@ export interface Track {
     spotifyUrl?: string;
     isrc?: string;
     dateAdded: number;
+    /** Timestamp assigned after a StaySound download completes. */
+    downloadedAt?: number;
     favorite?: boolean;
     /** @internal Temporary field set during scan for filename-based matching. Not persisted. */
     _filename?: string;

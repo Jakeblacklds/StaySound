@@ -1,4 +1,4 @@
-import { requireNativeModule } from 'expo-modules-core';
+import { requireOptionalNativeModule } from 'expo-modules-core';
 
 export type SoulseekNativeConfig = {
   username: string;
@@ -41,10 +41,18 @@ interface NativeSoulseekModule {
   cancelActiveOperations(): Promise<void>;
 }
 
-const NativeModule = requireNativeModule<NativeSoulseekModule>('SoulseekNative');
+const NativeModule = requireOptionalNativeModule<NativeSoulseekModule>('SoulseekNative');
+
+function requireSoulseekNativeModule(): NativeSoulseekModule {
+  if (!NativeModule) {
+    throw new Error('El motor nativo de Soulseek no esta disponible en esta plataforma.');
+  }
+
+  return NativeModule;
+}
 
 export function isSoulseekNativeAvailable(): boolean {
-  return NativeModule.isAvailable();
+  return NativeModule?.isAvailable() ?? false;
 }
 
 export async function searchSoulseekNative(
@@ -53,7 +61,7 @@ export async function searchSoulseekNative(
   timeoutMs: number,
   maxResults: number,
 ): Promise<SoulseekNativeMatch[]> {
-  return NativeModule.search(config, query, timeoutMs, maxResults);
+  return requireSoulseekNativeModule().search(config, query, timeoutMs, maxResults);
 }
 
 export async function downloadSoulseekNativeFile(
@@ -61,10 +69,11 @@ export async function downloadSoulseekNativeFile(
   match: SoulseekNativeMatch,
   outputPath: string,
 ): Promise<SoulseekNativeDownloadResult> {
-  return NativeModule.download(config, match, outputPath);
+  return requireSoulseekNativeModule().download(config, match, outputPath);
 }
 
 export async function cancelSoulseekNativeOperations(): Promise<void> {
+  if (!NativeModule) return;
   return NativeModule.cancelActiveOperations();
 }
 

@@ -1,35 +1,75 @@
-import { StatusBar } from 'expo-status-bar';
-import { Platform, StyleSheet } from 'react-native';
-
-import EditScreenInfo from '@/components/EditScreenInfo';
-import { Text, View } from '@/components/Themed';
+import { ImmersiveGlass } from '@/src/components/ui';
+import { useTheme } from '@/src/theme';
+import { Ionicons } from '@expo/vector-icons';
+import { router } from 'expo-router';
+import React from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
+import { Text } from 'react-native-paper';
+import { SafeAreaView } from 'react-native-safe-area-context';
 
 export default function ModalScreen() {
-  return (
-    <View style={styles.container}>
-      <Text style={styles.title}>Modal</Text>
-      <View style={styles.separator} lightColor="#eee" darkColor="rgba(255,255,255,0.1)" />
-      <EditScreenInfo path="app/modal.tsx" />
+  const { theme } = useTheme();
 
-      {/* Use a light status bar on iOS to account for the black space above the modal */}
-      <StatusBar style={Platform.OS === 'ios' ? 'light' : 'auto'} />
-    </View>
+  return (
+    <SafeAreaView style={styles.container}>
+      <ImmersiveGlass tone="strong" style={styles.panel}>
+        <View style={[styles.icon, { backgroundColor: `${theme.colors.primaryContainer}B8` }]}>
+          <Ionicons name="musical-notes" size={30} color={theme.colors.onPrimaryContainer} />
+        </View>
+        <Text style={[styles.title, { color: theme.colors.onSurface }]}>StaySound</Text>
+        <Text style={[styles.copy, { color: theme.colors.onSurfaceVariant }]}>Tu música sigue contigo.</Text>
+        <Pressable
+          accessibilityRole="button"
+          onPress={() => router.back()}
+          style={[styles.button, { backgroundColor: theme.colors.primary }]}
+        >
+          <Text style={[styles.buttonLabel, { color: theme.colors.onPrimary }]}>Cerrar</Text>
+        </Pressable>
+      </ImmersiveGlass>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+    justifyContent: 'center',
+    padding: 20,
+  },
+  panel: {
+    alignItems: 'center',
+    padding: 28,
+    gap: 10,
+  },
+  icon: {
+    width: 72,
+    height: 72,
+    borderRadius: 25,
     alignItems: 'center',
     justifyContent: 'center',
+    marginBottom: 8,
   },
   title: {
-    fontSize: 20,
-    fontWeight: 'bold',
+    fontSize: 24,
+    lineHeight: 30,
+    fontWeight: '800',
+    letterSpacing: -0.6,
   },
-  separator: {
-    marginVertical: 30,
-    height: 1,
-    width: '80%',
+  copy: {
+    fontSize: 14,
+    lineHeight: 20,
+    textAlign: 'center',
+  },
+  button: {
+    minWidth: 150,
+    minHeight: 50,
+    borderRadius: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  buttonLabel: {
+    fontSize: 14,
+    fontWeight: '800',
   },
 });

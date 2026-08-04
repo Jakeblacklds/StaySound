@@ -1,6 +1,6 @@
-import { useEffect, useState, type ComponentType } from 'react';
+import { useEffect, useState, type ComponentType, type CSSProperties } from 'react';
 import { fetchLatestAppRelease, type AppReleaseInfo } from '../appDownload';
-import { ArtistIcon, DiscIcon, DownloadIcon, HomeIcon, MusicNoteIcon, PhoneIcon, PlaylistIcon, SyncIcon } from './icons';
+import { ArtistIcon, DiscIcon, DownloadIcon, HomeIcon, MusicNoteIcon, PhoneIcon, PlaylistIcon } from './icons';
 import type { Tab } from './types';
 
 const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[] = [
@@ -9,7 +9,6 @@ const TABS: { id: Tab; label: string; Icon: ComponentType<{ size?: number }> }[]
   { id: 'albums', label: 'Álbumes', Icon: DiscIcon },
   { id: 'artists', label: 'Artistas', Icon: ArtistIcon },
   { id: 'playlists', label: 'Playlists', Icon: PlaylistIcon },
-  { id: 'radio', label: 'Radio', Icon: SyncIcon },
   { id: 'downloads', label: 'Descargas', Icon: DownloadIcon },
 ];
 
@@ -18,7 +17,10 @@ interface SidebarProps {
   onTabChange: (tab: Tab) => void;
 }
 
-function AppDownloadCard() {
+/** Entry point to the "Apps" page. Always visible now — the page itself handles the
+    "no hay build publicada todavía" case, so the card no longer vanishes when the
+    release lookup comes up empty. */
+function AppDownloadCard({ onOpen }: { onOpen: () => void }) {
   const [release, setRelease] = useState<AppReleaseInfo | null>(null);
   const [checked, setChecked] = useState(false);
 
@@ -34,33 +36,29 @@ function AppDownloadCard() {
     };
   }, []);
 
-  if (checked && !release) {
-    return null;
-  }
-
   return (
-    <a
-      className="app-download"
-      href={release?.apkUrl ?? '#'}
-      aria-disabled={!release}
-      onClick={(event) => {
-        if (!release) event.preventDefault();
-      }}
-    >
+    <button type="button" className="app-download" onClick={onOpen}>
       <span className="app-download-icon"><PhoneIcon size={18} /></span>
       <span className="app-download-text">
-        <strong>Descargar app</strong>
-        <small>{release ? `Android · v${release.versionName}` : 'Buscando versión…'}</small>
+        <strong>Consigue la app</strong>
+        <small>
+          {release
+            ? `Android v${release.versionName} · Windows · Mac`
+            : checked
+              ? 'Android · Windows · Mac'
+              : 'Buscando versión…'}
+        </small>
       </span>
-    </a>
+    </button>
   );
 }
 
 export function Sidebar({ tab, onTabChange }: SidebarProps) {
+  const activeIndex = TABS.findIndex(item => item.id === tab);
   return (
     <aside className="sidebar">
       <div className="brand">
-        <span className="brand-mark">S</span>
+        <span className="brand-mark" aria-hidden="true" />
         <div>
           <strong>StaySound</strong>
           <small>Tu música, sin nube</small>
@@ -68,6 +66,11 @@ export function Sidebar({ tab, onTabChange }: SidebarProps) {
       </div>
       <nav className="nav-tabs" aria-label="Library views">
         <span className="nav-label">Biblioteca</span>
+        <span
+          className="nav-motion-indicator"
+          aria-hidden="true"
+          style={{ '--nav-index': Math.max(0, activeIndex), opacity: activeIndex < 0 ? 0 : 1 } as CSSProperties}
+        />
         {TABS.map(({ id, label, Icon }) => (
           <button
             key={id}
@@ -79,7 +82,7 @@ export function Sidebar({ tab, onTabChange }: SidebarProps) {
           </button>
         ))}
       </nav>
-      <AppDownloadCard />
+      <AppDownloadCard onOpen={() => onTabChange('get-app')} />
     </aside>
   );
 }

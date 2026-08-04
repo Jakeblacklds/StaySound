@@ -1,5 +1,6 @@
 import * as FileSystem from 'expo-file-system/legacy';
 import { useCallback, useMemo, useRef, useState } from 'react';
+import { getArtworkThumbUri } from '../services/artworkThumbnails';
 import { extractMetadata, withTimeout } from '../services/fileScanner';
 import { enrichTrackFromUri, organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
 import { downloadSoulseekTrack, downloadSoulseekTrackFromMatch, SoulseekTrackMatch } from '../services/soulseekDownloadService';
@@ -14,22 +15,36 @@ const createIdleState = (): DownloadState => ({
 });
 
 const SOULSEEK_FLOW_LOG = '[SoulseekFlow]';
+const CANONICAL_ARTWORK_DIR = `${FileSystem.documentDirectory ?? ''}StaySound/Artwork/`;
 
-function pickMetadataText(candidate: string | undefined, fallback: string): string {
-    const trimmed = candidate?.trim();
-    if (!trimmed) return fallback;
-
-    const normalized = trimmed.toLowerCase();
-    if (
-        normalized === 'unknown'
-        || normalized === 'unknown title'
-        || normalized === 'unknown artist'
-        || normalized === 'unknown album'
-    ) {
-        return fallback;
+async function persistCanonicalArtwork(track: Track): Promise<Track> {
+    const artworkUrl = track.artwork?.trim();
+    if (!artworkUrl || !/^https?:\/\//i.test(artworkUrl) || !FileSystem.documentDirectory) {
+        return track;
     }
 
-    return trimmed;
+    const catalogId = track.tidalAlbumId ?? track.tidalId;
+    if (!catalogId) return track;
+
+    try {
+        const directoryInfo = await FileSystem.getInfoAsync(CANONICAL_ARTWORK_DIR);
+        if (!directoryInfo.exists) {
+            await FileSystem.makeDirectoryAsync(CANONICAL_ARTWORK_DIR, { intermediates: true });
+        }
+
+        const destination = `${CANONICAL_ARTWORK_DIR}tidal_${catalogId}.jpg`;
+        const existing = await FileSystem.getInfoAsync(destination);
+        if (!existing.exists || !existing.size) {
+            await FileSystem.downloadAsync(artworkUrl, destination);
+        }
+
+        const persisted = await FileSystem.getInfoAsync(destination);
+        return persisted.exists && persisted.size
+            ? { ...track, artwork: destination }
+            : track;
+    } catch {
+        return track;
+    }
 }
 
 export function useTidalDownload(
@@ -80,29 +95,33 @@ export function useTidalDownload(
     }, []);
 
     const enrichSoulseekDownloadedTrack = useCallback(async (downloadedTrack: Track): Promise<Track> => {
-        const trackWithPathHints = enrichTrackFromUri(downloadedTrack, downloadedTrack.uri);
+        const trackWithArtwork = await persistCanonicalArtwork(downloadedTrack);
+        const trackWithPathHints = enrichTrackFromUri(trackWithArtwork, trackWithArtwork.uri);
+        let enrichedTrack = trackWithPathHints;
+
         try {
             const metadata = await withTimeout(extractMetadata(trackWithPathHints.uri), 4500);
 
-            if (!metadata) {
-                return trackWithPathHints;
+            if (metadata) {
+                enrichedTrack = {
+                    ...trackWithPathHints,
+                    // Keep TIDAL's catalog identity and artwork. Embedded Soulseek
+                    // tags are useful only for technical audio properties.
+                    genre: metadata.genre ?? trackWithPathHints.genre,
+                    format: metadata.format || trackWithPathHints.format,
+                    sampleRate: metadata.sampleRate ?? trackWithPathHints.sampleRate,
+                    bitDepth: metadata.bitDepth ?? trackWithPathHints.bitDepth,
+                };
             }
-
-            return {
-                ...trackWithPathHints,
-                title: pickMetadataText(metadata.title, trackWithPathHints.title),
-                artist: pickMetadataText(metadata.artist, trackWithPathHints.artist),
-                album: pickMetadataText(metadata.album, trackWithPathHints.album),
-                artwork: metadata.artwork || trackWithPathHints.artwork,
-                trackNumber: metadata.trackNumber ?? trackWithPathHints.trackNumber,
-                year: metadata.year ?? trackWithPathHints.year,
-                genre: metadata.genre ?? trackWithPathHints.genre,
-                format: metadata.format || trackWithPathHints.format,
-                sampleRate: metadata.sampleRate ?? trackWithPathHints.sampleRate,
-                bitDepth: metadata.bitDepth ?? trackWithPathHints.bitDepth,
-            };
         } catch {
-            return trackWithPathHints;
+            // Technical metadata is best-effort; catalog data is already complete.
+        }
+
+        try {
+            const artworkThumb = await getArtworkThumbUri(enrichedTrack.artwork);
+            return artworkThumb ? { ...enrichedTrack, artworkThumb } : enrichedTrack;
+        } catch {
+            return enrichedTrack;
         }
     }, []);
 

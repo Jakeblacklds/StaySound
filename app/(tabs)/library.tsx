@@ -2,8 +2,7 @@
  * LibraryScreen - Main library view with tabs for songs, albums, artists, playlists
  */
 
-import { AlphabetScrubber, ArtistCard, CustomIcon, EmptyState, ScanButton, SegmentedTabs, TrackListItem } from '@/src/components/ui';
-import { TidalAtmosphere } from '@/src/components/tidal';
+import { AlbumCard, ArtistCard, EmptyState, ImmersiveHeading, ScanButton, SegmentedTabs, TrackListItem } from '@/src/components/ui';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n } from '@/src/i18n';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
@@ -11,7 +10,7 @@ import { useLibraryStore, usePlayerStore, useSettingsStore } from '@/src/stores'
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { Album, Artist, Track } from '@/src/types';
 import { FlashList } from '@shopify/flash-list';
-import { Image } from 'expo-image';
+import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo } from 'react';
 import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, StyleSheet, View } from 'react-native';
@@ -262,54 +261,19 @@ export default function LibraryScreen() {
         />
     ), [currentTrackId, handleTrackPress, handleAddToQueue]);
 
-    const renderArtistItem = useCallback(({ item, index }: { item: Artist; index: number }) => {
-        const isLeft = index % 2 === 0;
-        const colIndex = Math.floor(index / 2);
-        const isCompact = isLeft ? (colIndex % 3 === 1) : (colIndex % 3 === 0);
-        const height = isCompact ? 228 : 270;
-
+    const renderArtistItem = useCallback(({ item }: { item: Artist }) => {
         return (
             <View style={[styles.masonryWrapper, { padding: 6 }]}>
-                <ArtistCard artist={item} size="full" height={height} presentation="masonry" onPress={handleArtistPress} />
+                <ArtistCard artist={item} size="full" height={218} presentation="masonry" onPress={handleArtistPress} />
             </View>
         );
     }, [handleArtistPress]);
 
     const renderAlbumItem = useCallback(({ item }: { item: Album }) => (
-        <Pressable
-            accessibilityRole="button"
-            accessibilityLabel={`Álbum ${item.name} de ${item.artist}`}
-            onPress={() => handleAlbumPress(item)}
-            style={({ pressed }) => [
-                styles.albumRow,
-                { borderColor: `${theme.colors.outline}40` },
-                pressed && styles.albumRowPressed,
-            ]}
-        >
-            <View style={[styles.albumArtworkWrap, { backgroundColor: theme.colors.surfaceVariant }]}>
-                {item.artwork || item.artworkThumb ? (
-                    <Image
-                        source={{ uri: item.artworkThumb || item.artwork }}
-                        style={styles.albumArtwork}
-                        contentFit="cover"
-                        recyclingKey={item.id}
-                        cachePolicy={performanceProfile.imageCachePolicyList}
-                        transition={0}
-                    />
-                ) : (
-                    <CustomIcon name="Album" size={32} color={theme.colors.primary} />
-                )}
-            </View>
-            <View style={styles.albumRowInfo}>
-                <Text variant="titleMedium" numberOfLines={2} style={[styles.albumRowTitle, { color: theme.colors.onSurface }]}>
-                    {item.name}
-                </Text>
-                <Text variant="bodySmall" numberOfLines={1} style={[styles.albumRowSubtitle, { color: theme.colors.onSurfaceVariant }]}>
-                    {item.artist}
-                </Text>
-            </View>
-        </Pressable>
-    ), [handleAlbumPress, theme.colors.onSurface, theme.colors.onSurfaceVariant, theme.colors.outline, theme.colors.primary, theme.colors.surfaceVariant]);
+        <View style={styles.albumGridItem}>
+            <AlbumCard album={item} size="full" presentation="stacked" onPress={handleAlbumPress} />
+        </View>
+    ), [handleAlbumPress]);
 
     const trackKeyExtractor = useCallback((item: Track) => item.id, []);
     const albumKeyExtractor = useCallback((item: Album) => item.id, []);
@@ -322,7 +286,7 @@ export default function LibraryScreen() {
         () => ({
             paddingBottom: 120 + insets.bottom,
             paddingLeft: Math.max(10, screenPadding - 4),
-            paddingRight: screenPadding + 26,
+            paddingRight: screenPadding,
         }),
         [screenPadding, insets.bottom],
     );
@@ -387,10 +351,6 @@ export default function LibraryScreen() {
 
     const aC = useAnimatedColors();
     const animSearchbarBg = useAnimatedStyle(() => ({ backgroundColor: aC.surfaceVariant.value + 'A6' }));
-    const heroArtwork = useMemo(
-        () => albums[0]?.artwork ?? albums[0]?.artworkThumb ?? tracks[0]?.artworkThumb ?? tracks[0]?.artwork,
-        [albums, tracks]
-    );
     // Icon inside the circle — search glyph fades out, X fades in
     const searchGlyphStyle = useAnimatedStyle(() => ({
         opacity: 1 - searchProgress.value,
@@ -425,8 +385,7 @@ export default function LibraryScreen() {
     }, [searchQuery]);
 
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-            <TidalAtmosphere sourceUri={heroArtwork} mode="fog" />
+        <View style={styles.container}>
             <SafeAreaView style={styles.container} edges={['top']}>
                 <Animated.View
                     style={[
@@ -437,18 +396,7 @@ export default function LibraryScreen() {
                     ]}
                 >
                     <Animated.View style={styles.header}>
-                        <Text
-                            variant="headlineMedium"
-                            style={[
-                                styles.title,
-                                {
-                                    color: theme.colors.onBackground,
-                                    fontFamily: theme.typography.fontFamily.bold
-                                }
-                            ]}
-                        >
-                            {t('library.title')}
-                        </Text>
+                        <Text style={[styles.screenTitle, { color: theme.colors.onBackground }]}>{t('library.title')}</Text>
                     </Animated.View>
                 </Animated.View>
 
@@ -504,10 +452,10 @@ export default function LibraryScreen() {
                                 ]}
                             >
                                 <Animated.View pointerEvents="none" style={searchGlyphStyle}>
-                                    <Text style={[styles.searchToggleGlyph, { color: theme.colors.primary }]}>⌕</Text>
+                                    <Ionicons name="search" size={21} color={theme.colors.onSurface} />
                                 </Animated.View>
                                 <Animated.View pointerEvents="none" style={closeGlyphStyle}>
-                                    <Text style={[styles.searchToggleGlyph, { color: theme.colors.primary }]}>✕</Text>
+                                    <Ionicons name="close" size={23} color={theme.colors.onSurface} />
                                 </Animated.View>
                             </Pressable>
                         </View>
@@ -550,12 +498,6 @@ export default function LibraryScreen() {
                                     scrollEventThrottle={16}
                                     showsVerticalScrollIndicator={false}
                                 />
-                                    {!searchQuery && (
-                                        <AlphabetScrubber
-                                            onLetterChange={handleLetterScrub}
-                                            onScrubStateChange={setIsAlphabetScrubbing}
-                                        />
-                                    )}
                                 </View>
                             )}
                         </Animated.View>
@@ -579,6 +521,7 @@ export default function LibraryScreen() {
                                 <FlashList
                                     data={filteredAlbums}
                                     keyExtractor={albumKeyExtractor}
+                                    numColumns={2}
                                     renderItem={renderAlbumItem}
                                     contentContainerStyle={albumListContentStyle}
                                     showsVerticalScrollIndicator={false}
@@ -607,8 +550,6 @@ export default function LibraryScreen() {
                                     data={filteredArtists}
                                     keyExtractor={artistKeyExtractor}
                                     numColumns={2}
-                                    masonry={true}
-                                    optimizeItemArrangement={true}
                                     renderItem={renderArtistItem}
                                     contentContainerStyle={gridContentStyle}
                                     showsVerticalScrollIndicator={false}
@@ -628,8 +569,53 @@ const styles = StyleSheet.create({
         flex: 1,
     },
     header: {
-        paddingTop: 10,
-        paddingBottom: 8,
+        paddingTop: 18,
+        paddingBottom: 10,
+    },
+    screenTitle: {
+        fontFamily: 'StaySound',
+        fontSize: 30,
+        lineHeight: 36,
+        fontWeight: '900',
+        letterSpacing: -1.25,
+    },
+    libraryOverview: {
+        flexDirection: 'row',
+        gap: 9,
+        marginTop: 18,
+    },
+    overviewPrimary: {
+        flex: 1.28,
+        minHeight: 86,
+        borderRadius: 25,
+        paddingHorizontal: 16,
+        justifyContent: 'center',
+    },
+    overviewTile: {
+        flex: 1,
+        minHeight: 86,
+        borderRadius: 25,
+        borderWidth: StyleSheet.hairlineWidth,
+        paddingHorizontal: 14,
+        justifyContent: 'center',
+    },
+    overviewNumber: {
+        fontSize: 28,
+        lineHeight: 31,
+        fontWeight: '900',
+        letterSpacing: -1,
+    },
+    overviewNumberSmall: {
+        fontSize: 23,
+        lineHeight: 27,
+        fontWeight: '900',
+        letterSpacing: -0.7,
+    },
+    overviewLabel: {
+        marginTop: 2,
+        fontSize: 11,
+        lineHeight: 15,
+        fontWeight: '700',
     },
     title: {
         fontWeight: 'bold',
@@ -637,11 +623,11 @@ const styles = StyleSheet.create({
     tabSectionRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 10,
+        gap: 8,
     },
     tabSlot: {
         flex: 1,
-        minHeight: 48,
+        minHeight: 36,
         justifyContent: 'center',
     },
     tabsFadeWrap: {
@@ -652,23 +638,25 @@ const styles = StyleSheet.create({
         opacity: 0,
     },
     searchAccordion: {
-        height: 48,
+        height: 36,
         position: 'relative',
         alignItems: 'center',
         justifyContent: 'center',
         flexShrink: 0,
-        width: 48,
+        width: 36,
     },
     searchToggleButton: {
         width: '100%',
         height: '100%',
-        borderRadius: 24,
+        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.12)',
     },
     searchToggleGlyph: {
-        fontSize: 22,
-        lineHeight: 22,
+        fontSize: 19,
+        lineHeight: 19,
         fontWeight: '600',
     },
     searchInputRail: {
@@ -684,7 +672,7 @@ const styles = StyleSheet.create({
     },
     // Outer Animated.View wrapper — receives animated background color
     searchbar: {
-        borderRadius: 24,
+        borderRadius: 20,
         overflow: 'hidden',
         justifyContent: 'center',
     },
@@ -696,8 +684,8 @@ const styles = StyleSheet.create({
         borderColor: 'transparent',
     },
     tabSection: {
-        paddingTop: 6,
-        paddingBottom: 10,
+        paddingTop: 4,
+        paddingBottom: 12,
     },
     content: {
         flex: 1,
@@ -709,46 +697,13 @@ const styles = StyleSheet.create({
     emptyContainer: {
         flex: 1,
     },
-    albumRow: {
-        flexDirection: 'row',
-        alignItems: 'center',
-        paddingVertical: 11,
-        borderBottomWidth: StyleSheet.hairlineWidth,
-    },
-    albumRowPressed: {
-        opacity: 0.82,
-    },
-    albumArtworkWrap: {
-        width: 72,
-        height: 72,
-        borderRadius: 14,
-        overflow: 'hidden',
-        alignItems: 'center',
-        justifyContent: 'center',
-    },
-    albumArtwork: {
-        width: '100%',
-        height: '100%',
-    },
-    albumRowInfo: {
+    albumGridItem: {
         flex: 1,
-        marginLeft: 14,
-        paddingRight: 8,
-    },
-    albumRowTitle: {
-        fontWeight: '700',
-        letterSpacing: -0.2,
-    },
-    albumRowSubtitle: {
-        marginTop: 4,
-        opacity: 0.78,
+        padding: 6,
+        marginBottom: 12,
     },
     masonryWrapper: {
         flex: 1,
         marginBottom: 8,
     },
 });
-
-
-
-

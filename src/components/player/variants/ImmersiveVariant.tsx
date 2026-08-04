@@ -29,6 +29,8 @@ interface ImmersiveVariantProps {
     previousIcon: string;
     showLyrics: boolean;
     lrcPreviewText?: string;
+    lrcPreviousText?: string;
+    lrcNextText?: string;
     isLyricsExpanded: boolean;
     lrcAccentBorderColor?: string;
     controlSurfaceColor?: string;
@@ -221,11 +223,17 @@ const ActiveGlyph = React.memo(function ActiveGlyph({
  * ------------------------------------------------------------------ */
 const LrcPreviewLine = React.memo(function LrcPreviewLine({
     text,
+    previousText,
+    nextText,
     color,
+    inactiveColor,
     onPress,
 }: {
     text?: string;
+    previousText?: string;
+    nextText?: string;
     color: string;
+    inactiveColor: string;
     onPress: () => void;
 }) {
     const enter = useSharedValue(1);
@@ -247,13 +255,28 @@ const LrcPreviewLine = React.memo(function LrcPreviewLine({
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             accessibilityRole="button"
             accessibilityLabel="Mostrar letras"
-            style={styles.lrcLineMinimal}
+            style={styles.lyricRail}
         >
+            <View style={[styles.lyricRailRule, { backgroundColor: inactiveColor }]}>
+                <View style={[styles.lyricRailMarker, { backgroundColor: color }]} />
+            </View>
             <Animated.Text
                 style={[styles.lrcLineText, { color }, lineStyle]}
-                numberOfLines={2}
+                numberOfLines={1}
             >
                 {visibleText}
+            </Animated.Text>
+            <Animated.Text
+                style={[styles.lyricRailGhost, { color: inactiveColor }]}
+                numberOfLines={1}
+            >
+                {previousText || ' '}
+            </Animated.Text>
+            <Animated.Text
+                style={[styles.lyricRailGhost, { color: inactiveColor }]}
+                numberOfLines={1}
+            >
+                {nextText || ' '}
             </Animated.Text>
         </Pressable>
     );
@@ -269,10 +292,14 @@ export function ImmersiveVariant({
     repeatMode,
     accentColor,
     textColor,
+    onPrimaryColor,
     trackTechLabel,
     showLyrics,
     lrcPreviewText,
+    lrcPreviousText,
+    lrcNextText,
     isLyricsExpanded,
+    onClose,
     onOpenMoreOptions,
     onToggleLyrics,
     onArtistPress,
@@ -290,15 +317,25 @@ export function ImmersiveVariant({
 }: ImmersiveVariantProps) {
     return (
         <View style={[styles.contentMinimal, { paddingTop: topInset, paddingBottom: Math.max(bottomInset + 18, 40) }]}>
-            {/* Top: grabber + whisper-quiet context line */}
-            <View style={styles.grabberWrap}>
-                <View style={[styles.grabber, { backgroundColor: textColor }]} />
-            </View>
+            {/* Top: explicit close affordance + quiet track context */}
+            <Pressable
+                onPress={onClose}
+                accessibilityRole="button"
+                accessibilityLabel="Cerrar reproductor"
+                hitSlop={12}
+                style={styles.playerCloseButton}
+            >
+                <MaterialCommunityIcons
+                    name="chevron-down"
+                    size={34}
+                    color={textColor + '70'}
+                />
+            </Pressable>
             <Animated.Text
                 style={[styles.topContextLabel, textStyle]}
                 numberOfLines={1}
             >
-                {track.album || ''}
+                {track.title}
             </Animated.Text>
 
             {/* Cover slot — the real cover is the absolute morphing layer in
@@ -361,7 +398,10 @@ export function ImmersiveVariant({
                     {showLyrics ? null : (
                         <LrcPreviewLine
                             text={lrcPreviewText}
+                            previousText={lrcPreviousText}
+                            nextText={lrcNextText}
                             color={accentColor}
+                            inactiveColor={textColor + '35'}
                             onPress={onToggleLyrics}
                         />
                     )}
@@ -401,9 +441,9 @@ export function ImmersiveVariant({
                         <Glyph
                             onPress={onPlayPause}
                             accessibilityLabel={isPlaying ? 'Pausar' : 'Reproducir'}
-                            style={styles.transportPlay}
+                            style={[styles.transportPlay, { backgroundColor: accentColor }]}
                         >
-                            <PlayPauseGlyph isPlaying={isPlaying} color={textColor} size={62} />
+                            <PlayPauseGlyph isPlaying={isPlaying} color={onPrimaryColor} size={45} />
                         </Glyph>
                         <Glyph
                             name="skip-next"
@@ -435,19 +475,19 @@ export function ImmersiveVariant({
                     {/* Footer — three quiet actions */}
                     <View style={styles.footerMinimal}>
                         <Glyph
-                            name="text"
+                            name="playlist-play"
                             size={24}
-                            color={showLyrics ? accentColor : textColor + 'B0'}
-                            onPress={onToggleLyrics}
-                            accessibilityLabel={showLyrics ? 'Ocultar letras' : 'Mostrar letras'}
+                            color={textColor + 'A8'}
+                            onPress={onOpenQueue}
+                            accessibilityLabel="Ver cola de reproducción"
                             style={styles.footerBtn}
                         />
                         <Glyph
                             name="playlist-music"
                             size={24}
-                            color={textColor + 'B0'}
-                            onPress={onOpenQueue}
-                            accessibilityLabel="Ver cola de reproducción"
+                            color={showLyrics ? accentColor : textColor + 'A8'}
+                            onPress={onToggleLyrics}
+                            accessibilityLabel={showLyrics ? 'Ocultar letras' : 'Mostrar letras'}
                             style={styles.footerBtn}
                         />
                         <Glyph

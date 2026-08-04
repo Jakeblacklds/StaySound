@@ -12,6 +12,7 @@ import {
   RepeatOneIcon,
   ShuffleIcon,
   SpinnerIcon,
+  SyncIcon,
   VolumeHighIcon,
   VolumeLowIcon,
   VolumeMuteIcon,
@@ -35,6 +36,8 @@ interface PlayerBarProps {
   onShuffle: () => void;
   onOpenFullPlayer: () => void;
   onOpenQueue: () => void;
+  onStartRadio: () => void;
+  isRadioLoading?: boolean;
 }
 
 export function PlayerBar({
@@ -55,13 +58,18 @@ export function PlayerBar({
   onShuffle,
   onOpenFullPlayer,
   onOpenQueue,
+  onStartRadio,
+  isRadioLoading = false,
 }: PlayerBarProps) {
   const [palette, setPalette] = useState<WebDynamicPalette | null>(null);
+  const [artworkFailed, setArtworkFailed] = useState(false);
   const safeDuration = duration || currentTrack?.duration || 0;
   const progress = safeDuration > 0 ? Math.min(1, position / safeDuration) : 0;
+  const volumePercent = Math.round(Math.max(0, Math.min(1, volume)) * 100);
 
   useEffect(() => {
     let active = true;
+    setArtworkFailed(false);
     void getDynamicPalette(currentTrack).then(nextPalette => {
       if (active) setPalette(nextPalette);
     });
@@ -85,8 +93,8 @@ export function PlayerBar({
       <div className="now-playing" onClick={onOpenFullPlayer} role="button" tabIndex={0}
         onKeyDown={event => { if (event.key === 'Enter') onOpenFullPlayer(); }}>
         <div key={currentTrack?.id ?? 'empty'} className={`np-artwork ${isPlaying ? 'playing' : ''}`}>
-          {currentTrack?.artwork ? (
-            <img src={currentTrack.artwork} alt="" />
+          {currentTrack?.artwork && !artworkFailed ? (
+            <img src={currentTrack.artwork} alt="" onError={() => setArtworkFailed(true)} />
           ) : (
             <span className="np-artwork-letter">
               {currentTrack ? currentTrack.title.slice(0, 1).toUpperCase() : 'S'}
@@ -136,6 +144,15 @@ export function PlayerBar({
           >
             {repeatMode === 'one' ? <RepeatOneIcon size={16} /> : <RepeatIcon size={16} />}
           </button>
+          <button
+            className="t-btn radio-action"
+            onClick={onStartRadio}
+            disabled={!currentTrack || isRadioLoading}
+            aria-label="Iniciar radio desde esta canción"
+            title="Iniciar radio desde esta canción"
+          >
+            {isRadioLoading ? <SpinnerIcon size={16} /> : <SyncIcon size={17} />}
+          </button>
         </div>
         <div className="timeline">
           <span>{formatDuration(position)}</span>
@@ -167,13 +184,13 @@ export function PlayerBar({
         </button>
         <input
           type="range"
-          min="0"
-          max="1"
-          step="0.01"
-          value={volume}
-          onChange={event => onVolume(Number(event.target.value))}
+          min={0}
+          max={100}
+          step={1}
+          value={volumePercent}
+          onInput={event => onVolume(event.currentTarget.valueAsNumber / 100)}
           aria-label="Volumen"
-          style={{ '--val': `${volume * 100}%` } as CSSProperties}
+          style={{ '--val': `${volumePercent}%` } as CSSProperties}
         />
       </div>
     </footer>

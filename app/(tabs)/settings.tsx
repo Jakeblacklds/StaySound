@@ -1,10 +1,10 @@
 import { TIDAL_API_BASES, TIDAL_MIRROR_NAMES } from '@/src/services/tidalService';
 import { applyDownloadedOtaUpdate, checkForAppUpdates, downloadAndInstallBinaryUpdate, getAppUpdateConfig, getInstalledVersionLabel } from '@/src/services/appUpdateService';
-import { useAppUpdateStore, useAuthStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
+import { useAppUpdateStore, useLibraryStore, useNotificationStore, useSettingsStore } from '@/src/stores';
 import { TidalMirrorAvailability, getTidalMirrorAvailability, getTidalMirrorOptions } from '@/src/services/tidalService';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
-import { useUIStore } from '@/src/stores/uiStore';
 import { useI18n } from '@/src/i18n';
+import { ImmersiveGlass } from '@/src/components/ui';
 import { useTheme } from '@/src/theme';
 import { generateManualAccentPalette, SchemeVariant } from '@/src/theme/utils';
 import { TidalQuality, Track } from '@/src/types/audio';
@@ -12,7 +12,6 @@ import { MaterialCommunityIcons } from '@expo/vector-icons';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import * as ImagePicker from 'expo-image-picker';
 import React, { useEffect, useMemo, useState } from 'react';
 import { Alert, Modal, Pressable, ScrollView, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
@@ -38,12 +37,8 @@ function formatMirrorSummary(availability?: TidalMirrorAvailability): string {
 }
 
 function formatMirrorCapabilities(availability?: TidalMirrorAvailability): string {
-    if (!availability) return 'Busqueda ?, Stream ?, Descarga ?';
-
-    const search = availability.supportsSearch ? 'Busqueda OK' : 'Busqueda KO';
-    const stream = availability.supportsStream ? 'Stream OK' : 'Stream KO';
-    const download = availability.supportsDownload ? 'Descarga OK' : 'Descarga KO';
-    return `${search} · ${stream} · ${download}`;
+    if (!availability) return 'Búsqueda pendiente';
+    return availability.supportsSearch ? 'Búsqueda disponible' : 'Búsqueda no disponible';
 }
 
 function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
@@ -82,9 +77,6 @@ export default function SettingsScreen() {
     const { t, locale } = useI18n();
     const insets = useSafeAreaInsets();
     const { isScanning, scanLibrary, getAllTracks, lastScanDate, repairMissingMetadata, hydrateMetadataFromTidalForLibrary } = useLibraryStore();
-    const appSession = useAuthStore(state => state.session);
-    const signOut = useAuthStore(state => state.signOut);
-    const openConfirmModal = useUIStore(state => state.openConfirmModal);
 
     const [hexInput, setHexInput] = useState(config.accentColor);
     const [tempColor, setTempColor] = useState(config.accentColor);
@@ -259,20 +251,6 @@ export default function SettingsScreen() {
         }
     };
 
-    const handleMainSignOut = () => {
-        openConfirmModal({
-            title: 'Cerrar sesion',
-            message: 'Se cerrara la sesion de StaySound en este dispositivo y volveras a la pantalla de acceso.',
-            confirmLabel: 'Cerrar sesion',
-            cancelLabel: 'Cancelar',
-            isDestructive: true,
-            onConfirm: () => {
-                void signOut();
-                showNotification('La sesion de StaySound se cerro en este dispositivo.', 'info');
-            },
-        });
-    };
-
     const colorPresets = [
         '#6750A4', // Purple
         '#006A6A', // Teal
@@ -406,43 +384,39 @@ export default function SettingsScreen() {
             : 'Buscar';
 
     const showThemeColors = config.style === 'material3' && !config.dynamicColors;
-    const heroGradient = [theme.colors.primary, (theme.colors as any).tertiary ?? theme.colors.secondary] as const;
-
     return (
         <ScrollView
-            style={[styles.container, { backgroundColor: theme.colors.background }]}
-            contentContainerStyle={[styles.content, { paddingBottom: styles.content.paddingBottom + insets.bottom }]}
+            style={styles.container}
+            contentContainerStyle={[
+                styles.content,
+                {
+                    paddingTop: insets.top + 16,
+                    paddingBottom: styles.content.paddingBottom + insets.bottom,
+                },
+            ]}
             showsVerticalScrollIndicator={false}
         >
             {/* ——— HERO: gradient banner + integrated profile ——— */}
             <Animated.View entering={FadeInDown.duration(520).springify().damping(16)} style={styles.heroWrap}>
-                <LinearGradient
-                    colors={heroGradient}
-                    start={{ x: 0, y: 0 }}
-                    end={{ x: 1, y: 1 }}
-                    style={styles.hero}
-                >
-                    <View style={styles.heroGlowA} />
-                    <View style={styles.heroGlowB} />
-
-                    <Text style={[styles.heroEyebrow, { color: theme.colors.onPrimary }]}>
+                <ImmersiveGlass tone="regular" accentColor={theme.colors.primary} style={styles.hero}>
+                    <Text style={[styles.heroEyebrow, { color: theme.colors.primary }]}>
                         AJUSTES
                     </Text>
 
                     <View style={styles.heroProfileRow}>
                         <Pressable onPress={handlePickImage} style={styles.avatarContainer}>
-                            <View style={[styles.avatarCircle, { borderColor: 'rgba(255,255,255,0.55)', backgroundColor: 'rgba(255,255,255,0.16)' }]}>
+                            <View style={[styles.avatarCircle, { borderColor: theme.colors.outline + '55', backgroundColor: theme.colors.surfaceVariant + '88' }]}>
                                 {userAvatarUri ? (
                                     <Image source={{ uri: userAvatarUri }} style={styles.avatarImage} />
                                 ) : (
-                                    <View style={[styles.avatarPlaceholder, { backgroundColor: 'rgba(255,255,255,0.18)' }]}>
-                                        <Text style={{ color: theme.colors.onPrimary, fontSize: 30, fontWeight: '800' }}>
+                                    <View style={[styles.avatarPlaceholder, { backgroundColor: theme.colors.primaryContainer }]}>
+                                        <Text style={{ color: theme.colors.onPrimaryContainer, fontSize: 30, fontWeight: '800' }}>
                                             {userName ? userName.charAt(0).toUpperCase() : 'U'}
                                         </Text>
                                     </View>
                                 )}
-                                <View style={[styles.avatarBadge, { backgroundColor: theme.colors.onPrimary }]}>
-                                    <MaterialCommunityIcons name="camera" size={13} color={theme.colors.primary} />
+                                <View style={[styles.avatarBadge, { backgroundColor: theme.colors.primaryContainer, borderColor: theme.colors.surface }]}>
+                                    <MaterialCommunityIcons name="camera" size={13} color={theme.colors.onPrimaryContainer} />
                                 </View>
                             </View>
                         </Pressable>
@@ -456,47 +430,36 @@ export default function SettingsScreen() {
                                         mode="flat"
                                         dense
                                         autoFocus
-                                        underlineColor="rgba(255,255,255,0.45)"
-                                        activeUnderlineColor={theme.colors.onPrimary}
-                                        textColor={theme.colors.onPrimary}
+                                        underlineColor={theme.colors.outline + '66'}
+                                        activeUnderlineColor={theme.colors.primary}
+                                        textColor={theme.colors.onSurface}
                                         style={{ flex: 1, backgroundColor: 'transparent' }}
                                         placeholder={t('settings.profile.namePlaceholder')}
                                     />
                                     <IconButton
                                         icon="check"
                                         mode="contained"
-                                        containerColor={theme.colors.onPrimary}
-                                        iconColor={theme.colors.primary}
+                                        containerColor={theme.colors.primaryContainer}
+                                        iconColor={theme.colors.onPrimaryContainer}
                                         onPress={handleSaveName}
                                         size={18}
                                     />
                                 </View>
                             ) : (
                                 <Pressable onPress={() => { setTempName(userName); setEditingName(true); }} style={styles.nameActionRow}>
-                                    <Text variant="headlineSmall" numberOfLines={1} style={{ color: theme.colors.onPrimary, fontWeight: '800', flexShrink: 1 }}>
+                                    <Text variant="headlineSmall" numberOfLines={1} style={{ color: theme.colors.onSurface, fontWeight: '800', flexShrink: 1 }}>
                                         {userName || 'StaySound User'}
                                     </Text>
-                                    <MaterialCommunityIcons name="pencil" size={16} color={theme.colors.onPrimary} style={{ marginLeft: 8, opacity: 0.85 }} />
+                                    <MaterialCommunityIcons name="pencil" size={16} color={theme.colors.primary} style={{ marginLeft: 8, opacity: 0.85 }} />
                                 </Pressable>
                             )}
-                            <Text variant="bodyMedium" style={{ color: theme.colors.onPrimary, opacity: 0.82, marginTop: 2 }}>
+                            <Text variant="bodyMedium" style={{ color: theme.colors.onSurfaceVariant, opacity: 0.82, marginTop: 2 }}>
                                 Personaliza tu experiencia StaySound
                             </Text>
                         </View>
                     </View>
-                </LinearGradient>
+                </ImmersiveGlass>
             </Animated.View>
-
-            {/* ——— Cuentas ——— */}
-            <Section title="Cuentas" index={0} theme={theme}>
-                <SettingRow
-                    theme={theme}
-                    icon="shield-account-outline"
-                    title={appSession?.email || 'Cuenta de Invitado'}
-                    description={appSession ? 'Sesion principal activa' : 'Sin cuenta vinculada'}
-                    right={appSession ? <IconButton icon="logout" iconColor={theme.colors.error} onPress={handleMainSignOut} /> : undefined}
-                />
-            </Section>
 
             {/* ——— Idioma ——— */}
             <Section title={t('settings.section.language')} index={1} theme={theme}>
@@ -611,7 +574,7 @@ export default function SettingsScreen() {
                             onRequestClose={() => setShowPicker(false)}
                         >
                             <View style={styles.modalOverlay}>
-                                <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
+                                <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, paddingBottom: Math.max(60, insets.bottom + 32) }]}>
                                     <View style={styles.modalHeader}>
                                         <Text variant="titleLarge" style={{ color: theme.colors.onSurface }}>
                                             {t('settings.theme.chooseColor')}
@@ -720,17 +683,9 @@ export default function SettingsScreen() {
                 <SettingRow
                     theme={theme}
                     icon="download-circle-outline"
-                    title="Calidad de Descarga"
+                    title="Calidad preferida"
                     description={qualityDescription[tidalDownloadQuality]}
                     onPress={() => setShowQualityModal(true)}
-                />
-                <RowDivider theme={theme} />
-                <SettingRow
-                    theme={theme}
-                    icon="server-network"
-                    title="Servidor de Contenido"
-                    description={TIDAL_MIRROR_NAMES[tidalMirror] || 'Automatico'}
-                    onPress={() => setShowMirrorModal(true)}
                 />
                 <RowDivider theme={theme} />
                 <SettingRow
@@ -759,7 +714,7 @@ export default function SettingsScreen() {
             {/* Modals for Quality and Mirror */}
             <Modal visible={showQualityModal} transparent animationType="fade" onRequestClose={() => setShowQualityModal(false)}>
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, paddingBottom: Math.max(60, insets.bottom + 32) }]}>
                         <View style={styles.modalHeader}>
                             <Text variant="titleLarge">Calidad de audio</Text>
                             <IconButton icon="close" onPress={() => setShowQualityModal(false)} />
@@ -788,7 +743,7 @@ export default function SettingsScreen() {
 
             <Modal visible={showMirrorModal} transparent animationType="fade" onRequestClose={() => setShowMirrorModal(false)}>
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, paddingBottom: Math.max(60, insets.bottom + 32) }]}>
                         <View style={styles.modalHeader}>
                             <Text variant="titleLarge">Servidor de Tidal</Text>
                             <IconButton icon="close" onPress={() => setShowMirrorModal(false)} />
@@ -825,7 +780,7 @@ export default function SettingsScreen() {
                 }}
             >
                 <View style={styles.modalOverlay}>
-                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface }]}>
+                    <View style={[styles.modalContent, { backgroundColor: theme.colors.surface, paddingBottom: Math.max(60, insets.bottom + 32) }]}>
                         <View style={styles.modalHeader}>
                             <Text variant="titleLarge">Buscando artwork faltante</Text>
                             {!isHydratingTidalMetadata && (
@@ -977,9 +932,9 @@ function Section({
                     {title}
                 </Text>
             ) : null}
-            <View style={[styles.card, { backgroundColor: theme.colors.surfaceVariant + '26', borderColor: theme.colors.outline + '1F' }]}>
+            <ImmersiveGlass tone="quiet" style={styles.card}>
                 {children}
-            </View>
+            </ImmersiveGlass>
         </Animated.View>
     );
 }
@@ -990,37 +945,20 @@ const styles = StyleSheet.create({
 
     // ——— Hero ———
     heroWrap: {
-        marginBottom: 26,
+        marginTop: 10,
+        marginBottom: 28,
     },
     hero: {
         borderRadius: 30,
-        padding: 22,
+        padding: 20,
         overflow: 'hidden',
-    },
-    heroGlowA: {
-        position: 'absolute',
-        width: 180,
-        height: 180,
-        borderRadius: 90,
-        backgroundColor: 'rgba(255,255,255,0.12)',
-        top: -64,
-        right: -34,
-    },
-    heroGlowB: {
-        position: 'absolute',
-        width: 130,
-        height: 130,
-        borderRadius: 65,
-        backgroundColor: 'rgba(255,255,255,0.08)',
-        bottom: -46,
-        left: -22,
     },
     heroEyebrow: {
         fontSize: 12,
         fontWeight: '900',
         letterSpacing: 3,
         opacity: 0.88,
-        marginBottom: 18,
+        marginBottom: 16,
     },
     heroProfileRow: {
         flexDirection: 'row',
@@ -1036,22 +974,22 @@ const styles = StyleSheet.create({
         position: 'relative',
     },
     avatarCircle: {
-        width: 84,
-        height: 84,
-        borderRadius: 30,
-        borderWidth: 2,
+        width: 76,
+        height: 76,
+        borderRadius: 26,
+        borderWidth: StyleSheet.hairlineWidth,
         padding: 3,
         overflow: 'visible',
     },
     avatarImage: {
         width: '100%',
         height: '100%',
-        borderRadius: 24,
+        borderRadius: 21,
     },
     avatarPlaceholder: {
         width: '100%',
         height: '100%',
-        borderRadius: 24,
+        borderRadius: 21,
         alignItems: 'center',
         justifyContent: 'center',
     },
@@ -1064,8 +1002,7 @@ const styles = StyleSheet.create({
         borderRadius: 12,
         alignItems: 'center',
         justifyContent: 'center',
-        borderWidth: 3,
-        borderColor: '#fff',
+        borderWidth: 2,
     },
     nameActionRow: {
         flexDirection: 'row',
@@ -1092,8 +1029,7 @@ const styles = StyleSheet.create({
         opacity: 0.75,
     },
     card: {
-        borderRadius: 24,
-        borderWidth: 1,
+        borderRadius: 26,
         overflow: 'hidden',
     },
     row: {

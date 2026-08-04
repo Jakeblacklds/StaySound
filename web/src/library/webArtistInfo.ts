@@ -65,6 +65,17 @@ type WikipediaSummary = {
 
 const memoryCache = new Map<string, CachedArtistInfo>();
 const inflight = new Map<string, Promise<WebArtistInfo | null>>();
+const MAX_ARTIST_MEMORY_CACHE_ENTRIES = 48;
+
+function rememberArtistInfo(key: string, entry: CachedArtistInfo): void {
+  memoryCache.delete(key);
+  memoryCache.set(key, entry);
+  while (memoryCache.size > MAX_ARTIST_MEMORY_CACHE_ENTRIES) {
+    const oldestKey = memoryCache.keys().next().value;
+    if (!oldestKey) break;
+    memoryCache.delete(oldestKey);
+  }
+}
 
 function normalizeName(value: string): string {
   return value
@@ -93,16 +104,19 @@ function getCachedMap(): Record<string, CachedArtistInfo> {
 
 function readCache(key: string): CachedArtistInfo | null {
   const memory = memoryCache.get(key);
-  if (memory && Date.now() - memory.timestamp < CACHE_TTL_MS) return memory;
+  if (memory && Date.now() - memory.timestamp < CACHE_TTL_MS) {
+    rememberArtistInfo(key, memory);
+    return memory;
+  }
   const cached = getCachedMap()[key];
   if (!cached || Date.now() - cached.timestamp >= CACHE_TTL_MS) return null;
-  memoryCache.set(key, cached);
+  rememberArtistInfo(key, cached);
   return cached;
 }
 
 function writeCache(key: string, value: WebArtistInfo): void {
   const entry = { ...value, timestamp: Date.now() };
-  memoryCache.set(key, entry);
+  rememberArtistInfo(key, entry);
   try {
     const cache = getCachedMap();
     cache[key] = entry;

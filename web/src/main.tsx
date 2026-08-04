@@ -6,6 +6,17 @@ import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
 import './styles/app.css';
+import './styles/circulo.css';
+
+// Tauri's transparent macOS window needs a genuinely transparent page root.
+// Keep this opt-in so the regular website/PWA retains its opaque fallback.
+const isTauriShell = '__TAURI_INTERNALS__' in window;
+if (isTauriShell) {
+  document.documentElement.classList.add('tauri-shell');
+  if (/Macintosh|Mac OS X/i.test(navigator.userAgent)) {
+    document.documentElement.classList.add('platform-macos');
+  }
+}
 
 const root = document.getElementById('root');
 
@@ -13,10 +24,17 @@ if (!root) {
   throw new Error('StaySound Web root element was not found.');
 }
 
+// am-lyrics starts its network lookup from connectedCallback(). React StrictMode
+// intentionally mounts/unmounts components twice in development, which makes
+// the custom element start the same lyrics lookup twice in the Tauri shell.
+// Keep StrictMode for the regular web app, but avoid duplicate network work in
+// the desktop webview.
 createRoot(root).render(
-  <React.StrictMode>
-    <App />
-  </React.StrictMode>,
+  isTauriShell ? <App /> : (
+    <React.StrictMode>
+      <App />
+    </React.StrictMode>
+  ),
 );
 
 if ('serviceWorker' in navigator) {

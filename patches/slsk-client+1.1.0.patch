@@ -1,0 +1,1088 @@
+diff --git a/node_modules/slsk-client/lib/listen.js b/node_modules/slsk-client/lib/listen.js
+index a921994..70ad6a0 100644
+--- a/node_modules/slsk-client/lib/listen.js
++++ b/node_modules/slsk-client/lib/listen.js
+@@ -1,6 +1,6 @@
+ const EventEmitter = require('events')
+ const net = require('net')
+-const Messages = require('./messages.js')
++const Message = require('./message.js')
+ const debug = require('debug')('slsk:listen:i')
+ 
+ module.exports = class Listen extends EventEmitter {
+@@ -9,50 +9,58 @@ module.exports = class Listen extends EventEmitter {
+     this.port = port
+ 
+     this.server = net.createServer((c) => {
+-      let user
+-
+-      let msgs = new Messages()
+-      c.on('data', chunk => {
+-        msgs.write(chunk)
+-      })
++      // The first framed message decides what this connection is. For 'F'
++      // (file transfer) connections everything after the init message is RAW
++      // bytes (transfer token, then file data), so it must never go through
++      // a length-prefixed message parser. We therefore parse only the first
++      // message here and hand the socket (plus any leftover bytes) to the
++      // right handler.
++      let buffer = Buffer.alloc(0)
++      let done = false
+ 
+       c.on('error', err => {
+         debug(`listen connection error ${err.code}`)
+       })
+ 
+-      msgs.on('message', msg => {
+-        let size = msg.int32()
+-        if (size < 4) return
+-
+-        if (!user) {
+-          let code = msg.int8()
+-          switch (code) {
+-            case 0: {
+-              let token = msg.int32()
+-              debug(`recv Pierce Firewall, token: ${token}`)
+-              break
+-            }
+-            case 1: {
+-              user = msg.str()
+-              let type = msg.str()
+-              let token = msg.int32()
+-              debug(`peerInit ${user}, type ${type}, token ${token}`)
+-              this.emit('new-peer', {
+-                socket: c,
+-                peer: { user, type, token }
+-              })
+-              break
+-            }
+-            default: {
+-              debug(`unattended case.`)
+-            }
+-          }
+-        }
+-      })
+-
+       c.on('end', () => {
+         debug('client disconnected')
+       })
++
++      const onData = chunk => {
++        if (done) return
++        buffer = Buffer.concat([buffer, chunk])
++        if (buffer.length < 4) return
++        const size = buffer.readUInt32LE(0)
++        if (buffer.length < size + 4) return
++        const msg = new Message(buffer.subarray(0, size + 4))
++        msg.int32() // size
++        const code = msg.int8()
++        const leftover = buffer.subarray(size + 4)
++        done = true
++        c.removeListener('data', onData)
++        if (code === 0) {
++          const token = msg.rawHexStr(4)
++          debug(`recv Pierce Firewall, token: ${token}`)
++          // A peer we asked to connect to us (ConnectToPeer) answers with
++          // PierceFirewall. If this is an 'F' connection the uploader now
++          // sends the raw transfer token followed by file data.
++          this.emit('file-connection', { socket: c, token, leftover })
++        } else if (code === 1) {
++          const user = msg.str()
++          const type = msg.str()
++          const token = msg.rawHexStr(4)
++          debug(`peerInit ${user}, type ${type}, token ${token}`)
++          if (type === 'F') {
++            this.emit('file-connection', { socket: c, peer: { user, type, token }, leftover })
++          } else {
++            this.emit('new-peer', { socket: c, peer: { user, type, token }, leftover })
++          }
++        } else {
++          debug(`unattended case.`)
++          c.destroy()
++        }
++      }
++      c.on('data', onData)
+     })
+ 
+     this.server.on('error', err => {
+diff --git a/node_modules/slsk-client/lib/message-factory.js b/node_modules/slsk-client/lib/message-factory.js
+index 3cd58fe..d38993e 100644
+--- a/node_modules/slsk-client/lib/message-factory.js
++++ b/node_modules/slsk-client/lib/message-factory.js
+@@ -17,18 +17,22 @@ module.exports = {
+           .str(type)
+           .rawHexStr(token)
+       },
+-      sharedFileList: (number, name, filesCount, filename) => {
+-        return new Message()
+-          .int32(5)
+-          .int32(number) // nb folders
+-          .str(name)
+-          .int32(filesCount) // nb files
+-          .int8(1) // code file
+-          .str(filename) // filename
+-          .int32(3000000) // size1
+-          .int32(0) // size2
+-          .str('mp3') // ext
+-          .int32(0)
++      sharedFileList: (folders) => {
++        let payload = new Message().int32(folders.length)
++        folders.forEach(folder => {
++          payload.str(folder.name).int32(folder.files.length)
++          folder.files.forEach(file => {
++            const extension = file.filename.includes('.') ? file.filename.split('.').pop() : ''
++            payload.int8(1)
++              .str(file.filename)
++              .int32(file.size >>> 0)
++              .int32(Math.floor(file.size / 0x100000000))
++              .str(extension)
++              .int32(0)
++          })
++        })
++        payload.int32(0).int32(0)
++        return new Message().int32(5).writeBuffer(zlib.deflateSync(payload.data))
+       },
+       fileSearchResult: (files, token, user) => {
+         let msg = new Message()
+@@ -60,11 +64,37 @@ module.exports = {
+           .rawHexStr(token) // token
+           .str(file)
+       },
+-      transferResponse: (token) => {
+-        return new Message()
++      transferResponse: (token, allowed = true, size = 0, reason = 'File not shared.') => {
++        const message = new Message()
+           .int32(41)
+           .rawHexStr(token)
+-          .int8(1)
++          .int8(allowed ? 1 : 0)
++        if (allowed && size > 0) {
++          message.int32(size >>> 0).int32(Math.floor(size / 0x100000000))
++        } else if (!allowed) {
++          message.str(reason)
++        }
++        return message
++      },
++      uploadTransferRequest: (token, filename, size) => {
++        return new Message()
++          .int32(40)
++          .int32(1)
++          .rawHexStr(token)
++          .str(filename)
++          .int32(size >>> 0)
++          .int32(Math.floor(size / 0x100000000))
++      },
++      queueUpload: (filename) => {
++        return new Message()
++          .int32(43)
++          .str(filename)
++      },
++      placeInQueueRequest: (filename) => {
++        return new Message().int32(51).str(filename)
++      },
++      uploadDenied: (filename, reason = 'File not shared.') => {
++        return new Message().int32(50).str(filename).str(reason)
+       }
+     },
+     server: {
+@@ -87,6 +117,13 @@ module.exports = {
+           .int32(3)
+           .str(username)
+       },
++      connectToPeer: (token, username, type = 'P') => {
++        return new Message()
++          .int32(18)
++          .rawHexStr(token)
++          .str(username)
++          .str(type)
++      },
+       addUser: (user) => {
+         return new Message()
+           .int32(5)
+diff --git a/node_modules/slsk-client/lib/peer/default-peer.js b/node_modules/slsk-client/lib/peer/default-peer.js
+index cec8d1d..0652f26 100644
+--- a/node_modules/slsk-client/lib/peer/default-peer.js
++++ b/node_modules/slsk-client/lib/peer/default-peer.js
+@@ -3,6 +3,8 @@ const zlib = require('zlib')
+ const Messages = require('../messages.js')
+ const MessageFactory = require('../message-factory.js')
+ const downloadPeerFile = require('./download-peer-file.js')
++const uploadPeerFile = require('./upload-peer-file.js')
++const crypto = require('crypto')
+ const debug = require('debug')('slsk:peer:default:i')
+ 
+ let stack = require('../stack')
+@@ -12,9 +14,16 @@ module.exports = class DefaultPeer extends Peer {
+     super(socket, peer)
+ 
+     this.conn.on('connect', () => {
+-      if (peer.token) {
++      if (peer.pierce && peer.token) {
+         let buf = Buffer.from('05000000' + '00' + peer.token, 'hex')
+         this.conn.write(buf)
++      } else {
++        // Fresh outgoing message connection (e.g. after GetPeerAddress): the
++        // peer ignores everything until it knows who we are via PeerInit.
++        this.conn.write(MessageFactory
++          .to.peer
++          .peerInit(stack.currentLogin, 'P', peer.token || '00000000')
++          .getBuff())
+       }
+     })
+ 
+@@ -32,9 +41,7 @@ module.exports = class DefaultPeer extends Peer {
+       switch (code) {
+         case 4: {
+           debug(`${peer.user} recv GetSharedFileList ${size}`)
+-          let res = MessageFactory
+-            .to.peer
+-            .sharedFileList(1, 'test', 1, '@@abcde\\test\\test-test.mp3')
++          let res = MessageFactory.to.peer.sharedFileList(stack.shared ? stack.shared.getFolders() : [])
+           debug(`${peer.user} sending SharedFileList`)
+           this.conn.write(res.getBuff())
+           break
+@@ -75,52 +82,101 @@ module.exports = class DefaultPeer extends Peer {
+           let token = msg.rawHexStr(4)
+           let file = msg.str()
+           debug(`${peer.user} recv TransferRequest ${file}`)
+-          stack.downloadTokens[token] = {
+-            user: peer.user,
+-            file
+-          }
+           if (dir === 1) {
++            stack.downloadTokens[token] = { user: peer.user, file }
+             stack.downloadTokens[token].size = msg.int32()
++            msg.int32()
++            this.conn.write(MessageFactory.to.peer.transferResponse(token).getBuff())
++            setTimeout(() => {
++              const pending = stack.downloadTokens[token]
++              if (pending && !pending.started && peer.host && peer.port) {
++                debug(`second-chance file connection to ${peer.user}`)
++                downloadPeerFile(peer.host, peer.port, token, peer.user, true)
++              }
++            }, 3000)
++          } else {
++            const sharedFile = stack.shared && stack.shared.find(file)
++            if (!sharedFile) {
++              this.conn.write(MessageFactory.to.peer.transferResponse(token, false).getBuff())
++              break
++            }
++            stack.uploadTokens[token] = sharedFile
++            this.conn.write(MessageFactory.to.peer.transferResponse(token, true, sharedFile.size).getBuff())
+           }
+-          let res = MessageFactory
+-            .to.peer
+-            .transferResponse(token)
+-
+-          setTimeout(() => {
+-            debug(`${peer.user} sending TransferResponse`)
+-            this.conn.write(res.getBuff())
+-          }, 200)
+           break
+         }
+         case 41: {
+           let token = msg.rawHexStr(4)
+           let allowed = msg.int8()
+           debug(`${peer.user} recv TransferResponse token: ${token} allowed: ${allowed}`)
++          const upload = stack.uploadTokens[token]
++          if (upload) {
++            if (allowed === 1 && peer.host && peer.port) {
++              uploadPeerFile.connect(peer.host, peer.port, token, stack.currentLogin, upload)
++            } else {
++              delete stack.uploadTokens[token]
++            }
++            break
++          }
+           if (allowed === 0) {
+             let reason = msg.str()
+             debug(`reason: ${reason}, I will receive TransferRequest soon...`)
++            const pending = stack.downloadTokens[token]
+             delete stack.downloadTokens[token] // avoid memory leak
++            if (pending && !/queue/i.test(reason)) {
++              // "Queued" means the uploader will start the transfer later; any
++              // other reason is terminal and the caller must try another peer.
++              const down = stack.download[pending.user + '_' + pending.file]
++              if (down && typeof down.cb === 'function') {
++                down.cb(new Error(`Peer rejected transfer: ${reason}`))
++                down.cb = null
++              }
++            }
+           } else if (allowed === 1) {
+             debug(`Directly allowed. Connecting to peer with PeerInit + ${token}`)
+             downloadPeerFile(peer.host, peer.port, token, peer.user, true)
+           }
+           break
+         }
++        case 43: {
++          const filename = msg.str()
++          const sharedFile = stack.shared && stack.shared.find(filename)
++          if (!sharedFile) {
++            this.conn.write(MessageFactory.to.peer.uploadDenied(filename).getBuff())
++            break
++          }
++          const token = crypto.randomBytes(4).toString('hex')
++          stack.uploadTokens[token] = sharedFile
++          this.conn.write(MessageFactory.to.peer.uploadTransferRequest(token, filename, sharedFile.size).getBuff())
++          break
++        }
+         case 46: {
+           let filename = msg.str()
+           debug(`${peer.user} UploadFailed ${filename}`)
+           let down = stack.download[peer.user + '_' + filename]
+           if (down && typeof down.cb === 'function') {
+             down.cb(new Error('Peer error'))
++            down.cb = null
+           } else {
+             debug(`Cannot cb for ${peer.user} ${filename}`)
+           }
+           break
+         }
++        case 44: {
++          const filename = msg.str()
++          const place = msg.int32()
++          debug(`${peer.user} PlaceInQueue ${filename}: ${place}`)
++          break
++        }
+         case 50: {
+           let filename = msg.str()
+           let reason = msg.str()
+           debug(`${peer.user} QueueFailed ${filename} reason ${reason}`)
++          let down = stack.download[peer.user + '_' + filename]
++          if (down && typeof down.cb === 'function') {
++            down.cb(new Error(`Queue failed: ${reason}`))
++            down.cb = null
++          }
+           break
+         }
+         default: {
+diff --git a/node_modules/slsk-client/lib/peer/download-peer-file.js b/node_modules/slsk-client/lib/peer/download-peer-file.js
+index dc4275e..0cb9e73 100644
+--- a/node_modules/slsk-client/lib/peer/download-peer-file.js
++++ b/node_modules/slsk-client/lib/peer/download-peer-file.js
+@@ -5,96 +5,183 @@ const MessageFactory = require('../message-factory.js')
+ 
+ let stack = require('../stack')
+ 
++/**
++ * Shared receive loop for a file ('F') connection once we know the transfer
++ * token: writes the 8-byte offset, then streams incoming bytes to disk and
++ * finally reports to the download callback (success, incomplete or error).
++ */
++function receiveFile (conn, requestToken, initialData) {
++  const tok = stack.downloadTokens[requestToken]
++  if (!tok) {
++    debug(`ERROR: token ${requestToken} not exist, destroying file connection`)
++    conn.destroy()
++    return false
++  }
++  if (tok.started) {
++    debug(`duplicate file connection for token ${requestToken}`)
++    conn.destroy()
++    return false
++  }
++  tok.started = true
++  const down = stack.download[tok.user + '_' + tok.file]
++
++  let chunks = []
++  let receivedBytes = 0
++  let socketError
++  let output
++  if (down && down.path) {
++    output = fs.createWriteStream(down.path)
++    output.on('error', error => {
++      socketError = error
++      conn.destroy()
++    })
++  }
++
++  const writeChunk = data => {
++    if (down && down.stream) down.stream.push(data)
++    if (output) {
++      if (!output.write(data)) {
++        conn.pause()
++        output.once('drain', () => conn.resume())
++      }
++    } else {
++      chunks.push(data)
++    }
++    receivedBytes += data.length
++    if (tok.size && receivedBytes >= tok.size) {
++      debug(`disconnect, received: ${receivedBytes} size: ${tok.size}`)
++      // It is the downloader's responsibility to close the connection when
++      // the whole file arrived.
++      conn.end()
++    }
++  }
++
++  conn.on('data', writeChunk)
++
++  conn.on('close', () => {
++    debug(`file socket close ${tok.user}`)
++    if (down && down.stream) down.stream.push(null)
++    delete stack.downloadTokens[requestToken]
++    if (!down) return
++    const complete = receivedBytes >= tok.size
++    const buffer = output ? undefined : Buffer.concat(chunks)
++    const finish = () => {
++      down.buffer = buffer
++      down.size = receivedBytes
++      chunks = []
++      if (typeof down.cb !== 'function') return
++      const cb = down.cb
++      down.cb = null
++      if (socketError) cb(socketError)
++      else if (!complete) cb(new Error(`Incomplete download: ${receivedBytes}/${tok.size}`))
++      else cb(null, down)
++    }
++    if (output) output.end(finish)
++    else if (down.path) fs.writeFile(down.path, buffer, finish)
++    else finish()
++  })
++
++  conn.on('error', error => {
++    socketError = error
++    debug(`file socket error ${tok.user}, destroying`)
++    conn.destroy()
++  })
++
++  // We already downloaded 0 bytes: tell the uploader to start at offset 0.
++  conn.write(Buffer.from('0000000000000000', 'hex'))
++  if (initialData && initialData.length) writeChunk(initialData)
++  return true
++}
++
++/**
++ * Outgoing file connection.
++ * - noPierce (legacy "directly allowed"): we are the downloader connecting to
++ *   the uploader, so we send PeerInit('F'), then the RAW transfer token
++ *   (FileDownloadInit) and the 8-byte offset. The old implementation never
++ *   sent the raw token, so modern uploaders waited forever ("peer accepted
++ *   but sends no data").
++ * - pierce: the uploader asked us (via server ConnectToPeer) to connect; we
++ *   send PierceFirewall(token) and the uploader answers with the raw transfer
++ *   token, then file data.
++ */
+ module.exports = (host, port, token, user, noPierce) => {
+   debug(`downloadPeerFile ${user}`)
++  const fail = error => {
++    const tok = stack.downloadTokens[token]
++    const down = tok && stack.download[tok.user + '_' + tok.file]
++    delete stack.downloadTokens[token]
++    if (down && typeof down.cb === 'function') {
++      down.cb(error)
++      down.cb = null
++    }
++  }
++
++  let connected = false
+   let conn = net.createConnection({
+     host,
+     port
+   }, () => {
++    connected = true
+     if (noPierce) {
+       debug(`noPierce ${user} connected`)
+       conn.write(MessageFactory
+         .to.peer
+-        .peerInit(stack.currentLogin, 'F', token)
++        .peerInit(stack.currentLogin, 'F', '00000000')
+         .getBuff())
+-
+-      setTimeout(() => {
+-        debug(`noPierce sending 8* 00`)
+-        if (conn.destroyed) {
+-          debug(`socket closed`)
+-          return
+-        }
+-        conn.write(Buffer.from('00000000' + '00000000', 'hex'))
+-      }, 1000)
++      conn.write(Buffer.from(token, 'hex'))
++      receiveFile(conn, token)
+     } else {
+       conn.write(MessageFactory
+         .to.peer
+         .pierceFw(token)
+         .getBuff())
+-    }
+-  })
+ 
+-  let received = false
+-  let requestToken = noPierce ? token : undefined
+-  let buf = Buffer.alloc(0)
+-  let tok
+-  let down
+-  let i = 0
+-
+-  conn.on('data', data => {
+-    if (!noPierce && !received) {
+-      requestToken = data.toString('hex', 0, 4)
+-      conn.write(Buffer.from('00000000' + '00000000', 'hex'))
+-      received = true
+-    } else {
+-      debug(`file data`)
+-      if (down && down.stream) {
+-        debug('push to stream')
+-        down.stream.push(data)
++      let pending = Buffer.alloc(0)
++      const onToken = data => {
++        pending = Buffer.concat([pending, data])
++        if (pending.length < 4) return
++        conn.removeListener('data', onToken)
++        const requestToken = pending.toString('hex', 0, 4)
++        receiveFile(conn, requestToken, pending.subarray(4))
+       }
+-      buf = Buffer.concat([buf, data])
+-    }
+-
+-    if (tok) {
+-      if (i % 10 === 0) {
+-        debug(`buf: ${buf.length} size: ${tok.size}`)
+-      }
+-      i++
+-    } else {
+-      tok = stack.downloadTokens[requestToken]
+-      down = stack.download[tok.user + '_' + tok.file]
+-    }
+-
+-    if (tok && buf.length >= tok.size) {
+-      debug(`disconnect, buf: ${buf.length} size: ${tok.size}`)
+-      conn.end()
++      conn.on('data', onToken)
+     }
+   })
+ 
+-  conn.on('close', () => {
+-    debug(`file socket close ${user}`)
+-    if (tok && down) {
+-      if (down.stream) down.stream.push(null)
+-      const filePath = down.path || getFilePathName(tok.user, tok.file)
+-      fs.writeFile(filePath, buf, () => {
+-        down.path = filePath
+-        down.buffer = buf
+-        if (typeof down.cb === 'function') down.cb(null, down)
+-      })
+-    } else {
+-      fs.writeFile(`${user}-${token}.mp3`, buf, () => {})
+-      debug(`ERROR: token ${token} not exist`)
++  conn.on('error', error => {
++    if (!connected) {
++      // The old implementation swallowed connect failures, leaving the
++      // download stuck forever at 0 bytes. Report so callers can move on to
++      // another peer. (For pierce connections `token` is the connection
++      // token, not a transfer token, so the lookup is simply a no-op.)
++      debug(`file connection to ${user} failed: ${error.code}`)
++      fail(error)
+     }
+-  })
+-
+-  conn.on('error', () => {
+-    debug(`file socket error ${user}, destroying`)
+     conn.destroy()
+-    // close event will be called (https://nodejs.org/api/net.html#net_event_error_1)
+   })
+ }
+ 
+-function getFilePathName (user, file) {
+-  file = file.split('\\')
+-  return `/tmp/slsk/${user}_${file[file.length - 1]}`
++/**
++ * Incoming file connection on our listen port: the uploader connected to us
++ * (directly with PeerInit 'F', or with PierceFirewall after our
++ * ConnectToPeer) and now sends the RAW transfer token, which we match against
++ * our pending downloads. The old implementation parsed these connections as
++ * message connections and never answered the offset, so the transfer hung.
++ */
++module.exports.incoming = (socket, leftover) => {
++  let pending = Buffer.alloc(0)
++  const onToken = data => {
++    pending = Buffer.concat([pending, data])
++    if (pending.length < 4) return
++    socket.removeListener('data', onToken)
++    const requestToken = pending.toString('hex', 0, 4)
++    debug(`incoming file connection, token ${requestToken}`)
++    receiveFile(socket, requestToken, pending.subarray(4))
++  }
++  socket.on('data', onToken)
++  socket.on('error', err => {
++    debug(`incoming file connection error ${err.code}`)
++    socket.destroy()
++  })
++  if (leftover && leftover.length) onToken(leftover)
+ }
+diff --git a/node_modules/slsk-client/lib/peer/peer.js b/node_modules/slsk-client/lib/peer/peer.js
+index 05d2973..4d8b3f8 100644
+--- a/node_modules/slsk-client/lib/peer/peer.js
++++ b/node_modules/slsk-client/lib/peer/peer.js
+@@ -7,13 +7,21 @@ module.exports = class Peer extends EventEmitter {
+     super()
+     this.conn = socket
+     this.peer = peer
++    this.connected = !socket.connecting
++
++    this.conn.on('connect', () => {
++      this.connected = true
++      this.emit('ready')
++    })
+ 
+     this.conn.on('error', error => {
++      this.connected = false
+       debug(`${peer.user} error ${error.code}`)
+       this.emit('disconnect', {})
+     })
+ 
+     this.conn.on('end', () => {
++      this.connected = false
+       debug(`${peer.user} connection ended`)
+       this.emit('disconnect', {})
+     })
+@@ -27,6 +35,22 @@ module.exports = class Peer extends EventEmitter {
+       .getBuff())
+   }
+ 
++  queueUpload (file) {
++    debug(`QueueUpload ${file}`)
++    this.conn.write(MessageFactory
++      .to.peer
++      .queueUpload(file)
++      .getBuff())
++  }
++
++  placeInQueueRequest (file) {
++    debug(`PlaceInQueueRequest ${file}`)
++    this.conn.write(MessageFactory
++      .to.peer
++      .placeInQueueRequest(file)
++      .getBuff())
++  }
++
+   setAddress (host, port) {
+     debug(`setAddress for ${this.peer.user}: ${host} ${port}`)
+     this.peer.host = host
+diff --git a/node_modules/slsk-client/lib/peer/upload-peer-file.js b/node_modules/slsk-client/lib/peer/upload-peer-file.js
+new file mode 100644
+index 0000000..57d5b32
+--- /dev/null
++++ b/node_modules/slsk-client/lib/peer/upload-peer-file.js
+@@ -0,0 +1,39 @@
++const fs = require('fs')
++const net = require('net')
++const MessageFactory = require('../message-factory.js')
++
++function streamFromOffset (socket, upload, offsetBuffer) {
++  const low = offsetBuffer.readUInt32LE(0)
++  const high = offsetBuffer.readUInt32LE(4)
++  const offset = low + (high * 0x100000000)
++  if (offset >= upload.size) return
++  const input = fs.createReadStream(upload.path, { start: offset })
++  input.on('error', () => socket.destroy())
++  input.pipe(socket, { end: false })
++}
++
++function waitForOffset (socket, upload) {
++  let pending = Buffer.alloc(0)
++  const onData = chunk => {
++    pending = Buffer.concat([pending, chunk])
++    if (pending.length < 8) return
++    socket.removeListener('data', onData)
++    streamFromOffset(socket, upload, pending.subarray(0, 8))
++  }
++  socket.on('data', onData)
++}
++
++function accept (socket, upload) {
++  waitForOffset(socket, upload)
++}
++
++function connect (host, port, token, username, upload) {
++  const socket = net.createConnection({ host, port }, () => {
++    socket.write(MessageFactory.to.peer.peerInit(username, 'F', '00000000').getBuff())
++    socket.write(Buffer.from(token, 'hex'))
++    waitForOffset(socket, upload)
++  })
++  socket.on('error', () => socket.destroy())
++}
++
++module.exports = { accept, connect }
+diff --git a/node_modules/slsk-client/lib/server.js b/node_modules/slsk-client/lib/server.js
+index 049f84b..70dda6e 100644
+--- a/node_modules/slsk-client/lib/server.js
++++ b/node_modules/slsk-client/lib/server.js
+@@ -37,9 +37,11 @@ module.exports = class Server extends EventEmitter {
+             let greet = msg.str()
+             debug(`Login succeed: ${greet}`)
+             debug(`send SharedFoldersFiles`)
++            const sharedFolders = stack.shared ? stack.shared.getFolders() : []
++            const sharedFiles = stack.shared ? stack.shared.files.length : 0
+             this.conn.write(MessageFactory
+               .to.server
+-              .sharedFoldersFiles(1, 1)
++              .sharedFoldersFiles(sharedFolders.length, sharedFiles)
+               .getBuff())
+             debug(`send Have No Parents 1`)
+             this.conn.write(MessageFactory
+@@ -164,6 +166,11 @@ module.exports = class Server extends EventEmitter {
+     })
+   }
+ 
++  updateSharedStats (folderCount, fileCount) {
++    if (!this.conn || this.conn.destroyed) return
++    this.conn.write(MessageFactory.to.server.sharedFoldersFiles(folderCount, fileCount).getBuff())
++  }
++
+   login (credentials) {
+     this.conn.write(MessageFactory
+       .to.server
+@@ -195,6 +202,14 @@ module.exports = class Server extends EventEmitter {
+       .getBuff())
+   }
+ 
++  connectToPeer (username, token, type = 'P') {
++    debug(`send ConnectToPeer ${username} ${type} ${token}`)
++    this.conn.write(MessageFactory
++      .to.server
++      .connectToPeer(token, username, type)
++      .getBuff())
++  }
++
+   destroy () {
+     this.conn.destroy()
+   }
+diff --git a/node_modules/slsk-client/lib/share/shared.js b/node_modules/slsk-client/lib/share/shared.js
+index 51e8235..8f2ef22 100644
+--- a/node_modules/slsk-client/lib/share/shared.js
++++ b/node_modules/slsk-client/lib/share/shared.js
+@@ -1,56 +1,99 @@
+ const EventEmitter = require('events')
+ const fs = require('fs')
+-const separator = require('path').sep
++const pathUtil = require('path')
++const separator = pathUtil.sep
+ const debug = require('debug')('slsk:shared:i')
+ const matches = require('./matches.js')
++const SHARED_AUDIO_EXTENSIONS = new Set([
++  '.aac', '.aif', '.aiff', '.alac', '.ape', '.flac', '.m4a',
++  '.mp3', '.ogg', '.opus', '.wav', '.wma'
++])
+ 
+ module.exports = class Shared extends EventEmitter {
+   constructor () {
+     super()
+     this.files = []
++    this.folders = []
++    this.sharePaths = []
++  }
++
++  scanFolder (folder) {
++    const absolute = pathUtil.resolve(folder)
++    if (!fs.existsSync(absolute) || !fs.statSync(absolute).isDirectory()) {
++      debug(`Folder ${folder} does not exist`)
++      return
++    }
++
++    const shareName = pathUtil.basename(absolute) || 'StaySound'
++    if (!this.sharePaths.includes(absolute)) this.sharePaths.push(absolute)
++    this.folders.push({ path: absolute, name: shareName })
++    fs.readdirSync(absolute).forEach(file => this.scan(absolute, shareName, file))
++    debug(`Scan folder ${folder} completed, ${this.files.length} shared`)
++    process.nextTick(() => this.emit('complete', folder))
++  }
+ 
+-    this.on('file', file => {
+-      let path = file.path
++  scan (root, shareName, relativePath) {
++    const file = pathUtil.join(root, relativePath)
++    const name = pathUtil.basename(file)
++    if (name.startsWith('.') || name.endsWith('.part')) return
++    let stats
++    try {
++      stats = fs.lstatSync(file)
++    } catch (error) {
++      debug(`Cannot inspect ${file}: ${error.message}`)
++      return
++    }
++    if (stats.isSymbolicLink()) return
++    if (stats.isFile() && SHARED_AUDIO_EXTENSIONS.has(pathUtil.extname(name).toLowerCase())) {
++      const virtualPath = `@@StaySound\\${shareName}\\${relativePath.split(separator).join('\\')}`
+       this.files.push({
+-        key: path.slice(Math.max(path.length - 2, 1)).join(separator),
++        key: relativePath,
+         value: {
+-          file: path.join(separator),
+-          size: file.size
++          file: virtualPath,
++          path: file,
++          size: stats.size
+         }
+       })
+-    })
++    } else if (stats.isDirectory()) {
++      try {
++        fs.readdirSync(file).forEach(it => this.scan(root, shareName, pathUtil.join(relativePath, it)))
++      } catch (error) {
++        debug(`Cannot read ${file}: ${error.message}`)
++      }
++    }
+   }
+ 
+-  scanFolder (folder) {
+-    fs.readdir(folder, (err, files) => {
+-      if (err) {
+-        debug(`Folder ${folder} does not exist`)
+-      } else {
+-        files.forEach(file => {
+-          this.scan([folder, file])
+-        })
+-        debug(`Scan folder ${folder} completed, ${this.files.length} shared`)
+-        this.emit('complete', folder)
+-      }
++  search (query) {
++    return this.files.filter(it => matches(it.key, query))
++  }
++
++  find (virtualPath) {
++    const normalized = String(virtualPath || '').replaceAll('/', '\\').toLowerCase()
++    return this.files.find(file => file.value.file.toLowerCase() === normalized)?.value
++  }
++
++  getFolders () {
++    const folders = new Map()
++    this.files.forEach(entry => {
++      const virtualPath = entry.value.file
++      const index = virtualPath.lastIndexOf('\\')
++      const directory = index >= 0 ? virtualPath.slice(0, index) : '@@StaySound'
++      const filename = index >= 0 ? virtualPath.slice(index + 1) : virtualPath
++      if (!folders.has(directory)) folders.set(directory, [])
++      folders.get(directory).push({ filename, size: entry.value.size })
+     })
++    return [...folders].map(([name, files]) => ({ name, files }))
+   }
+ 
+-  scan (path) {
+-    let file = path.join(separator)
+-    let stats = fs.statSync(file)
+-    if (stats.isFile()) {
+-      this.emit('file', {
+-        path,
+-        size: stats.size
+-      })
+-    } else {
+-      fs.readdirSync(file).forEach(it => {
+-        this.scan(path.concat([it]))
+-      })
+-    }
++  rescan () {
++    const paths = [...this.sharePaths]
++    this.files = []
++    this.folders = []
++    paths.forEach(folder => this.scanFolder(folder))
+   }
+ 
+-  search (query) {
+-    return this.files.filter(it => matches(it.key, query))
++  setFolders (folders) {
++    this.sharePaths = [...new Set((folders || []).map(folder => pathUtil.resolve(folder)))]
++    this.rescan()
+   }
+ }
+diff --git a/node_modules/slsk-client/lib/slsk-client.js b/node_modules/slsk-client/lib/slsk-client.js
+index b08f09c..4156798 100644
+--- a/node_modules/slsk-client/lib/slsk-client.js
++++ b/node_modules/slsk-client/lib/slsk-client.js
+@@ -9,6 +9,7 @@ const Server = require('./server.js')
+ const DefaultPeer = require('./peer/default-peer.js')
+ const DistributedPeer = require('./peer/distributed-peer.js')
+ const downloadPeerFile = require('./peer/download-peer-file.js')
++const uploadPeerFile = require('./peer/upload-peer-file.js')
+ const Listen = require('./listen.js')
+ const Shared = require('./share/shared.js')
+ let stack = require('./stack')
+@@ -27,6 +28,9 @@ class SlskClient extends EventEmitter {
+ 
+   init (cb) {
+     debug('Init client')
++    shared = new Shared()
++    this.sharedFolders.forEach(folder => shared.scanFolder(folder))
++    stack.shared = shared
+     server = new Server(this.serverAddress, cb)
+ 
+     server.on('connect-to-peer', peer => {
+@@ -34,13 +38,16 @@ class SlskClient extends EventEmitter {
+     })
+ 
+     server.on('get-peer-address', peer => {
+-      if (peers[peer.user]) {
++      if (peers[peer.user] && peers[peer.user].connected) {
+         peers[peer.user].setAddress(peer.host, peer.port)
+       } else {
++        if (peers[peer.user]) peers[peer.user].destroy()
++        const solicitationToken = Object.keys(stack.peerSolicitations)
++          .find(token => stack.peerSolicitations[token].user === peer.user)
+         peers[peer.user] = new DefaultPeer(net.createConnection({
+           host: peer.host,
+           port: peer.port
+-        }), peer)
++        }), { ...peer, token: solicitationToken })
+         if (stack.peerSearchMatches[peer.user]) {
+           Object.keys(stack.peerSearchMatches[peer.user]).forEach(ticket => {
+             peers[peer.user].fileSearchResult(stack.peerSearchMatches[peer.user][ticket], ticket, stack.currentLogin)
+@@ -50,8 +57,6 @@ class SlskClient extends EventEmitter {
+       }
+     })
+ 
+-    shared = new Shared()
+-    this.sharedFolders.forEach(folder => shared.scanFolder(folder))
+   }
+ 
+   connectToPeer (peer) {
+@@ -91,10 +96,12 @@ class SlskClient extends EventEmitter {
+         break
+       }
+       default: {
++        if (peers[peer.user] && peers[peer.user].connected) break
++        if (peers[peer.user]) peers[peer.user].destroy()
+         peers[peer.user] = new DefaultPeer(net.createConnection({
+           host: peer.host,
+           port: peer.port
+-        }), peer)
++        }), { ...peer, pierce: true })
+         peers[peer.user].on('disconnect', () => {
+           delete peers[peer.user]
+         })
+@@ -119,6 +126,36 @@ class SlskClient extends EventEmitter {
+           delete peers[peer.user]
+         })
+       }
++      if (evt.leftover && evt.leftover.length) evt.socket.emit('data', evt.leftover)
++    })
++    listen.on('file-connection', evt => {
++      const solicitation = evt.token && stack.peerSolicitations[evt.token]
++      if (solicitation && solicitation.type === 'P') {
++        delete stack.peerSolicitations[evt.token]
++        if (peers[solicitation.user]) peers[solicitation.user].destroy()
++        const indirectPeer = new DefaultPeer(evt.socket, {
++          user: solicitation.user,
++          type: 'P',
++          token: evt.token
++        })
++        peers[solicitation.user] = indirectPeer
++        indirectPeer.on('disconnect', () => {
++          if (peers[solicitation.user] === indirectPeer) delete peers[solicitation.user]
++        })
++        if (evt.leftover && evt.leftover.length) evt.socket.emit('data', evt.leftover)
++        return
++      }
++      const upload = evt.peer && stack.uploadTokens[evt.peer.token]
++      if (upload) {
++        uploadPeerFile.accept(evt.socket, upload)
++        delete stack.uploadTokens[evt.peer.token]
++        if (evt.leftover && evt.leftover.length) evt.socket.emit('data', evt.leftover)
++        return
++      }
++      // Incoming 'F' connection for one of our downloads: the uploader sends
++      // the raw transfer token next; downloadPeerFile.incoming answers the
++      // 8-byte offset and receives the file.
++      downloadPeerFile.incoming(evt.socket, evt.leftover)
+     })
+     server.setWaitPort(incomingPort)
+     stack.login = cb
+@@ -156,16 +193,29 @@ class SlskClient extends EventEmitter {
+     if (typeof obj.file === 'undefined') {
+       throw new Error('You must specify file')
+     }
+-    if (!peers[obj.file.user]) {
+-      return cb(new Error('User not exist'))
+-    }
+-
+-    let token = crypto.randomBytes(4).toString('hex')
+-
+-    stack.downloadTokens[token] = {
+-      user: obj.file.user,
+-      file: obj.file.file,
+-      size: obj.file.size
++    if (!peers[obj.file.user] || !peers[obj.file.user].connected) {
++      // Search-result sockets are short-lived. A peer can legitimately close
++      // that socket after advertising its files, so resolve its current
++      // address through the Soulseek server before declaring it unavailable.
++      server.getPeerAddress(obj.file.user)
++      const connectionToken = crypto.randomBytes(4).toString('hex')
++      stack.peerSolicitations[connectionToken] = { user: obj.file.user, type: 'P' }
++      server.connectToPeer(obj.file.user, connectionToken, 'P')
++      const startedAt = Date.now()
++      const waitForPeer = setInterval(() => {
++        if (peers[obj.file.user] && peers[obj.file.user].connected) {
++          clearInterval(waitForPeer)
++          delete stack.peerSolicitations[connectionToken]
++          this.download(obj, cb, stream)
++          return
++        }
++        if (Date.now() - startedAt >= 10000) {
++          clearInterval(waitForPeer)
++          delete stack.peerSolicitations[connectionToken]
++          cb(new Error('Peer unavailable after direct and indirect connection attempts'))
++        }
++      }, 100)
++      return
+     }
+ 
+     stack.download[obj.file.user + '_' + obj.file.file] = {
+@@ -173,7 +223,14 @@ class SlskClient extends EventEmitter {
+       path: obj.path,
+       stream
+     }
+-    peers[obj.file.user].transferRequest(obj.file.file, token)
++    // Modern flow (what Seeker/Nicotine+/slskd do): ask the uploader to queue
++    // the file. When a slot frees up, the uploader sends TransferRequest
++    // (direction 1), we answer TransferResponse(allowed) and the uploader
++    // opens the 'F' connection. The legacy TransferRequest(direction 0) is
++    // deprecated and rejected by modern clients, which is why transfers used
++    // to hang at "peer accepted but sends no data".
++    peers[obj.file.user].queueUpload(obj.file.file)
++    peers[obj.file.user].placeInQueueRequest(obj.file.file)
+   }
+ 
+   downloadStream (obj, cb) {
+@@ -183,6 +240,30 @@ class SlskClient extends EventEmitter {
+     this.download(obj, null, s)
+   }
+ 
++  rescanShares () {
++    if (!shared) return
++    shared.rescan()
++    stack.shared = shared
++    if (server) server.updateSharedStats(shared.getFolders().length, shared.files.length)
++  }
++
++  setSharedFolders (folders) {
++    if (!shared) return { files: 0, folders: 0, roots: [] }
++    shared.setFolders(folders)
++    stack.shared = shared
++    if (server) server.updateSharedStats(shared.getFolders().length, shared.files.length)
++    return this.getShareStats()
++  }
++
++  getShareStats () {
++    if (!shared) return { files: 0, folders: 0, roots: [] }
++    return {
++      files: shared.files.length,
++      folders: shared.getFolders().length,
++      roots: [...shared.sharePaths]
++    }
++  }
++
+   destroy () {
+     if (server) server.destroy()
+     if (listen) listen.destroy()
+diff --git a/node_modules/slsk-client/lib/stack.js b/node_modules/slsk-client/lib/stack.js
+index 5e6051a..c21d4a1 100644
+--- a/node_modules/slsk-client/lib/stack.js
++++ b/node_modules/slsk-client/lib/stack.js
+@@ -2,6 +2,9 @@ module.exports = {
+   search: {},
+   download: {},
+   downloadTokens: {},
++  uploadTokens: {},
++  peerSolicitations: {},
++  shared: null,
+   peerSearchMatches: {},
+   peerSearchRequests: []
+ }

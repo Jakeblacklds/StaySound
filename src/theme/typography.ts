@@ -1,21 +1,18 @@
 import { Platform, TextStyle } from 'react-native';
 
 const systemFont = Platform.select({
-    ios: 'System',
-    android: 'sans-serif',
+    android: 'StaySound',
+    ios: 'SF Pro Display',
     default: 'System',
 }) ?? 'System';
 
-const mediumSystemFont = Platform.select({
-    ios: 'System',
-    android: 'sans-serif-medium',
-    default: 'System',
-}) ?? systemFont;
+const mediumSystemFont = systemFont;
 
 export const fontFamilies = {
     regular: systemFont,
     medium: mediumSystemFont,
-    bold: mediumSystemFont,
+    bold: systemFont,
+    accent: systemFont,
     mono: Platform.select({
         ios: 'SpaceMono',
         android: 'monospace',

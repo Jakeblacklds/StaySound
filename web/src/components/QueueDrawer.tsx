@@ -2,6 +2,7 @@ import { formatDuration } from '@staysound/services/metadataService';
 import type { Track } from '@staysound/types/audio';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { CloseIcon, PlayingBars } from './icons';
+import { useIsDesktopViewport } from '../hooks/useIsDesktopViewport';
 
 interface QueueDrawerProps {
   queue: Track[];
@@ -12,6 +13,7 @@ interface QueueDrawerProps {
 }
 
 export function QueueDrawer({ queue, currentIndex, isPlaying, onPlayIndex, onClose }: QueueDrawerProps) {
+  const isDesktopViewport = useIsDesktopViewport();
   const [closing, setClosing] = useState(false);
   const activeRef = useRef<HTMLButtonElement>(null);
 
@@ -39,10 +41,12 @@ export function QueueDrawer({ queue, currentIndex, isPlaying, onPlayIndex, onClo
     return () => document.removeEventListener('keydown', handleKey);
   }, [handleClose]);
 
+  const circ = isDesktopViewport ? 'circ' : '';
+
   return (
     <>
-      <div className="queue-drawer-overlay" onClick={handleClose} />
-      <aside className={`queue-drawer ${closing ? 'closing' : ''}`}>
+      <div className={`queue-drawer-overlay ${circ} ${closing ? 'closing' : ''}`} onClick={handleClose} />
+      <aside className={`queue-drawer ${circ} ${closing ? 'closing' : ''}`}>
         <div className="queue-header">
           <h3>Cola de reproducción</h3>
           <button onClick={handleClose} aria-label="Cerrar cola"><CloseIcon size={18} /></button>

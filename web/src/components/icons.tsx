@@ -164,6 +164,37 @@ export function MusicNoteIcon(props: IconProps) {
   );
 }
 
+export function MicrophoneIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="9" y="3" width="6" height="11" rx="3" />
+      <path d="M5.5 10.5v.5a6.5 6.5 0 0 0 13 0v-.5" />
+      <path d="M12 17.5V21" />
+      <path d="M8.5 21h7" />
+    </Icon>
+  );
+}
+
+export function SeekBackIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M4 8V4L1 7l3 3V8a8.5 8.5 0 1 1-.1 8.2" />
+      <path d="M9.4 9.2h1.1v5.6" />
+      <path d="M13.2 10.6c0-.9.6-1.5 1.4-1.5s1.4.6 1.4 1.5v2.8c0 .9-.6 1.5-1.4 1.5s-1.4-.6-1.4-1.5v-2.8Z" />
+    </Icon>
+  );
+}
+
+export function SeekForwardIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M20 8V4l3 3-3 3V8a8.5 8.5 0 1 0 .1 8.2" />
+      <path d="M8.2 9.2h1.1v5.6" />
+      <path d="M12 10.6c0-.9.6-1.5 1.4-1.5s1.4.6 1.4 1.5v2.8c0 .9-.6 1.5-1.4 1.5s-1.4-.6-1.4-1.5v-2.8Z" />
+    </Icon>
+  );
+}
+
 export function DiscIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -214,6 +245,19 @@ export function PlusIcon(props: IconProps) {
   );
 }
 
+export function KeyboardIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <rect x="2" y="6" width="20" height="12" rx="2" />
+      <path d="M6 10h.01" />
+      <path d="M10 10h.01" />
+      <path d="M14 10h.01" />
+      <path d="M18 10h.01" />
+      <path d="M8 14h8" />
+    </Icon>
+  );
+}
+
 export function TrashIcon(props: IconProps) {
   return (
     <Icon {...props}>
@@ -228,16 +272,22 @@ export function TrashIcon(props: IconProps) {
 
 export function GearIcon(props: IconProps) {
   return (
+    <Icon {...props} fill="currentColor" stroke="none">
+      <path d="M19.43 12.98c.04-.32.07-.65.07-.98s-.02-.66-.07-.98l2.11-1.65a.5.5 0 0 0 .12-.64l-2-3.46a.5.5 0 0 0-.61-.22l-2.49 1a7.7 7.7 0 0 0-1.69-.98L14.5 2.42A.49.49 0 0 0 14 2h-4a.49.49 0 0 0-.49.42L9.13 5.07c-.61.25-1.18.58-1.69.98l-2.49-1a.5.5 0 0 0-.61.22l-2 3.46a.5.5 0 0 0 .12.64l2.11 1.65c-.04.32-.08.65-.08.98s.03.66.08.98l-2.11 1.65a.5.5 0 0 0-.12.64l2 3.46c.14.24.43.34.7.22l2.49-1c.51.4 1.08.73 1.69.98l.38 2.65c.04.28.28.49.56.49h4c.28 0 .52-.21.56-.49l.38-2.65c.61-.25 1.18-.58 1.69-.98l2.49 1c.27.11.56.02.7-.22l2-3.46a.5.5 0 0 0-.12-.64l-2.11-1.65ZM12 15.5A3.5 3.5 0 1 1 12 8a3.5 3.5 0 0 1 0 7.5Z" />
+    </Icon>
+  );
+}
+
+/** Controls icon: clearer than a cog for per-view options such as lyrics. */
+export function SlidersIcon(props: IconProps) {
+  return (
     <Icon {...props}>
-      <circle cx="12" cy="12" r="3" />
-      <path d="M12 2.5v3" />
-      <path d="M12 18.5v3" />
-      <path d="M4.6 4.6 6.7 6.7" />
-      <path d="m17.3 17.3 2.1 2.1" />
-      <path d="M2.5 12h3" />
-      <path d="M18.5 12h3" />
-      <path d="m4.6 19.4 2.1-2.1" />
-      <path d="m17.3 6.7 2.1-2.1" />
+      <path d="M4 6h16" />
+      <path d="M4 12h16" />
+      <path d="M4 18h16" />
+      <circle cx="9" cy="6" r="2" fill="var(--fp-bg, #0b0e14)" />
+      <circle cx="16" cy="12" r="2" fill="var(--fp-bg, #0b0e14)" />
+      <circle cx="11" cy="18" r="2" fill="var(--fp-bg, #0b0e14)" />
     </Icon>
   );
 }
@@ -303,6 +353,35 @@ export function SpinnerIcon(props: IconProps) {
   return (
     <Icon {...props} className={`spin ${props.className ?? ''}`}>
       <path d="M12 3a9 9 0 1 0 9 9" />
+    </Icon>
+  );
+}
+
+export function HeartIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M12 20.2 4.9 13a4.6 4.6 0 0 1 6.5-6.5l.6.6.6-.6A4.6 4.6 0 0 1 19.1 13Z" />
+    </Icon>
+  );
+}
+
+export function LyricsIcon(props: IconProps) {
+  return (
+    <Icon {...props}>
+      <path d="M6 6.5A2.5 2.5 0 0 1 8.5 4H18v13.5A2.5 2.5 0 0 0 15.5 15H6z" />
+      <path d="M8.5 8h6" />
+      <path d="M8.5 11h5" />
+      <path d="M8.5 14h4" />
+    </Icon>
+  );
+}
+
+export function MoreIcon(props: IconProps) {
+  return (
+    <Icon {...props} fill="currentColor" stroke="none">
+      <circle cx="5.5" cy="12" r="1.5" />
+      <circle cx="12" cy="12" r="1.5" />
+      <circle cx="18.5" cy="12" r="1.5" />
     </Icon>
   );
 }

@@ -15,6 +15,7 @@ import {
 } from "@/src/theme";
 import { LinearGradient } from "expo-linear-gradient";
 import { Image } from "expo-image";
+import { StatusBar } from "expo-status-bar";
 import { usePathname, useRouter } from "expo-router";
 import React, { useCallback, useRef, useState } from "react";
 import {
@@ -33,6 +34,7 @@ import Animated, {
   Easing,
   Extrapolation,
   interpolate,
+  interpolateColor,
   runOnJS,
   useAnimatedStyle,
   useFrameCallback,
@@ -146,17 +148,6 @@ export function FullPlayer() {
     }
   }, [currentTrack?.id]);
 
-  // Animated glow progress (0 = paused, 1 = playing) — drives the cover's
-  // play/pause breathing scale.
-  const playGlowProgress = useSharedValue(0);
-  React.useEffect(() => {
-    playGlowProgress.value = withSpring(isPlayingVisual ? 1 : 0, {
-      damping: 18,
-      stiffness: 150,
-      mass: 0.7,
-    });
-  }, [isPlayingVisual]);
-
   // Actions
   const togglePlayPause = usePlayerStore((state) => state.togglePlayPause);
   const next = usePlayerStore((state) => state.next);
@@ -260,14 +251,13 @@ export function FullPlayer() {
     : miniCollapsedBottom;
   const miniHeight = isDetailRoute ? DETAIL_HEIGHT : MINI_HEIGHT;
   const miniWidth = SCREEN_WIDTH - miniLeft * 2;
-  const miniRadius = 22;
+  const miniRadius = 0;
 
   // Expansion & Breathing
   const expansion = useSharedValue(0);
   const lyricsExpansion = useSharedValue(0);
   const trackChangeScale = useSharedValue(1);
   const cdSpin = useSharedValue(0);
-  const [animationsActive, setAnimationsActive] = useState(false);
 
   // ---- Simulated frost (perf) ------------------------------------------
   // The collapsed mini + the navbar used to each run a live (dimezis) blur.
@@ -315,6 +305,14 @@ export function FullPlayer() {
     lrcPreviewState.isDownloadingLrc
       ? "..."
       : "");
+  const lrcPreviousText =
+    lrcPreviewLineIndex >= 0
+      ? lrcPreviewLines[lrcPreviewLineIndex + 1]?.text ?? ""
+      : "";
+  const lrcNextText =
+    lrcPreviewLineIndex >= 0
+      ? lrcPreviewLines[lrcPreviewLineIndex + 2]?.text ?? ""
+      : "";
 
   const toggleLyricsFull = (val: boolean) => {
     setIsLyricsExpanded(val);
@@ -612,8 +610,8 @@ export function FullPlayer() {
   // top of the title + favorite button. We size the cover from the real
   // vertical budget so it can never overlap the lower stack.
   const playerTopInset = Math.max(insets.top + 22, 42);
-  const HEADER_ZONE = 51; // grabber (21) + whisper context label (30)
-  const LOWER_STACK_ZONE = 366; // title block + lyric line + progress + transport + footer row
+  const HEADER_ZONE = 58; // close chevron + whisper context label
+  const LOWER_STACK_ZONE = 388; // metadata + lyric rail + progress + transport + footer
   const playerBottomPad = Math.max(insets.bottom + 18, 40);
   const artworkVerticalAvail =
     SCREEN_HEIGHT -
@@ -622,8 +620,8 @@ export function FullPlayer() {
     LOWER_STACK_ZONE -
     playerBottomPad;
   const ARTWORK_SIZE = Math.max(
-    200,
-    Math.min(SCREEN_WIDTH - 56, artworkVerticalAvail),
+    218,
+    Math.min(SCREEN_WIDTH * 0.8, artworkVerticalAvail),
   );
   const ARTWORK_TOP = playerTopInset + HEADER_ZONE;
 
@@ -672,12 +670,8 @@ export function FullPlayer() {
       [1, 1, 1.018, 1],
       Extrapolation.CLAMP,
     );
-    // Apple-style: the cover shrinks while paused and blooms back when playing.
-    // Only applied once expanded so the mini-player morph is untouched.
-    const playScale = interpolate(playGlowProgress.value, [0, 1], [0.86, 1]);
-    const expandedPlayScale = 1 + (playScale - 1) * p;
     const baseScale = p > 0.9 ? settleScale * trackChangeScale.value : settleScale;
-    const scale = baseScale * expandedPlayScale;
+    const scale = baseScale;
 
     return {
       width: interpolate(
@@ -738,18 +732,18 @@ export function FullPlayer() {
       Extrapolation.CLAMP,
     ),
   }));
-
-  const artworkCdSpinStyle = useAnimatedStyle(() => {
-    const spinVisibility = interpolate(
-      expansion.value,
-      [0, 0.62, 1],
-      [0, 0, 1],
-      Extrapolation.CLAMP,
-    );
-    return {
-      transform: [{ rotate: `${cdSpin.value * spinVisibility}deg` }],
-    };
-  });
+  const artworkCdSpinStyle = useAnimatedStyle(() => ({
+    transform: [
+      {
+        rotate: `${cdSpin.value * interpolate(
+          expansion.value,
+          [0, 0.62, 1],
+          [0, 0, 1],
+          Extrapolation.CLAMP,
+        )}deg`,
+      },
+    ],
+  }));
 
   const contentAnimatedStyle = useAnimatedStyle(() => ({
     opacity:
@@ -795,7 +789,7 @@ export function FullPlayer() {
   // bar: an album-hued near-opaque tint (dark 0.90 / light 0.92) so mini +
   // navbar read as one continuous frosted dock. The tint ramps to fully opaque
   // late in the expansion so the full player keeps its solid background.
-  const glassTintAlpha = lightweightMode ? 0.96 : (isDark ? 0.9 : 0.92);
+  const glassTintAlpha = 1;
   const glassTintStyle = useAnimatedStyle(() => {
     // Collapsed → the frost alpha. As soon as the player expands past the
     // threshold the tint ramps to fully opaque so the growing rectangle is a
@@ -808,10 +802,15 @@ export function FullPlayer() {
       Extrapolation.CLAMP,
     );
     return {
-      backgroundColor:
-        playerAnimColors?.background?.value ||
-        (isDark ? playerColors.background : playerSurfaceColor) ||
-        theme.colors.background,
+      backgroundColor: interpolateColor(
+        expansion.value,
+        [0, BLUR_COLLAPSE_THRESHOLD, 1],
+        [
+          themeAnimatedColors.surface.value,
+          playerAnimColors?.background?.value || playerSurfaceColor || theme.colors.background,
+          playerAnimColors?.background?.value || playerSurfaceColor || theme.colors.background,
+        ],
+      ),
       opacity: Math.max(ramp, forceSolid.value),
     };
   });
@@ -825,6 +824,15 @@ export function FullPlayer() {
       [0, 0, isDark ? 0.68 : 0.54, 1],
       Extrapolation.CLAMP,
     ),
+  }));
+  const fullPlayerScrimStyle = useAnimatedStyle(() => ({
+    opacity:
+      interpolate(
+        expansion.value,
+        [0, 0.64, 0.9, 1],
+        [0, 0, isDark ? 0.26 : 0.22, isDark ? 0.38 : 0.32],
+        Extrapolation.CLAMP,
+      ),
   }));
   const lyricsBgOverlayStyle = useAnimatedStyle(() => ({
     opacity: interpolate(lyricsExpansion.value, [0, 1], [0, 0.6]),
@@ -866,17 +874,6 @@ export function FullPlayer() {
   React.useEffect(() => {
     setExpansion(expansion);
   }, []);
-
-  React.useEffect(() => {
-    if (isVisible && !queueVisible) {
-      const timer = setTimeout(() => {
-        setAnimationsActive(true);
-      }, EXPAND_DURATION + 50);
-      return () => clearTimeout(timer);
-    } else {
-      setAnimationsActive(false);
-    }
-  }, [isVisible, queueVisible]);
 
   React.useEffect(() => {
     if (!isVisible) return;
@@ -950,6 +947,8 @@ export function FullPlayer() {
     ARTWORK_SIZE,
     showLyrics,
     lrcPreviewText,
+    lrcPreviousText,
+    lrcNextText,
     isLyricsExpanded,
     lrcAccentBorderColor: accentBorderColor,
     controlSurfaceColor: chromeSurfaceColor,
@@ -961,6 +960,7 @@ export function FullPlayer() {
 
   return (
     <>
+      <StatusBar hidden={isVisible} animated style="light" />
       <SharedPlayerShell />
       <Animated.View style={[styles.root, rootAnimatedStyle]}>
         <GestureDetector gesture={Gesture.Exclusive(panGesture, tapGesture)}>
@@ -1028,7 +1028,6 @@ export function FullPlayer() {
                 />
               </Animated.View>
             ) : null}
-
             {nativeSpectrumEnabled ? (
               <Animated.View
                 style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
@@ -1061,6 +1060,14 @@ export function FullPlayer() {
                 />
               </Animated.View>
             ) : null}
+            <Animated.View
+              pointerEvents="none"
+              style={[
+                StyleSheet.absoluteFill,
+                { backgroundColor: "#05040B" },
+                fullPlayerScrimStyle,
+              ]}
+            />
 
             <Animated.View
               style={[
@@ -1085,15 +1092,15 @@ export function FullPlayer() {
                     />
                   </Animated.View>
                   <Animated.View pointerEvents="none" style={[StyleSheet.absoluteFill, artworkCdOverlayStyle]}>
-                    <View style={[styles.fullPlayerCdOuterRim, { borderColor: withAlpha("#FFFFFF", 0.42) }]} />
+                    <View style={[styles.fullPlayerCdOuterRim, { borderColor: withAlpha(accentColor, 0.62) }]} />
                     <View style={[styles.fullPlayerCdOuterRimShadow, { borderColor: withAlpha("#000000", 0.34) }]} />
-                    <View style={[styles.fullPlayerCdGroove, { borderColor: withAlpha(textColor, 0.26) }]} />
-                    <View style={[styles.fullPlayerCdRing, { borderColor: withAlpha(textColor, 0.52) }]} />
+                    <View style={[styles.fullPlayerCdGroove, { borderColor: withAlpha(textColor, 0.18) }]} />
+                    <View style={[styles.fullPlayerCdRing, { borderColor: withAlpha(textColor, 0.42) }]} />
                     <View
                       style={[
                         styles.fullPlayerCdHole,
                         {
-                          backgroundColor: playerSurfaceColor,
+                          backgroundColor: withAlpha(accentColor, 0.34),
                           borderColor: withAlpha(textColor, 0.48),
                         },
                       ]}

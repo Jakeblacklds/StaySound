@@ -11,8 +11,23 @@ interface KeyboardShortcutHandlers {
   onToggleMute: () => void;
   onToggleFullPlayer: () => void;
   onToggleQueue: () => void;
+  onToggleShortcutHelp: () => void;
   getVolume: () => number;
 }
+
+/** The shortcut map, in the order it reads best on the help sheet. Kept beside
+    the handler so a new shortcut cannot ship undocumented. */
+export const KEYBOARD_SHORTCUTS: { keys: string; action: string }[] = [
+  { keys: 'Espacio', action: 'Reproducir o pausar' },
+  { keys: '←  →', action: 'Retroceder o avanzar 5 segundos' },
+  { keys: '⇧ ←  ⇧ →', action: 'Canción anterior o siguiente' },
+  { keys: 'N  ·  P', action: 'Siguiente · anterior' },
+  { keys: '↑  ↓', action: 'Subir o bajar el volumen' },
+  { keys: 'M', action: 'Silenciar' },
+  { keys: 'F', action: 'Abrir o cerrar el reproductor completo' },
+  { keys: 'Q', action: 'Abrir o cerrar la cola' },
+  { keys: '?', action: 'Mostrar esta lista' },
+];
 
 export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
   useEffect(() => {
@@ -22,6 +37,15 @@ export function useKeyboardShortcuts(handlers: KeyboardShortcutHandlers): void {
       // Don't intercept when user is typing in an input
       const target = event.target as HTMLElement;
       if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable) {
+        return;
+      }
+
+      // Matched on event.key, not event.code: "?" sits on a different physical
+      // key across the US, Spanish and Latin American layouts this app is used
+      // on, and only event.key reflects what the user actually typed.
+      if (event.key === '?' && !event.metaKey && !event.ctrlKey) {
+        event.preventDefault();
+        handlers.onToggleShortcutHelp();
         return;
       }
 

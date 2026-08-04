@@ -7,6 +7,7 @@ import type { Album, Artist, Playlist, Track } from '../types/audio';
 type AndroidAutoTrack = {
     id: string;
     uri: string;
+    fallbackUri?: string;
     title: string;
     artist: string;
     album: string;
@@ -120,17 +121,25 @@ function buildFilePlaybackUri(track: Track): string | undefined {
  * native side has no access to Expo FileSystem to resolve this at play time, so
  * it must be baked into the catalog snapshot.
  */
-function resolvePlaybackUri(track: Track): string {
+function resolvePlaybackUris(track: Track): Pick<AndroidAutoTrack, 'uri' | 'fallbackUri'> {
     const uri = normalizeText(track.uri);
 
     if (MEDIA_STORE_AUDIO_RE.test(uri)) {
         const fileUri = buildFilePlaybackUri(track);
-        if (fileUri) return fileUri;
+        if (fileUri) {
+            return {
+                uri: fileUri,
+                // Scoped-storage behavior differs by Android version and vendor.
+                // Keep MediaStore as a native fallback if the reconstructed path
+                // is not readable from the background playback service.
+                fallbackUri: uri,
+            };
+        }
     }
 
-    if (uri.startsWith('/')) return `file://${uri}`;
+    if (uri.startsWith('/')) return { uri: `file://${uri}` };
 
-    return uri;
+    return { uri };
 }
 
 function compareByName<T extends { name: string }>(a: T, b: T): number {
@@ -150,7 +159,7 @@ function compareTracks(a: AndroidAutoTrack, b: AndroidAutoTrack): number {
 function serializeTrack(track: Track): AndroidAutoTrack {
     return {
         id: track.id,
-        uri: resolvePlaybackUri(track),
+        ...resolvePlaybackUris(track),
         title: normalizeText(track.title) || 'Unknown Title',
         artist: normalizeText(track.artist) || 'Unknown Artist',
         album: normalizeText(track.album) || 'Unknown Album',

@@ -2,6 +2,14 @@ import { parseFilename } from '@staysound/services/audioUtils';
 import { generateAlbumId, generateArtistId } from '@staysound/services/metadataService';
 import type { Track } from '@staysound/types/audio';
 import { parseBlob, type IAudioMetadata } from 'music-metadata-browser';
+import {
+  desktopMusicFileUrl,
+  getDesktopMusicFolder,
+  isTauriDesktop,
+  pickDesktopMusicFolder,
+  readDesktopMusicFile,
+  scanDesktopMusicFolder,
+} from '../desktop/tauriMusicLibrary';
 import { cacheRemoteArtwork, saveArtworkBlob } from '../storage/webArtworkCache';
 
 export interface ImportedWebTrack extends Track {
@@ -15,12 +23,15 @@ export interface ImportedWebTrack extends Track {
   artworkKey?: string;
   /** True when a persisted file handle exists, so the track can relink lazily on play. */
   relinkable?: boolean;
+  /** Absolute native path used by the Tauri asset protocol. */
+  nativePath?: string;
 }
 
 export interface ImportResult {
   tracks: ImportedWebTrack[];
   skipped: number;
   handle?: FileSystemDirectoryHandle;
+  nativeFolderPath?: string;
 }
 
 export interface CollectedAudioFile {
@@ -368,12 +379,50 @@ async function importFileList(
 }
 
 export function canImportFolder(): boolean {
-  return typeof (window as DirectoryPickerWindow).showDirectoryPicker === 'function';
+  return isTauriDesktop() || typeof (window as DirectoryPickerWindow).showDirectoryPicker === 'function';
+}
+
+export { getDesktopMusicFolder };
+
+export async function importRememberedDesktopFolder(
+  folderPath: string,
+  onProgress?: (current: number, total: number, name: string) => void,
+): Promise<ImportResult> {
+  const descriptors = await scanDesktopMusicFolder();
+  const tracks: ImportedWebTrack[] = [];
+
+  for (let index = 0; index < descriptors.length; index += 1) {
+    const descriptor = descriptors[index];
+    onProgress?.(index + 1, descriptors.length, descriptor.name);
+    const bytes = await readDesktopMusicFile(descriptor.path);
+    const file = new File([bytes], descriptor.name, {
+      type: descriptor.mimeType,
+      lastModified: descriptor.lastModified || Date.now(),
+    });
+    const track = await fileToTrack(file, descriptor.relativePath);
+    const temporaryUrl = track.objectUrl;
+    const nativeUrl = desktopMusicFileUrl(descriptor.path);
+    track.uri = nativeUrl;
+    track.objectUrl = nativeUrl;
+    track.nativePath = descriptor.path;
+    track.needsRelink = false;
+    track.relinkable = true;
+    URL.revokeObjectURL(temporaryUrl);
+    tracks.push(track);
+  }
+
+  return { tracks, skipped: 0, nativeFolderPath: folderPath };
 }
 
 export async function importFolder(
   onProgress?: (current: number, total: number, name: string) => void,
 ): Promise<ImportResult> {
+  if (isTauriDesktop()) {
+    const folderPath = await pickDesktopMusicFolder();
+    if (!folderPath) throw new DOMException('Importación cancelada', 'AbortError');
+    return importRememberedDesktopFolder(folderPath, onProgress);
+  }
+
   const picker = (window as DirectoryPickerWindow).showDirectoryPicker;
   if (!picker) {
     throw new Error('Folder import is not supported by this browser.');

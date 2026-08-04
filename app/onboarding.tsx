@@ -8,7 +8,7 @@ import {
 import { getArtistInfo } from '@/src/services/artistApi';
 import { hasPermissions, requestPermissions } from '@/src/services/fileScanner';
 import { getTidalArtistInfo, searchTidalArtists } from '@/src/services/tidalService';
-import { useAuthStore, useLibraryStore } from '@/src/stores';
+import { useLibraryStore } from '@/src/stores';
 import { OnboardingTasteArtist, useOnboardingStore } from '@/src/stores/onboardingStore';
 import { typeScale, useTheme } from '@/src/theme';
 import { Ionicons } from '@expo/vector-icons';
@@ -778,7 +778,6 @@ export default function OnboardingScreen() {
     const insets = useSafeAreaInsets();
     const { theme } = useTheme();
     const { t } = useI18n();
-    const { session } = useAuthStore();
     const {
         completeOnboarding,
         setUserName,
@@ -809,14 +808,6 @@ export default function OnboardingScreen() {
     const quickSuggestionsAttempted = useRef(false);
     const searchRequestId = useRef(0);
     const scanLibrary = useLibraryStore(state => state.scanLibrary);
-
-    // Pre-fill name from email
-    useEffect(() => {
-        if (!name && session?.email) {
-            const p = session.email.split('@')[0] ?? '';
-            if (p) setName(p.charAt(0).toUpperCase() + p.slice(1));
-        }
-    }, [name, session?.email]);
 
     // Artist search
     useEffect(() => {
@@ -1145,11 +1136,11 @@ const styles = StyleSheet.create({
     sub: { ...typeScale.bodyStrong, textAlign: 'center' },
 
     // Logo
-    logo: { width: 112, height: 112, borderRadius: 56, alignItems: 'center', justifyContent: 'center', overflow: 'hidden' },
+    logo: { width: 112, height: 112, borderRadius: 32, alignItems: 'center', justifyContent: 'center', overflow: 'hidden', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.2)' },
     logoImg: { width: 112, height: 112 },
 
     // Avatar
-    avatar: { width: 110, height: 110, borderRadius: 55, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+    avatar: { width: 110, height: 110, borderRadius: 32, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
     avatarImg: { width: '100%', height: '100%' },
     avatarPlaceholder: { alignItems: 'center', gap: 4 },
     avatarHint: { ...typeScale.micro },
@@ -1165,12 +1156,12 @@ const styles = StyleSheet.create({
     profileHero: { alignItems: 'center', gap: 12, paddingTop: 16 },
 
     // Input
-    inputRow: { minHeight: 50, borderRadius: 14, borderWidth: 1.3, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 },
+    inputRow: { minHeight: 54, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14 },
     inputText: { ...typeScale.bodyStrong, flex: 1, paddingVertical: 12 },
-    searchRow: { minHeight: 50, borderRadius: 14, borderWidth: 1.3, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 12 },
+    searchRow: { minHeight: 54, borderRadius: 20, borderWidth: StyleSheet.hairlineWidth, flexDirection: 'row', alignItems: 'center', gap: 8, paddingHorizontal: 14 },
 
     // Buttons
-    btn: { minHeight: 52, borderRadius: 26, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
+    btn: { minHeight: 54, borderRadius: 20, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 16 },
     btnText: { ...typeScale.title, fontSize: 16, textAlign: 'center' },
     skipBtn: { alignSelf: 'center', paddingVertical: 8, paddingHorizontal: 4 },
     skip: { ...typeScale.bodyStrong, fontSize: 14, textAlign: 'center' },
@@ -1198,7 +1189,7 @@ const styles = StyleSheet.create({
     artistGrid: { flexDirection: 'row', flexWrap: 'wrap', marginHorizontal: -5 },
     artistCell: { width: '33.333%', paddingHorizontal: 5, marginBottom: 14 },
     artistPoster: { gap: 8 },
-    artistPortrait: { width: '100%', aspectRatio: 1, borderRadius: 999, overflow: 'hidden', alignItems: 'center', justifyContent: 'center' },
+    artistPortrait: { width: '100%', aspectRatio: 1, borderRadius: 24, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.18)' },
     artistPortraitImg: { width: '100%', height: '100%' },
     selectedBadge: { position: 'absolute', right: 4, bottom: 4, width: 20, height: 20, borderRadius: 999, alignItems: 'center', justifyContent: 'center' },
     artistPosterName: { ...typeScale.bodyStrong, fontSize: 12, textAlign: 'center', lineHeight: 16 },
@@ -1208,8 +1199,8 @@ const styles = StyleSheet.create({
 
     // Permissions
     permIntro: { ...typeScale.body, lineHeight: 22 },
-    permItem: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 16, borderWidth: StyleSheet.hairlineWidth, padding: 16 },
-    permIcon: { width: 44, height: 44, borderRadius: 12, alignItems: 'center', justifyContent: 'center' },
+    permItem: { flexDirection: 'row', alignItems: 'center', gap: 14, borderRadius: 22, borderWidth: StyleSheet.hairlineWidth, padding: 16 },
+    permIcon: { width: 44, height: 44, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
     permTexts: { flex: 1, gap: 3 },
     permTitle: { ...typeScale.bodyStrong },
     permDesc: { ...typeScale.caption, lineHeight: 18 },

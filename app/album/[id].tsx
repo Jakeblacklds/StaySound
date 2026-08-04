@@ -1,4 +1,5 @@
 import { CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
+import { TidalAtmosphere } from '@/src/components/tidal';
 import { useDynamicColors } from '@/src/hooks';
 import { formatDuration } from '@/src/services';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
@@ -7,10 +8,9 @@ import { Track } from '@/src/types';
 import { FlashList } from '@shopify/flash-list';
 import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
-import { StatusBar, StyleSheet, View } from 'react-native';
+import { Pressable, StatusBar, StyleSheet, View } from 'react-native';
 import { IconButton, Text } from 'react-native-paper';
 import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -50,14 +50,6 @@ export default function AlbumDetailScreen() {
         },
     });
 
-    const headerStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(scrollY.value, [0, HEADER_HEIGHT - 100], [1, 0]),
-        transform: [
-            { translateY: interpolate(scrollY.value, [0, HEADER_HEIGHT], [0, -HEADER_HEIGHT / 2]) },
-            { scale: interpolate(scrollY.value, [-100, 0], [1.2, 1], 'clamp') },
-        ],
-    }));
-
     const artworkStyle = useAnimatedStyle(() => ({
         transform: [
             { scale: interpolate(scrollY.value, [-100, 0, 100], [1.3, 1, 0.9], 'clamp') },
@@ -94,33 +86,43 @@ export default function AlbumDetailScreen() {
 
         return (
             <View style={styles.headerContent}>
-                {/* Album Info */}
-                <View style={styles.albumInfo}>
-                    <Text
-                        variant="labelMedium"
-                        style={[styles.albumKicker, { color: albumColors.isDark ? 'rgba(255,255,255,0.56)' : 'rgba(0,0,0,0.44)' }]}
-                    >
-                        ALBUM
-                    </Text>
-                    <Text
-                        variant="headlineMedium"
-                        style={[styles.albumTitle, { color: albumColors.text }]}
-                        numberOfLines={2}
-                    >
-                        {album.name}
-                    </Text>
-                    <Text
-                        variant="titleMedium"
-                        style={[styles.albumArtist, { color: albumColors.primary }]}
-                    >
-                        {album.artist}
-                    </Text>
-                    <Text
-                        variant="bodySmall"
-                        style={[styles.albumMeta, { color: albumColors.isDark ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.56)' }]}
-                    >
-                        {tracks.length} songs • {formatDuration(totalDuration)}
-                    </Text>
+                <View style={styles.albumHero}>
+                    <View style={[styles.artwork, { backgroundColor: theme.colors.surfaceVariant }]}>
+                        {album.artwork || album.artworkThumb ? (
+                            <Image source={{ uri: album.artwork || album.artworkThumb }} style={styles.artworkImage} />
+                        ) : (
+                            <CustomIcon name="Album" size={72} color={theme.colors.onSurfaceVariant} />
+                        )}
+                    </View>
+                    <View style={styles.albumInfo}>
+                        <Text
+                            variant="labelMedium"
+                            style={[styles.albumKicker, { color: albumColors.primary }]}
+                        >
+                            ÁLBUM
+                        </Text>
+                        <Text
+                            style={[styles.albumTitle, { color: albumColors.text }]}
+                            numberOfLines={3}
+                        >
+                            {album.name}
+                        </Text>
+                        <Text style={[styles.albumArtist, { color: albumColors.primary }]} numberOfLines={2}>
+                            {album.artist}
+                        </Text>
+                        <Text style={[styles.albumMeta, { color: albumColors.isDark ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.56)' }]}>
+                            {tracks.length} canciones · {formatDuration(totalDuration)}
+                        </Text>
+                        {tracks[0] ? (
+                            <Pressable
+                                onPress={() => handleTrackPress(tracks[0])}
+                                style={[styles.playAlbumButton, { backgroundColor: albumColors.primary }]}
+                            >
+                                <CustomIcon name="Play" size={18} color={albumColors.onPrimary} />
+                                <Text style={[styles.playAlbumLabel, { color: albumColors.onPrimary }]}>Reproducir</Text>
+                            </Pressable>
+                        ) : null}
+                    </View>
                 </View>
 
                 {/* Track list header */}
@@ -132,7 +134,7 @@ export default function AlbumDetailScreen() {
                 </Text>
             </View>
         );
-    }, [album, albumColors, tracks.length, totalDuration]);
+    }, [album, albumColors, handleTrackPress, theme.colors.onSurfaceVariant, theme.colors.surfaceVariant, tracks, totalDuration]);
 
     if (!album) {
         return (
@@ -143,36 +145,9 @@ export default function AlbumDetailScreen() {
     }
 
     return (
-        <View style={[styles.container, { backgroundColor: albumColors.background }]}>
+        <View style={styles.container}>
             <StatusBar barStyle={albumColors.isDark ? 'light-content' : 'dark-content'} />
-            {/* Blurred Background */}
-            <Animated.View style={[StyleSheet.absoluteFill, headerStyle]}>
-                {album.artwork ? (
-                    <>
-                        <Image source={{ uri: album.artwork }} style={styles.backgroundImage} blurRadius={30} />
-                        <LinearGradient
-                            colors={[albumColors.background + '80', albumColors.background]}
-                            style={styles.gradient}
-                        />
-                    </>
-                ) : (
-                    <LinearGradient
-                        colors={[theme.colors.primaryContainer, theme.colors.background]}
-                        style={StyleSheet.absoluteFill}
-                    />
-                )}
-            </Animated.View>
-
-            {/* Artwork */}
-            <Animated.View style={[styles.artworkContainer, { paddingTop: insets.top + HERO_TOP_OFFSET, paddingHorizontal: 24 }, artworkStyle]}>
-                <View style={[styles.artwork, { backgroundColor: theme.colors.surfaceVariant }]}>
-                    {album.artwork ? (
-                        <Image source={{ uri: album.artwork }} style={styles.artworkImage} />
-                    ) : (
-                        <CustomIcon name="Album" size={100} color={theme.colors.onSurfaceVariant} />
-                    )}
-                </View>
-            </Animated.View>
+            <TidalAtmosphere sourceUri={album.artwork || album.artworkThumb} mode="artwork" />
 
             {/* Back Button */}
             <View style={[styles.backButton, { top: insets.top + BACK_BUTTON_TOP_OFFSET }]}>
@@ -195,7 +170,7 @@ export default function AlbumDetailScreen() {
                 ListHeaderComponent={ListHeader}
                 contentContainerStyle={[
                     styles.listContent,
-                    { paddingTop: HEADER_HEIGHT + CONTENT_TOP_GAP }
+                    { paddingTop: insets.top + 72 }
                 ]}
                 showsVerticalScrollIndicator={false}
                 drawDistance={300}
@@ -208,33 +183,19 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    backgroundImage: {
-        ...StyleSheet.absoluteFillObject,
-        width: '100%',
-        height: HEADER_HEIGHT + 100,
-    },
-    gradient: {
-        ...StyleSheet.absoluteFillObject,
-        height: HEADER_HEIGHT + 100,
-    },
-    artworkContainer: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        alignItems: 'flex-start',
-        zIndex: 10,
-    },
     artwork: {
-        width: ARTWORK_SIZE,
-        height: ARTWORK_SIZE,
-        borderRadius: 26,
+        width: '45%',
+        aspectRatio: 1,
+        borderRadius: 28,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
-        elevation: 16,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.22)',
+        elevation: 10,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 8 },
-        shadowOpacity: 0.3,
+        shadowOpacity: 0.24,
         shadowRadius: 12,
     },
     artworkImage: {
@@ -254,32 +215,60 @@ const styles = StyleSheet.create({
         paddingBottom: 120,
     },
     headerContent: {
-        paddingHorizontal: 24,
-        paddingTop: 18,
+        paddingHorizontal: 18,
+        paddingTop: 12,
+    },
+    albumHero: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 18,
+        marginBottom: 34,
     },
     albumInfo: {
+        flex: 1,
         alignItems: 'flex-start',
-        marginBottom: 26,
     },
     albumKicker: {
         letterSpacing: 1.4,
         marginBottom: 8,
     },
     albumTitle: {
-        fontWeight: 'bold',
+        fontSize: 28,
+        lineHeight: 29,
+        fontWeight: '900',
         textAlign: 'left',
-        marginBottom: 6,
-        letterSpacing: -0.9,
+        marginBottom: 7,
+        letterSpacing: -1.1,
     },
     albumArtist: {
-        marginBottom: 6,
+        fontSize: 14,
+        lineHeight: 18,
+        fontWeight: '800',
+        marginBottom: 4,
     },
     albumMeta: {
         marginTop: 2,
+        fontSize: 11,
+        lineHeight: 15,
+    },
+    playAlbumButton: {
+        minHeight: 40,
+        marginTop: 13,
+        paddingHorizontal: 14,
+        borderRadius: 15,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+    },
+    playAlbumLabel: {
+        fontSize: 12,
+        fontWeight: '900',
     },
     trackListTitle: {
-        letterSpacing: 1.2,
-        marginBottom: 10,
+        letterSpacing: 1.6,
+        marginBottom: 12,
         marginLeft: 0,
+        fontSize: 11,
+        fontWeight: '800',
     },
 });

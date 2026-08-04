@@ -9,7 +9,7 @@ import {
 } from '@/src/components/tidal';
 import { Ionicons } from '@expo/vector-icons';
 import { useTidalDownload } from '@/src/hooks';
-import { getSoulseekCredentials, searchSoulseekTracksByQuery, setSoulseekCredentials, SoulseekCompressedFallbackError, type SoulseekSearchResult } from '@/src/services/soulseekDownloadService';
+import { getSoulseekCredentials, prefetchSoulseekTrack, setSoulseekCredentials, SoulseekCompressedFallbackError, type SoulseekSearchResult } from '@/src/services/soulseekDownloadService';
 import { FileSystemStorage } from '@/src/services/storage';
 import {
     createTidalStreamTrack,
@@ -240,11 +240,8 @@ function formatMirrorStatus(availability?: TidalMirrorAvailability): string {
 }
 
 function formatMirrorCapabilities(availability?: TidalMirrorAvailability): string {
-    if (!availability) return 'Busqueda ?, Stream ?, Descarga ?';
-    const search = availability.supportsSearch ? 'Busqueda OK' : 'Busqueda KO';
-    const stream = availability.supportsStream ? 'Stream OK' : 'Stream KO';
-    const download = availability.supportsDownload ? 'Descarga OK' : 'Descarga KO';
-    return `${search} · ${stream} · ${download}`;
+    if (!availability) return 'Búsqueda pendiente';
+    return availability.supportsSearch ? 'Búsqueda disponible' : 'Búsqueda no disponible';
 }
 
 function getPrimaryMirrorOptions(availableMirrors: string[]): string[] {
@@ -277,8 +274,8 @@ export default function TidalScreen() {
     const [committedQuery, setCommittedQuery] = useState('');
     const [recentSearches, setRecentSearches] = useState<string[]>([]);
     const [searchRunId, setSearchRunId] = useState(0);
-    const [activeSourceTab, setActiveSourceTab] = useState<TidalSourceTab>('tidal');
-    const [activeTab, setActiveTab] = useState<TidalTab>('all');
+    const [activeSourceTab, setActiveSourceTab] = useState<TidalSourceTab>('soulseek');
+    const [activeTab, setActiveTab] = useState<TidalTab>('tracks');
     const [tracks, setTracks] = useState<TidalTrack[]>([]);
     const [artists, setArtists] = useState<TidalArtist[]>([]);
     const [artistArtworkOverrides, setArtistArtworkOverrides] = useState<Map<number, string>>(new Map());
@@ -294,6 +291,7 @@ export default function TidalScreen() {
     const [soulseekUsername, setSoulseekUsername] = useState('');
     const [soulseekPassword, setSoulseekPassword] = useState('');
     const [hasSoulseekCredentials, setHasSoulseekCredentials] = useState(false);
+    const [showSoulseekAuthModal, setShowSoulseekAuthModal] = useState(false);
     const [isSavingSoulseekCredentials, setIsSavingSoulseekCredentials] = useState(false);
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showMirrorModal, setShowMirrorModal] = useState(false);
@@ -348,7 +346,8 @@ export default function TidalScreen() {
         let cancelled = false;
         getSoulseekCredentials()
             .then((saved) => {
-                if (cancelled || !saved) return;
+                if (cancelled) return;
+                if (!saved) return;
                 setSoulseekUsername(saved.username);
                 setSoulseekPassword(saved.password);
                 setHasSoulseekCredentials(true);
@@ -374,6 +373,7 @@ export default function TidalScreen() {
         try {
             await setSoulseekCredentials(username, password);
             setHasSoulseekCredentials(true);
+            setShowSoulseekAuthModal(false);
             setSoulseekError(null);
             showNotification('Sesion de Soulseek guardada.', 'success');
         } catch (saveError) {
@@ -401,8 +401,8 @@ export default function TidalScreen() {
 
     const artistArtworkAttempted = useRef<Set<number>>(new Set());
     const pendingSearchTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-    const activeTabRef = useRef<TidalTab>('all');
-    const activeSourceTabRef = useRef<TidalSourceTab>('tidal');
+    const activeTabRef = useRef<TidalTab>('tracks');
+    const activeSourceTabRef = useRef<TidalSourceTab>('soulseek');
     const soulseekResultCommitRef = useRef<ReturnType<typeof InteractionManager.runAfterInteractions> | null>(null);
 
     useEffect(() => {
@@ -493,9 +493,7 @@ export default function TidalScreen() {
         }
 
         setActiveSourceTab(source);
-        if (source === 'tidal') {
-            setActiveTab(tab);
-        }
+        setActiveTab(tab);
         setCommittedQuery(trimmed);
         setSearchRunId(prev => prev + 1);
         setHasResolvedSearch(false);
@@ -552,9 +550,8 @@ export default function TidalScreen() {
     }, [query, triggerSearch]);
 
     useEffect(() => {
-        // ── Always search Tidal regardless of source tab ──
-        // The Soulseek tab reuses this metadata to find the best match
-        // via handleSoulseekOnlyDownload / renderSoulseekMirrorTrackRow.
+        // TIDAL is always the canonical catalog, including in Soulseek mode.
+        // Soulseek is only queried after the user chooses a concrete track.
         const currentQuery = committedQuery.trim();
         if (!currentQuery) {
             setTracks([]);
@@ -564,19 +561,6 @@ export default function TidalScreen() {
             setArtistArtworkOverrides(new Map());
             artistArtworkAttempted.current.clear();
             setHasResolvedSearch(false);
-            setError(null);
-            setIsLoading(false);
-            return;
-        }
-
-        if (activeSourceTab === 'soulseek') {
-            setTracks([]);
-            setArtists([]);
-            setAlbums([]);
-            setPlaylists([]);
-            setArtistArtworkOverrides(new Map());
-            artistArtworkAttempted.current.clear();
-            setHasResolvedSearch(true);
             setError(null);
             setIsLoading(false);
             return;
@@ -647,62 +631,6 @@ export default function TidalScreen() {
             resultCommit?.cancel();
         };
     }, [activeSourceTab, committedQuery, searchRunId]);
-
-    useEffect(() => {
-        const currentQuery = committedQuery.trim();
-        if (activeSourceTab !== 'soulseek' || !currentQuery || !hasSoulseekCredentials) {
-            setSoulseekResults([]);
-            setSoulseekError(null);
-            setHasResolvedSoulseekSearch(false);
-            setIsSoulseekLoading(false);
-            return;
-        }
-
-        const controller = new AbortController();
-        let cancelled = false;
-
-        setSoulseekResults([]);
-        setSoulseekError(null);
-        setHasResolvedSoulseekSearch(false);
-        setIsSoulseekLoading(true);
-        console.log(`${SOULSEEK_FLOW_LOG} native search start`, {
-            query: currentQuery,
-            run: searchRunId,
-        });
-
-        searchSoulseekTracksByQuery(currentQuery, tidalDownloadQuality, controller.signal)
-            .then((nextResults) => {
-                if (cancelled) return;
-                console.log(`${SOULSEEK_FLOW_LOG} native search result`, {
-                    query: currentQuery,
-                    results: nextResults.length,
-                    folders: new Set(nextResults.map(result => `${result.match.username}:${getSoulseekFolderPath(result.match.filename || '')}`)).size,
-                });
-                commitSoulseekResults(nextResults, () => {
-                    setHasResolvedSoulseekSearch(true);
-                    setIsSoulseekLoading(false);
-                }, () => !cancelled && !controller.signal.aborted);
-            })
-            .catch((searchError: unknown) => {
-                if (cancelled || controller.signal.aborted) return;
-                const message = searchError instanceof Error ? searchError.message : 'No se pudo consultar Soulseek';
-                console.log(`${SOULSEEK_FLOW_LOG} native search error`, {
-                    query: currentQuery,
-                    message,
-                });
-                setSoulseekError(message);
-                setSoulseekResults([]);
-                setHasResolvedSoulseekSearch(true);
-                setIsSoulseekLoading(false);
-            });
-
-        return () => {
-            cancelled = true;
-            controller.abort();
-            soulseekResultCommitRef.current?.cancel();
-            soulseekResultCommitRef.current = null;
-        };
-    }, [activeSourceTab, commitSoulseekResults, committedQuery, hasSoulseekCredentials, searchRunId, tidalDownloadQuality]);
 
     const handleSoulseekMatchDownload = useCallback(async (
         result: SoulseekSearchResult,
@@ -946,6 +874,11 @@ export default function TidalScreen() {
     }, [cancelDownload, download, downloadFromSoulseek, downloads, showNotification]);
 
     const handleSoulseekOnlyDownload = useCallback(async (track: TidalTrack) => {
+        if (!hasSoulseekCredentials) {
+            setShowSoulseekAuthModal(true);
+            return;
+        }
+
         try {
             console.log(`${SOULSEEK_FLOW_LOG} soulseek-only button pressed`, {
                 activeSourceTab,
@@ -1005,7 +938,7 @@ export default function TidalScreen() {
             const message = downloadError instanceof Error ? downloadError.message : 'Error en descarga';
             showNotification(message, 'error');
         }
-    }, [activeSourceTab, cancelDownload, downloadFromSoulseek, downloads, showNotification]);
+    }, [activeSourceTab, cancelDownload, downloadFromSoulseek, downloads, hasSoulseekCredentials, showNotification]);
 
     const openArtist = useCallback((artist: TidalArtist) => {
         if (!canNavigate) {
@@ -1110,50 +1043,6 @@ export default function TidalScreen() {
                 return left.folderPath.localeCompare(right.folderPath, 'es', { sensitivity: 'base' });
             });
     }, [soulseekResults]);
-
-    const handleSourceTabChange = useCallback((nextSource: TidalSourceTab) => {
-        console.log(`${SOULSEEK_FLOW_LOG} source tab press`, {
-            from: activeSourceTab,
-            to: nextSource,
-            currentRef: activeSourceTabRef.current,
-            query: query.trim(),
-            committedQuery: committedQuery.trim(),
-        });
-        if (nextSource === activeSourceTab) {
-            console.log(`${SOULSEEK_FLOW_LOG} source tab unchanged`, {
-                source: nextSource,
-            });
-            return;
-        }
-
-        activeSourceTabRef.current = nextSource;
-        setActiveSourceTab(nextSource);
-        if (nextSource === 'soulseek') {
-            setActiveTab('tracks');
-            activeTabRef.current = 'tracks';
-        }
-        console.log(`${SOULSEEK_FLOW_LOG} source ref updated`, {
-            nextSource,
-            ref: activeSourceTabRef.current,
-        });
-        if (query.trim()) {
-            triggerSearch(query, activeTabRef.current, nextSource);
-            return;
-        }
-
-        const committed = committedQuery.trim();
-        if (committed) {
-            triggerSearch(committed, activeTabRef.current, nextSource);
-            return;
-        }
-
-        setHasResolvedSearch(false);
-        setHasResolvedSoulseekSearch(false);
-        setError(null);
-        setSoulseekError(null);
-        setIsLoading(false);
-        setIsSoulseekLoading(false);
-    }, [activeSourceTab, committedQuery, query, triggerSearch]);
 
     const visibleArtistsForArtwork = useMemo(() => {
         if (hasCommittedQuery) {
@@ -1299,40 +1188,13 @@ export default function TidalScreen() {
         if (!activeMirrorAvailability) return null;
 
         const searchOk = activeMirrorAvailability.supportsSearch;
-        const streamOk = activeMirrorAvailability.supportsStream;
-        const downloadOk = activeMirrorAvailability.supportsDownload;
-
-        if (activeMirrorAvailability.status === 'unavailable' || (!searchOk && !streamOk && !downloadOk)) {
+        if (activeMirrorAvailability.status === 'unavailable' || !searchOk) {
             return {
                 tone: 'error' as const,
             };
         }
 
         if (activeMirrorAvailability.status === 'slow') {
-            return {
-                tone: 'warning' as const,
-            };
-        }
-
-        if (!streamOk && !downloadOk) {
-            return {
-                tone: 'error' as const,
-            };
-        }
-
-        if (!streamOk) {
-            return {
-                tone: 'error' as const,
-            };
-        }
-
-        if (!downloadOk) {
-            return {
-                tone: 'warning' as const,
-            };
-        }
-
-        if (!searchOk) {
             return {
                 tone: 'warning' as const,
             };
@@ -1417,10 +1279,6 @@ export default function TidalScreen() {
     }, [triggerSearch]);
 
     const resultTabs = useMemo(() => ([
-        { key: 'all' as const, label: 'Todo' },
-        { key: 'artists' as const, label: 'Artistas' },
-        { key: 'albums' as const, label: 'Álbumes' },
-        { key: 'playlists' as const, label: 'Playlists' },
         { key: 'tracks' as const, label: 'Canciones' },
     ]), []);
 
@@ -1441,32 +1299,26 @@ export default function TidalScreen() {
         [activeTab, tracks, committedQuery],
     );
 
-    const virtualListData = useMemo<TidalVirtualListItem[]>(() => {
-        if (activeSourceTab === 'soulseek' && !hasSoulseekCredentials) {
-            return [{ type: 'auth' }];
-        }
+    useEffect(() => {
+        if (
+            activeSourceTab !== 'soulseek'
+            || !hasSoulseekCredentials
+            || visibleTrackResults.length === 0
+        ) return;
 
-        if (isSoulseekSource ? isSoulseekLoading : isLoading) {
+        // The native engine is intentionally single-session. Priming the first
+        // result hides search latency without queueing many logins ahead of a
+        // download the user explicitly requests.
+        prefetchSoulseekTrack(visibleTrackResults[0], tidalDownloadQuality);
+    }, [activeSourceTab, hasSoulseekCredentials, tidalDownloadQuality, visibleTrackResults]);
+
+    const virtualListData = useMemo<TidalVirtualListItem[]>(() => {
+        if (isLoading) {
             return [{ type: 'loading' }];
         }
 
-        if (isSoulseekSource ? soulseekError : error) {
+        if (error) {
             return [{ type: 'error' }];
-        }
-
-        if (isSoulseekSource && hasCommittedQuery) {
-            if (hasResolvedSoulseekSearch && soulseekFolderGroups.length === 0) {
-                return [{ type: 'soulseek-empty' }];
-            }
-
-            const nextItems: TidalVirtualListItem[] = [{ type: 'soulseek-summary', count: soulseekResults.length }];
-            for (const group of soulseekFolderGroups) {
-                nextItems.push({ type: 'soulseek-folder-header', group });
-                for (const result of group.results) {
-                    nextItems.push({ type: 'soulseek-track', result });
-                }
-            }
-            return nextItems;
         }
 
         if (!hasQuery && !isFocused) {
@@ -1477,37 +1329,12 @@ export default function TidalScreen() {
             return [{ type: 'empty' }];
         }
 
-        const showArtists = activeTab === 'all' || activeTab === 'artists';
-        const showAlbums = activeTab === 'all' || activeTab === 'albums';
-        const showPlaylists = activeTab === 'all' || activeTab === 'playlists';
-        const showTracks = activeTab === 'all' || activeTab === 'tracks';
-
         const nextItems: TidalVirtualListItem[] = [];
-        if (showArtists && visibleArtistResults.length > 0) {
-            if (activeTab === 'artists') {
-                nextItems.push({ type: 'label', key: 'label-artists', label: 'Artistas' });
-                nextItems.push({ type: 'artists-rail' });
-            } else {
-                nextItems.push({ type: 'feature', artist: visibleArtistResults[0] });
-            }
-        }
-        if (showTracks && visibleTrackResults.length > 0) {
+        if (visibleTrackResults.length > 0) {
             nextItems.push({ type: 'label', key: 'label-tracks', label: 'Canciones' });
             for (const track of visibleTrackResults) {
                 nextItems.push({ type: 'track', track });
             }
-        }
-        if (showAlbums && visibleAlbumResults.length > 0) {
-            nextItems.push({ type: 'label', key: 'label-albums', label: 'Álbumes' });
-            nextItems.push({ type: 'albums-rail' });
-        }
-        if (activeTab !== 'artists' && showArtists && visibleArtistResults.length > 1) {
-            nextItems.push({ type: 'label', key: 'label-artists', label: 'Más artistas' });
-            nextItems.push({ type: 'artists-rail' });
-        }
-        if (showPlaylists && visiblePlaylistResults.length > 0) {
-            nextItems.push({ type: 'label', key: 'label-playlists', label: 'Playlists' });
-            nextItems.push({ type: 'playlists-rail' });
         }
         return nextItems;
     }, [
@@ -1569,16 +1396,17 @@ export default function TidalScreen() {
             <View style={styles.header}>
                 <View style={styles.headerTitleRow}>
                     <View style={styles.headerTitleBlock}>
-                        <Text style={[styles.headerKicker, { color: accentColor }]}>EXPLORAR</Text>
                         <Text style={[styles.headerTitle, { color: theme.colors.onBackground }]}>Buscar</Text>
                     </View>
-                    <Pressable
-                        onPress={() => setShowSettingsSheet(true)}
-                        hitSlop={8}
-                        style={({ pressed }) => [styles.settingsButton, { opacity: pressed ? 0.62 : 1 }]}
-                    >
-                        <Ionicons name="options" size={21} color={theme.colors.onSurface} />
-                    </Pressable>
+                    <View style={styles.headerActionColumn}>
+                        <Pressable
+                            onPress={() => setShowSettingsSheet(true)}
+                            hitSlop={8}
+                            style={({ pressed }) => [styles.settingsButton, { opacity: pressed ? 0.62 : 1 }]}
+                        >
+                            <Ionicons name="options-outline" size={21} color={theme.colors.onSurface} />
+                        </Pressable>
+                    </View>
                 </View>
 
                 <View style={[
@@ -1602,27 +1430,6 @@ export default function TidalScreen() {
                         inputStyle={[styles.searchInput, { color: theme.colors.onSurface }]}
                         placeholderTextColor={withAlpha(theme.colors.onSurfaceVariant, '66')}
                     />
-                </View>
-
-                <View style={styles.sourceTabsRow}>
-                    <Pressable
-                        onPress={() => handleSourceTabChange('tidal')}
-                        style={styles.sourceTab}
-                    >
-                        <Text style={[styles.sourceTabLabel, { color: !isSoulseekSource ? theme.colors.onSurface : withAlpha(theme.colors.onSurfaceVariant, 'A0') }]}>
-                            Tidal
-                        </Text>
-                        <View style={[styles.sourceTabUnderline, { backgroundColor: !isSoulseekSource ? accentColor : 'transparent' }]} />
-                    </Pressable>
-                    <Pressable
-                        onPress={() => handleSourceTabChange('soulseek')}
-                        style={styles.sourceTab}
-                    >
-                        <Text style={[styles.sourceTabLabel, { color: isSoulseekSource ? theme.colors.onSurface : withAlpha(theme.colors.onSurfaceVariant, 'A0') }]}>
-                            Soulseek
-                        </Text>
-                        <View style={[styles.sourceTabUnderline, { backgroundColor: isSoulseekSource ? accentColor : 'transparent' }]} />
-                    </Pressable>
                 </View>
             </View>
 
@@ -1726,7 +1533,6 @@ export default function TidalScreen() {
         accentColor,
         activeTab,
         applySuggestion,
-        handleSourceTabChange,
         handleSubmitSearch,
         hasCommittedQuery,
         hasQuery,
@@ -1809,8 +1615,8 @@ export default function TidalScreen() {
                 return (
                     <View style={styles.centered}>
                         <EmptyState
-                            title={isSoulseekSource ? 'No se pudo cargar Soulseek' : 'No se pudo cargar Tidal'}
-                            description={(isSoulseekSource ? soulseekError : error) ?? undefined}
+                            title="No se pudo cargar Tidal"
+                            description={error ?? undefined}
                         />
                     </View>
                 );
@@ -1853,63 +1659,31 @@ export default function TidalScreen() {
                 return renderSoulseekTrackRow(item.result);
             case 'home':
                 return (
-                    <View style={styles.coverWall}>
-                        <View>
-                            <View style={styles.homeHeaderRow}>
-                                <View style={{ gap: 4 }}>
-                                    <Text style={[styles.headerKicker, { color: accentColor }]}>PARA TI</Text>
-                                    <Text style={[styles.homeTitle, { color: theme.colors.onBackground }]}>Descubre</Text>
-                                </View>
-                                <Button mode="text" compact onPress={fetchHomeRecommendations} textColor={accentColor}>
-                                    Refrescar
-                                </Button>
+                    <View style={styles.recommendationList}>
+                        <View style={styles.homeHeaderRow}>
+                            <View style={{ gap: 4 }}>
+                                <Text style={[styles.headerKicker, { color: accentColor }]}>PARA TI</Text>
+                                <Text style={[styles.homeTitle, { color: theme.colors.onBackground }]}>Sugerencias</Text>
                             </View>
-                            {isRecommending && recommendedTracks.length === 0 ? (
-                                <View style={styles.coverWallGrid}>
-                                    {[1, 2, 3, 4].map((i) => (
-                                        <View key={`s-rec-tra-${i}`} style={{ width: coverSize }}>
-                                            <Skeleton height={coverSize} width={coverSize} borderRadius={20} />
-                                            <Skeleton height={13} width="80%" borderRadius={4} style={{ marginTop: 8 }} />
-                                        </View>
-                                    ))}
-                                </View>
-                            ) : recommendedTracks.length > 0 ? (
-                                <View style={styles.coverWallGrid}>
-                                    {recommendedTracks.map(track => (
-                                        <TidalCoverCard
-                                            key={track.id}
-                                            imageUri={normalizeCardImageUri(track.artworkUrl)}
-                                            title={track.title}
-                                            subtitle={track.artist}
-                                            size={coverSize}
-                                            badge="play"
-                                            tone="glass"
-                                            onPress={() => handleTidalPlay(track)}
-                                        />
-                                    ))}
-                                </View>
-                            ) : null}
+                            <Pressable onPress={fetchHomeRecommendations} hitSlop={12}>
+                                <Ionicons name="refresh" size={20} color={accentColor} />
+                            </Pressable>
                         </View>
-
-                        {recommendedArtists.length > 0 ? (
-                            <View>
-                                <Text style={[styles.homeSubLabel, { color: withAlpha(theme.colors.onSurfaceVariant, 'CC') }]}>Artistas para ti</Text>
-                                <ScrollView horizontal showsHorizontalScrollIndicator={false} bounces={false} contentContainerStyle={styles.homeRail}>
-                                    {recommendedArtists.map(artist => (
-                                        <TidalCoverCard
-                                            key={artist.id}
-                                            imageUri={normalizeCardImageUri(artistArtworkOverrides.get(artist.id) || artist.artworkUrl)}
-                                            title={artist.name}
-                                            size={104}
-                                            variant="circle"
-                                            fallbackIcon="person"
-                                            tone="glass"
-                                            onPress={() => openArtist(artist)}
-                                        />
-                                    ))}
-                                </ScrollView>
-                            </View>
-                        ) : null}
+                        {isRecommending && recommendedTracks.length === 0
+                            ? [1, 2, 3, 4].map((i) => (
+                                <View key={`s-rec-tra-${i}`} style={styles.recommendationSkeleton}>
+                                    <Skeleton height={52} width={52} borderRadius={7} />
+                                    <View style={{ flex: 1, gap: 7 }}>
+                                        <Skeleton height={13} width="72%" borderRadius={4} />
+                                        <Skeleton height={11} width="44%" borderRadius={4} />
+                                    </View>
+                                </View>
+                            ))
+                            : recommendedTracks.map(track => (
+                                <React.Fragment key={track.id}>
+                                    {renderSoulseekMirrorTrackRow(track)}
+                                </React.Fragment>
+                            ))}
                     </View>
                 );
             case 'empty':
@@ -2044,7 +1818,7 @@ export default function TidalScreen() {
         windowWidth,
     ]);
     return (
-        <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
+        <View style={styles.container}>
             <SafeAreaView style={styles.flex} edges={['top', 'left', 'right']}>
                 <FlashList
                     data={virtualListData}
@@ -2066,7 +1840,7 @@ export default function TidalScreen() {
                 visible={showMirrorModal}
                 onClose={() => setShowMirrorModal(false)}
                 title="Servidores"
-                subtitle="Elige el origen de streaming y descargas"
+                subtitle="Elige el catálogo usado para encontrar música"
             >
                 <OptionRow
                     icon="sparkles"
@@ -2125,7 +1899,7 @@ export default function TidalScreen() {
                 visible={showQualityModal}
                 onClose={() => setShowQualityModal(false)}
                 title="Fidelidad"
-                subtitle="Calidad de flujo y descarga"
+                subtitle="Calidad de los archivos descargados"
             >
                 {qualityModalOptions.map((q) => {
                     const details = {
@@ -2178,26 +1952,62 @@ export default function TidalScreen() {
             <TidalBottomSheet
                 visible={showSettingsSheet}
                 onClose={() => setShowSettingsSheet(false)}
-                title="Ajustes de Tidal"
+                title="Ajustes de descarga"
             >
                 <OptionRow
                     icon="musical-notes"
                     title="Calidad de audio"
-                    description="Formato de flujo y descarga"
+                    description="Formato de los archivos descargados"
                     onPress={() => { setShowSettingsSheet(false); setShowQualityModal(true); }}
                 />
                 <OptionRow
                     icon="server"
-                    title="Servidor"
-                    description="Origen de streaming y descargas"
+                    title="Catálogo de búsqueda"
+                    description="Automático es lo recomendado"
                     onPress={() => { setShowSettingsSheet(false); setShowMirrorModal(true); }}
                 />
                 <OptionRow
                     icon="person-circle-outline"
                     title="Sesión Soulseek"
                     description="Cambia tus credenciales"
-                    onPress={() => { setShowSettingsSheet(false); setHasSoulseekCredentials(false); }}
+                    onPress={() => { setShowSettingsSheet(false); setShowSoulseekAuthModal(true); }}
                 />
+            </TidalBottomSheet>
+
+            <TidalBottomSheet
+                visible={showSoulseekAuthModal}
+                onClose={() => setShowSoulseekAuthModal(false)}
+                title="Conectar Soulseek"
+                subtitle="Configura tu cuenta para buscar y descargar música."
+            >
+                <TextInput
+                    mode="outlined"
+                    label="Usuario"
+                    value={soulseekUsername}
+                    onChangeText={setSoulseekUsername}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    style={styles.soulseekAuthInput}
+                />
+                <TextInput
+                    mode="outlined"
+                    label="Password"
+                    value={soulseekPassword}
+                    onChangeText={setSoulseekPassword}
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    secureTextEntry
+                    style={styles.soulseekAuthInput}
+                />
+                <Button
+                    mode="contained"
+                    onPress={handleSaveSoulseekCredentials}
+                    loading={isSavingSoulseekCredentials}
+                    disabled={isSavingSoulseekCredentials}
+                    contentStyle={styles.soulseekAuthButtonContent}
+                >
+                    Guardar credenciales
+                </Button>
             </TidalBottomSheet>
         </View>
     );
@@ -2214,14 +2024,21 @@ const styles = StyleSheet.create({
     flex: {
         flex: 1,
     },
+    recommendationList: {
+        marginHorizontal: 20,
+        paddingBottom: 18,
+    },
+    recommendationSkeleton: {
+        minHeight: 68,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 13,
+    },
     header: {
-        marginHorizontal: 16,
-        marginTop: 8,
+        marginHorizontal: 20,
+        marginTop: 14,
         marginBottom: 18,
-        paddingHorizontal: 0,
-        paddingTop: 8,
-        gap: 16,
-        elevation: 0,
+        gap: 14,
     },
     headerTitleRow: {
         flexDirection: 'row',
@@ -2232,16 +2049,21 @@ const styles = StyleSheet.create({
     },
     headerTitleBlock: {
         flex: 1,
-        paddingRight: 10,
+        paddingRight: 8,
         justifyContent: 'center',
-        gap: 4,
+        gap: 8,
     },
     headerKicker: {
         ...typeScale.micro,
         letterSpacing: 1.6,
     },
     headerTitle: {
-        ...typeScale.hero,
+        ...typeScale.screenTitle,
+        fontFamily: 'StaySound',
+        fontSize: 30,
+        lineHeight: 36,
+        fontWeight: '900',
+        letterSpacing: -1.25,
     },
     headerSubtitle: {
         ...typeScale.body,
@@ -2255,14 +2077,33 @@ const styles = StyleSheet.create({
         borderRadius: 20,
         alignItems: 'center',
         justifyContent: 'center',
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.14)',
+        backgroundColor: 'transparent',
+    },
+    headerActionColumn: {
+        alignItems: 'center',
+        gap: 9,
+    },
+    downloadMark: {
+        width: 60,
+        height: 60,
+        borderRadius: 22,
+        alignItems: 'center',
+        justifyContent: 'center',
+        shadowColor: '#000',
+        shadowOffset: { width: 0, height: 8 },
+        shadowOpacity: 0.25,
+        shadowRadius: 14,
+        elevation: 7,
     },
     title: {
         ...typeScale.titleLarge,
     },
     searchDock: {
-        borderRadius: 18,
-        borderWidth: StyleSheet.hairlineWidth,
-        paddingHorizontal: 2,
+        borderRadius: 10,
+        borderWidth: 1,
+        paddingHorizontal: 3,
         overflow: 'hidden',
         zIndex: 1,
     },
@@ -2274,22 +2115,22 @@ const styles = StyleSheet.create({
         zIndex: 1,
     },
     searchbar: {
-        borderRadius: 18,
-        minHeight: 56,
+        borderRadius: 10,
+        minHeight: 48,
         elevation: 0,
     },
     searchInput: {
         ...typeScale.bodyStrong,
-        fontSize: 16,
-        lineHeight: 22,
+        fontSize: 14,
+        lineHeight: 20,
         letterSpacing: 0,
         alignSelf: 'center',
     },
     sourceTabsRow: {
         flexDirection: 'row',
         alignItems: 'center',
-        gap: 24,
-        minHeight: 36,
+        gap: 7,
+        minHeight: 34,
     },
     sourceTabsCaption: {
         ...typeScale.micro,
@@ -2300,22 +2141,29 @@ const styles = StyleSheet.create({
         marginRight: -6,
     },
     sourceTab: {
-        minWidth: 58,
-        paddingTop: 2,
-        paddingBottom: 6,
-        alignItems: 'flex-start',
+        minWidth: 74,
+        paddingVertical: 8,
+        paddingHorizontal: 11,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        gap: 6,
+        borderRadius: 15,
+        borderWidth: StyleSheet.hairlineWidth,
+        backgroundColor: 'rgba(255,255,255,0.06)',
     },
     sourceTabLabel: {
         ...typeScale.label,
         fontWeight: '800',
         letterSpacing: 0,
-        fontSize: 15,
+        fontSize: 12,
     },
     sourceTabUnderline: {
-        alignSelf: 'stretch',
+        alignSelf: 'center',
+        width: 18,
         height: 2,
         borderRadius: 999,
-        marginTop: 6,
+        marginTop: 4,
     },
     filterScroller: {
         paddingHorizontal: 16,
@@ -3022,8 +2870,8 @@ const styles = StyleSheet.create({
     },
     homeTitle: {
         ...typeScale.hero,
-        fontSize: 34,
-        lineHeight: 38,
+        fontSize: 30,
+        lineHeight: 34,
     },
     homeSubLabel: {
         ...typeScale.micro,

@@ -1,4 +1,4 @@
-export type LyricsFontId = 'classic' | 'syne' | 'grotesk' | 'fraunces' | 'nunito';
+export type LyricsFontId = 'newsreader' | 'classic' | 'syne' | 'grotesk' | 'fraunces' | 'nunito';
 
 export interface LyricsFontDefinition {
   id: LyricsFontId;
@@ -16,6 +16,13 @@ export interface LyricsFontDefinition {
 const LYRICS_FONT_STORAGE_KEY = 'staysound.lyricsFont';
 
 export const LYRICS_FONTS: LyricsFontDefinition[] = [
+  {
+    id: 'newsreader',
+    label: 'Sala de escucha',
+    description: 'Serif editorial del nuevo lenguaje de StaySound',
+    stack: "'Newsreader', ui-serif, Georgia, serif",
+    loadFamily: 'Newsreader',
+  },
   {
     id: 'classic',
     label: 'Clásica',
@@ -60,7 +67,7 @@ export function readStoredLyricsFont(): LyricsFontId {
   try {
     return getLyricsFont(window.localStorage.getItem(LYRICS_FONT_STORAGE_KEY)).id;
   } catch {
-    return 'classic';
+    return 'newsreader';
   }
 }
 

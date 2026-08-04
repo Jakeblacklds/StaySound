@@ -1,6 +1,5 @@
-import { AlbumCard, CustomIcon, EmptyState } from '@/src/components/ui';
-import { TidalAtmosphere } from '@/src/components/tidal';
-import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
+import { AlbumCard, CustomIcon, EmptyState, GlassIconButton, TrackListItem } from '@/src/components/ui';
+import { useDynamicColors, useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n, type TranslationKey } from '@/src/i18n';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
 import { createTidalStreamTrack } from '@/src/services/tidalService';
@@ -13,7 +12,7 @@ import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useMemo, useRef } from 'react';
-import { FlatList, Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, View, useWindowDimensions } from 'react-native';
 import { Text } from 'react-native-paper';
 import Animated, {
   Extrapolation,
@@ -22,16 +21,12 @@ import Animated, {
   useAnimatedScrollHandler,
   useAnimatedStyle,
   useSharedValue,
-  withTiming,
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const TRACK_CARD_WIDTH = 140;
 const HERO_PICK_COUNT = 5;
-const HERO_CAROUSEL_GAP = 14;
-const HERO_CAROUSEL_EDGE_PADDING = 32;
-const HERO_CARD_INACTIVE_SCALE = 0.992;
-const HERO_CARD_INACTIVE_OPACITY = 0.94;
+const HERO_CAROUSEL_GAP = 0;
 
 function getGreeting(t: (key: TranslationKey) => string): string {
   const hour = new Date().getHours();
@@ -79,10 +74,12 @@ const HeroCarouselDot = React.memo(({
   index,
   scrollX,
   step,
+  color,
 }: {
   index: number;
   scrollX: SharedValue<number>;
   step: number;
+  color: string;
 }) => {
   const animatedStyle = useAnimatedStyle(() => {
     const inputRange = [
@@ -102,7 +99,7 @@ const HeroCarouselDot = React.memo(({
     };
   }, [index, scrollX, step]);
 
-  return <Animated.View style={[styles.heroCarouselDot, animatedStyle]} />;
+  return <Animated.View style={[styles.heroCarouselDot, { backgroundColor: color }, animatedStyle]} />;
 });
 
 const TrackCard = React.memo(({
@@ -177,7 +174,6 @@ const TrackCard = React.memo(({
 
 const SectionHeader = React.memo(({
   title,
-  icon,
   onSeeAll,
 }: {
   title: string;
@@ -192,7 +188,6 @@ const SectionHeader = React.memo(({
   return (
     <View style={styles.sectionHeader}>
       <View style={styles.sectionTitleRow}>
-        <CustomIcon name={icon} size={22} color={theme.colors.primary} style={styles.sectionIcon} />
         <Text variant="titleMedium" style={[styles.sectionTitle, titleStyle]}>
           {title}
         </Text>
@@ -200,7 +195,7 @@ const SectionHeader = React.memo(({
       {onSeeAll != null && (
         <Pressable onPress={onSeeAll} hitSlop={12}>
           <Text variant="labelMedium" style={seeAllStyle}>
-            {t('home.seeAll')}
+          Ver todo
           </Text>
         </Pressable>
       )}
@@ -216,6 +211,7 @@ const HeroCarouselCard = React.memo(({
   width,
   onPress,
   onLongPress,
+  accentColor,
 }: {
   track: Track;
   index: number;
@@ -224,28 +220,35 @@ const HeroCarouselCard = React.memo(({
   width: number;
   onPress: (track: Track) => void;
   onLongPress?: (track: Track) => void;
+  accentColor: string;
 }) => {
   const { theme } = useTheme();
   const performanceProfile = usePerformanceProfile();
   const imageCachePolicy = performanceProfile.imageCachePolicyList;
-  const artworkHeight = Math.min(width - 6, 332);
-  const INFO_SECTION_HEIGHT = 118;
-  const cardHeight = artworkHeight + INFO_SECTION_HEIGHT + 14;
-  const albumLabel = track.album && track.album !== 'Unknown Album' ? track.album : track.artist;
-  const animatedStyle = useAnimatedStyle(() => {
+  const artworkSize = Math.min(410, Math.max(318, width * 0.94));
+  const artworkRight = -Math.min(210, width * 0.4);
+  const copyWidth = Math.min(150, Math.max(132, width * 0.39));
+  const cardHeight = 350;
+  const sampleRateKHz = track.sampleRate
+    ? `${Math.round((track.sampleRate / 1000) * 10) / 10} kHz`
+    : '44.1 kHz';
+  const bitDepthLabel = `${track.bitDepth || 16}-bit`;
+  const qualityLabel = (track.codec || 'FLAC').toUpperCase();
+  const qualityMeta = `${qualityLabel} · ${sampleRateKHz} · ${bitDepthLabel}`;
+  const artworkVisibilityStyle = useAnimatedStyle(() => {
     const inputRange = [
-      (index - 1) * step,
+      (index - 0.72) * step,
       index * step,
-      (index + 1) * step,
+      (index + 0.72) * step,
     ];
-
     return {
-      opacity: interpolate(scrollX.value, inputRange, [HERO_CARD_INACTIVE_OPACITY, 1, HERO_CARD_INACTIVE_OPACITY], Extrapolation.CLAMP),
-      transform: [
-        {
-          scale: interpolate(scrollX.value, inputRange, [HERO_CARD_INACTIVE_SCALE, 1, HERO_CARD_INACTIVE_SCALE], Extrapolation.CLAMP),
-        },
-      ],
+      opacity: interpolate(scrollX.value, inputRange, [0, 1, 0], Extrapolation.CLAMP),
+    };
+  }, [index, scrollX, step]);
+  const copyAnimatedStyle = useAnimatedStyle(() => {
+    const inputRange = [(index - 1) * step, index * step, (index + 1) * step];
+    return {
+      opacity: interpolate(scrollX.value, inputRange, [0, 1, 0], Extrapolation.CLAMP),
     };
   }, [index, scrollX, step]);
 
@@ -253,7 +256,6 @@ const HeroCarouselCard = React.memo(({
     <Animated.View
       style={[
         styles.heroCarouselCard,
-        animatedStyle,
         {
           width,
           height: cardHeight,
@@ -271,39 +273,51 @@ const HeroCarouselCard = React.memo(({
         ]}
       >
         <View style={styles.heroCarouselBody}>
-          <View
+          <Animated.View
             style={[
               styles.heroCarouselArtworkShell,
+              artworkVisibilityStyle,
               {
-                height: artworkHeight,
+                width: artworkSize,
+                height: artworkSize,
+                right: artworkRight,
                 backgroundColor: theme.colors.surfaceVariant,
+                borderColor: `${accentColor}A8`,
+                shadowColor: accentColor,
               },
             ]}
           >
-            {track.artwork ? (
-              <Image
-                source={{ uri: track.artwork || track.artworkThumb }}
-                style={[StyleSheet.absoluteFill, { borderRadius: 28 }]}
-                contentFit="cover"
-                recyclingKey={`hero-carousel-${track.id}`}
-                cachePolicy={imageCachePolicy}
-                transition={0}
-              />
-            ) : (
-              <CustomIcon name="Album" size={54} color={theme.colors.onSurfaceVariant + '80'} />
-            )}
-
-            <LinearGradient
-              colors={['transparent', 'rgba(0,0,0,0.10)', 'rgba(0,0,0,0.34)']}
-              locations={[0, 0.62, 1]}
-              style={[styles.heroCarouselArtworkFade, { borderRadius: 28 }]}
+            <View style={styles.heroCarouselArtworkClip}>
+              {track.artwork ? (
+                <Image
+                  source={{ uri: track.artwork || track.artworkThumb }}
+                  style={StyleSheet.absoluteFill}
+                  contentFit="cover"
+                  recyclingKey={`hero-carousel-${track.id}`}
+                  cachePolicy={imageCachePolicy}
+                  transition={0}
+                />
+              ) : (
+                <CustomIcon name="Album" size={54} color={theme.colors.onSurfaceVariant + '80'} />
+              )}
+            </View>
+            <View
+              pointerEvents="none"
+              style={[styles.heroCarouselInnerRing, { borderColor: `${accentColor}66` }]}
             />
-          </View>
+          </Animated.View>
 
-          <View style={[styles.heroCarouselInfo, { height: INFO_SECTION_HEIGHT }]}>
+          <Animated.View
+            style={[
+              styles.heroCarouselInfo,
+              { width: copyWidth },
+              copyAnimatedStyle,
+            ]}
+          >
+            <Text style={[styles.heroCarouselKicker, { color: theme.colors.onSurfaceVariant }]}>STAYSOUND PICKS</Text>
             <Text
               variant="headlineSmall"
-              numberOfLines={2}
+              numberOfLines={3}
               ellipsizeMode="tail"
               style={[styles.heroCarouselTitle, { color: theme.colors.onBackground }]}
             >
@@ -313,22 +327,29 @@ const HeroCarouselCard = React.memo(({
               variant="bodyMedium"
               numberOfLines={1}
               ellipsizeMode="tail"
-              style={[styles.heroCarouselArtist, { color: theme.colors.onSurfaceVariant }]}
+              style={[styles.heroCarouselArtist, { color: accentColor }]}
             >
               {track.artist}
             </Text>
             <View style={styles.heroCarouselMetaRow}>
-              <CustomIcon name="Album" size={12} color={theme.colors.onSurfaceVariant} />
               <Text
                 variant="bodySmall"
                 numberOfLines={1}
                 ellipsizeMode="tail"
                 style={[styles.heroCarouselMetaText, { color: theme.colors.onSurfaceVariant }]}
               >
-                {albumLabel}
+                {qualityMeta}
               </Text>
             </View>
-          </View>
+            <View style={styles.heroCarouselPlayRow}>
+              <View style={[styles.heroCarouselPlay, { backgroundColor: accentColor }]}>
+                <CustomIcon name="Play" size={18} color={theme.colors.onPrimary} />
+              </View>
+              <Text style={[styles.heroCarouselPlayLabel, { color: accentColor }]}>
+                Reproducir
+              </Text>
+            </View>
+          </Animated.View>
         </View>
       </Pressable>
     </Animated.View>
@@ -340,22 +361,23 @@ const HeroCarousel = React.memo(({
   cardWidth,
   onPressTrack,
   onLongPressTrack,
+  accentColor,
 }: {
   tracks: Track[];
   cardWidth: number;
   onPressTrack: (track: Track) => void;
   onLongPressTrack?: (track: Track) => void;
+  accentColor: string;
 }) => {
   const scrollX = useSharedValue(0);
   const step = cardWidth + HERO_CAROUSEL_GAP;
-  const snapOffsets = useMemo(() => tracks.map((_, index) => index * step), [step, tracks]);
   const scrollHandler = useAnimatedScrollHandler({
     onScroll: (event) => {
       scrollX.value = event.contentOffset.x;
     },
   });
   const renderItem = useCallback(({ item, index }: { item: Track; index: number }) => (
-    <View style={index === tracks.length - 1 ? null : styles.heroCarouselItemSpacing}>
+    <View>
       <HeroCarouselCard
         track={item}
         index={index}
@@ -364,9 +386,10 @@ const HeroCarousel = React.memo(({
         width={cardWidth}
         onPress={onPressTrack}
         onLongPress={onLongPressTrack}
+        accentColor={accentColor}
       />
     </View>
-  ), [cardWidth, onLongPressTrack, onPressTrack, scrollX, step, tracks.length]);
+  ), [accentColor, cardWidth, onLongPressTrack, onPressTrack, scrollX, step]);
   const keyExtractor = useCallback((item: Track) => `hero-wrap-${item.id}`, []);
   const getItemLayout = useCallback((_: ArrayLike<Track> | null | undefined, index: number) => ({
     length: step,
@@ -383,15 +406,17 @@ const HeroCarousel = React.memo(({
         getItemLayout={getItemLayout}
         showsHorizontalScrollIndicator={false}
         horizontal
+        style={styles.heroCarouselViewport}
         directionalLockEnabled
         overScrollMode="never"
         contentContainerStyle={styles.heroCarouselList}
-        snapToOffsets={snapOffsets}
+        snapToInterval={step}
         snapToAlignment="start"
+        pagingEnabled
         disableIntervalMomentum
         decelerationRate="fast"
         bounces={false}
-        removeClippedSubviews
+        removeClippedSubviews={false}
         initialNumToRender={tracks.length}
         maxToRenderPerBatch={tracks.length}
         windowSize={3}
@@ -405,6 +430,7 @@ const HeroCarousel = React.memo(({
             index={index}
             scrollX={scrollX}
             step={step}
+            color={accentColor}
           />
         ))}
       </View>
@@ -435,11 +461,18 @@ export default function HomeScreen() {
   const deleteTrack = useLibraryStore(s => s.deleteTrack);
 
   const play = usePlayerStore(s => s.play);
+  const currentTrack = usePlayerStore(s => s.currentTrack);
   const addToQueue = usePlayerStore(s => s.addToQueue);
   const recentlyPlayed = usePlayerStore(s => s.recentlyPlayed);
   const setPendingTrackPreview = usePlayerStore(s => s.setPendingTrackPreview);
   const showNotification = useNotificationStore(s => s.showNotification);
   const { userName, userAvatarUri } = useOnboardingStore();
+  const currentArtwork = currentTrack?.artwork || currentTrack?.artworkThumb;
+  const { colors: playbackColors } = useDynamicColors(currentArtwork, {
+    enabled: performanceProfile.enableDynamicColors,
+    applyToTheme: false,
+  });
+  const playbackAccent = playbackColors.primary || theme.colors.primary;
 
   const toValues = useCallback(<T,>(source: unknown): T[] => {
     if (source instanceof Map) return Array.from(source.values()) as T[];
@@ -484,7 +517,7 @@ export default function HomeScreen() {
   const heroPicks = useMemo(() => quickPicks.slice(0, HERO_PICK_COUNT), [quickPicks]);
   const recentlyPlayedSlice = useMemo(() => recentlyPlayed.slice(0, 10), [recentlyPlayed]);
   const hasMusic = tracks.length > 0;
-  const heroCardWidth = useMemo(() => Math.max(252, screenWidth - 128), [screenWidth]);
+  const heroCardWidth = screenWidth;
   const lightweightMode = config.lightweightMode;
   const heroTracks = useMemo(() => lightweightMode ? quickPicks.slice(0, 8) : heroPicks, [heroPicks, lightweightMode, quickPicks]);
   const horizontalDrawDistance = performanceProfile.reducedListWindowing ? TRACK_CARD_WIDTH : TRACK_CARD_WIDTH * 2;
@@ -547,7 +580,6 @@ export default function HomeScreen() {
   }, []);
 
   const goToLibrary = useCallback(() => router.push('/library'), []);
-  const goToSettings = useCallback(() => router.push('/settings'), []);
 
   const renderTrackCard = useCallback(({ item }: { item: Track }) => (
     <TrackCard track={item} onPress={handleTrackPress} onLongPress={handleTrackLongPress} />
@@ -555,15 +587,8 @@ export default function HomeScreen() {
 
   const trackKeyExtractor = useCallback((item: Track) => item.id, []);
   const renderHorizontalSeparator = useCallback(() => <View style={styles.listSeparator} />, []);
-
-  const heroArtwork = useMemo(
-    () => heroTracks[0]?.artwork ?? recentlyPlayedSlice[0]?.artwork ?? recentlyAddedTracks[0]?.artwork,
-    [heroTracks, recentlyAddedTracks, recentlyPlayedSlice]
-  );
-
   return (
-    <View style={[styles.container, { backgroundColor: theme.colors.background }]}>
-      <TidalAtmosphere sourceUri={heroArtwork} mode="fog" />
+    <View style={styles.container}>
       <ScrollView
         style={styles.container}
         contentContainerStyle={[styles.content, { paddingTop: insets.top + 6, paddingBottom: styles.content.paddingBottom + insets.bottom }]}
@@ -573,7 +598,7 @@ export default function HomeScreen() {
         <Animated.View style={[styles.heroCard, heroEntryStyle]}>
           <View style={styles.header}>
             <View style={styles.headerTop}>
-              <Pressable onPress={() => router.push('/settings')} style={styles.profileArea}>
+              <View style={styles.profileArea}>
                 <View style={[styles.avatarContainer, { borderColor: theme.colors.outline + '30', backgroundColor: theme.colors.surfaceVariant }]}>
                   {userAvatarUri ? (
                     <Image source={{ uri: userAvatarUri }} style={styles.avatar} contentFit="cover" cachePolicy={performanceProfile.imageCachePolicyOverlay} transition={0} />
@@ -593,60 +618,28 @@ export default function HomeScreen() {
                     {userName || t('common.appName')}
                   </Text>
                 </View>
-              </Pressable>
-
-              <Pressable onPress={goToSettings} style={[styles.settingsBtn, { backgroundColor: theme.colors.surfaceVariant + '70', borderColor: theme.colors.outline + '24' }]}>
-                <CustomIcon name="Ajustes" size={22} color={theme.colors.onSurfaceVariant} />
-              </Pressable>
+              </View>
             </View>
           </View>
 
-          {hasMusic && heroTracks.length > 0 ? (
+          {hasMusic ? (
             <View style={styles.heroPicksSection}>
-              {lightweightMode ? (
-                <FlashList
-                  data={heroTracks}
-                  renderItem={renderTrackCard}
-                  keyExtractor={trackKeyExtractor}
-                  ItemSeparatorComponent={renderHorizontalSeparator}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  contentContainerStyle={styles.horizontalList}
-                  drawDistance={horizontalDrawDistance}
-                />
-              ) : (
-                <HeroCarousel
-                  tracks={heroTracks}
-                  cardWidth={heroCardWidth}
-                  onPressTrack={handleTrackPress}
-                  onLongPressTrack={handleTrackLongPress}
-                />
-              )}
+              <HeroCarousel
+                tracks={heroTracks}
+                cardWidth={heroCardWidth}
+                onPressTrack={handleTrackPress}
+                onLongPressTrack={handleTrackLongPress}
+                accentColor={playbackAccent}
+              />
             </View>
           ) : null}
         </Animated.View>
 
-        {recentlyPlayedSlice.length > 0 && (
-          <Animated.View style={[styles.sectionBlock, recentlyPlayedEntryStyle]}>
-            <SectionHeader title={t('home.recentlyPlayed')} icon="Reciente" />
-            <FlashList
-              data={recentlyPlayedSlice}
-              renderItem={renderTrackCard}
-              keyExtractor={trackKeyExtractor}
-              ItemSeparatorComponent={renderHorizontalSeparator}
-              horizontal
-              showsHorizontalScrollIndicator={false}
-              contentContainerStyle={styles.horizontalList}
-              drawDistance={horizontalDrawDistance}
-            />
-          </Animated.View>
-        )}
-
-        {recentlyAddedTracks.length > 0 && (
+        {quickPicks.length > 0 && (
           <Animated.View style={[styles.sectionBlock, recentlyAddedEntryStyle]}>
-            <SectionHeader title={t('home.recentlyAdded')} icon="Reciente" onSeeAll={goToLibrary} />
+            <SectionHeader title="Para esta noche" icon="Reciente" onSeeAll={goToLibrary} />
             <FlashList
-              data={recentlyAddedTracks}
+              data={quickPicks}
               renderItem={renderTrackCard}
               keyExtractor={trackKeyExtractor}
               ItemSeparatorComponent={renderHorizontalSeparator}
@@ -655,19 +648,6 @@ export default function HomeScreen() {
               contentContainerStyle={styles.horizontalList}
               drawDistance={horizontalDrawDistance}
             />
-          </Animated.View>
-        )}
-
-        {recentlyAddedAlbums.length > 0 && (
-          <Animated.View style={[styles.sectionBlock, albumsEntryStyle]}>
-            <SectionHeader title={t('home.albumsSection')} icon="Album" onSeeAll={goToLibrary} />
-            <View style={styles.albumGrid}>
-              {recentlyAddedAlbums.map((album) => (
-                <View key={album.id} style={styles.albumWrapper}>
-                  <AlbumCard album={album} size="medium" presentation="stacked" onPress={handleAlbumPress} />
-                </View>
-              ))}
-            </View>
           </Animated.View>
         )}
 
@@ -699,42 +679,108 @@ function hashSimple(str: string | number): number {
 const styles = StyleSheet.create({
   container: { flex: 1 },
   content: { paddingBottom: 140 },
-  heroCard: { marginHorizontal: 16, marginTop: 8, marginBottom: 28 },
-  header: { paddingHorizontal: 2, paddingTop: 18, marginBottom: 26 },
+  heroCard: { marginTop: 2, marginBottom: 12 },
+  header: { paddingHorizontal: 24, paddingTop: 26, marginBottom: 0, zIndex: 8, elevation: 8 },
   headerTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   profileArea: { flexDirection: 'row', alignItems: 'center', flex: 1 },
-  avatarContainer: { width: 52, height: 52, borderRadius: 14, borderWidth: 1, overflow: 'hidden', marginRight: 14 },
+  avatarContainer: { display: 'none' },
   avatar: { width: '100%', height: '100%' },
   avatarPlaceholder: { width: '100%', height: '100%', alignItems: 'center', justifyContent: 'center' },
   headerTextContainer: { flex: 1 },
-  greetingText: { ...typeScale.caption, marginBottom: 3, opacity: 0.72, textTransform: 'uppercase', letterSpacing: 0.8 },
-  appTitle: { ...typeScale.screenTitle, letterSpacing: -0.8 },
-  settingsBtn: { width: 40, height: 40, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1 },
-  heroPicksSection: { marginBottom: 10, marginHorizontal: -16 },
-  heroCarouselList: { paddingLeft: HERO_CAROUSEL_EDGE_PADDING, paddingRight: HERO_CAROUSEL_EDGE_PADDING },
+  greetingText: { ...typeScale.micro, fontFamily: 'StaySound', marginBottom: 4, opacity: 0.72, textTransform: 'uppercase', letterSpacing: 1.6, fontWeight: '500' },
+  appTitle: { ...typeScale.screenTitle, fontSize: 30, lineHeight: 34, letterSpacing: -1.05 },
+  spotlight: {
+    height: 430,
+    borderRadius: 34,
+    overflow: 'hidden',
+    justifyContent: 'space-between',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.22)',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 18 },
+    shadowOpacity: 0.32,
+    shadowRadius: 30,
+    elevation: 10,
+  },
+  spotlightPressed: { transform: [{ scale: 0.985 }], opacity: 0.96 },
+  spotlightBadge: {
+    alignSelf: 'flex-start',
+    margin: 18,
+    paddingHorizontal: 12,
+    height: 30,
+    borderRadius: 15,
+    backgroundColor: 'rgba(4,6,12,0.64)',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.18)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  liveDot: { width: 7, height: 7, borderRadius: 4 },
+  spotlightBadgeText: { color: '#fff', fontSize: 10, lineHeight: 13, fontWeight: '900', letterSpacing: 1.4 },
+  spotlightCopy: { padding: 22, paddingTop: 72 },
+  spotlightTitle: { color: '#fff', fontSize: 35, lineHeight: 38, fontWeight: '900', letterSpacing: -1.35 },
+  spotlightArtist: { color: 'rgba(255,255,255,0.74)', fontSize: 16, lineHeight: 22, marginTop: 7, fontWeight: '600' },
+  spotlightActionRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 },
+  spotlightPlay: { width: 38, height: 38, borderRadius: 14, alignItems: 'center', justifyContent: 'center' },
+  spotlightActionText: { color: '#fff', fontSize: 13, fontWeight: '800' },
+  commandRow: { flexDirection: 'row', gap: 10, marginTop: 12 },
+  commandCard: { flex: 1, minHeight: 86, borderRadius: 25, padding: 13, flexDirection: 'row', alignItems: 'center', gap: 11 },
+  commandIcon: { width: 42, height: 42, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  commandCopy: { flex: 1 },
+  commandEyebrow: { fontSize: 9, fontWeight: '900', letterSpacing: 1.15, opacity: 0.68 },
+  commandTitle: { fontSize: 14, lineHeight: 18, fontWeight: '800', marginTop: 3 },
+  statCard: { width: 94, minHeight: 86, borderRadius: 25, borderWidth: StyleSheet.hairlineWidth, alignItems: 'center', justifyContent: 'center' },
+  statNumber: { fontSize: 25, lineHeight: 29, fontWeight: '900', letterSpacing: -0.8 },
+  statLabel: { fontSize: 11, marginTop: 1, fontWeight: '700' },
+  commandPressed: { transform: [{ scale: 0.97 }], opacity: 0.86 },
+  heroPicksSection: { marginTop: 0, marginBottom: 8 },
+  heroCarouselList: { paddingLeft: 0, paddingRight: 0 },
+  heroCarouselViewport: { overflow: 'visible' },
   heroCarouselItemSpacing: { marginRight: HERO_CAROUSEL_GAP },
   heroCarouselCard: {
-    borderRadius: 28,
+    borderRadius: 0,
     borderWidth: 0,
+    overflow: 'visible',
   },
   heroCarouselPressable: {
     flex: 1,
+    overflow: 'visible',
   },
   heroCarouselPressed: { opacity: 0.96 },
   heroCarouselBody: {
     flex: 1,
   },
   heroCarouselArtworkShell: {
-    borderRadius: 28,
-    borderWidth: 0,
+    position: 'absolute',
+    top: -100,
+    borderRadius: 999,
+    borderWidth: 1.5,
+    overflow: 'visible',
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: -10, height: 10 },
+    shadowOpacity: 0.38,
+    shadowRadius: 22,
+    elevation: 12,
+  },
+  heroCarouselArtworkClip: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 999,
     overflow: 'hidden',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  heroCarouselArtworkFade: { ...StyleSheet.absoluteFillObject },
-  heroCarouselInfo: { marginTop: 14, paddingHorizontal: 2, overflow: 'hidden' },
-  heroCarouselTitle: { ...typeScale.screenTitle, lineHeight: 30, fontWeight: '700', letterSpacing: -0.8 },
-  heroCarouselArtist: { marginTop: 6, lineHeight: 22 },
+  heroCarouselInnerRing: {
+    position: 'absolute',
+    inset: 7,
+    borderRadius: 999,
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  heroCarouselInfo: { position: 'absolute', left: 24, bottom: 18, overflow: 'visible', zIndex: 4 },
+  heroCarouselKicker: { ...typeScale.micro, fontFamily: 'StaySound', fontSize: 10, letterSpacing: 1.35, fontWeight: '500', marginBottom: 10 },
+  heroCarouselTitle: { ...typeScale.screenTitle, fontSize: 27, lineHeight: 28, fontWeight: '900', letterSpacing: -0.8 },
+  heroCarouselArtist: { marginTop: 6, lineHeight: 22, fontWeight: '800' },
   heroCarouselMetaRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -742,34 +788,35 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   heroCarouselMetaText: { flexShrink: 1, lineHeight: 18 },
+  heroCarouselPlayRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginTop: 18 },
+  heroCarouselPlay: { width: 46, height: 46, borderRadius: 23, alignItems: 'center', justifyContent: 'center' },
+  heroCarouselPlayLabel: { ...typeScale.label, fontWeight: '800' },
   heroCarouselDots: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
-    marginTop: 12,
+    marginTop: 0,
   },
   heroCarouselDot: {
-    height: 8,
+    height: 5,
     borderRadius: 999,
-    backgroundColor: '#FFFFFF',
   },
-  sectionBlock: { marginHorizontal: 16, marginBottom: 34 },
+  sectionBlock: { marginHorizontal: 24, marginBottom: 28 },
   sectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingHorizontal: 0, marginBottom: 14 },
   sectionTitleRow: { flexDirection: 'row', alignItems: 'center' },
   sectionIcon: { marginRight: 8 },
-  sectionTitle: { ...typeScale.title, letterSpacing: -0.35, fontWeight: '700' },
+  sectionTitle: { ...typeScale.body, fontFamily: 'StaySound', fontSize: 14, lineHeight: 18, letterSpacing: -0.15, fontWeight: '500', opacity: 0.78 },
   horizontalList: { paddingLeft: 0, paddingRight: 0, marginBottom: 2 },
   listSeparator: { width: 14 },
-  trackCard: { width: TRACK_CARD_WIDTH, borderRadius: 0, overflow: 'visible', padding: 0, borderWidth: 0 },
+  trackCard: { width: 92, borderRadius: 0, overflow: 'visible', padding: 0, borderWidth: 0, alignItems: 'center' },
   pressedCard: { opacity: 0.8, transform: [{ scale: 0.96 }] },
-  trackCardArt: { width: TRACK_CARD_WIDTH, height: TRACK_CARD_WIDTH, borderRadius: 22, overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 12 },
-  trackCardTitle: { ...typeScale.bodyStrong, paddingHorizontal: 1, letterSpacing: -0.2 },
-  trackCardSubtitle: { paddingHorizontal: 1, opacity: 0.84 },
-  albumGrid: { flexDirection: 'row', flexWrap: 'wrap', paddingHorizontal: 2, marginBottom: 4 },
-  albumWrapper: { width: '50%', paddingHorizontal: 6, marginBottom: 12 },
+  trackCardArt: { width: 86, height: 86, borderRadius: 43, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.24)', overflow: 'hidden', alignItems: 'center', justifyContent: 'center', marginBottom: 10 },
+  trackCardTitle: { ...typeScale.bodyStrong, width: 92, paddingHorizontal: 1, letterSpacing: -0.2, textAlign: 'center', fontSize: 11 },
+  trackCardSubtitle: { width: 92, paddingHorizontal: 1, opacity: 0.72, textAlign: 'center', fontSize: 9 },
+  recentStack: { borderRadius: 28, borderWidth: StyleSheet.hairlineWidth, paddingVertical: 6, overflow: 'hidden' },
+  albumRail: { gap: 12, paddingRight: 18, paddingBottom: 8 },
+  albumWrapper: { width: 176 },
   emptyContainer: { marginTop: 20, height: 300, paddingHorizontal: 20 },
   bottomSpacer: { height: 40 },
 });
-
-

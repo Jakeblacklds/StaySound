@@ -193,7 +193,7 @@ export function EqualizerEditor() {
                 : 'equalizer.status.waitingForPlayback';
 
     return (
-        <SafeAreaView style={[styles.safeArea, { backgroundColor: theme.colors.background }]}>
+        <SafeAreaView style={styles.safeArea}>
             <ScrollView
                 style={styles.container}
                 contentContainerStyle={styles.content}
@@ -228,11 +228,6 @@ export function EqualizerEditor() {
                     end={{ x: 1, y: 1 }}
                     style={styles.heroCard}
                 >
-                    <View style={styles.heroGlowWrap} pointerEvents="none">
-                        <View style={[styles.heroGlow, { backgroundColor: `${theme.colors.primary}24` }]} />
-                        <View style={[styles.heroGlowSecondary, { backgroundColor: `${theme.colors.secondary}16` }]} />
-                    </View>
-
                     <View style={styles.heroCopy}>
                         <Text style={[styles.heroEyebrow, { color: `${theme.colors.onSurfaceVariant}CC` }]}>
                             {t('equalizer.hero.eyebrow')}
@@ -279,7 +274,7 @@ export function EqualizerEditor() {
                     </View>
                 </LinearGradient>
 
-                <View style={[styles.modeCard, { backgroundColor: theme.colors.surface, borderColor: `${theme.colors.outline}40` }]}>
+                <View style={[styles.modeCard, { backgroundColor: `${theme.colors.surface}A8`, borderColor: `${theme.colors.outline}38` }]}>
                     <View style={styles.sectionHeading}>
                         <Text style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
                             {t('equalizer.section.title')}
@@ -310,7 +305,7 @@ export function EqualizerEditor() {
                 </View>
 
                 {usingIntegratedEqualizer ? (
-                    <View style={[styles.presetCard, { backgroundColor: theme.colors.surface, borderColor: `${theme.colors.outline}40` }]}>
+                    <View style={[styles.presetCard, { backgroundColor: `${theme.colors.surface}A8`, borderColor: `${theme.colors.outline}38` }]}>
                         <View style={styles.sectionHeading}>
                             <Text style={[styles.sectionTitle, { color: theme.colors.onSurface }]}>
                                 {t('equalizer.presets.title')}
@@ -575,12 +570,9 @@ const styles = StyleSheet.create({
     container: { flex: 1 },
     content: { paddingHorizontal: 18, paddingBottom: 40, gap: 18 },
     headerRow: { flexDirection: 'row', alignItems: 'center', gap: 14, paddingTop: 8, marginBottom: 4 },
-    headerButton: { width: 44, height: 44, borderRadius: 22, alignItems: 'center', justifyContent: 'center' },
+    headerButton: { width: 44, height: 44, borderRadius: 17, alignItems: 'center', justifyContent: 'center', borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.14)' },
     headerText: { flex: 1 },
-    heroCard: { borderRadius: 30, overflow: 'hidden', paddingHorizontal: 18, paddingTop: 18, paddingBottom: 20, minHeight: 520 },
-    heroGlowWrap: { ...StyleSheet.absoluteFillObject },
-    heroGlow: { position: 'absolute', width: 220, height: 220, borderRadius: 110, top: 36, right: -30 },
-    heroGlowSecondary: { position: 'absolute', width: 260, height: 260, borderRadius: 130, bottom: 48, left: -90 },
+    heroCard: { borderRadius: 30, overflow: 'hidden', paddingHorizontal: 18, paddingTop: 18, paddingBottom: 20, minHeight: 520, borderWidth: StyleSheet.hairlineWidth, borderColor: 'rgba(255,255,255,0.16)' },
     heroCopy: { gap: 6, marginBottom: 18 },
     heroEyebrow: { ...typeScale.micro, textTransform: 'uppercase', letterSpacing: 1.1 },
     heroTitle: { ...typeScale.hero, fontSize: 34, lineHeight: 38 },

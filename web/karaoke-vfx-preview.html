@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Karaoke VFX Preview</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; min-height: 100%; background: #05060a; color: white; font-family: Inter, system-ui, sans-serif; }
+      body { padding: 24px; }
+      main { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+      .stage { position: relative; aspect-ratio: 16 / 9; overflow: hidden; border-radius: 18px; background: #080a0f; isolation: isolate; }
+      .stage canvas, .scrim { position: absolute; inset: 0; width: 100%; height: 100%; }
+      .stage canvas { mix-blend-mode: screen; }
+      .scrim { background: radial-gradient(ellipse 63% 46% at 50% 50%, rgba(0,0,0,.03), rgba(0,0,0,.48)); }
+      .label { position: absolute; top: 16px; left: 18px; font-size: 10px; font-weight: 800; letter-spacing: .17em; text-transform: uppercase; opacity: .64; }
+      .lyric { position: absolute; z-index: 2; inset: 0; display: grid; place-items: center; padding: 11%; text-align: center; font-size: clamp(25px, 4vw, 64px); font-weight: 850; letter-spacing: -.055em; text-shadow: 0 8px 34px rgba(0,0,0,.55); }
+      .rock .lyric { justify-items: start; text-align: left; font-weight: 950; font-style: italic; text-transform: uppercase; transform: skewX(-3deg); }
+      .reggaeton .lyric { justify-items: start; text-align: left; font-weight: 900; line-height: .9; }
+      .folk .lyric { font-family: Iowan Old Style, Baskerville, Georgia, serif; font-style: italic; font-weight: 640; letter-spacing: -.035em; }
+      .disco .lyric { font-style: italic; text-transform: uppercase; text-shadow: -2px 0 #75dfff, 2px 0 #ff72cb, 0 8px 34px #000; }
+      .electronic .lyric { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: -.045em; text-shadow: -3px 0 #ff4e96, 3px 0 #45dfff; }
+      @media (max-width: 900px) { main { grid-template-columns: 1fr; } }
+    </style>
+  </head>
+  <body>
+    <main id="stages"></main>
+    <script type="module">
+      import { createStageGlRenderer } from '/src/karaoke/stageGlRenderer.ts';
+
+      const genres = ['pop', 'rock', 'reggaeton', 'folk', 'disco', 'electronic'];
+      const copy = {
+        pop: 'Cuando vuelve a brillar',
+        rock: 'ROMPE EL SILENCIO',
+        reggaeton: 'Siente cómo cae',
+        folk: 'La tarde vuelve a respirar',
+        disco: 'TODO VUELVE A GIRAR',
+        electronic: 'SIGNAL_LOCKED',
+      };
+      const palette = { primary: '#75dfff', secondary: '#d98cff', accent: '#ffd56b' };
+      const root = document.querySelector('#stages');
+      const previews = genres.map(genre => {
+        const stage = document.createElement('section');
+        stage.className = `stage ${genre}`;
+        stage.innerHTML = `
+          <canvas></canvas>
+          <div class="scrim"></div>
+          <span class="label">${genre}</span>
+          <div class="lyric">${copy[genre]}</div>
+        `;
+        root.append(stage);
+        const canvas = stage.querySelector('canvas');
+        const renderer = createStageGlRenderer(canvas);
+        const resize = () => {
+          const rect = canvas.getBoundingClientRect();
+          canvas.width = Math.max(1, Math.round(rect.width));
+          canvas.height = Math.max(1, Math.round(rect.height));
+        };
+        resize();
+        return { stage, canvas, renderer, resize, genre };
+      });
+      new ResizeObserver(() => previews.forEach(preview => preview.resize())).observe(root);
+
+      const draw = time => {
+        for (const preview of previews) {
+          const bass = .32 + Math.sin(time * .0017) * .16;
+          const mid = .3 + Math.sin(time * .0011 + 1.2) * .14;
+          const treble = .28 + Math.sin(time * .0023 + 2.4) * .12;
+          const beat = Math.max(0, Math.sin(time * .005)) ** 8;
+          const hit = Math.max(0, Math.sin(time * .0037 + .8)) ** 10;
+          const glow = Math.max(0, Math.sin(time * .0061 + 1.7)) ** 12;
+          preview.stage.style.setProperty('--bass', bass.toFixed(3));
+          preview.renderer?.render({
+            time,
+            width: preview.canvas.width,
+            height: preview.canvas.height,
+            genre: preview.genre,
+            palette,
+            audio: {
+              bass, mid, treble,
+              level: bass * .4 + mid * .4 + treble * .2,
+              vocal: .34,
+              pitch: .5 + Math.sin(time * .0007) * .24,
+              beat, hit, glow,
+              instrumental: .72,
+            },
+          });
+        }
+        requestAnimationFrame(draw);
+      };
+      requestAnimationFrame(draw);
+    </script>
+  </body>
+</html>

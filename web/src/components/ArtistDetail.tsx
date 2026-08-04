@@ -1,7 +1,8 @@
 import { formatDuration } from '@staysound/services/metadataService';
 import type { Album, Artist, Track } from '@staysound/types/audio';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { getWebArtistInfo, type WebArtistInfo } from '../library/webArtistInfo';
+import { useIsDesktopViewport } from '../hooks/useIsDesktopViewport';
 
 interface ArtistDetailProps {
   artist: Artist;
@@ -9,7 +10,7 @@ interface ArtistDetailProps {
   tracks: Track[];
   activeTrackId?: string;
   isPlaying: boolean;
-  onPlay: (track: Track, queue: Track[]) => void;
+  onPlay: (track: Track, queue: Track[], origin?: HTMLElement) => void;
   onSelectAlbum: (album: Album) => void;
   onBack: () => void;
 }
@@ -24,6 +25,7 @@ export function ArtistDetail({
   onSelectAlbum,
   onBack,
 }: ArtistDetailProps) {
+  const isDesktopViewport = useIsDesktopViewport();
   const [artistInfo, setArtistInfo] = useState<WebArtistInfo | null>(null);
   const artistTracks = useMemo(() => tracks.filter(t => t.artistId === artist.id), [artist.id, tracks]);
   // Let playback resolve persisted handles on demand instead of disabling
@@ -39,6 +41,7 @@ export function ArtistDetail({
     || artistAlbums.find(album => album.artwork)?.artwork;
   const artwork = artistInfo?.photoUrl || localArtwork;
   const biography = artistInfo?.biography;
+  const transitionKey = artist.id.replace(/[^a-zA-Z0-9_-]/g, '-');
 
   useEffect(() => {
     let active = true;
@@ -62,14 +65,18 @@ export function ArtistDetail({
   }
 
   return (
-    <section className="detail-view">
+    <section className={`detail-view ${isDesktopViewport ? 'circ' : ''}`}>
       <button className="back-btn" onClick={onBack}>
         ← Artistas
       </button>
       <div className="artist-mural">
         {artwork && <img className="artist-mural-bg" src={artwork} alt="" />}
         <div className="artist-mural-scrim" />
-        <div className="artist-mural-portrait">
+        <div
+          className="artist-mural-portrait"
+          data-motion-id={`artist-detail-art-${transitionKey}`}
+          style={{ viewTransitionName: `artist-art-${transitionKey}` } as CSSProperties}
+        >
           {artwork ? (
             <img src={artwork} alt={artist.name} />
           ) : (
@@ -78,7 +85,10 @@ export function ArtistDetail({
         </div>
         <div className="artist-mural-copy">
           <p className="eyebrow">Artista</p>
-          <h2>{artistInfo?.name || artist.name}</h2>
+          <h2
+            data-motion-id={`artist-detail-title-${transitionKey}`}
+            style={{ viewTransitionName: `artist-title-${transitionKey}` } as CSSProperties}
+          >{artistInfo?.name || artist.name}</h2>
           <div className="detail-stats">
             <span>{artist.trackCount} canciones</span>
             <span>{artist.albumCount} álbumes</span>
@@ -134,14 +144,14 @@ export function ArtistDetail({
       {/* All tracks */}
       <div className="artist-albums-section">
         <h3>Canciones</h3>
-        <div className="track-list">
+        <div className={`track-list ${isDesktopViewport ? 'circ' : ''}`}>
           {artistTracks.map((track, index) => {
             const active = activeTrackId === track.id;
             return (
               <button
                 key={track.id}
                 className={`track-row ${active ? 'active' : ''}`}
-                onClick={() => onPlay(track, playableTracks)}
+                onClick={event => onPlay(track, playableTracks, event.currentTarget)}
               >
                 <span className="track-index">
                   {active && isPlaying ? '▮▮' : index + 1}

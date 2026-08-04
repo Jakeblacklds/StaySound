@@ -5,6 +5,7 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleProp, StyleSheet, TextStyle, View, ViewStyle } from 'react-native';
 import Animated from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -26,6 +27,8 @@ type MiniPlayerShellProps = {
     showPause: boolean;
     onPress?: () => void;
     onToggle?: () => void;
+    onPrevious?: () => void;
+    onNext?: () => void;
     onPressIn?: () => void;
     onPressOut?: () => void;
     contentStyle?: StyleProp<ViewStyle>;
@@ -71,6 +74,8 @@ function MiniPlayerShellInner({
     showPause,
     onPress,
     onToggle,
+    onPrevious,
+    onNext,
     onPressIn,
     onPressOut,
     contentStyle,
@@ -160,30 +165,38 @@ function MiniPlayerShellInner({
                         </Animated.View>
                     </Pressable>
 
-                    <AnimatedPressable
-                        onPress={onToggle}
-                        onPressIn={onPressIn}
-                        onPressOut={onPressOut}
-                        style={[
-                            styles.rowPlayButton,
-                            { backgroundColor: buttonFillColor, borderColor: buttonBorderColor },
-                            playButtonStyle,
-                        ]}
-                        hitSlop={12}
-                    >
-                        {showLoading ? (
-                            <ActivityIndicator color={textColor} size="small" />
-                        ) : showPause ? (
-                            <MiniPlayerPauseIcon color={textColor} size={20} />
-                        ) : (
-                            <CustomIcon
-                                name="Play"
-                                size={20}
-                                color={textColor}
-                                style={styles.playIconOffset}
-                            />
-                        )}
-                    </AnimatedPressable>
+                    <View style={styles.rowControls}>
+                        <Pressable onPress={onPrevious} hitSlop={10} style={styles.rowSkipButton}>
+                            <MaterialCommunityIcons name="skip-previous" size={23} color={textColor} />
+                        </Pressable>
+                        <AnimatedPressable
+                            onPress={onToggle}
+                            onPressIn={onPressIn}
+                            onPressOut={onPressOut}
+                            style={[
+                                styles.rowPlayButton,
+                                { backgroundColor: buttonFillColor, borderColor: buttonBorderColor },
+                                playButtonStyle,
+                            ]}
+                            hitSlop={10}
+                        >
+                            {showLoading ? (
+                                <ActivityIndicator color={textColor} size="small" />
+                            ) : showPause ? (
+                                <MiniPlayerPauseIcon color={textColor} size={18} />
+                            ) : (
+                                <CustomIcon
+                                    name="Play"
+                                    size={18}
+                                    color={textColor}
+                                    style={styles.playIconOffset}
+                                />
+                            )}
+                        </AnimatedPressable>
+                        <Pressable onPress={onNext} hitSlop={10} style={styles.rowSkipButton}>
+                            <MaterialCommunityIcons name="skip-next" size={23} color={textColor} />
+                        </Pressable>
+                    </View>
                 </>
             )}
         </Animated.View>
@@ -212,7 +225,7 @@ const styles = StyleSheet.create({
     rowArtworkWrap: {
         width: 48,
         height: 48,
-        borderRadius: 16,
+        borderRadius: 7,
         overflow: 'hidden',
     },
     overlayArtworkWrap: {
@@ -244,27 +257,39 @@ const styles = StyleSheet.create({
         paddingTop: 2,
     },
     title: {
-        fontSize: 14,
-        fontWeight: '800',
+        fontFamily: 'StaySound',
+        fontSize: 14.5,
+        fontWeight: '700',
         letterSpacing: -0.15,
     },
     artist: {
+        fontFamily: 'StaySound',
         fontSize: 11.5,
         marginTop: 2,
         opacity: 0.7,
     },
-    // Mirrors the tab bar's liquid pill (54Ã—34, r17, soft shadow).
+    rowControls: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 2,
+    },
+    rowSkipButton: {
+        width: 30,
+        height: 40,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
     rowPlayButton: {
-        width: 54,
-        height: 34,
-        borderRadius: 17,
+        width: 36,
+        height: 36,
+        borderRadius: 18,
         alignItems: 'center',
         justifyContent: 'center',
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 2 },
-        shadowOpacity: 0.15,
-        shadowRadius: 6,
-        elevation: 2,
+        shadowOpacity: 0,
+        shadowRadius: 0,
+        elevation: 0,
     },
     overlayPlayButton: {
         position: 'absolute',

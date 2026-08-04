@@ -9,6 +9,7 @@ import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper';
 import 'react-native-reanimated';
 
 import { FullPlayer } from '@/src/components/player';
+import { WebAmbientBackground } from '@/src/components/backgrounds/WebAmbientBackground';
 import { scheduleAndroidAutoCatalogSync } from '@/src/services/androidAutoCatalogSync';
 import { bootstrapAppUpdates } from '@/src/services/appUpdateService';
 import { refreshAndroidEqualizerCapabilities, syncAndroidEqualizerFromSettings } from '@/src/services/androidEqualizerService';
@@ -18,7 +19,7 @@ import { hasPermissions } from '@/src/services/fileScanner';
 import { addAudioLibraryChangedListenerNative } from '@/src/services/nativeLibraryIndexer';
 import { ensureSeededSpotifyTop50Playlist, hydrateSpotifyTop50GlobalPlaylist } from '@/src/services/spotifyChartsService';
 import { AudioEngine } from '@/src/services';
-import { useAuthStore, useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
+import { useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
 import { createPaperFonts, ThemeProvider, useTheme } from '@/src/theme';
 
 export {
@@ -42,13 +43,11 @@ export default function RootLayout() {
   const _hasLibraryHydrated = useLibraryStore(state => state._hasHydrated);
   const _hasSettingsHydrated = useSettingsStore(state => state._hasHydrated);
   const _hasOnboardingHydrated = useOnboardingStore(state => state._hasHydrated);
-  const _hasAuthHydrated = useAuthStore(state => state._hasHydrated);
   const isAppReady =
     loaded &&
     _hasLibraryHydrated &&
     _hasSettingsHydrated &&
-    _hasOnboardingHydrated &&
-    _hasAuthHydrated;
+    _hasOnboardingHydrated;
 
   return (
     <GestureHandlerRootView style={styles.container}>
@@ -111,44 +110,23 @@ function AudioSync() {
   return null;
 }
 
-function SessionBootstrap() {
-  const bootstrap = useAuthStore(state => state.bootstrap);
-  const heartbeat = useAuthStore(state => state.heartbeat);
-  const hasSessionLock = useAuthStore(state => state.hasSessionLock);
-  const status = useAuthStore(state => state.status);
-
+function DiscoveryBootstrap() {
   useEffect(() => {
-    void bootstrap();
     ensureSeededSpotifyTop50Playlist();
     void hydrateSpotifyTop50GlobalPlaylist();
-  }, [bootstrap]);
-
-  useEffect(() => {
-    if (status !== 'authenticated' || !hasSessionLock) {
-      return;
-    }
-
-    void hydrateSpotifyTop50GlobalPlaylist({ force: true });
-    void heartbeat();
     void ensureOnboardingMirrorPlaylist();
-
-    const interval = setInterval(() => {
-      void heartbeat();
-    }, 25_000);
 
     const subscription = AppState.addEventListener('change', nextState => {
       if (nextState === 'active') {
-        void heartbeat();
         void hydrateSpotifyTop50GlobalPlaylist({ force: true });
         void ensureOnboardingMirrorPlaylist();
       }
     });
 
     return () => {
-      clearInterval(interval);
       subscription.remove();
     };
-  }, [hasSessionLock, heartbeat, status]);
+  }, []);
 
   return null;
 }
@@ -291,7 +269,6 @@ function AppUpdateBootstrap({ isAppReady }: { isAppReady: boolean }) {
 
 function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
   const { theme, isDark } = useTheme();
-  const authStatus = useAuthStore(state => state.status);
   const hasCompletedOnboarding = useOnboardingStore(state => state.hasCompletedOnboarding);
   const currentTrack = usePlayerStore(state => state.currentTrack);
   const isPlayerVisible = usePlayerStore(state => state.playerVisible);
@@ -301,18 +278,11 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
   const shouldMountFullPlayer = isPlayerVisible || currentTrack != null;
 
   useEffect(() => {
-    if (!canNavigate || authStatus === 'loading' || authStatus === 'idle') {
+    if (!canNavigate) {
       return;
     }
 
     const task = InteractionManager.runAfterInteractions(() => {
-      if (authStatus !== 'authenticated') {
-        if (pathname !== '/auth') {
-          router.navigate('/auth' as any);
-        }
-        return;
-      }
-
       if (!hasCompletedOnboarding) {
         if (pathname !== '/onboarding') {
           router.navigate('/onboarding' as any);
@@ -320,7 +290,7 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
         return;
       }
 
-      if (pathname === '/auth' || pathname === '/onboarding') {
+      if (pathname === '/onboarding') {
         router.navigate('/');
       }
     });
@@ -328,7 +298,7 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
     return () => {
       task.cancel();
     };
-  }, [authStatus, canNavigate, hasCompletedOnboarding, pathname]);
+  }, [canNavigate, hasCompletedOnboarding, pathname]);
 
   const basePaperTheme = isDark ? MD3DarkTheme : MD3LightTheme;
   const paperTheme = isDark
@@ -380,19 +350,20 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
       <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={styles.container}>
-            <SessionBootstrap />
+            <DiscoveryBootstrap />
             <AppUpdateBootstrap isAppReady={isAppReady} />
             <AndroidAutoCatalogBootstrap />
             <LibraryAutoScanBootstrap />
             <EqualizerBootstrap />
             <AudioSync />
+            <WebAmbientBackground />
             <Stack
               screenOptions={{
                 headerShown: false,
                 animation: 'fade_from_bottom',
+                contentStyle: styles.transparentScene,
               }}
             >
-              <Stack.Screen name="auth" options={{ animation: 'fade', gestureEnabled: false }} />
               <Stack.Screen name="(tabs)" />
               <Stack.Screen
                 name="onboarding"
@@ -441,6 +412,9 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
+  },
+  transparentScene: {
+    backgroundColor: 'transparent',
   },
 });
 

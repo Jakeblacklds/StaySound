@@ -44,6 +44,10 @@ module.exports = {
                 UIBackgroundModes: ['audio'],
                 NSAppleMusicUsageDescription: 'StaySound needs access to your music library',
                 NSPhotoLibraryUsageDescription: 'StaySound needs access to display album artwork',
+                NSLocalNetworkUsageDescription: 'StaySound connects to your trusted Soulseek bridge to download music you select.',
+                NSAppTransportSecurity: {
+                    NSAllowsLocalNetworking: true,
+                },
             },
         },
         android: {
@@ -76,6 +80,45 @@ module.exports = {
         plugins: [
             'expo-router',
             'expo-system-ui',
+            [
+                'expo-font',
+                {
+                    android: {
+                        fonts: [
+                            {
+                                fontFamily: 'StaySound',
+                                fontDefinitions: [
+                                    {
+                                        path: './assets/fonts/apple/SFPRODISPLAYREGULAR.ttf',
+                                        weight: 400,
+                                    },
+                                    {
+                                        path: './assets/fonts/apple/SFPRODISPLAYMEDIUM.ttf',
+                                        weight: 500,
+                                    },
+                                    {
+                                        path: './assets/fonts/apple/SFPRODISPLAYBOLD.ttf',
+                                        weight: 700,
+                                    },
+                                    {
+                                        path: './assets/fonts/apple/SFPRODISPLAYSEMIBOLDITALIC.ttf',
+                                        weight: 600,
+                                        style: 'italic',
+                                    },
+                                ],
+                            },
+                        ],
+                    },
+                    ios: {
+                        fonts: [
+                            './assets/fonts/apple/SFPRODISPLAYREGULAR.ttf',
+                            './assets/fonts/apple/SFPRODISPLAYMEDIUM.ttf',
+                            './assets/fonts/apple/SFPRODISPLAYBOLD.ttf',
+                            './assets/fonts/apple/SFPRODISPLAYSEMIBOLDITALIC.ttf',
+                        ],
+                    },
+                },
+            ],
             [
                 'expo-splash-screen',
                 {
@@ -126,6 +169,7 @@ module.exports = {
             soulseek: {
                 username: process.env.SOULSEEK_USERNAME || '',
                 password: process.env.SOULSEEK_PASSWORD || '',
+                bridgeUrl: process.env.EXPO_PUBLIC_SOULSEEK_BRIDGE_URL || '',
                 serverHost: process.env.SOULSEEK_SERVER_HOST || 'server.slsknet.org',
                 serverPort: Number(process.env.SOULSEEK_SERVER_PORT || 2242),
                 listenPort: Number(process.env.SOULSEEK_LISTEN_PORT || 2234),

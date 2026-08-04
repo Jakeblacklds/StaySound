@@ -1,6 +1,7 @@
 ﻿package expo.modules.soulseeknative
 
 import java.io.Closeable
+import java.net.InetSocketAddress
 import java.net.ServerSocket
 import java.net.Socket
 import java.net.SocketTimeoutException
@@ -18,6 +19,7 @@ internal class SoulseekSession(
   private val searchResults = LinkedBlockingQueue<SoulseekMatch>()
   private val incomingTransferRequests = LinkedBlockingQueue<IncomingTransferRequest>()
   private val peerAddresses = ConcurrentHashMap<String, PeerAddress>()
+  private val peerMessageConnections = ConcurrentHashMap<String, PeerSearchConnection>()
 
   private lateinit var serverSocket: SlskSocket
   private lateinit var incomingPeerServer: ServerSocket
@@ -135,6 +137,7 @@ internal class SoulseekSession(
     val collected = ArrayList<SoulseekMatch>()
     val dedup = HashSet<String>()
     val deadline = System.currentTimeMillis() + timeoutMs
+    var lastResultAtMs = System.currentTimeMillis()
 
     while (System.currentTimeMillis() < deadline && collected.size < maxResults) {
       ensureNotCancelled(cancelled)
@@ -147,8 +150,22 @@ internal class SoulseekSession(
         val key = "${next.username}::${next.filename}::${next.size}"
         if (dedup.add(key)) {
           collected.add(next)
+          lastResultAtMs = System.currentTimeMillis()
           if (collected.size >= maxResults) break
         }
+      }
+
+      // Popular tracks usually produce many replies immediately. As soon as
+      // several ready, measurable peers have answered and the stream has gone
+      // quiet, return them instead of always burning the full search timeout.
+      val readyPeers = collected.count {
+        it.slotsFree == true && (it.speed ?: 0) > 0
+      }
+      if (
+        readyPeers >= 3 &&
+        (collected.size >= 12 || System.currentTimeMillis() - lastResultAtMs >= 350L)
+      ) {
+        break
       }
     }
 
@@ -162,6 +179,7 @@ internal class SoulseekSession(
       serverSocket = serverSocket,
       closeables = closeables,
       peerAddresses = peerAddresses,
+      acquirePeerMessageConnection = ::acquirePeerMessageConnection,
       pumpIncomingPeerSocket = ::handleIncomingPeerSocket,
       pumpServerPackets = { handleServerPacketsForSearchBurst(6) },
       pollIncomingTransferRequest = { incomingTransferRequests.poll() },
@@ -186,6 +204,9 @@ internal class SoulseekSession(
         socket = socket,
         onMatch = { match -> searchResults.offer(match) },
         onTransferRequest = { request -> incomingTransferRequests.offer(request) },
+        onIdentity = { username, identifiedConnection ->
+          peerMessageConnections[username] = identifiedConnection
+        },
       )
       peerConnections.add(connection)
       closeables.add(connection)
@@ -312,9 +333,13 @@ internal class SoulseekSession(
           socket = socket,
           onMatch = { match -> searchResults.offer(match) },
           onTransferRequest = { request -> incomingTransferRequests.offer(request) },
+          onIdentity = { username, identifiedConnection ->
+            peerMessageConnections[username] = identifiedConnection
+          },
         )
         peerConnections.add(connection)
         closeables.add(connection)
+        peerMessageConnections[info.user] = connection
         connection.start()
       } catch (_: Exception) {
         // best effort only
@@ -326,10 +351,75 @@ internal class SoulseekSession(
     worker.start()
   }
 
+  private fun acquirePeerMessageConnection(
+    username: String,
+    address: PeerAddress,
+  ): PeerSearchConnection {
+    peerMessageConnections[username]?.takeIf { it.isOpen() }?.let { return it }
+
+    val connectionToken = randomTokenBytes()
+
+    // Ask the Soulseek server for a reverse connection before trying the
+    // peer's public address. If carrier NAT blocks the direct route, the
+    // pending ConnectToPeer request gives us an indirect P channel.
+    serverSocket.send(
+      SlskMessageBuilder()
+        .writeUInt32(18)
+        .writeBytes(connectionToken)
+        .writeString(username)
+        .writeString("P")
+        .toPacket(),
+    )
+
+    try {
+      val socket = Socket()
+      socket.connect(InetSocketAddress(address.host, address.port), 2_400)
+      socket.soTimeout = 4_500
+
+      val slskSocket = SlskSocket(socket)
+      closeables.add(slskSocket)
+      slskSocket.send(
+        SlskMessageBuilder()
+          .writeUInt8(1)
+          .writeString(config.username)
+          .writeString("P")
+          .writeBytes(connectionToken)
+          .toPacket(),
+      )
+
+      val connection = PeerSearchConnection(
+        socket = socket,
+        onMatch = { match -> searchResults.offer(match) },
+        onTransferRequest = { request -> incomingTransferRequests.offer(request) },
+        onIdentity = { identity, identifiedConnection ->
+          peerMessageConnections[identity] = identifiedConnection
+        },
+      )
+      peerConnections.add(connection)
+      closeables.add(connection)
+      peerMessageConnections[username] = connection
+      connection.start()
+      return connection
+    } catch (_: Exception) {
+      // Continue pumping the server and listening socket for the indirect path.
+    }
+
+    val deadline = System.currentTimeMillis() + 12_000L
+    while (System.currentTimeMillis() < deadline) {
+      ensureNotCancelled(cancelled)
+      handleIncomingPeerSocketsBurst(2)
+      handleServerPacketsForSearchBurst(6)
+      peerMessageConnections[username]?.takeIf { it.isOpen() }?.let { return it }
+    }
+
+    throw IllegalStateException("No se pudo abrir el canal P directo ni indirecto con $username.")
+  }
+
   override fun close() {
     peerConnections.forEach { runCatching { it.close() } }
     closeables.forEach { runCatching { it.close() } }
     peerConnections.clear()
+    peerMessageConnections.clear()
     closeables.clear()
   }
 }

@@ -52,3 +52,27 @@ page-*.js
 [0-9]*-*.js
 src/theme/write_test.tmp
 .vercel
+
+# Tauri desktop build artifacts
+.desktop-sidecar/
+src-tauri/binaries/
+src-tauri/target/
+
+# Local karaoke separation runtime used by Tauri development
+.venv-demucs/
+
+# Swift package build output (macos-native)
+macos-native/.build/
+
+# Release binaries, renders and packaged apps
+out/
+
+# Scratch: QA screenshots, APK inspection dumps, audit captures
+.audit/
+tmp_*
+design-qa*.png
+design-qa.md
+*.mp3
+
+# Tooling session state
+.impeccable/

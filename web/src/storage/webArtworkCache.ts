@@ -6,6 +6,7 @@ import {
   loadLibraryArtworkUrls,
   saveLibraryArtworkBlob,
 } from './webPersistence';
+import { fetchDesktopTidalArtwork, isTauriDesktop } from '../desktop/tauriMusicLibrary';
 
 export const saveArtworkBlob = saveLibraryArtworkBlob;
 export const loadArtworkUrls = loadLibraryArtworkUrls;
@@ -19,10 +20,20 @@ export const clearArtworkCache = clearLibraryArtworkCache;
 export async function cacheRemoteArtwork(key: string, url?: string): Promise<string | undefined> {
   if (!key || !url || url.startsWith('blob:')) return undefined;
   try {
+    const isTidalArtwork = /^https:\/\/resources\.tidal\.com\/images\//i.test(url);
+    if (isTidalArtwork && isTauriDesktop()) {
+      const bytes = await fetchDesktopTidalArtwork(url);
+      const copy = new Uint8Array(bytes.byteLength);
+      copy.set(bytes);
+      const blob = new Blob([copy.buffer], { type: 'image/jpeg' });
+      await saveArtworkBlob(key, blob);
+      return URL.createObjectURL(blob);
+    }
+
     // TIDAL serves images for <img>, but does not grant canvas CORS access.
     // Route those through our same-origin proxy so we can persist the Blob and
     // extract its real colors for the dynamic theme.
-    const source = /^https:\/\/resources\.tidal\.com\/images\//i.test(url)
+    const source = isTidalArtwork
       ? `/api/artwork?url=${encodeURIComponent(url)}`
       : url;
     const response = await fetch(source, { cache: 'force-cache' });

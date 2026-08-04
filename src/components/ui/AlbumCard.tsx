@@ -7,7 +7,7 @@
  * Custom React.memo comparator to prevent unnecessary re-renders.
  */
 
-import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
+import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme, withAlpha } from '@/src/theme';
 import { Album } from '@/src/types';
 import { Image as ExpoImage } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
@@ -49,9 +49,9 @@ function AlbumCardInner({ album, size = 'medium', height: customHeight, presenta
             {
                 width: cardWidth,
                 height: customHeight || cardWidth,
-                borderRadius: isStacked ? 16 : cardStyles.imageRadius,
-                borderWidth: cardStyles.variant === 'brutal' ? globalStyles.borderWidth : 0,
-                borderColor: cardStyles.variant === 'brutal' ? globalStyles.borderColor : 'transparent',
+                borderRadius: isStacked ? 22 : Math.max(cardStyles.imageRadius, 22),
+                borderWidth: cardStyles.variant === 'brutal' ? globalStyles.borderWidth : StyleSheet.hairlineWidth,
+                borderColor: cardStyles.variant === 'brutal' ? globalStyles.borderColor : withAlpha(theme.colors.outline, '38'),
                 overflow: 'hidden' as const,
                 shadowColor: 'transparent',
                 shadowOffset: { width: 0, height: 0 },
@@ -116,6 +116,13 @@ function AlbumCardInner({ album, size = 'medium', height: customHeight, presenta
                 ) : (
                     <CustomIcon name="Album" size={cardWidth === '100%' ? 60 : (cardWidth as number) * 0.4} color={theme.colors.primary} />
                 )}
+
+                <LinearGradient
+                    pointerEvents="none"
+                    colors={['rgba(255,255,255,0.13)', 'transparent', 'rgba(0,0,0,0.14)']}
+                    locations={[0, 0.36, 1]}
+                    style={StyleSheet.absoluteFill}
+                />
 
                 {!isStacked ? (
                     <View style={styles.infoOverlay}>
@@ -212,7 +219,8 @@ const styles = StyleSheet.create({
         marginBottom: 20,
     },
     pressed: {
-        opacity: 0.82,
+        opacity: 0.9,
+        transform: [{ scale: 0.97 }],
     },
     artwork: {
         alignItems: 'center',
@@ -245,13 +253,14 @@ const styles = StyleSheet.create({
         opacity: 0.9,
     },
     stackedInfo: {
-        paddingTop: 10,
-        paddingHorizontal: 2,
+        paddingTop: 12,
+        paddingHorizontal: 3,
     },
     stackedName: {
         ...typeScale.bodyStrong,
+        fontWeight: '700',
         letterSpacing: -0.15,
-        lineHeight: 18,
+        lineHeight: 19,
     },
     stackedSubtitle: {
         ...typeScale.caption,

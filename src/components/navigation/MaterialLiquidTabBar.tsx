@@ -11,7 +11,7 @@ import { usePlayerStore } from '@/src/stores';
 import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
 import { ColorTokens } from '@/src/types/theme';
 import { mixHexColors, pickReadableColor } from '@/src/utils/colorContrast';
-import { Ionicons } from '@expo/vector-icons';
+import { MaterialCommunityIcons } from '@expo/vector-icons';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
@@ -41,18 +41,18 @@ const NAV_FREEZE_MS = 320;
 const H_INSET = 12;
 const PILL_W = 54;
 const PILL_H = 34;
-const ICON_SIZE = 25;
+const ICON_SIZE = 24;
 const LABEL_RISE = 10;
 const BAR_CONTENT_OFFSET = -2;
 const PILL_TOP = Math.round((BAR_HEIGHT - PILL_H) / 2);
 const LABEL_TOP = PILL_TOP + PILL_H + 3;
 
 const TAB_ICONS = {
-  index:     { filled: 'home' as const,          outline: 'home-outline' as const },
-  library:   { filled: 'albums' as const,        outline: 'albums-outline' as const },
-  playlists: { filled: 'musical-notes' as const, outline: 'musical-notes-outline' as const },
-  tidal:     { filled: 'search' as const,        outline: 'search-outline' as const },
-  settings:  { filled: 'settings' as const,      outline: 'settings-outline' as const },
+  index:     { filled: 'home-variant' as const,   outline: 'home-variant-outline' as const },
+  library:   { filled: 'album' as const,          outline: 'album' as const },
+  playlists: { filled: 'playlist-music' as const, outline: 'playlist-music-outline' as const },
+  tidal:     { filled: 'magnify' as const,        outline: 'magnify' as const },
+  settings:  { filled: 'tune-variant' as const,   outline: 'tune-variant' as const },
 } as const;
 
 function getTabColors(colors: ColorTokens) {
@@ -127,13 +127,9 @@ const TabItem = memo(function TabItem({
   }));
 
   const labelStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(sel.value, [0, 0.28, 1], [0, 0, 1]),
-    transform: [
-      { translateY: interpolate(sel.value, [0, 1], [LABEL_RISE, 0]) },
-      { scale: interpolate(sel.value, [0, 1], [0.84, 1]) },
-    ],
+    opacity: interpolate(sel.value, [0, 1], [0.66, 1]),
+    transform: [{ translateY: interpolate(sel.value, [0, 1], [0, -1]) }],
   }));
-
   return (
     <Pressable
       onPress={onPress}
@@ -150,20 +146,25 @@ const TabItem = memo(function TabItem({
       accessibilityState={{ selected: focused }}
     >
       {/* Icon — pop scale + vertical lift + press squish */}
-      <Animated.View style={[styles.iconArea, iconWrapStyle]}>
+      <Animated.View
+        style={[
+          styles.iconArea,
+          iconWrapStyle,
+        ]}
+      >
         {/* Outline icon fades out */}
         <Animated.View style={inactiveIconStyle}>
-          <Ionicons name={icons.outline as any} size={ICON_SIZE} color={mutedColor} />
+          <MaterialCommunityIcons name={icons.outline as any} size={ICON_SIZE} color={mutedColor} />
         </Animated.View>
         {/* Filled icon fades in, absolutely overlaid */}
         <Animated.View style={[styles.iconOverlay, activeIconStyle]}>
-          <Ionicons name={icons.filled as any} size={ICON_SIZE} color={activeIconColor} />
+          <MaterialCommunityIcons name={icons.filled as any} size={ICON_SIZE} color={accentColor} />
         </Animated.View>
       </Animated.View>
 
       {/* Label springs up from below */}
       <Animated.Text
-        style={[styles.itemLabel, { color: mutedColor }, labelStyle]}
+        style={[styles.itemLabel, { color: focused ? accentColor : mutedColor }, labelStyle]}
         numberOfLines={1}
       >
         {label}
@@ -280,10 +281,9 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
   // the mini player's tint (dark 0.90 / light 0.92) so the two surfaces read as
   // a single continuous pane of glass.
   const navTintStyle = useAnimatedStyle(() => {
-    const dynamicBackground = navAnimColors?.background?.value;
     return {
-      backgroundColor: dynamicBackground || navSurfaceColor || aC.surface.value,
-      opacity: isDark ? 0.9 : 0.92,
+      backgroundColor: aC.surface.value,
+      opacity: 1,
     };
   });
 
@@ -291,7 +291,6 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
   // dock descends (matching the player turning opaque) and during a route-change
   // freeze. When fully collapsed + settled it is transparent so the frost shows.
   const navSolidStyle = useAnimatedStyle(() => {
-    const dynamicBackground = navAnimColors?.background?.value;
     const ramp = interpolate(
       expansion?.value ?? 0,
       [0, BLUR_COLLAPSE_THRESHOLD],
@@ -299,7 +298,7 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
       Extrapolation.CLAMP,
     );
     return {
-      backgroundColor: dynamicBackground || navSurfaceColor || aC.surface.value,
+      backgroundColor: aC.surface.value,
       opacity: Math.max(ramp, forceSolid.value * 0.94),
     };
   });
@@ -364,18 +363,6 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
           style={styles.itemsRow}
           onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
         >
-          {slotWidth > 0 && (
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                styles.pill,
-                { width: PILL_W, height: PILL_H },
-                pillBgStyle,
-                pillTransformStyle,
-              ]}
-            />
-          )}
-
           {visibleRoutes.map((route, index) => {
             const descriptor = descriptors[route.key];
             const options = descriptor.options;
@@ -410,7 +397,7 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
                   label={label}
                   routeName={route.name}
                   focused={focused}
-                  activeIconColor={palette.activeIcon}
+                  activeIconColor={palette.accent}
                   mutedColor={theme.colors.onSurfaceVariant}
                   accentColor={palette.accent}
                   onPress={onPress}
@@ -432,10 +419,9 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     overflow: 'hidden',
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.14)',
     elevation: 0,
-    shadowOffset: { width: 0, height: 0 },
-    shadowOpacity: 0,
-    shadowRadius: 0,
   },
   itemsRow: {
     height: BAR_HEIGHT,
@@ -463,13 +449,15 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   itemLabel: {
-    ...typeScale.micro,
+    fontFamily: 'StaySound',
+    fontSize: 10.5,
+    lineHeight: 13,
     position: 'absolute',
     top: LABEL_TOP,
     maxWidth: PILL_W + 22,
     letterSpacing: 0.1,
     textAlign: 'center',
-    fontWeight: '700',
+    fontWeight: '500',
   },
   pill: {
     position: 'absolute',

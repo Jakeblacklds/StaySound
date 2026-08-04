@@ -16,6 +16,7 @@ internal class SoulseekTransferClient(
   private val serverSocket: SlskSocket,
   private val closeables: CopyOnWriteArrayList<Closeable>,
   private val peerAddresses: ConcurrentHashMap<String, PeerAddress>,
+  private val acquirePeerMessageConnection: (String, PeerAddress) -> PeerSearchConnection,
   private val pumpIncomingPeerSocket: () -> Unit,
   private val pumpServerPackets: () -> Unit,
   private val pollIncomingTransferRequest: () -> IncomingTransferRequest?,
@@ -26,6 +27,54 @@ internal class SoulseekTransferClient(
 
     val address = resolvePeerAddress(match.username, match.host, match.port)
     ensureNotCancelled(cancelled)
+
+    val targetPath = normalizeOutputPath(outputPath)
+    val targetFile = File(targetPath)
+    targetFile.parentFile?.mkdirs()
+    if (targetFile.exists()) {
+      targetFile.delete()
+    }
+
+    val modernTransfer = runCatching {
+      requestModernQueuedTransfer(
+        username = match.username,
+        address = address,
+        filename = match.filename,
+        timeoutMs = 15_000,
+      )
+    }.getOrNull()
+
+    if (modernTransfer != null) {
+      val modernExpectedSize = listOf(
+        modernTransfer.expectedSize,
+        match.size.takeIf { it > 0L },
+      ).firstOrNull { it != null && it > 0L } ?: 0L
+
+      sendQueuedTransferAcceptance(
+        reply = modernTransfer.reply,
+        token = modernTransfer.token,
+        expectedSize = modernExpectedSize,
+      )
+
+      try {
+        downloadFileWithFallback(
+          host = address.host,
+          port = address.port,
+          token = modernTransfer.token,
+          targetFile = targetFile,
+          expectedSize = modernExpectedSize,
+        )
+
+        return DownloadResult(
+          path = targetFile.absolutePath,
+          bytesWritten = targetFile.length(),
+        )
+      } catch (_: Exception) {
+        // The queue handshake worked but this peer could not complete the F
+        // connection. Restart cleanly with the compatibility flow below.
+        if (targetFile.exists()) targetFile.delete()
+      }
+    }
 
     val token = randomTokenBytes()
 
@@ -39,13 +88,6 @@ internal class SoulseekTransferClient(
     val transferResponse = transferHandshake.response
 
     ensureNotCancelled(cancelled)
-
-    val targetPath = normalizeOutputPath(outputPath)
-    val targetFile = File(targetPath)
-    targetFile.parentFile?.mkdirs()
-    if (targetFile.exists()) {
-      targetFile.delete()
-    }
 
     val expectedSize = listOf(
       transferResponse.expectedSize,
@@ -97,6 +139,55 @@ internal class SoulseekTransferClient(
       path = targetFile.absolutePath,
       bytesWritten = targetFile.length(),
     )
+  }
+
+  private fun requestModernQueuedTransfer(
+    username: String,
+    address: PeerAddress,
+    filename: String,
+    timeoutMs: Int,
+  ): QueuedTransferStart {
+    val peerConnection = acquirePeerMessageConnection(username, address)
+    peerConnection.send(
+      SlskMessageBuilder()
+        .writeUInt32(43)
+        .writeString(filename)
+        .toPacket(),
+    )
+    peerConnection.send(
+      SlskMessageBuilder()
+        .writeUInt32(51)
+        .writeString(filename)
+        .toPacket(),
+    )
+
+    val normalizedExpected = filename.trim().lowercase(Locale.US)
+    val deadline = System.currentTimeMillis() + timeoutMs.coerceAtLeast(5_000)
+    while (System.currentTimeMillis() < deadline) {
+      ensureNotCancelled(cancelled)
+      pumpIncomingPeerSocket()
+      pumpServerPackets()
+
+      while (true) {
+        val incoming = pollIncomingTransferRequest() ?: break
+        val incomingFilename = incoming.filename.trim().lowercase(Locale.US)
+        if (
+          normalizedExpected.isNotBlank() &&
+          incomingFilename.isNotBlank() &&
+          incomingFilename != normalizedExpected
+        ) {
+          continue
+        }
+
+        return QueuedTransferStart(
+          token = incoming.token,
+          expectedSize = incoming.expectedSize,
+          reply = incoming.reply,
+        )
+      }
+    }
+
+    throw SocketTimeoutException("El peer no inicio QueueUpload a tiempo.")
   }
 
   private fun requestTransferWithFallback(

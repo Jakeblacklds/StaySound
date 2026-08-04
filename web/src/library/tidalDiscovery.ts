@@ -136,6 +136,78 @@ function uniqueTracks(tracks: TidalTrack[]): TidalTrack[] {
   return unique;
 }
 
+function normalizeCatalogText(value?: string): string {
+  return (value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+function tokenCoverage(target: string, candidate: string): number {
+  const targetTokens = new Set(normalizeCatalogText(target).split(' ').filter(Boolean));
+  const candidateTokens = new Set(normalizeCatalogText(candidate).split(' ').filter(Boolean));
+  if (targetTokens.size === 0 || candidateTokens.size === 0) return 0;
+  let matches = 0;
+  targetTokens.forEach(token => {
+    if (candidateTokens.has(token)) matches += 1;
+  });
+  return matches / targetTokens.size;
+}
+
+function scoreSeedMatch(local: Track, candidate: TidalTrack): number {
+  if (local.isrc && candidate.isrc && local.isrc === candidate.isrc) return 1000;
+  const wantedTitle = normalizeCatalogText(local.title);
+  const foundTitle = normalizeCatalogText(candidate.title);
+  const titleCoverage = tokenCoverage(local.title, candidate.title);
+  const artistCoverage = tokenCoverage(local.artist, candidate.artist);
+  const albumCoverage = tokenCoverage(local.album, candidate.album);
+  let score = titleCoverage * 70 + artistCoverage * 24 + albumCoverage * 12;
+  if (wantedTitle && wantedTitle === foundTitle) score += 100;
+  else if (wantedTitle && foundTitle && (wantedTitle.includes(foundTitle) || foundTitle.includes(wantedTitle))) score += 42;
+  return score;
+}
+
+export type PersonalizedTidalMix = {
+  seeds: TidalTrack[];
+  tracks: TidalTrack[];
+};
+
+const personalizedMixCache = new Map<string, Promise<PersonalizedTidalMix>>();
+
+function interleaveRecommendationWaves(waves: TidalTrack[][], limit: number): TidalTrack[] {
+  const mixed: TidalTrack[] = [];
+  const seen = new Set<number>();
+  const artistCounts = new Map<string, number>();
+  const maxLength = Math.max(0, ...waves.map(wave => wave.length));
+
+  // Round-robin keeps the first seed from swallowing the whole feed. Cap each
+  // artist during the first pass for the same reason Spotify-style mixes feel
+  // varied even when several seeds belong to a similar scene.
+  for (let rank = 0; rank < maxLength && mixed.length < limit; rank += 1) {
+    for (let waveIndex = 0; waveIndex < waves.length && mixed.length < limit; waveIndex += 1) {
+      const wave = waves[(waveIndex + rank) % waves.length];
+      const track = wave[rank];
+      if (!track || seen.has(track.id)) continue;
+      const artistKey = track.artist.trim().toLowerCase();
+      if ((artistCounts.get(artistKey) ?? 0) >= 3) continue;
+      seen.add(track.id);
+      artistCounts.set(artistKey, (artistCounts.get(artistKey) ?? 0) + 1);
+      mixed.push(track);
+    }
+  }
+
+  // If the catalog is small, fill the remaining slots without the artist cap.
+  for (const track of waves.flat()) {
+    if (mixed.length >= limit) break;
+    if (seen.has(track.id)) continue;
+    seen.add(track.id);
+    mixed.push(track);
+  }
+  return mixed;
+}
+
 export function tidalTrackToDownloadResult(track: TidalTrack): DownloadSearchResult {
   return {
     id: `tidal_discovery_${track.id}`,
@@ -179,9 +251,27 @@ export async function findTidalSeedForTrack(track: Track): Promise<TidalTrack | 
       isrc: track.isrc,
     };
   }
-  const query = `${track.artist} ${track.title}`.trim();
-  const matches = await searchTidalTracks(query, 5);
-  return matches[0] ?? null;
+  // Local tags are not always clean (a track number sometimes lands in the
+  // artist field), so title and album are part of the query and results are
+  // ranked instead of trusting the API's first item blindly.
+  const primaryQuery = `${track.title} ${track.artist} ${track.album}`.trim();
+  let matches = await searchTidalTracks(primaryQuery, 12);
+  let ranked = matches
+    .map(candidate => ({ candidate, score: scoreSeedMatch(track, candidate) }))
+    .sort((left, right) => right.score - left.score);
+
+  if (!ranked[0] || ranked[0].score < 80) {
+    const fallbackQuery = `${track.title} ${track.album}`.trim();
+    const fallbackMatches = fallbackQuery === primaryQuery
+      ? []
+      : await searchTidalTracks(fallbackQuery, 12).catch(() => []);
+    matches = uniqueTracks([...matches, ...fallbackMatches]);
+    ranked = matches
+      .map(candidate => ({ candidate, score: scoreSeedMatch(track, candidate) }))
+      .sort((left, right) => right.score - left.score);
+  }
+
+  return ranked[0]?.score >= 60 ? ranked[0].candidate : null;
 }
 
 export async function buildTidalRadio(seed: TidalTrack, limit = 36): Promise<TidalTrack[]> {
@@ -192,4 +282,68 @@ export async function buildTidalRadio(seed: TidalTrack, limit = 36): Promise<Tid
   );
   const secondary = secondaryWaves.flatMap(result => result.status === 'fulfilled' ? result.value : []);
   return uniqueTracks([seed, ...firstWave, ...secondary]).slice(0, limit);
+}
+
+/**
+ * Builds a diverse home mix from several local listening signals.
+ *
+ * Search identifies each local song in TIDAL, the recommendations endpoint
+ * expands every successful match, and a round-robin pass blends the waves.
+ * Artist-search fallbacks keep the home useful when a recommendations mirror
+ * is temporarily incomplete.
+ */
+export async function buildPersonalizedTidalMix(
+  localSeeds: Track[],
+  limit = 24,
+): Promise<PersonalizedTidalMix> {
+  const distinctLocalSeeds = localSeeds.filter((track, index, source) => {
+    const identity = `${track.artist}::${track.title}`.toLowerCase();
+    return track.artist !== 'Unknown Artist' && source.findIndex(candidate => (
+      `${candidate.artist}::${candidate.title}`.toLowerCase() === identity
+    )) === index;
+  }).slice(0, 4);
+
+  const cacheKey = distinctLocalSeeds
+    .map(track => `${track.tidalId ?? ''}:${track.artist}:${track.title}`.toLowerCase())
+    .join('|');
+  if (!cacheKey) return { seeds: [], tracks: [] };
+
+  const cached = personalizedMixCache.get(cacheKey);
+  if (cached) return cached;
+
+  const request = (async (): Promise<PersonalizedTidalMix> => {
+    const seedResults = await Promise.allSettled(distinctLocalSeeds.map(findTidalSeedForTrack));
+    const seeds = uniqueTracks(seedResults.flatMap(result => (
+      result.status === 'fulfilled' && result.value ? [result.value] : []
+    )));
+    if (seeds.length === 0) return { seeds: [], tracks: [] };
+
+    const waveResults = await Promise.allSettled(seeds.map(async seed => {
+      const recommendations = await getTidalRecommendations(seed.id, 18).catch(() => []);
+      if (recommendations.length >= 6) return recommendations;
+      const searchFallback = await searchTidalTracks(seed.artist, 12).catch(() => []);
+      return uniqueTracks([...recommendations, ...searchFallback]);
+    }));
+    const waves = waveResults.flatMap(result => result.status === 'fulfilled' ? [result.value] : []);
+    const seedIds = new Set(seeds.map(seed => seed.id));
+    const tracks = interleaveRecommendationWaves(waves, limit)
+      .filter(track => !seedIds.has(track.id));
+    return { seeds, tracks };
+  })();
+
+  personalizedMixCache.set(cacheKey, request);
+  if (personalizedMixCache.size > 16) {
+    const oldestKey = personalizedMixCache.keys().next().value;
+    if (oldestKey) personalizedMixCache.delete(oldestKey);
+  }
+  try {
+    const result = await request;
+    // Do not pin a temporary mirror failure in memory. The Home retry action
+    // should always get a fresh chance when no useful recommendations arrived.
+    if (result.tracks.length === 0) personalizedMixCache.delete(cacheKey);
+    return result;
+  } catch (error) {
+    personalizedMixCache.delete(cacheKey);
+    throw error;
+  }
 }

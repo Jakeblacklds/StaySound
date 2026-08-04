@@ -35,6 +35,8 @@ class WebAudioEngine {
   private listeners = new Set<Listener>();
   private state: WebAudioState = { ...initialState };
   private lastLinearQueue: Track[] = [];
+  private outputGain: GainNode | null = null;
+  private handlingEnded = false;
   /** Resolves a playable URL for a track whose blob: URL died between sessions. */
   private resolveTrackUri?: (track: Track) => Promise<string | null>;
 
@@ -59,6 +61,14 @@ class WebAudioEngine {
         error: 'No se pudo reproducir este archivo. Reimpórtalo o prueba otro formato.',
       });
     });
+    // WKWebView can defer media events while its window is in the background.
+    // Reconcile the native media element as soon as the app becomes active so
+    // a deferred track ending cannot leave the queue stuck.
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) void this.recoverAfterBackground();
+    });
+    window.addEventListener('focus', () => void this.recoverAfterBackground());
+    window.addEventListener('pageshow', () => void this.recoverAfterBackground());
     this.setVolume(initialState.volume);
   }
 
@@ -78,6 +88,18 @@ class WebAudioEngine {
 
   getAudioElement(): HTMLAudioElement {
     return this.audio;
+  }
+
+  /**
+   * Once the media element is routed through Web Audio (for the spectrum
+   * visualizer), control loudness in that graph. WebKit/WKWebView can ignore
+   * HTMLMediaElement.volume after createMediaElementSource(), which made both
+   * desktop volume sliders stop affecting a playing track.
+   */
+  attachOutputGain(gain: GainNode): void {
+    this.outputGain = gain;
+    this.audio.volume = 1;
+    this.applyVolume(this.state.volume);
   }
 
   setQueue(track: Track, queue: Track[], autoPlay = false): void {
@@ -138,8 +160,9 @@ class WebAudioEngine {
   }
 
   setVolume(volume: number): void {
+    if (!Number.isFinite(volume)) return;
     const nextVolume = Math.max(0, Math.min(1, volume));
-    this.audio.volume = nextVolume;
+    this.applyVolume(nextVolume);
     this.patch({ volume: nextVolume });
   }
 
@@ -183,12 +206,43 @@ class WebAudioEngine {
   }
 
   private async handleEnded(): Promise<void> {
-    if (this.state.repeatMode === 'one') {
-      this.seek(0);
-      await this.play();
+    if (this.handlingEnded) return;
+    this.handlingEnded = true;
+    try {
+      if (this.state.repeatMode === 'one') {
+        this.seek(0);
+        await this.play();
+        return;
+      }
+
+      const nextIndex = this.getNextIndex();
+      if (nextIndex < 0) {
+        this.pause();
+        return;
+      }
+
+      // An HTMLMediaElement becomes paused before/while `ended` is emitted.
+      // Do not derive autoplay from state.isPlaying here: it may already be
+      // false even though the user was listening continuously.
+      this.goToIndex(nextIndex, true);
+    } finally {
+      this.handlingEnded = false;
+    }
+  }
+
+  private async recoverAfterBackground(): Promise<void> {
+    if (!this.state.currentTrack) return;
+
+    if (this.audio.ended) {
+      await this.handleEnded();
       return;
     }
-    this.next();
+
+    // If WebKit interrupted the media element without delivering a pause
+    // event, preserve the user's playing intent when the app becomes active.
+    if (this.state.isPlaying && this.audio.paused) {
+      await this.play();
+    }
   }
 
   private getNextIndex(): number {
@@ -275,6 +329,15 @@ class WebAudioEngine {
 
   private secondsToMs(value: number): number {
     return Number.isFinite(value) ? Math.round(value * 1000) : 0;
+  }
+
+  private applyVolume(volume: number): void {
+    if (this.outputGain) {
+      this.audio.volume = 1;
+      this.outputGain.gain.value = volume;
+      return;
+    }
+    this.audio.volume = volume;
   }
 
   private patch(partial: Partial<WebAudioState>): void {

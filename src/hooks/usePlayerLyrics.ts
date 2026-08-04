@@ -97,6 +97,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
   const lyricsRequestIdRef = useRef(0);
   const prevRefreshNonceRef = useRef(refreshNonce);
   const hasManualLyricsSelectionRef = useRef(false);
+  const manualLyricsOptionIdRef = useRef<string | null>(null);
   const lyricsOffsetCacheRef = useRef<LyricsOffsetCacheMap>({});
   const lyricsOffsetSaveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const prefetchedTrackIdRef = useRef<string | null>(null);
@@ -118,6 +119,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
     setNativePositionMs(0);
     setLastRenderedLyrics(null);
     hasManualLyricsSelectionRef.current = false;
+    manualLyricsOptionIdRef.current = null;
   }, []);
 
   const hasMeaningfulLyricsValue = useCallback((value?: string | null) => {
@@ -397,6 +399,25 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
         let appleOptions = cachedAppleOptions;
         let exactAppleOptions = appleOptions.filter(option => option.isExactMatch);
 
+        const cachedManualOptionIndex = manualLyricsOptionIdRef.current
+          ? appleOptions.findIndex(option => option.id === manualLyricsOptionIdRef.current)
+          : -1;
+
+        // Metadata can hydrate after the player is already open (duration, album, ISRC),
+        // which re-runs this lookup. Keep the option the listener explicitly chose instead
+        // of falling back to result 0 just because the same candidates came from cache.
+        if (hasManualLyricsSelectionRef.current && cachedManualOptionIndex >= 0) {
+          setTrackLyricsOptions(appleOptions);
+          setSuggestedLyricsOptions([]);
+          setIsLyricsSuggestionModalVisible(false);
+          setSelectedTrackLyricsOptionIndex(cachedManualOptionIndex);
+          setLyricsMode('synced');
+          setLrcError(null);
+          setIsLyricsLoading(false);
+          setHasResolvedLyricsAttempt(true);
+          return;
+        }
+
         if (exactAppleOptions.length > 0) {
           setTrackLyricsOptions(exactAppleOptions);
           setSuggestedLyricsOptions([]);
@@ -428,6 +449,20 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
         appleOptions = await LyricsRepository.getAppleWordLyricsOptions(songTitle, artist, album, durationSec, trackId, isrc, lyricsSources);
         if (lyricsRequestIdRef.current !== requestId) return;
         exactAppleOptions = appleOptions.filter(option => option.isExactMatch);
+
+        const fetchedManualOptionIndex = manualLyricsOptionIdRef.current
+          ? appleOptions.findIndex(option => option.id === manualLyricsOptionIdRef.current)
+          : -1;
+
+        if (hasManualLyricsSelectionRef.current && fetchedManualOptionIndex >= 0) {
+          setTrackLyricsOptions(appleOptions);
+          setSuggestedLyricsOptions([]);
+          setIsLyricsSuggestionModalVisible(false);
+          setSelectedTrackLyricsOptionIndex(fetchedManualOptionIndex);
+          setLyricsMode('synced');
+          setLrcError(null);
+          return;
+        }
 
         const bestApplePayload = exactAppleOptions[0]?.payload ?? null;
         const hasAppleWords = exactAppleOptions.length > 0;
@@ -592,10 +627,15 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
 
   const handleCycleSyncedLyricsOption = useCallback(() => {
     if (trackLyricsOptions.length <= 1) return;
-    setSelectedTrackLyricsOptionIndex(prev => (prev + 1) % trackLyricsOptions.length);
+    setSelectedTrackLyricsOptionIndex(prev => {
+      const nextIndex = (prev + 1) % trackLyricsOptions.length;
+      manualLyricsOptionIdRef.current = trackLyricsOptions[nextIndex]?.id ?? null;
+      return nextIndex;
+    });
+    hasManualLyricsSelectionRef.current = true;
     setLyricsMode('synced');
     lyricsTransitionProgress.value = 0;
-  }, [lyricsTransitionProgress, trackLyricsOptions.length]);
+  }, [lyricsTransitionProgress, trackLyricsOptions]);
 
   const handleSelectSuggestedLyrics = useCallback((optionId: string) => {
     const selectedIndex = suggestedLyricsOptions.findIndex(option => option.id === optionId);
@@ -604,6 +644,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
     setTrackLyricsOptions(suggestedLyricsOptions);
     setSelectedTrackLyricsOptionIndex(selectedIndex);
     hasManualLyricsSelectionRef.current = true;
+    manualLyricsOptionIdRef.current = suggestedLyricsOptions[selectedIndex]?.id ?? null;
     setLyricsMode('synced');
     setLrcError(null);
     setIsLyricsSuggestionModalVisible(false);

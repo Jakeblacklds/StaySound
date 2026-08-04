@@ -20,6 +20,7 @@ const FALLBACK_SEEDS: Array<[string, string, string]> = [
 ];
 
 const paletteCache = new Map<string, WebDynamicPalette>();
+const MAX_PALETTE_CACHE_ENTRIES = 64;
 
 function hashString(value: string): number {
   let hash = 0;
@@ -344,6 +345,9 @@ function extractionCandidates(artwork: string): string[] {
     return [artwork];
   }
   if (typeof location !== 'undefined' && url.hostname === location.hostname) return [artwork];
+  if (url.hostname === 'resources.tidal.com') {
+    return [`/api/artwork?url=${encodeURIComponent(url.href)}`, artwork];
+  }
   return [artwork, `/api/artwork?url=${encodeURIComponent(url.href)}`];
 }
 
@@ -369,7 +373,12 @@ export async function getDynamicPalette(track?: Track | null): Promise<WebDynami
 
   const cacheKey = `${track.id}:${track.artwork}`;
   const cached = paletteCache.get(cacheKey);
-  if (cached) return cached;
+  if (cached) {
+    // Refresh insertion order so frequently played tracks stay warm.
+    paletteCache.delete(cacheKey);
+    paletteCache.set(cacheKey, cached);
+    return cached;
+  }
 
   let palette: WebDynamicPalette | null = null;
   for (const src of extractionCandidates(track.artwork)) {
@@ -379,6 +388,11 @@ export async function getDynamicPalette(track?: Track | null): Promise<WebDynami
   const resolved = palette ?? fallbackPalette(track);
 
   paletteCache.set(cacheKey, resolved);
+  while (paletteCache.size > MAX_PALETTE_CACHE_ENTRIES) {
+    const oldestKey = paletteCache.keys().next().value;
+    if (!oldestKey) break;
+    paletteCache.delete(oldestKey);
+  }
   return resolved;
 }
 

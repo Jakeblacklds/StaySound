@@ -15,6 +15,7 @@ export type { SegmentedTabItem } from './SegmentedTabs';
 export { Skeleton } from './Skeleton';
 export { TrackListItem as MemoizedTrackListItem, TrackListItem } from './TrackListItem';
 export { DownloadAnimatedButton } from './DownloadAnimatedButton';
+export { GlassIconButton, ImmersiveGlass, ImmersiveHeading } from './ImmersiveSurface';
 export { TidalTrackRow } from './TidalTrackRow';
 export type { TidalTrackRowProps } from './TidalTrackRow';
 export { TidalCoverCard } from './TidalCoverCard';

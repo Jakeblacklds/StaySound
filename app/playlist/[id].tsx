@@ -416,7 +416,7 @@ export default function PlaylistDetailScreen() {
           </View>
 
           <Text
-            variant="headlineSmall"
+            variant="headlineMedium"
             style={[styles.playlistTitle, { color: theme.colors.onBackground }]}
             numberOfLines={2}
           >
@@ -442,7 +442,7 @@ export default function PlaylistDetailScreen() {
           <IconButton
             icon={() => <CustomIcon name="Play" size={32} color={theme.colors.onPrimary} />}
             mode="contained"
-            size={56}
+            size={64}
             containerColor={theme.colors.primary}
             onPress={handlePlayAll}
             disabled={playableTracks.length === 0}
@@ -685,13 +685,15 @@ const styles = StyleSheet.create({
     marginBottom: 24,
   },
   playlistIcon: {
-    width: 120,
-    height: 120,
-    borderRadius: 16,
+    width: 210,
+    height: 210,
+    borderRadius: 30,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 16,
+    marginBottom: 22,
     overflow: 'hidden',
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: 'rgba(255,255,255,0.2)',
   },
   playlistIconImage: {
     width: '100%',
@@ -700,7 +702,8 @@ const styles = StyleSheet.create({
   playlistTitle: {
     fontWeight: '800',
     textAlign: 'center',
-    marginBottom: 4,
+    marginBottom: 7,
+    letterSpacing: -0.9,
   },
   playlistDescription: {
     textAlign: 'center',
@@ -711,7 +714,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     gap: 12,
-    marginBottom: 16,
+    marginBottom: 22,
   },
   addSongsDivider: {
     height: 1,
@@ -721,9 +724,12 @@ const styles = StyleSheet.create({
   addSongsToggle: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingHorizontal: 24,
-    paddingVertical: 16,
+    paddingHorizontal: 18,
+    paddingVertical: 15,
     gap: 10,
+    marginHorizontal: 16,
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.07)',
   },
   addSongsToggleText: {
     fontSize: 14,

@@ -1,0 +1,1463 @@
+/* ============================================================
+   "Círculo" — the desktop player skin (imported after app.css in main.tsx, so its
+   unconditional rules win the cascade exactly like the existing "Sala de escucha" skin
+   already does over the original theme — see the memory note on the two stacked themes).
+
+   Unlike that skin, EVERYTHING here — tokens included — lives behind
+   @media (min-width: 821px): the design kit is explicitly desktop-only (mocked at
+   1487x1058) and mobile web is out of scope, so nothing in this file should ever paint a
+   phone-width tab. Tauri's window (min 960x640) is always above this breakpoint.
+
+   App.tsx decides which components mount (TopNav vs Sidebar, PlayerBarCirculo vs PlayerBar,
+   etc.) via useIsDesktopViewport() at the SAME 821px breakpoint, so the two never fight —
+   this file only has to style what's actually in the DOM.
+   ============================================================ */
+@media (min-width: 821px) {
+  :root {
+    --circ-bg: #000000;
+    --circ-surface: #0e0e0e;
+    --circ-panel: #141414;
+    --circ-hairline: #1f1f1f;
+    --circ-border: #262626;
+    --circ-text: #ffffff;
+    --circ-text-2: #9a9a9a;
+    --circ-text-3: #6e6e6e;
+    --circ-amber: #ffa31a;
+    --circ-wave-rest: #4a4a4a;
+    --circ-font: 'Hanken Grotesk', ui-sans-serif, system-ui, -apple-system, sans-serif;
+
+    --circ-type-hero: clamp(3.4rem, 5vw, 4.2rem);
+    --circ-type-pick: clamp(2.8rem, 4.2vw, 3.6rem);
+    --circ-type-artist: 1.6rem;
+    --circ-type-nav: 0.95rem;
+    --circ-type-eyebrow: 0.95rem;
+
+    --circ-player-height: 150px;
+    --circ-ring: 1.5px;
+    /* One horizontal rhythm for the whole shell, so the nav, sub-nav and every
+       screen keep the same margin as the window narrows instead of each holding
+       its own hard-coded 44px. */
+    --circ-pad-x: clamp(20px, 3vw, 44px);
+    --circ-ease-standard: cubic-bezier(.2, 0, 0, 1);
+    --circ-ease-enter: cubic-bezier(.16, 1, .3, 1);
+    --circ-dur-fast: 160ms;
+    --circ-dur-base: 240ms;
+
+    /* The real per-track accent already exists (App.tsx → getDynamicPalette →
+       --dyn-accent); Círculo just points --accent at it. */
+    --accent: var(--dyn-accent, var(--circ-amber));
+    --accent-hover: color-mix(in oklch, var(--accent) 82%, white);
+    --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+    --text-on-accent: #0a0600;
+
+    --bg-root: var(--circ-bg);
+    --bg-elevated: var(--circ-panel);
+    --bg-hover: rgba(255, 255, 255, 0.05);
+    --bg-selected: rgba(255, 255, 255, 0.09);
+    --bg-pressed: rgba(255, 255, 255, 0.07);
+
+    --text-primary: var(--circ-text);
+    --text-secondary: var(--circ-text-2);
+    --text-muted: var(--circ-text-3);
+
+    --border-subtle: var(--circ-hairline);
+    --border-strong: var(--circ-border);
+
+    /* Círculo has ONE face; weight does the hierarchy — no serif anywhere, unlike the
+       "Sala de escucha" skin these vars otherwise inherit from. Remapping the semantic
+       font vars (not just --circ-font) means every legacy component that already reads
+       --font-ui/--font-editorial (Downloads, Radio, Playlists, modals, detail headers)
+       re-fonts to Hanken Grotesk automatically, without needing its own Círculo pass. */
+    --font-ui: var(--circ-font);
+    --font-editorial: var(--circ-font);
+    --font-display: var(--circ-font);
+    --font-body: var(--circ-font);
+  }
+
+  html.tauri-shell,
+  html.tauri-shell body,
+  body:has(.circ-app-shell) {
+    background: var(--bg-root);
+  }
+
+  /* ---------- shell ---------- */
+  .circ-app-shell {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+    background: transparent;
+    color: var(--text-primary);
+    font-family: var(--circ-font);
+  }
+
+  .circ-app-shell .circ-content {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding-bottom: 0;
+    transition: padding-bottom 520ms var(--circ-ease-enter);
+  }
+
+  .circ-app-shell.has-active-track .circ-content {
+    padding-bottom: var(--circ-player-height);
+  }
+
+  /* ---------- top nav ---------- */
+  .circ-top-nav {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 18px var(--circ-pad-x);
+    flex: 0 0 auto;
+  }
+
+  .circ-brand {
+    font-family: var(--circ-font);
+    font-size: 1.35rem;
+    font-weight: 800;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+    margin-right: auto;
+  }
+
+  .circ-top-nav-items {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    gap: 34px;
+  }
+
+  .circ-top-nav-items button {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    padding: 10px 2px 14px;
+    font-family: var(--circ-font);
+    font-size: var(--circ-type-nav);
+    font-weight: 400;
+    color: var(--text-secondary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-top-nav-items button:hover {
+    color: var(--text-primary);
+  }
+
+  .circ-top-nav-items button.active {
+    color: var(--accent);
+    font-weight: 600;
+  }
+
+  .circ-top-nav-items button::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: transparent;
+    transition: background-color var(--circ-dur-base) var(--circ-ease-standard);
+  }
+
+  .circ-top-nav-items button.active::after {
+    background: var(--accent);
+  }
+
+  .circ-top-nav-trailing {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .circ-top-nav-trailing button {
+    width: 40px;
+    height: 40px;
+    display: grid;
+    place-items: center;
+    border-radius: var(--radius-sm, 2px);
+    color: var(--text-secondary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard), background-color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-top-nav-trailing button:hover {
+    color: var(--text-primary);
+    background: var(--bg-pressed);
+  }
+
+  /* macOS Tauri overlays the webview into the native titlebar (trafficLightPosition
+     {18,18} in tauri.macos.conf.json) — TopNav is a full-width bar at the very top,
+     so its brand text would sit right under the traffic-light cluster otherwise.
+     Same fix already used for .fp-header (FullPlayer's own top bar) in app.css:205-207:
+     push the row down below the lights rather than indent it sideways. */
+  html.tauri-shell.platform-macos .circ-top-nav {
+    padding-top: 48px;
+  }
+
+  /* The toast is pinned top-right, which was fine when navigation lived in a left
+     sidebar. Círculo's nav is a full-width top bar, so a 420px toast sat straight
+     on top of "Playlists"/"Descargas"/settings — completely hiding them on narrow
+     windows. Move it above the player bar, where nothing else competes for space. */
+  .status-toast {
+    top: auto;
+    bottom: calc(var(--circ-player-height) + 16px);
+    right: var(--circ-pad-x);
+    animation: circToastIn 260ms var(--circ-ease-enter) both;
+  }
+
+  @keyframes circToastIn {
+    from { opacity: 0; transform: translateY(10px) scale(0.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+  }
+
+  /* ---------- circular artwork ---------- */
+  .circ-art {
+    display: inline-grid;
+    place-items: center;
+    border-radius: 50%;
+    box-sizing: border-box;
+    border: var(--circ-ring) solid transparent;
+    transition: border-color var(--circ-dur-fast) var(--circ-ease-standard), padding var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-art.fill {
+    display: grid;
+  }
+
+  .circ-art.ringed {
+    border-color: var(--accent);
+  }
+
+  .circ-art-disc {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--bg-elevated);
+    flex: 0 0 auto;
+  }
+
+  .circ-art-disc img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+  }
+
+  /* ---------- waveform ---------- */
+  .circ-waveform {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1.5px;
+    width: 100%;
+  }
+
+  .circ-waveform span:not(.circ-waveform-thumb) {
+    flex: 1;
+    border-radius: 1px;
+    background: var(--circ-wave-rest);
+    transition: background-color 120ms linear;
+  }
+
+  .circ-waveform span.played {
+    background: var(--accent);
+  }
+
+  .circ-waveform-thumb {
+    position: absolute;
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background: var(--accent);
+    box-shadow: 0 0 0 3px var(--bg-root);
+    pointer-events: none;
+  }
+
+  /* ---------- quality chip ---------- */
+  .circ-quality-chip {
+    display: inline-flex;
+    align-items: baseline;
+    font-family: var(--circ-font);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .circ-quality-chip.stack {
+    display: grid;
+    gap: 3px;
+    justify-items: center;
+  }
+
+  .circ-quality-chip strong {
+    color: var(--accent);
+    font-size: 0.8rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  .circ-quality-chip span {
+    color: var(--text-muted);
+    font-size: 0.78rem;
+  }
+
+  /* ---------- player bar ---------- */
+  .circ-player-bar {
+    position: fixed;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 40;
+    display: grid;
+    /* Minimums have to fit Tauri's smallest window (960px wide) with room to spare:
+       200 + 360 + 240 + gaps + padding stays under 900. The earlier values summed to
+       1126px, so the utilities zone was pushed off-screen on any window under ~1130. */
+    /* The utilities column is sized by its content (`auto`), not by a fraction: its
+       width is dictated by however many labelled buttons plus the volume slider are
+       showing, and a fraction that came out narrower than that made the zone spill
+       leftwards over the scrubber's remaining-time. With `auto` the waveform gives
+       up room instead, which is the part that can afford to. */
+    grid-template-columns: minmax(180px, 1fr) minmax(300px, 2.2fr) auto;
+    align-items: center;
+    gap: clamp(12px, 1.7vw, 28px);
+    height: var(--circ-player-height);
+    padding: 0 clamp(16px, 2.6vw, 40px);
+    border-top: 1px solid var(--border-subtle);
+    background: var(--bg-root);
+    font-family: var(--circ-font);
+    transform-origin: 50% 100%;
+    will-change: transform, opacity;
+    animation: circPlayerBarReveal 680ms var(--circ-ease-enter) both;
+  }
+
+  .circ-player-bar > * {
+    animation: circPlayerBarContentReveal 520ms var(--circ-ease-enter) both;
+  }
+
+  .circ-player-bar > :nth-child(1) { animation-delay: 150ms; }
+  .circ-player-bar > :nth-child(2) { animation-delay: 210ms; }
+  .circ-player-bar > :nth-child(3) { animation-delay: 270ms; }
+
+  @keyframes circPlayerBarReveal {
+    0% {
+      opacity: 0;
+      transform: translate3d(0, 100%, 0) scaleY(0.94);
+      box-shadow: 0 -1px 0 transparent;
+    }
+    58% {
+      opacity: 1;
+      transform: translate3d(0, -5px, 0) scaleY(1.015);
+      box-shadow: 0 -18px 52px color-mix(in srgb, var(--accent) 10%, transparent);
+    }
+    100% {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scaleY(1);
+      box-shadow: 0 -12px 36px rgba(0, 0, 0, 0.22);
+    }
+  }
+
+  @keyframes circPlayerBarContentReveal {
+    from {
+      opacity: 0;
+      transform: translate3d(0, 14px, 0) scale(0.985);
+    }
+    to {
+      opacity: 1;
+      transform: translate3d(0, 0, 0) scale(1);
+    }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .circ-app-shell .circ-content {
+      transition: none;
+    }
+
+    .circ-player-bar,
+    .circ-player-bar > * {
+      animation: none;
+    }
+  }
+
+  .circ-pb-obra {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    min-width: 0;
+    cursor: pointer;
+  }
+
+  .circ-pb-art {
+    flex: 0 0 auto;
+  }
+
+  .circ-pb-copy {
+    min-width: 0;
+  }
+
+  .circ-pb-copy strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 1.02rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .circ-pb-copy small {
+    display: block;
+    margin-top: 3px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-secondary);
+    font-size: 0.85rem;
+  }
+
+  .circ-pb-copy .circ-quality-chip {
+    margin-top: 4px;
+    white-space: nowrap;
+  }
+
+  .circ-pb-transporte {
+    display: grid;
+    gap: 10px;
+    align-content: center;
+    min-width: 0;
+  }
+
+  .circ-pb-controls {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 26px;
+  }
+
+  .circ-pb-controls button {
+    display: grid;
+    place-items: center;
+    color: var(--text-secondary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-pb-controls button:hover {
+    color: var(--text-primary);
+  }
+
+  .circ-pb-controls button.active {
+    color: var(--accent);
+  }
+
+  .circ-pb-controls button.circ-pb-play {
+    width: 60px;
+    height: 60px;
+    border-radius: 50%;
+    color: var(--text-on-accent);
+    background: var(--accent);
+    transition: background-color var(--circ-dur-fast) var(--circ-ease-standard), transform 90ms var(--circ-ease-standard);
+  }
+
+  .circ-pb-controls button.circ-pb-play:hover {
+    background: var(--accent-hover);
+    color: var(--text-on-accent);
+  }
+
+  .circ-pb-controls button.circ-pb-play:active {
+    transform: scale(0.96);
+  }
+
+  .circ-pb-scrub {
+    display: grid;
+    grid-template-columns: 46px minmax(0, 1fr) 46px;
+    gap: 12px;
+    align-items: center;
+  }
+
+  .circ-pb-scrub > span {
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    font-variant-numeric: tabular-nums;
+  }
+
+  .circ-pb-scrub > span:last-child {
+    text-align: right;
+  }
+
+  .circ-pb-utilidades {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+  }
+
+  .circ-pb-divider {
+    width: 1px;
+    align-self: stretch;
+    margin: 34px 0;
+    background: var(--border-subtle);
+  }
+
+  .circ-pb-utility {
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    padding: 0 clamp(10px, 1.4vw, 22px);
+    color: var(--text-secondary);
+    font-size: 0.82rem;
+    white-space: nowrap;
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-pb-utility:hover {
+    color: var(--text-primary);
+  }
+
+  .circ-pb-utility.active {
+    color: var(--accent);
+  }
+
+  .circ-pb-utility.busy {
+    opacity: 0.55;
+  }
+
+  /* Volume lives here because Círculo's full player has no transport of its own —
+     the bar is the only place playback is controlled at desktop width. */
+  .circ-pb-volume {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding-left: 22px;
+  }
+
+  .circ-pb-volume button {
+    display: grid;
+    place-items: center;
+    color: var(--text-secondary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-pb-volume button:hover {
+    color: var(--text-primary);
+  }
+
+  /* Track thickness goes through --track-h, never `height` — the base rule pads the
+     element out with transparent borders for a usable hit area and clips the fill to
+     the content box (see the convention documented above `input[type="range"]` in
+     app.css). Setting `height` collapses that content box to zero and the fill
+     silently disappears. */
+  .circ-pb-volume input[type='range'] {
+    width: 84px;
+    --track-h: 4px;
+    --range-fill: var(--accent);
+    /* `background-image`, not the `background` shorthand: the shorthand resets
+       background-clip back to border-box, which spills the fill over the
+       transparent hit-area borders and renders a chunky bar instead of a track. */
+    background-image: linear-gradient(90deg, var(--accent) var(--val, 0%), var(--circ-wave-rest) var(--val, 0%));
+    background-clip: content-box;
+  }
+
+  .circ-pb-volume input[type='range']::-webkit-slider-thumb {
+    width: 11px;
+    height: 11px;
+    background: var(--accent);
+    box-shadow: none;
+  }
+
+  /* ---------- shared: eyebrow label ---------- */
+  .ss-eyebrow {
+    display: block;
+    margin: 0;
+    color: var(--text-secondary);
+    font-family: var(--circ-font);
+    font-size: var(--circ-type-eyebrow);
+  }
+
+  /* ---------- circular tile (album/playlist circle + caption) ---------- */
+  .circ-tile {
+    display: grid;
+    gap: 4px;
+    justify-items: center;
+    text-align: center;
+  }
+
+  .circ-tile strong {
+    margin-top: 10px;
+    font-family: var(--circ-font);
+    font-size: 1rem;
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .circ-tile small {
+    color: var(--text-secondary);
+    font-size: 0.88rem;
+  }
+
+  /* ---------- carousel chevron ---------- */
+  .circ-carousel-chevron {
+    width: 40px;
+    height: 40px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elevated);
+    color: var(--text-secondary);
+    flex: 0 0 auto;
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard), border-color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-carousel-chevron:hover {
+    color: var(--accent);
+    border-color: var(--accent);
+  }
+
+  .circ-carousel-chevron span {
+    display: grid;
+    transform: rotate(180deg);
+  }
+
+  /* ---------- home ---------- */
+  .circ-home {
+    position: relative;
+    min-height: 100%;
+    overflow: hidden;
+    padding: 26px var(--circ-pad-x) 40px;
+  }
+
+  .circ-home-empty {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    max-width: 420px;
+    margin: 15vh auto 0;
+    text-align: center;
+    color: var(--text-secondary);
+    font-family: var(--circ-font);
+  }
+
+  .circ-home-empty h2 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1.4rem;
+  }
+
+  .circ-home-hero-art {
+    position: absolute;
+    top: -40px;
+    right: -16%;
+    width: min(58vw, 760px);
+    aspect-ratio: 1;
+    pointer-events: none;
+  }
+
+  .circ-home-welcome {
+    position: relative;
+    max-width: 46%;
+  }
+
+  .circ-home-welcome h1 {
+    margin: 2px 0 0;
+    font-family: var(--circ-font);
+    font-size: var(--circ-type-hero);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1;
+    color: var(--text-primary);
+  }
+
+  .circ-home-pick-eyebrow {
+    margin-top: 44px;
+  }
+
+  .circ-home-welcome h2 {
+    margin: 4px 0 0;
+    font-family: var(--circ-font);
+    font-size: var(--circ-type-pick);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    line-height: 1.02;
+    color: var(--text-primary);
+  }
+
+  .circ-home-pick-artist {
+    margin: 8px 0 0;
+    font-family: var(--circ-font);
+    font-size: var(--circ-type-artist);
+    font-weight: 600;
+    color: var(--accent);
+  }
+
+  .circ-home-welcome .circ-quality-chip {
+    margin-top: 12px;
+  }
+
+  .circ-home-pick-actions {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    margin-top: 26px;
+  }
+
+  .circ-home-play {
+    width: 64px;
+    height: 64px;
+    border-radius: 50%;
+    display: grid;
+    place-items: center;
+    background: var(--accent);
+    color: var(--text-on-accent);
+    transition: background-color var(--circ-dur-fast) var(--circ-ease-standard), transform 90ms var(--circ-ease-standard);
+  }
+
+  .circ-home-play:hover {
+    background: var(--accent-hover);
+  }
+
+  .circ-home-play:active {
+    transform: scale(0.96);
+  }
+
+  .circ-home-pick-link {
+    color: var(--accent);
+    font-family: var(--circ-font);
+    font-size: 1rem;
+    font-weight: 600;
+  }
+
+  .circ-home-pick-link:hover {
+    color: var(--accent-hover);
+  }
+
+  .circ-home-rail {
+    position: relative;
+    margin-top: 52px;
+    /* Tied to the hero disc's own math (right: -16%, width: min(58vw, 760px)) so the
+       rail's right edge can never land under the disc, at any viewport width — a fixed
+       percentage here drifted out of sync with the disc and let them overlap. */
+    max-width: calc(116vw - min(58vw, 760px) - var(--circ-pad-x) - 32px);
+  }
+
+  .circ-home-history-rail {
+    margin-top: 38px;
+  }
+
+  .circ-home-rail-row {
+    display: flex;
+    align-items: center;
+    gap: 26px;
+    margin-top: 18px;
+    overflow-x: auto;
+  }
+
+  /* ---------- segmented sub-nav (Biblioteca: Álbumes/Canciones/Artistas/Radio) ---------- */
+  .circ-segmented-tabs {
+    display: flex;
+    gap: 30px;
+    padding: 10px var(--circ-pad-x) 0;
+  }
+
+  .circ-segmented-tabs button {
+    position: relative;
+    padding: 10px 2px 14px;
+    font-family: var(--circ-font);
+    font-size: 0.92rem;
+    font-weight: 500;
+    color: var(--text-secondary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-segmented-tabs button:hover {
+    color: var(--text-primary);
+  }
+
+  .circ-segmented-tabs button.active {
+    color: var(--accent);
+    font-weight: 700;
+  }
+
+  .circ-segmented-tabs button.active::after {
+    content: '';
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    height: 2px;
+    background: var(--accent);
+  }
+
+  /* ---------- shared: empty state + tile grid (Biblioteca, Search, etc.) ---------- */
+  .circ-empty-state {
+    display: grid;
+    justify-items: center;
+    gap: 14px;
+    max-width: 420px;
+    margin: 15vh auto 0;
+    text-align: center;
+    color: var(--text-secondary);
+    font-family: var(--circ-font);
+  }
+
+  .circ-empty-state h2 {
+    margin: 0;
+    color: var(--text-primary);
+    font-size: 1.4rem;
+  }
+
+  .circ-tile-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 30px 26px;
+    padding: 26px var(--circ-pad-x) 40px;
+  }
+
+  .circ-tile-grid .circ-tile {
+    width: 142px;
+  }
+
+  .circ-tile-grid .circ-art {
+    width: 118px;
+    height: 118px;
+  }
+
+  /* ---------- TrackList row, Círculo mode: continuous hairline-divided rows ---------- */
+  .track-list.circ {
+    background: transparent;
+    font-family: var(--circ-font);
+  }
+
+  .track-list.circ .track-list-head {
+    display: none;
+  }
+
+  .track-list.circ .track-row {
+    border-bottom: 1px solid var(--border-subtle);
+    background: transparent;
+  }
+
+  .track-list.circ .track-row.active {
+    background: var(--bg-pressed);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .track-list.circ .track-row:hover {
+    background: var(--bg-hover);
+  }
+
+  .track-list.circ .track-thumb {
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--bg-elevated);
+  }
+
+  .track-list.circ .track-index {
+    color: var(--text-muted);
+  }
+
+  .track-list.circ .track-row.active .track-index {
+    color: var(--accent);
+  }
+
+  .track-list.circ .track-main strong {
+    font-family: var(--circ-font);
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .track-list.circ .track-main small {
+    color: var(--text-muted);
+  }
+
+  .track-list.circ .track-meta {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* ---------- Buscar ---------- */
+  .circ-search {
+    padding: 26px var(--circ-pad-x) 40px;
+    max-width: 880px;
+  }
+
+  .circ-search h1 {
+    margin: 2px 0 26px;
+    font-family: var(--circ-font);
+    font-size: var(--circ-type-pick);
+    font-weight: 800;
+    letter-spacing: -0.02em;
+    color: var(--text-primary);
+  }
+
+  .circ-search-field {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    height: 52px;
+    padding: 0 20px;
+    border-radius: 999px;
+    border: 1px solid var(--border-subtle);
+    color: var(--text-muted);
+    transition: border-color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-search-field:focus-within {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .circ-search-field input {
+    flex: 1;
+    background: transparent;
+    border: 0;
+    outline: 0;
+    color: var(--text-primary);
+    font-family: var(--circ-font);
+    font-size: 1rem;
+  }
+
+  .circ-search-empty {
+    margin-top: 24px;
+    color: var(--text-muted);
+    font-family: var(--circ-font);
+  }
+
+  .circ-search-section {
+    margin-top: 34px;
+  }
+
+  .circ-search-grid {
+    padding: 18px 0 0;
+  }
+
+  .circ-search-tracks {
+    border-top: 1px solid var(--border-subtle);
+    margin-top: 14px;
+  }
+
+  /* ---------- Descargas ---------- */
+  .circ-app-shell .downloads-panel {
+    min-height: 100%;
+    padding: 26px var(--circ-pad-x) 40px;
+    font-family: var(--circ-font);
+  }
+
+  /* ---------- Apps nativas ---------- */
+  /* Same gutter/rhythm as every other screen in this shell. The grid is capped
+     because three download cards stretched across an ultrawide window read as a
+     banner, not as a choice. */
+  .circ-app-shell .getapp-panel {
+    min-height: 100%;
+    padding: 26px var(--circ-pad-x) 40px;
+    font-family: var(--circ-font);
+  }
+
+  .circ-app-shell .getapp-grid {
+    max-width: 1180px;
+  }
+
+  .circ-app-shell .getapp-card {
+    border-color: var(--circ-border);
+    background: var(--circ-surface);
+  }
+
+  .circ-app-shell .getapp-card.is-pending {
+    background: transparent;
+  }
+
+  .circ-app-shell .getapp-card-head small,
+  .circ-app-shell .getapp-card-meta,
+  .circ-app-shell .getapp-footer small {
+    color: var(--circ-text-3);
+  }
+
+  .circ-app-shell .getapp-card-perk,
+  .circ-app-shell .getapp-hero p {
+    color: var(--circ-text-2);
+  }
+
+  .circ-app-shell .desktop-required {
+    border-color: var(--circ-border);
+    background: var(--circ-surface);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .circ-app-shell .desktop-required-list li {
+    border-color: var(--circ-hairline);
+    background: var(--circ-bg);
+  }
+
+  .circ-app-shell .desktop-required-body p,
+  .circ-app-shell .desktop-required-list span {
+    color: var(--circ-text-2);
+  }
+
+  .circ-app-shell .download-toolbar {
+    grid-template-columns: minmax(190px, .34fr) minmax(500px, 1fr);
+    padding: 2px 0 24px;
+  }
+
+  .circ-app-shell .download-toolbar-copy strong {
+    font-size: 1.05rem;
+    font-weight: 700;
+  }
+
+  .circ-app-shell .download-toolbar-copy small {
+    color: var(--circ-text-3);
+  }
+
+  .circ-app-shell .download-search {
+    gap: 10px;
+  }
+
+  .circ-app-shell .download-search input {
+    height: 44px;
+    border-color: var(--circ-hairline);
+    background: transparent;
+    font-size: .95rem;
+    transition: border-color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-app-shell .download-search input:focus {
+    border-color: var(--accent);
+  }
+
+  .circ-app-shell .download-empty-state {
+    min-height: min(46vh, 400px);
+    color: var(--circ-text-3);
+  }
+
+  .circ-app-shell .download-empty-state h2 {
+    color: var(--circ-text);
+    font-size: 1.3rem;
+  }
+
+  .circ-app-shell .download-empty-state .empty-state-icon {
+    color: var(--circ-text-2);
+  }
+
+  .circ-app-shell .download-results {
+    gap: 0;
+    border-top: 1px solid var(--circ-hairline);
+  }
+
+  .circ-app-shell .download-result {
+    min-height: 66px;
+    padding: 8px 4px;
+    border: 0;
+    border-bottom: 1px solid var(--circ-hairline);
+    border-radius: 0;
+    background: transparent;
+    transition: background-color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-app-shell .download-result:hover {
+    background: var(--bg-hover);
+  }
+
+  .circ-app-shell .download-result.featured {
+    min-height: 88px;
+    border-top: 1px solid var(--circ-hairline);
+    background: transparent;
+  }
+
+  .circ-app-shell .download-result.featured .track-thumb {
+    width: 64px;
+    height: 64px;
+  }
+
+  .circ-app-shell .download-entity-card {
+    border: 0;
+    border-radius: 0;
+    padding: 0;
+    background: transparent;
+  }
+
+  .circ-app-shell .download-queue-banner,
+  .circ-app-shell .download-settings {
+    border-color: var(--circ-hairline);
+    background: var(--circ-surface);
+  }
+
+  .circ-search-track-row {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    width: 100%;
+    padding: 10px 4px;
+    border-bottom: 1px solid var(--border-subtle);
+    text-align: left;
+    transition: background-color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-search-track-row:hover {
+    background: var(--bg-hover);
+  }
+
+  .circ-search-track-row.active {
+    background: var(--bg-pressed);
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .circ-search-track-thumb {
+    width: 42px;
+    height: 42px;
+    flex: 0 0 auto;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--bg-elevated);
+  }
+
+  .circ-search-track-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+
+  .circ-search-track-copy {
+    flex: 1;
+    min-width: 0;
+  }
+
+  .circ-search-track-copy strong {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-family: var(--circ-font);
+    font-weight: 700;
+    color: var(--text-primary);
+  }
+
+  .circ-search-track-copy small {
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+  }
+
+  .circ-search-track-duration {
+    color: var(--text-muted);
+    font-variant-numeric: tabular-nums;
+    font-size: 0.85rem;
+  }
+
+  /* ---------- circles everywhere: broad-stroke pass over screens this project didn't
+     give a dedicated Círculo layout (Descargas, Playlists, Radio's result thumbs, and
+     ArtistDetail's still-legacy "Álbumes" sub-grid). Their surrounding chrome already
+     re-themed for free via the --bg-root / --text-* / --font-ui remap above; this just
+     rounds off whatever square thumbnails they still render. */
+  .track-thumb,
+  .card-artwork,
+  .download-entity-artwork,
+  .recommendation-artwork,
+  .playlist-art,
+  .mini-art,
+  .playlist-dot {
+    border-radius: 50%;
+    overflow: hidden;
+  }
+
+  /* ---------- full player: pure black + circular artwork, same accent pipeline.
+     FullPlayer.tsx keeps its full feature set (lyrics themes/fonts/timing offset,
+     karaoke launch, playlist quick-add, track-swap crossfade) untouched — this only
+     flattens its own --fp-* palette system (set inline per-track, so it needs
+     !important to lose to it) down to Círculo's black + single accent. */
+  /* Círculo's full player is the disc and the lyric sheet — nothing else. The
+     design kit deliberately gives it NO second transport: the persistent 150px
+     PlayerBarCirculo stays visible and keeps owning playback. So the overlay
+     stops *above* the bar rather than covering it (no z-index fight), and the
+     legacy `fp-deck` — an entire second Sala-de-escucha transport, with its own
+     dividers, square artwork and linear slider — is dropped instead of being
+     repainted. That deck is what was showing through as an un-redesigned bar. */
+  .full-player-overlay.circ {
+    inset: 0 0 var(--circ-player-height) 0;
+    grid-template-rows: 64px minmax(0, 1fr);
+    background: var(--bg-root) !important;
+    font-family: var(--circ-font);
+  }
+
+  .full-player-overlay.circ .fp-deck {
+    display: none;
+  }
+
+  /* One centred axis: disc, then title/artist/format stacked under it — the kit's
+     composition. The Sala layout left-aligned this copy against the disc, which is
+     what made the column read as off-balance. */
+  .full-player-overlay.circ .fp-performance {
+    justify-items: center;
+  }
+
+  .full-player-overlay.circ .fp-info,
+  .full-player-overlay.circ .fp-info h2,
+  .full-player-overlay.circ .fp-info p {
+    text-align: center;
+  }
+
+  .full-player-overlay.circ .fp-catalog {
+    color: var(--accent) !important;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+  }
+
+  /* The atmosphere stays. `.fp-bg` stacks four layers: (1) a full-bleed artwork
+     gradient wash, (2) AtmosphereCanvas — the spectrum-reactive orbs/beat ripples/
+     aurora ribbon/treble glitter, (3) a bass-reactive edge glow, (4) a readability
+     scrim. Only layer 1 genuinely fights Círculo's pure black, so it's the only one
+     that goes. Layers 2–3 blend with `screen`, and screen-over-#000 is a no-op —
+     the orbs keep their own colour and read as light emitted from the black itself,
+     which is exactly the restrained-psychedelic look this direction wants. */
+  .full-player-overlay.circ .fp-bg-base {
+    display: none;
+  }
+
+  /* Restrained, not flashy: the stock values are tuned to sit over a bright
+     artwork wash. Against pure black the same energy reads far louder, so pull
+     the canvas back and let the beat do the talking rather than the baseline. */
+  .full-player-overlay.circ .atmosphere-canvas {
+    opacity: 0.5;
+    filter: blur(clamp(20px, 2.6vw, 34px)) saturate(1.05);
+  }
+
+  .full-player-overlay.circ .fp-bg-edge-glow {
+    opacity: calc(0.05 + var(--atmo-bass-smooth, 0) * 0.2 + var(--atmo-beat, 0) * 0.05);
+    filter: saturate(1);
+    box-shadow: none;
+  }
+
+  /* The stock scrim is a blue-black (#03060a) that greys out Círculo's true black;
+     re-tint it to neutral and lighten it, since there's no bright wash left to
+     darken — only the orbs, which the copy already sits clear of. */
+  .full-player-overlay.circ .fp-bg-scrim {
+    background:
+      linear-gradient(90deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.12) 46%, rgba(0, 0, 0, 0.5) 100%),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0.1) 55%, rgba(0, 0, 0, 0.55) 100%);
+  }
+
+  .full-player-overlay.circ .fp-header-title,
+  .full-player-overlay.circ .fp-breadcrumb,
+  .full-player-overlay.circ .fp-chip-btn {
+    color: var(--text-secondary) !important;
+  }
+
+  .full-player-overlay.circ .fp-info h2,
+  .full-player-overlay.circ .fp-deck-copy strong {
+    color: var(--text-primary) !important;
+  }
+
+  .full-player-overlay.circ .fp-info p,
+  .full-player-overlay.circ .fp-catalog,
+  .full-player-overlay.circ .fp-deck-copy small {
+    color: var(--text-secondary) !important;
+  }
+
+  .full-player-overlay.circ .fp-artwork {
+    border-radius: 50%;
+    background: var(--bg-elevated);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  }
+
+  .full-player-overlay.circ .fp-artwork-canvasui {
+    display: none;
+  }
+
+  .full-player-overlay.circ .fp-lyrics-toggle,
+  .full-player-overlay.circ .fp-play-btn {
+    background: var(--accent) !important;
+    color: var(--text-on-accent) !important;
+  }
+
+  .full-player-overlay.circ .fp-skip-btn {
+    color: var(--text-primary) !important;
+  }
+
+  .full-player-overlay.circ .fp-side-btn {
+    color: var(--text-secondary) !important;
+  }
+
+  .full-player-overlay.circ .fp-side-btn.active {
+    color: var(--accent) !important;
+  }
+
+  .full-player-overlay.circ .fp-deck {
+    background: var(--bg-root) !important;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .full-player-overlay.circ .fp-timeline input[type='range'],
+  .full-player-overlay.circ .fp-volume-row input[type='range'] {
+    accent-color: var(--accent);
+  }
+
+  /* ---------- queue: anchored popover instead of a full slide-in drawer, matching the
+     design kit's Popover treatment. QueueDrawer.tsx keeps its own state/scroll/Escape
+     handling — only position and chrome change. */
+  .queue-drawer-overlay.circ {
+    background: transparent;
+    backdrop-filter: none;
+  }
+
+  .queue-drawer.circ {
+    top: auto;
+    left: auto;
+    right: 40px;
+    bottom: calc(var(--circ-player-height) + 14px);
+    width: 400px;
+    max-height: 60vh;
+    border-radius: 12px;
+    border: 1px solid var(--border-strong);
+    background: var(--bg-elevated);
+    box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+    font-family: var(--circ-font);
+  }
+
+  .queue-drawer.circ .queue-header {
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .queue-drawer.circ .queue-header h3 {
+    color: var(--text-primary);
+  }
+
+  .queue-drawer.circ .queue-item.active {
+    box-shadow: inset 2px 0 0 var(--accent);
+  }
+
+  .queue-drawer.circ .q-thumb {
+    border-radius: 50%;
+    overflow: hidden;
+  }
+}
+
+/* ============================================================
+   Responsive tiers. Círculo was composed against the 1487x1058 mock, so these
+   blocks describe how it degrades toward Tauri's 960px minimum window and how it
+   behaves when the window is far wider than the composition.
+   Kept as sibling blocks (not nested) so each tier reads as one flat list.
+   ============================================================ */
+
+/* --- Compact desktop: small laptops and half-screen windows ---------------- */
+@media (min-width: 821px) and (max-width: 1279.98px) {
+  /* Four labelled utilities plus a volume slider do not fit next to a scrubber
+     at this width. Drop to icon-only — the buttons keep their aria-label, so the
+     accessible name survives even though the visible text does not. */
+  .circ-pb-utility-label {
+    display: none;
+  }
+
+  .circ-pb-utility {
+    padding: 0 clamp(8px, 1.1vw, 14px);
+  }
+
+  /* The bar's own dividers are the first thing to go: at this width they read as
+     clutter rather than structure. */
+  .circ-pb-divider {
+    display: none;
+  }
+
+  .circ-pb-volume {
+    padding-left: 12px;
+  }
+
+  .circ-pb-volume input[type='range'] {
+    width: 62px;
+  }
+
+  .circ-pb-controls {
+    gap: clamp(14px, 2vw, 26px);
+  }
+
+  .circ-pb-controls button.circ-pb-play {
+    width: 52px;
+    height: 52px;
+  }
+
+  .circ-pb-art {
+    width: 52px;
+    height: 52px;
+  }
+
+  /* The sample-rate/bit-depth tail is the least load-bearing text in the bar. */
+  .circ-pb-copy .circ-quality-chip span {
+    display: none;
+  }
+
+  .circ-top-nav-items {
+    gap: clamp(16px, 2.4vw, 34px);
+  }
+
+  /* The welcome column and the bleeding hero disc compete for the same room once
+     the window is under ~1280; give the copy priority and pull the disc back. */
+  .circ-home-welcome {
+    max-width: 58%;
+  }
+
+  .circ-home-hero-art {
+    width: min(52vw, 520px);
+    top: -20px;
+  }
+
+  .circ-home-rail {
+    max-width: calc(116vw - min(52vw, 520px) - var(--circ-pad-x) - 32px);
+  }
+}
+
+/* --- Tight: Tauri's 960px minimum, or a narrow side-by-side window --------- */
+@media (min-width: 821px) and (max-width: 1049.98px) {
+  /* Volume becomes mute-only here. The slider is the first control that stops
+     being usable at this size, and ↑/↓/M still adjust it from the keyboard. */
+  .circ-pb-volume input[type='range'] {
+    display: none;
+  }
+
+  .circ-pb-volume {
+    padding-left: 6px;
+  }
+
+  .circ-pb-scrub {
+    grid-template-columns: 38px minmax(0, 1fr) 38px;
+    gap: 8px;
+  }
+
+  .circ-pb-scrub > span {
+    font-size: 0.75rem;
+  }
+
+  .circ-home-welcome {
+    max-width: 66%;
+  }
+
+  .circ-home-hero-art {
+    width: min(48vw, 420px);
+    opacity: 0.75;
+  }
+
+  .circ-home-rail {
+    max-width: calc(116vw - min(48vw, 420px) - var(--circ-pad-x) - 32px);
+  }
+
+  .circ-segmented-tabs {
+    gap: 20px;
+  }
+}
+
+/* --- Large displays: keep the composition from sprawling ------------------- */
+@media (min-width: 1800px) {
+  /* Only the reading measure is capped. The tile grids are deliberately left to
+     fill the width — more albums per row is the right answer on a big display,
+     whereas a 1200px-wide line of body copy is not. */
+  .circ-home-welcome {
+    max-width: 720px;
+  }
+
+  .circ-home-rail {
+    max-width: 1400px;
+  }
+
+  .circ-search {
+    max-width: 1100px;
+  }
+}

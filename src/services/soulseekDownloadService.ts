@@ -27,6 +27,8 @@ type SoulseekStoredCredentials = {
   password: string;
 };
 
+type SoulseekBackend = 'native' | 'bridge';
+
 const SOULSEEK_CREDENTIALS_STORAGE_KEY = 'soulseek-native-credentials';
 let soulseekCredentialsCache: SoulseekStoredCredentials | null = null;
 
@@ -42,6 +44,11 @@ export type SoulseekTrackMatch = {
   sampleRate?: number;
   bitDepth?: number;
   durationMs?: number;
+  slotsFree?: boolean;
+  queueLength?: number;
+  speed?: number;
+  host?: string;
+  port?: number;
   downloadUrl?: string;
   raw?: unknown;
 };
@@ -59,6 +66,12 @@ type SoulseekDownloadOptions = {
 
 const PEER_RETRY_LIMIT = 6;
 const MIN_SOULSEEK_MATCH_SCORE = 68;
+// Soulseek peers appear and disappear quickly. Avoid retrying stale users.
+const SOULSEEK_MATCH_CACHE_TTL_MS = 30 * 1000;
+const soulseekTrackMatchCache = new Map<string, {
+  expiresAt: number;
+  promise: Promise<SoulseekTrackMatch[]>;
+}>();
 
 export class SoulseekCompressedFallbackError extends Error {
   match: SoulseekTrackMatch;
@@ -156,6 +169,15 @@ function getSoulseekNativeConfig(): SoulseekRuntimeConfig {
   return mapNativeConfig(extra.soulseek);
 }
 
+function getSoulseekBridgeUrl(): string | null {
+  const extra = getExtraConfig();
+  const soulseek = (extra.soulseek && typeof extra.soulseek === 'object')
+    ? extra.soulseek as Record<string, unknown>
+    : {};
+  const rawUrl = typeof soulseek.bridgeUrl === 'string' ? soulseek.bridgeUrl.trim() : '';
+  return rawUrl ? rawUrl.replace(/\/+$/, '') : null;
+}
+
 async function getSoulseekNativeConfigAsync(): Promise<SoulseekRuntimeConfig> {
   const extra = getExtraConfig();
   const staticConfig = (extra.soulseek && typeof extra.soulseek === 'object')
@@ -181,14 +203,15 @@ async function getSoulseekNativeConfigAsync(): Promise<SoulseekRuntimeConfig> {
   throw new Error('Inicia sesion en la pestaña Soulseek con tu usuario y password.');
 }
 
-function ensureNativeAvailable() {
-  if (Platform.OS !== 'android') {
-    throw new Error('Soulseek nativo solo esta disponible en Android.');
+function getSoulseekBackend(): SoulseekBackend {
+  if (Platform.OS === 'android' && isSoulseekNativeAvailable()) return 'native';
+  if (getSoulseekBridgeUrl()) return 'bridge';
+
+  if (Platform.OS === 'ios') {
+    throw new Error('Configura EXPO_PUBLIC_SOULSEEK_BRIDGE_URL para descargar desde Soulseek en iOS.');
   }
 
-  if (!isSoulseekNativeAvailable()) {
-    throw new Error('El modulo nativo Soulseek no esta disponible en esta build. Reinstala el dev build de Android.');
-  }
+  throw new Error('El motor Soulseek no esta disponible en esta build y no hay un bridge configurado.');
 }
 
 function ensureNotAborted(signal?: AbortSignal, message = 'Descarga cancelada') {
@@ -468,6 +491,27 @@ function scoreSoulseekMatch(
   if ((match.size ?? 0) > 0) score += 4;
   if (hasForeignVersionTerm(tidalTrack, match)) score -= 55;
 
+  // Prefer peers that can start immediately and finish sooner. These values
+  // come from the Soulseek search reply; Monochrome remains catalog-only.
+  if (match.slotsFree === true) score += 90;
+  else if (match.slotsFree === false) score -= 45;
+
+  if (typeof match.queueLength === 'number') {
+    if (match.queueLength <= 0) score += 18;
+    else score -= Math.min(45, match.queueLength * 6);
+  }
+
+  if ((match.speed ?? 0) > 0) {
+    const speed = match.speed ?? 0;
+    const estimatedSeconds = (match.size ?? 0) > 0
+      ? (match.size ?? 0) / speed
+      : Number.POSITIVE_INFINITY;
+    if (estimatedSeconds <= 30) score += 55;
+    else if (estimatedSeconds <= 90) score += 35;
+    else if (estimatedSeconds <= 240) score += 15;
+    score += Math.min(25, Math.log10(Math.max(1, speed)) * 4);
+  }
+
   return score;
 }
 
@@ -503,7 +547,7 @@ function buildTrackSearchQueries(
   return Array.from(new Set(queries.map(normalizeWhitespace).filter(Boolean)));
 }
 
-async function searchRankedMatchesForTrack(
+async function searchRankedMatchesForTrackUncached(
   tidalTrack: TidalTrack,
   qualityPreference: TidalQuality,
   allowCompressedFallback = false,
@@ -524,7 +568,7 @@ async function searchRankedMatchesForTrack(
       qualityPreference,
       allowCompressedFallback,
     });
-    const matches = await searchNativeMatches(query, signal).catch((error: unknown) => {
+    const matches = await searchSoulseekMatches(query, signal).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       console.log(`${SOULSEEK_SERVICE_LOG} query error`, {
         query,
@@ -569,6 +613,65 @@ async function searchRankedMatchesForTrack(
     ranked: finalRanked.length,
   });
   return finalRanked;
+}
+
+function getSoulseekTrackCacheKey(
+  tidalTrack: TidalTrack,
+  qualityPreference: TidalQuality,
+  allowCompressedFallback: boolean,
+): string {
+  return [
+    normalizeComparableText(tidalTrack.artist),
+    normalizeComparableText(tidalTrack.title),
+    tidalTrack.durationMs || 0,
+    qualityPreference,
+    allowCompressedFallback ? 'compressed' : 'strict',
+  ].join('|');
+}
+
+async function searchRankedMatchesForTrack(
+  tidalTrack: TidalTrack,
+  qualityPreference: TidalQuality,
+  allowCompressedFallback = false,
+  signal?: AbortSignal,
+): Promise<SoulseekTrackMatch[]> {
+  ensureNotAborted(signal, 'Busqueda cancelada');
+  const key = getSoulseekTrackCacheKey(tidalTrack, qualityPreference, allowCompressedFallback);
+  const cached = soulseekTrackMatchCache.get(key);
+
+  if (cached && cached.expiresAt > Date.now()) {
+    const matches = await cached.promise;
+    ensureNotAborted(signal, 'Busqueda cancelada');
+    return matches;
+  }
+  if (cached) soulseekTrackMatchCache.delete(key);
+
+  const promise = searchRankedMatchesForTrackUncached(
+    tidalTrack,
+    qualityPreference,
+    allowCompressedFallback,
+    signal,
+  ).catch(error => {
+    soulseekTrackMatchCache.delete(key);
+    throw error;
+  });
+
+  soulseekTrackMatchCache.set(key, {
+    expiresAt: Date.now() + SOULSEEK_MATCH_CACHE_TTL_MS,
+    promise,
+  });
+  return promise;
+}
+
+export function prefetchSoulseekTrack(
+  tidalTrack: TidalTrack,
+  qualityPreference: TidalQuality,
+): void {
+  void searchRankedMatchesForTrack(
+    tidalTrack,
+    qualityPreference,
+    wantsLossless(qualityPreference),
+  ).catch(() => undefined);
 }
 
 function inferTrackTextFromMatch(
@@ -657,10 +760,6 @@ function toLibraryTrack(
   uri: string,
   extension: string,
 ): Track {
-  const inferred = inferTrackTextFromMatch(match, {
-    title: tidalTrack.title,
-    artist: tidalTrack.artist,
-  });
   const normalizedExtension = normalizeExtension(extension);
   const quality =
     normalizedExtension === 'flac' || normalizedExtension === 'wav'
@@ -670,8 +769,10 @@ function toLibraryTrack(
   return {
     id: `tidal_${tidalTrack.id}`,
     uri,
-    title: inferred.title || tidalTrack.title,
-    artist: inferred.artist || tidalTrack.artist,
+    // TIDAL is the canonical catalog. Soulseek only supplies the audio file and
+    // technical properties; peer filenames/tags must not replace catalog data.
+    title: tidalTrack.title,
+    artist: tidalTrack.artist,
     artistId: tidalTrack.artistId ? String(tidalTrack.artistId) : undefined,
     album: tidalTrack.album,
     duration: tidalTrack.durationMs,
@@ -686,6 +787,7 @@ function toLibraryTrack(
     source: 'tidal',
     tidalId: tidalTrack.id,
     tidalAlbumId: tidalTrack.albumId,
+    isrc: tidalTrack.isrc,
     dateAdded: Date.now(),
   };
 }
@@ -721,8 +823,18 @@ function isRetryablePeerError(error: unknown): boolean {
   return (
     message.includes('socket cerrado') ||
     message.includes('peer cerro') ||
+    // Node's Soulseek client reports a peer-side reset as `read ECONNRESET`.
+    // Treat it the same as the more human-readable reset messages so the
+    // caller can try the next verified match instead of failing the download.
+    message.includes('econnreset') ||
     message.includes('connection reset') ||
     message.includes('connection closed') ||
+    message.includes('connection refused') ||
+    message.includes('broken pipe') ||
+    message.includes('user not exist') ||
+    message.includes('canal p directo ni indirecto') ||
+    message.includes('queueupload') ||
+    message.includes('no pudo iniciar la descarga') ||
     message.includes('timeout') ||
     message.includes('timed out') ||
     message.includes('queued') ||
@@ -840,15 +952,99 @@ function fromNativeMatch(match: SoulseekNativeMatch): SoulseekTrackMatch {
     sampleRate: match.sampleRate,
     bitDepth: match.bitDepth,
     durationMs: match.durationMs,
+    slotsFree: match.slotsFree,
+    queueLength: match.queueLength,
+    speed: match.speed,
+    host: match.host,
+    port: match.port,
     raw: match,
   };
+}
+
+function fromBridgeMatch(raw: unknown): SoulseekTrackMatch | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const match = raw as Record<string, unknown>;
+  const username = typeof match.username === 'string' ? match.username.trim() : '';
+  const filename = typeof match.filename === 'string' ? match.filename.trim() : '';
+  if (!username || !filename) return null;
+
+  const optionalNumber = (value: unknown): number | undefined => (
+    typeof value === 'number' && Number.isFinite(value) ? value : undefined
+  );
+
+  return {
+    id: typeof match.id === 'string' ? match.id : undefined,
+    username,
+    filename,
+    size: optionalNumber(match.size),
+    extension: typeof match.extension === 'string' ? match.extension : undefined,
+    format: typeof match.format === 'string' ? match.format : undefined,
+    codec: typeof match.codec === 'string' ? match.codec : undefined,
+    bitRate: optionalNumber(match.bitRate),
+    sampleRate: optionalNumber(match.sampleRate),
+    bitDepth: optionalNumber(match.bitDepth),
+    durationMs: optionalNumber(match.durationMs),
+    slotsFree: typeof match.slotsFree === 'boolean'
+      ? match.slotsFree
+      : (typeof match.slots === 'boolean' ? match.slots : undefined),
+    queueLength: optionalNumber(match.queueLength),
+    speed: optionalNumber(match.speed),
+    host: typeof match.host === 'string' ? match.host : undefined,
+    port: optionalNumber(match.port),
+    raw,
+  };
+}
+
+async function readSoulseekBridgeResponse<T>(response: Response): Promise<T> {
+  const text = await response.text();
+  let payload: unknown = {};
+  try {
+    payload = text ? JSON.parse(text) : {};
+  } catch {
+    payload = {};
+  }
+
+  if (!response.ok) {
+    const error = payload && typeof payload === 'object' && 'error' in payload
+      ? String((payload as { error?: unknown }).error ?? '')
+      : '';
+    throw new Error(error || `Soulseek bridge respondio ${response.status}.`);
+  }
+
+  return payload as T;
+}
+
+async function searchBridgeMatches(
+  query: string,
+  signal?: AbortSignal,
+): Promise<SoulseekTrackMatch[]> {
+  const bridgeUrl = getSoulseekBridgeUrl();
+  if (!bridgeUrl) throw new Error('No hay un bridge Soulseek configurado.');
+  const config = await getSoulseekNativeConfigAsync();
+  ensureNotAborted(signal, 'Busqueda cancelada');
+
+  const response = await fetch(`${bridgeUrl}/search`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      query,
+      timeoutMs: config.searchTimeoutMs,
+      maxResults: config.maxResults,
+      credentials: { username: config.username, password: config.password },
+    }),
+    signal,
+  });
+  const payload = await readSoulseekBridgeResponse<{ results?: unknown[] }>(response);
+  ensureNotAborted(signal, 'Busqueda cancelada');
+  return (payload.results ?? [])
+    .map(fromBridgeMatch)
+    .filter((match): match is SoulseekTrackMatch => !!match);
 }
 
 async function searchNativeMatches(
   query: string,
   signal?: AbortSignal,
 ): Promise<SoulseekTrackMatch[]> {
-  ensureNativeAvailable();
   ensureNotAborted(signal, 'Busqueda cancelada');
 
   const config = await getSoulseekNativeConfigAsync();
@@ -884,6 +1080,15 @@ async function searchNativeMatches(
   }
 }
 
+async function searchSoulseekMatches(
+  query: string,
+  signal?: AbortSignal,
+): Promise<SoulseekTrackMatch[]> {
+  return getSoulseekBackend() === 'native'
+    ? searchNativeMatches(query, signal)
+    : searchBridgeMatches(query, signal);
+}
+
 export async function searchSoulseekTrack(
   tidalTrack: TidalTrack,
   qualityPreference: TidalQuality,
@@ -917,7 +1122,7 @@ export async function searchSoulseekTracksByQuery(
   const collected: SoulseekTrackMatch[] = [];
 
   for (const format of formats) {
-    const matches = await searchNativeMatches(`${baseQuery} ${format}`, signal).catch((error: unknown) => {
+    const matches = await searchSoulseekMatches(`${baseQuery} ${format}`, signal).catch((error: unknown) => {
       if (canContinueAfterSearchError(error)) return [] as SoulseekTrackMatch[];
       throw error;
     });
@@ -928,6 +1133,72 @@ export async function searchSoulseekTracksByQuery(
     match,
     track: toSoulseekVirtualTrack(match, parsed, qualityPreference),
   }));
+}
+
+async function downloadSoulseekBridgeFile(
+  match: SoulseekTrackMatch,
+  filename: string,
+  outputUri: string,
+  options: SoulseekDownloadOptions,
+): Promise<string> {
+  const bridgeUrl = getSoulseekBridgeUrl();
+  if (!bridgeUrl) throw new Error('No hay un bridge Soulseek configurado.');
+  const config = await getSoulseekNativeConfigAsync();
+  const rawMatch = match.raw && typeof match.raw === 'object'
+    ? match.raw as Record<string, unknown>
+    : {};
+  const bridgeMatch = {
+    ...rawMatch,
+    username: match.username,
+    filename: match.filename,
+    size: match.size,
+    extension: match.extension,
+    bitRate: match.bitRate,
+  };
+
+  ensureNotAborted(options.signal);
+  const response = await fetch(`${bridgeUrl}/download`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      match: bridgeMatch,
+      filename,
+      credentials: { username: config.username, password: config.password },
+    }),
+    signal: options.signal,
+  });
+  const payload = await readSoulseekBridgeResponse<{ url?: string }>(response);
+  if (!payload.url) throw new Error('El bridge Soulseek no devolvio el archivo descargado.');
+  ensureNotAborted(options.signal);
+
+  const payloadUrl = new URL(payload.url, `${bridgeUrl}/`);
+  const bridgeOrigin = new URL(bridgeUrl).origin;
+  const fileUrl = payloadUrl.pathname.startsWith('/files/')
+    ? `${bridgeOrigin}${payloadUrl.pathname}${payloadUrl.search}`
+    : payloadUrl.toString();
+  const task = FileSystem.createDownloadResumable(
+    fileUrl,
+    outputUri,
+    {},
+    progress => {
+      if (!progress.totalBytesExpectedToWrite) return;
+      const fraction = progress.totalBytesWritten / progress.totalBytesExpectedToWrite;
+      options.onProgress?.(Math.min(0.95, 0.12 + (fraction * 0.83)));
+    },
+  );
+  const cancelDownload = () => {
+    void task.cancelAsync();
+  };
+  options.signal?.addEventListener('abort', cancelDownload, { once: true });
+
+  try {
+    const result = await task.downloadAsync();
+    ensureNotAborted(options.signal);
+    if (!result?.uri) throw new Error('El bridge Soulseek no pudo transferir el archivo al dispositivo.');
+    return result.uri;
+  } finally {
+    options.signal?.removeEventListener('abort', cancelDownload);
+  }
 }
 
 async function downloadSoulseekTrackWithMatch(
@@ -948,7 +1219,7 @@ async function downloadSoulseekTrackWithMatch(
     throw new Error('La descarga Soulseek en esta calidad solo acepta MP3.');
   }
 
-  ensureNativeAvailable();
+  const backend = getSoulseekBackend();
   ensureNotAborted(options.signal);
 
   const extension = getMatchExtension(match);
@@ -961,7 +1232,6 @@ async function downloadSoulseekTrackWithMatch(
     await FileSystem.deleteAsync(outputUri, { idempotent: true });
   }
 
-  const nativeConfig = await getSoulseekNativeConfigAsync();
   const nativeMatch = (match.raw && typeof match.raw === 'object')
     ? (match.raw as SoulseekNativeMatch)
     : {
@@ -975,34 +1245,45 @@ async function downloadSoulseekTrackWithMatch(
       sampleRate: match.sampleRate,
       bitDepth: match.bitDepth,
       durationMs: match.durationMs,
+      slotsFree: match.slotsFree,
+      queueLength: match.queueLength,
+      speed: match.speed,
+      host: match.host,
+      port: match.port,
     } satisfies SoulseekNativeMatch;
 
   options.onProgress?.(0.1);
-  const unbindAbort = bindAbort(options.signal);
+  const unbindAbort = backend === 'native' ? bindAbort(options.signal) : () => {};
 
   try {
     ensureNotAborted(options.signal);
 
     const outputPath = normalizeFileUriToPath(outputUri);
-    const expectedSize = nativeMatch.size || match.size || 0;
-    const stopProgressPolling = startSoulseekFileProgressPolling(
-      outputUri,
-      expectedSize,
-      options.onProgress,
-      options.signal,
-    );
-    let nativeResult: Awaited<ReturnType<typeof downloadSoulseekNativeFile>>;
+    let savedUri: string;
 
-    try {
-      nativeResult = await downloadSoulseekNativeFile(nativeConfig, nativeMatch, outputPath);
-    } finally {
-      stopProgressPolling();
+    if (backend === 'native') {
+      const nativeConfig = await getSoulseekNativeConfigAsync();
+      const expectedSize = nativeMatch.size || match.size || 0;
+      const stopProgressPolling = startSoulseekFileProgressPolling(
+        outputUri,
+        expectedSize,
+        options.onProgress,
+        options.signal,
+      );
+      let nativeResult: Awaited<ReturnType<typeof downloadSoulseekNativeFile>>;
+
+      try {
+        nativeResult = await downloadSoulseekNativeFile(nativeConfig, nativeMatch, outputPath);
+      } finally {
+        stopProgressPolling();
+      }
+      savedUri = normalizeNativePathToUri(nativeResult.path || outputPath);
+    } else {
+      savedUri = await downloadSoulseekBridgeFile(match, filename, outputUri, options);
     }
 
     options.onProgress?.(0.95);
     ensureNotAborted(options.signal);
-
-    const savedUri = normalizeNativePathToUri(nativeResult.path || outputPath);
 
     const info = await FileSystem.getInfoAsync(savedUri);
     if (!info.exists || !info.size || info.size <= 0) {

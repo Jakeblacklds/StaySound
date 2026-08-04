@@ -297,7 +297,7 @@ index 0000000..0c96784
 +    }
 +}
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index b495b5a..4998096 100644
+index b495b5a..06aba26 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -3,6 +3,7 @@ package com.doublesymmetry.trackplayer.service
@@ -317,21 +317,24 @@ index b495b5a..4998096 100644
  import com.doublesymmetry.kotlinaudio.models.*
  import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
  import com.doublesymmetry.trackplayer.HeadlessJsMediaService
-@@ -51,6 +54,7 @@ import com.google.common.util.concurrent.Futures
+@@ -51,7 +54,9 @@ import com.google.common.util.concurrent.Futures
  import com.google.common.util.concurrent.ListenableFuture
  import kotlinx.coroutines.*
  import kotlinx.coroutines.flow.flow
 +import org.json.JSONObject
  import timber.log.Timber
++import java.io.File
  import java.util.concurrent.TimeUnit
  import kotlin.system.exitProcess
-@@ -70,6 +74,31 @@ class MusicService : HeadlessJsMediaService() {
+ 
+@@ -70,6 +75,32 @@ class MusicService : HeadlessJsMediaService() {
      private var lastWake: Long = 0
      var onStartCommandIntentValid: Boolean = true
  
 +    private data class AutoCatalogTrack(
 +        val id: String,
 +        val uri: String,
++        val fallbackUri: String?,
 +        val title: String,
 +        val artist: String,
 +        val album: String,
@@ -357,7 +360,7 @@ index b495b5a..4998096 100644
      fun acquireWakeLock() {
          acquireWakeLockNow(this)
      }
-@@ -139,6 +168,34 @@ class MusicService : HeadlessJsMediaService() {
+@@ -139,6 +170,34 @@ class MusicService : HeadlessJsMediaService() {
              return (player.currentItem as TrackAudioItem?)?.track
          }
  
@@ -392,7 +395,7 @@ index b495b5a..4998096 100644
      val state
          get() = player.playerState
  
-@@ -209,6 +266,17 @@ class MusicService : HeadlessJsMediaService() {
+@@ -209,6 +268,17 @@ class MusicService : HeadlessJsMediaService() {
              wakeMode = playerOptions?.getInt(WAKE_MODE, 0) ?: 0
          )
          player = QueuedAudioPlayer(this@MusicService, options)
@@ -410,7 +413,7 @@ index b495b5a..4998096 100644
          fakePlayer.release()
          mediaSession.player = player.forwardingPlayer
          observeEvents()
-@@ -857,6 +925,277 @@ class MusicService : HeadlessJsMediaService() {
+@@ -857,6 +927,288 @@ class MusicService : HeadlessJsMediaService() {
          return null
      }
  
@@ -443,6 +446,7 @@ index b495b5a..4998096 100644
 +                            AutoCatalogTrack(
 +                                id = id,
 +                                uri = item.optString("uri"),
++                                fallbackUri = item.optString("fallbackUri").takeIf { it.isNotBlank() },
 +                                title = item.optString("title", "Unknown Title"),
 +                                artist = item.optString("artist", "Unknown Artist"),
 +                                album = item.optString("album", "Unknown Album"),
@@ -536,9 +540,13 @@ index b495b5a..4998096 100644
 +    }
 +
 +    private fun buildResolvedPlayableItem(track: AutoCatalogTrack): MediaItem {
++        val playbackUri = track.uri.takeIf(::isReadableFileUri)
++            ?: track.fallbackUri
++            ?: track.uri
++
 +        return MediaItem.Builder()
 +            .setMediaId(track.id)
-+            .setUri(track.uri)
++            .setUri(playbackUri)
 +            .setMediaMetadata(
 +                androidx.media3.common.MediaMetadata.Builder()
 +                    .setIsBrowsable(false)
@@ -553,12 +561,18 @@ index b495b5a..4998096 100644
 +            .build()
 +    }
 +
++    private fun isReadableFileUri(uri: String): Boolean {
++        if (!uri.startsWith("file://", ignoreCase = true)) return true
++        return runCatching { File(Uri.parse(uri).path.orEmpty()).canRead() }.getOrDefault(false)
++    }
++
 +    private fun resolveRequestedMediaItems(mediaItems: List<MediaItem>): List<MediaItem> {
 +        val snapshot = loadAutoCatalogSnapshot()
 +        return mediaItems.mapNotNull { item ->
 +            val mediaId = item.mediaId
 +            if (!mediaId.isNullOrBlank()) {
 +                snapshot.tracksById[mediaId]?.let(::buildResolvedPlayableItem)
++                    ?: item.localConfiguration?.uri?.let { item }
 +            } else {
 +                item.localConfiguration?.uri?.let { item }
 +            }
@@ -688,7 +702,7 @@ index b495b5a..4998096 100644
      @MainThread
      inner class MusicBinder : Binder() {
          val service = this@MusicService
-@@ -900,10 +1239,13 @@ class MusicService : HeadlessJsMediaService() {
+@@ -900,10 +1252,13 @@ class MusicService : HeadlessJsMediaService() {
                      "com.google.android.projection.gearhead"
                  )
              ) {
@@ -706,7 +720,7 @@ index b495b5a..4998096 100644
              }
              return if (
                  isMediaNotificationController ||
-@@ -965,6 +1307,48 @@ class MusicService : HeadlessJsMediaService() {
+@@ -965,6 +1320,57 @@ class MusicService : HeadlessJsMediaService() {
              return super.onPlaybackResumption(mediaSession, controller)
          }
  
@@ -715,6 +729,10 @@ index b495b5a..4998096 100644
 +            controller: MediaSession.ControllerInfo,
 +            mediaItems: List<MediaItem>
 +        ): ListenableFuture<List<MediaItem>> {
++            if (resolveCatalogTracks(mediaItems).isEmpty()) {
++                return super.onAddMediaItems(session, controller, mediaItems)
++            }
++
 +            val resolvedItems = resolveRequestedMediaItems(mediaItems)
 +            return if (resolvedItems.isNotEmpty()) {
 +                Futures.immediateFuture(resolvedItems)
@@ -730,6 +748,11 @@ index b495b5a..4998096 100644
 +            startIndex: Int,
 +            startPositionMs: Long
 +        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
++            val resolvedTracks = resolveCatalogTracks(mediaItems)
++            if (resolvedTracks.isEmpty()) {
++                return super.onSetMediaItems(session, controller, mediaItems, startIndex, startPositionMs)
++            }
++
 +            val resolvedItems = resolveRequestedMediaItems(mediaItems)
 +            if (resolvedItems.isEmpty()) {
 +                return super.onSetMediaItems(session, controller, mediaItems, startIndex, startPositionMs)
@@ -738,11 +761,11 @@ index b495b5a..4998096 100644
 +            val safeIndex = startIndex.coerceIn(0, resolvedItems.lastIndex)
 +            val safePosition = if (startPositionMs >= 0) startPositionMs else C.TIME_UNSET
 +
-+            // IMPORTANT: only resolve the items (which now carry a playable URI) and let
-+            // Media3 set + prepare + play them on the session player. Do NOT also drive
-+            // playback manually via playCatalogSelection(): the two paths fight over the
-+            // same player (manual clear/add/play vs. the framework re-setting these items),
-+            // which reset the queue mid-load and resulted in silent playback from the car.
++            // RNTP's forwarding player intentionally ignores setMediaItems(), so
++            // catalog requests must update the underlying queue directly. Limit
++            // this path to known catalog IDs to avoid touching regular app queues.
++            playCatalogSelection(resolvedTracks, safeIndex)
++
 +            return Futures.immediateFuture(
 +                MediaSession.MediaItemsWithStartPosition(
 +                    resolvedItems,
@@ -755,7 +778,7 @@ index b495b5a..4998096 100644
          override fun onSetRating(
              session: MediaSession,
              controller: MediaSession.ControllerInfo,
-@@ -976,6 +1360,44 @@ class MusicService : HeadlessJsMediaService() {
+@@ -976,6 +1382,52 @@ class MusicService : HeadlessJsMediaService() {
              }
              return super.onSetRating(session, controller, rating)
          }
@@ -792,15 +815,23 @@ index b495b5a..4998096 100644
 +            params: LibraryParams?
 +        ): ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> {
 +            val children = getCatalogChildren(parentId)
++            val fromIndex = (page.toLong() * pageSize.toLong())
++                .coerceAtLeast(0)
++                .coerceAtMost(children.size.toLong())
++                .toInt()
++            val toIndex = (fromIndex.toLong() + pageSize.coerceAtLeast(0).toLong())
++                .coerceAtMost(children.size.toLong())
++                .toInt()
++            val pageItems = children.subList(fromIndex, toIndex)
 +            return Futures.immediateFuture(
-+                LibraryResult.ofItemList(ImmutableList.copyOf(children), params)
++                LibraryResult.ofItemList(ImmutableList.copyOf(pageItems), params)
 +            )
 +        }
 +        // ────────────────────────────────────────────────────────────────────
      }
  
      private fun getPendingIntentFlags(): Int {
-@@ -1029,5 +1451,17 @@ class MusicService : HeadlessJsMediaService() {
+@@ -1029,5 +1481,17 @@ class MusicService : HeadlessJsMediaService() {
  
          const val DEFAULT_JUMP_INTERVAL = 15.0
          const val DEFAULT_STOP_FOREGROUND_GRACE_PERIOD = 5

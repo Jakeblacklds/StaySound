@@ -96,8 +96,8 @@ export function SegmentedTabs<T extends string = string>({
                             style={[
                                 styles.label,
                                 {
-                                    color: selected ? theme.colors.onBackground : theme.colors.onSurfaceVariant,
-                                    opacity: selected ? 1 : 0.48,
+                                    color: selected ? accent : theme.colors.onSurfaceVariant,
+                                    opacity: selected ? 1 : 0.62,
                                     fontFamily: selected
                                         ? theme.typography.fontFamily.bold
                                         : theme.typography.fontFamily.medium,
@@ -121,24 +121,29 @@ export function SegmentedTabs<T extends string = string>({
 const styles = StyleSheet.create({
     row: {
         flexDirection: 'row',
-        alignItems: 'flex-end',
-        gap: 24,
+        alignItems: 'center',
+        gap: 18,
         position: 'relative',
+        alignSelf: 'flex-start',
+        padding: 0,
+        backgroundColor: 'transparent',
     },
     tab: {
-        paddingTop: 2,
-        paddingBottom: 12,
+        paddingVertical: 10,
+        paddingHorizontal: 0,
+        zIndex: 1,
     },
     label: {
-        fontSize: 19,
-        letterSpacing: -0.4,
+        fontSize: 14,
+        lineHeight: 18,
+        letterSpacing: -0.1,
     },
     indicator: {
         position: 'absolute',
-        bottom: 2,
+        height: 2,
+        bottom: 1,
         left: 0,
-        height: 2.5,
-        borderRadius: 2,
+        borderRadius: 1,
     },
 });
 

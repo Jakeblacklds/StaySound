@@ -9,14 +9,17 @@ import {
   loadPersistedLibraryAsync,
   loadPersistedPlaylists,
   loadPersistedSettings,
+  loadRecentlyPlayed,
   savePersistedLibrary,
   saveImportedLibrary,
   migrateLegacyLibraryArtifacts,
   savePersistedPlaylists,
   savePersistedSettings,
+  saveRecentlyPlayed,
   type PersistedWebTrack,
 } from '../storage/webPersistence';
 import { cacheRemoteArtwork, clearArtworkCache, loadArtworkUrls, saveArtworkBlob } from '../storage/webArtworkCache';
+import { desktopMusicFileUrl, isTauriDesktop, readDesktopMusicFile } from '../desktop/tauriMusicLibrary';
 import {
   clearTrackFileHandles,
   getAllTrackHandleKeys,
@@ -27,6 +30,12 @@ import {
 import { getFileHandleByRelativePath, getFolderHandle, verifyPermission } from './webFolderSync';
 import { webAudioEngine, type WebAudioState } from '../audio/webAudioEngine';
 
+export interface ArtworkRecoveryProgress {
+  processed: number;
+  total: number;
+  recovered: number;
+}
+
 interface WebLibraryState {
   tracks: Map<string, Track>;
   albums: Map<string, Album>;
@@ -36,6 +45,7 @@ interface WebLibraryState {
   isImporting: boolean;
   importMessage: string | null;
   skippedFiles: number;
+  recentlyPlayedIds: string[];
   audio: WebAudioState;
   addImportedTracks: (tracks: ImportedWebTrack[], skipped: number, options?: { silent?: boolean }) => Promise<void>;
   addTrack: (track: Track, message?: string) => Promise<void>;
@@ -47,6 +57,7 @@ interface WebLibraryState {
   clearLibrary: () => void;
   setQuery: (query: string) => void;
   setImporting: (isImporting: boolean, message?: string | null) => void;
+  recordRecentlyPlayed: (trackId: string) => void;
   playTrack: (track: Track, queue?: Track[]) => void;
   togglePlayback: () => void;
   next: () => void;
@@ -57,14 +68,14 @@ interface WebLibraryState {
   cycleRepeatMode: () => void;
   toggleShuffle: () => void;
   hydrateAudio: (audio: WebAudioState) => void;
-  recoverMissingArtwork: () => Promise<number>;
+  recoverMissingArtwork: (onProgress?: (progress: ArtworkRecoveryProgress) => void) => Promise<number>;
   hydrateArtistPhotos: () => Promise<number>;
   hydrateLibrary: () => Promise<void>;
 }
 
 function toPersistedTrack(track: Track): PersistedWebTrack {
   const webTrack = track as ImportedWebTrack & { fileHandle?: FileSystemFileHandle; needsRelink?: boolean };
-  const canRestoreFromHandle = Boolean(webTrack.fileHandle);
+  const canRestoreFromDisk = Boolean(webTrack.fileHandle || (isTauriDesktop() && webTrack.nativePath));
   const { uri: _uri, objectUrl: _objectUrl, fileHandle: _fileHandle, relinkable: _relinkable, ...persistableTrack } = webTrack;
   return {
     ...persistableTrack,
@@ -75,7 +86,7 @@ function toPersistedTrack(track: Track): PersistedWebTrack {
     fileSize: webTrack.fileSize ?? 0,
     fileType: webTrack.fileType ?? '',
     relativePath: track.relativePath,
-    needsRelink: webTrack.needsRelink ?? !canRestoreFromHandle,
+    needsRelink: webTrack.needsRelink ?? !canRestoreFromDisk,
   };
 }
 
@@ -119,6 +130,7 @@ function trackKeepScore(track: Track): number {
   let score = 0;
   if (!isTrackRelinkNeeded(track)) score += 1000;
   if (webTrack.fileHandle) score += 400;
+  if (webTrack.nativePath) score += 400;
   if (track.artwork) score += 120;
   if (track.artworkThumb) score += 40;
   if (track.tidalId) score += 30;
@@ -151,6 +163,12 @@ function mergeDuplicateTracks(preferred: Track, fallback: Track): Track {
     fileSize: preferredWeb.fileSize || fallbackWeb.fileSize,
     fileType: preferredWeb.fileType || fallbackWeb.fileType,
     fileHandle: preferredWeb.fileHandle || fallbackWeb.fileHandle,
+    nativePath: preferredWeb.nativePath || fallbackWeb.nativePath,
+    // Re-downloading or re-importing an existing song makes it recent again.
+    // Without this, duplicate consolidation kept the survivor's old timestamp
+    // and the completed download did not appear in Inicio.
+    dateAdded: Math.max(preferred.dateAdded || 0, fallback.dateAdded || 0),
+    downloadedAt: Math.max(preferred.downloadedAt || 0, fallback.downloadedAt || 0) || undefined,
     needsRelink: isTrackRelinkNeeded(preferred) && isTrackRelinkNeeded(fallback),
   } as Track;
 }
@@ -259,6 +277,26 @@ async function recoverLocalArtwork(
   track: Track,
   artworkKey: string,
 ): Promise<{ artwork: string; artworkKey: string } | undefined> {
+  const nativeTrack = track as ImportedWebTrack;
+  if (isTauriDesktop() && nativeTrack.nativePath) {
+    try {
+      const bytes = await readDesktopMusicFile(nativeTrack.nativePath);
+      const fileBytes = new Uint8Array(bytes.byteLength);
+      fileBytes.set(bytes);
+      const file = new File([fileBytes.buffer], nativeTrack.fileName || track._filename || track.title, {
+        type: nativeTrack.fileType || 'application/octet-stream',
+      });
+      const extracted = await extractEmbeddedArtwork(file, {
+        album: track.album,
+        albumId: track.albumId || artworkKey,
+        trackId: track.id,
+      });
+      if (extracted) return { artwork: extracted.url, artworkKey: extracted.artworkKey };
+    } catch (error) {
+      console.warn(`[WebLibrary] No se pudo leer artwork nativo de "${track.title}"`, error);
+    }
+  }
+
   let handle = await getTrackFileHandle(track.id);
   const relativePath = (track as Track & { relativePath?: string }).relativePath;
   let folder: FileSystemDirectoryHandle | null = null;
@@ -330,6 +368,7 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
   isImporting: false,
   importMessage: null,
   skippedFiles: 0,
+  recentlyPlayedIds: loadRecentlyPlayed(),
   audio: webAudioEngine.getState(),
 
   addImportedTracks: async (tracks, skipped, options = {}) => {
@@ -383,7 +422,9 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
 
   addTrack: async (track, message) => {
     const nextTracks = new Map(get().tracks);
-    nextTracks.set(track.id, track);
+    // addTrack is only used by completed downloads in the desktop/web shell.
+    // Keep a separate timestamp so imported files are not mislabeled as downloads.
+    nextTracks.set(track.id, { ...track, downloadedAt: Date.now() } as Track);
     const consolidated = consolidateDuplicateTracks(nextTracks);
     const nextPlaylists = remapPlaylistTrackIds(get().playlists, consolidated.idRemap);
     const collections = rebuildCollections(consolidated.tracks, get().artists);
@@ -403,53 +444,47 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
     });
   },
 
-  recoverMissingArtwork: async () => {
+  recoverMissingArtwork: async (onProgress) => {
     const currentTracks = get().tracks;
     const nextTracks = new Map(currentTracks);
+    const candidates = Array.from(currentTracks.values()).filter(track => !track.artwork);
     let recovered = 0;
     let localRecovered = 0;
     let remoteRecovered = 0;
     let unavailable = 0;
     const recoveredByKey = new Map<string, { artwork: string; artworkKey: string } | null>();
 
-    for (const track of currentTracks.values()) {
-      const remoteArtwork = track.artwork?.startsWith('http') ? track.artwork : undefined;
-      if (track.artwork && !remoteArtwork) continue;
+    onProgress?.({ processed: 0, total: candidates.length, recovered: 0 });
+
+    for (let index = 0; index < candidates.length; index += 1) {
+      const track = candidates[index];
       const artworkKey = (track as ImportedWebTrack).artworkKey || track.albumId || track.id;
       let artwork = recoveredByKey.get(artworkKey);
 
       if (artwork === undefined) {
         // This is an explicit user action, so it may read just the missing
         // tracks. Opening the app never performs this work or scans folders.
-        if (remoteArtwork) {
-          const cachedArtwork = await cacheRemoteArtwork(artworkKey, remoteArtwork);
+        const localArtwork = await recoverLocalArtwork(track, artworkKey);
+        if (localArtwork) {
+          artwork = localArtwork;
+          localRecovered += 1;
+        } else {
+          const remoteUrl = await resolveTidalArtworkForTrack(track).catch(() => undefined);
+          const cachedArtwork = await cacheRemoteArtwork(artworkKey, remoteUrl);
           artwork = cachedArtwork ? { artwork: cachedArtwork, artworkKey } : null;
           if (cachedArtwork) remoteRecovered += 1;
-        } else {
-          // This is an explicit user action, so it may read just the missing
-          // tracks. Opening the app never performs this work or scans folders.
-          const localArtwork = await recoverLocalArtwork(track, artworkKey);
-          if (localArtwork) {
-            artwork = localArtwork;
-            localRecovered += 1;
-          } else {
-            const remoteUrl = await resolveTidalArtworkForTrack(track).catch(() => undefined);
-            const cachedArtwork = await cacheRemoteArtwork(artworkKey, remoteUrl);
-            artwork = cachedArtwork ? { artwork: cachedArtwork, artworkKey } : null;
-            if (cachedArtwork) remoteRecovered += 1;
-          }
         }
         recoveredByKey.set(artworkKey, artwork);
       }
 
       if (!artwork) {
-        // A pre-existing remote URL is still visible; leave it untouched when
-        // its host cannot be cached locally right now.
-        if (!remoteArtwork) unavailable += 1;
+        unavailable += 1;
+        onProgress?.({ processed: index + 1, total: candidates.length, recovered });
         continue;
       }
       nextTracks.set(track.id, { ...track, ...artwork } as Track);
       recovered += 1;
+      onProgress?.({ processed: index + 1, total: candidates.length, recovered });
     }
 
     if (!recovered) {
@@ -522,7 +557,14 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
 
     for (const track of persisted.tracks) {
       if (!merged.has(track.id)) {
-        merged.set(track.id, { ...track, uri: '', needsRelink: true } as Track & { needsRelink: true });
+        const nativePath = track.nativePath;
+        const nativeUri = nativePath && isTauriDesktop() ? desktopMusicFileUrl(nativePath) : '';
+        merged.set(track.id, {
+          ...track,
+          uri: nativeUri,
+          needsRelink: !nativeUri,
+          relinkable: Boolean(nativeUri),
+        } as Track);
         changed = true;
       }
     }
@@ -530,7 +572,7 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
     const keysNeeded = new Set<string>();
     for (const track of merged.values()) {
       const key = (track as Track & { artworkKey?: string }).artworkKey;
-      if (key && !track.artwork) keysNeeded.add(key);
+      if (key && (!track.artwork || /^https?:/i.test(track.artwork))) keysNeeded.add(key);
     }
 
     const artworkUrls = await loadArtworkUrls(keysNeeded);
@@ -542,9 +584,14 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
       // (no "Reimportar") — either from a saved per-track handle, or from the
       // connected folder via the track's relative path. They relink on play.
       const relativePath = (track as Track & { relativePath?: string }).relativePath;
-      const relinkable = relinkableIds.has(id) || (hasFolder && Boolean(relativePath));
+      const nativePath = (track as ImportedWebTrack).nativePath;
+      const relinkable = Boolean(nativePath && isTauriDesktop())
+        || relinkableIds.has(id)
+        || (hasFolder && Boolean(relativePath));
       const patch: Partial<Track> & { relinkable?: boolean } = {};
-      if (cachedUrl && !track.artwork) patch.artwork = cachedUrl;
+      // A durable local Blob is more reliable than a previously persisted
+      // remote URL and also repairs legacy entries whose CDN image now fails.
+      if (cachedUrl && cachedUrl !== track.artwork) patch.artwork = cachedUrl;
       if (relinkable && !(track as Track & { relinkable?: boolean }).relinkable) patch.relinkable = true;
       if (Object.keys(patch).length > 0) {
         next.set(id, { ...track, ...patch });
@@ -576,6 +623,10 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
   createPlaylist: (name, trackIds = [], description) => {
     const trimmed = name.trim();
     if (!trimmed) return null;
+    const existing = get().playlists.find(
+      playlist => playlist.name.localeCompare(trimmed, undefined, { sensitivity: 'accent' }) === 0,
+    );
+    if (existing) return existing;
     const now = Date.now();
     const playlist: Playlist = {
       id: `playlist-${now}-${Math.random().toString(36).slice(2, 8)}`,
@@ -601,6 +652,11 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
   renamePlaylist: (playlistId, name) => {
     const trimmed = name.trim();
     if (!trimmed) return;
+    const duplicate = get().playlists.some(
+      playlist => playlist.id !== playlistId
+        && playlist.name.localeCompare(trimmed, undefined, { sensitivity: 'accent' }) === 0,
+    );
+    if (duplicate) return;
     const playlists = get().playlists.map(playlist =>
       playlist.id === playlistId
         ? { ...playlist, name: trimmed, updatedAt: Date.now() }
@@ -655,6 +711,12 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
 
   setQuery: query => set({ query }),
   setImporting: (isImporting, message = null) => set({ isImporting, importMessage: message }),
+  recordRecentlyPlayed: trackId => {
+    if (!trackId) return;
+    const recentlyPlayedIds = [trackId, ...get().recentlyPlayedIds.filter(id => id !== trackId)].slice(0, 24);
+    saveRecentlyPlayed(recentlyPlayedIds);
+    set({ recentlyPlayedIds });
+  },
   playTrack: (track, queue) => void webAudioEngine.play(track, queue),
   togglePlayback: () => webAudioEngine.toggle(),
   next: () => webAudioEngine.next(),
@@ -703,6 +765,13 @@ const relinkedUrlCache = new Map<string, string>();
 webAudioEngine.setTrackUriResolver(async track => {
   const cached = relinkedUrlCache.get(track.id);
   if (cached) return cached;
+
+  const nativePath = (track as ImportedWebTrack).nativePath;
+  if (nativePath && isTauriDesktop()) {
+    const url = desktopMusicFileUrl(nativePath);
+    relinkedUrlCache.set(track.id, url);
+    return url;
+  }
 
   // 1) Fast path: a per-track handle saved at import/scan time.
   let handle = await getTrackFileHandle(track.id);

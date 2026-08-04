@@ -12,6 +12,7 @@ internal class PeerSearchConnection(
   private val socket: Socket,
   private val onMatch: (SoulseekMatch) -> Unit,
   private val onTransferRequest: ((IncomingTransferRequest) -> Unit)? = null,
+  private val onIdentity: ((String, PeerSearchConnection) -> Unit)? = null,
 ) : Closeable {
   private val reader = SlskPacketReader(socket, socket.getInputStream())
   private val output = socket.getOutputStream()
@@ -24,6 +25,8 @@ internal class PeerSearchConnection(
       output.flush()
     }
   }
+
+  fun isOpen(): Boolean = running.get() && socket.isConnected && !socket.isClosed
 
   fun start() {
     worker = Thread {
@@ -39,8 +42,12 @@ internal class PeerSearchConnection(
         if (packet.isEmpty()) continue
 
         val first = packet[0].toInt() and 0xFF
-        if (first == 0 || first == 1) {
-          // peer init / pierce firewall handshake message
+        if (first == 1) {
+          handlePeerInitPacket(packet)
+          continue
+        }
+        if (first == 0) {
+          // pierce firewall handshake message
           continue
         }
 
@@ -70,6 +77,15 @@ internal class PeerSearchConnection(
   override fun close() {
     running.set(false)
     runCatching { socket.close() }
+  }
+
+  private fun handlePeerInitPacket(packet: ByteArray) {
+    val parser = SlskMessageParser(packet)
+    if (parser.readUInt8() != 1) return
+    val username = parser.readStringSafe()
+    val type = parser.readStringSafe()
+    if (username.isBlank() || !type.equals("P", ignoreCase = true)) return
+    onIdentity?.invoke(username, this)
   }
 
   private fun handleTransferRequestPacket(parser: SlskMessageParser) {

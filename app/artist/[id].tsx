@@ -3,15 +3,15 @@
  */
 
 import { AlbumCard, ArtistAbout, CustomIcon, MemoizedTrackListItem } from '@/src/components/ui';
+import { TidalAtmosphere } from '@/src/components/tidal';
 import { useArtistInfo, useDynamicColors } from '@/src/hooks';
 import { useLibraryStore, usePlayerStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Album, Track } from '@/src/types';
 import { BlurView } from 'expo-blur';
-import { LinearGradient } from 'expo-linear-gradient';
 import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
-import { Image, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
+import { Image, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { IconButton, Text } from 'react-native-paper';
 import Animated, { FadeIn, FadeInDown, FadeInRight, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -57,13 +57,6 @@ export default function ArtistDetailScreen() {
         },
     });
 
-    const headerStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(scrollY.value, [0, HEADER_HEIGHT - 100], [1, 0]),
-        transform: [
-            { translateY: interpolate(scrollY.value, [0, HEADER_HEIGHT], [0, -HEADER_HEIGHT / 2]) },
-        ],
-    }));
-
     const avatarStyle = useAnimatedStyle(() => ({
         transform: [
             { scale: interpolate(scrollY.value, [-100, 0, 100], [1.3, 1, 0.8], 'clamp') },
@@ -88,32 +81,9 @@ export default function ArtistDetailScreen() {
     }
 
     return (
-        <View style={[styles.container, { backgroundColor: artistColors.background }]}>
+        <View style={styles.container}>
             <StatusBar barStyle={artistColors.isDark ? 'light-content' : 'dark-content'} />
-
-            {artworkUri ? (
-                <Animated.View style={[StyleSheet.absoluteFill, headerStyle]}>
-                    <Image source={{ uri: artworkUri }} style={styles.heroBackdrop} blurRadius={28} />
-                </Animated.View>
-            ) : null}
-
-            <Animated.View style={[StyleSheet.absoluteFill, headerStyle]}>
-                <LinearGradient
-                    colors={['rgba(0,0,0,0)', artistColors.primary + '2A', artistColors.background]}
-                    style={StyleSheet.absoluteFill}
-                />
-            </Animated.View>
-
-            {/* Artist Avatar */}
-            <Animated.View style={[styles.avatarContainer, { paddingTop: insets.top + HERO_TOP_OFFSET, paddingHorizontal: 24 }, avatarStyle]}>
-                <View style={[styles.avatar, { backgroundColor: theme.colors.surfaceVariant }]}>
-                    {artworkUri ? (
-                        <Image source={{ uri: artworkUri }} style={styles.avatarImage} />
-                    ) : (
-                        <CustomIcon name="Artista" size={100} color={theme.colors.onSurfaceVariant} />
-                    )}
-                </View>
-            </Animated.View>
+            <TidalAtmosphere sourceUri={artworkUri} mode={artworkUri ? 'artwork' : 'tint'} />
 
             {/* Back Button */}
             <View style={[styles.backButton, { top: insets.top + BACK_BUTTON_TOP_OFFSET }]}>
@@ -132,30 +102,36 @@ export default function ArtistDetailScreen() {
                 scrollEventThrottle={16}
                 contentContainerStyle={[
                     styles.content,
-                    { paddingTop: HEADER_HEIGHT + CONTENT_TOP_GAP }
+                    { paddingTop: insets.top + 72 }
                 ]}
                 showsVerticalScrollIndicator={false}
             >
-                {/* Artist Info */}
-                <Animated.View entering={FadeIn.delay(200)} style={styles.artistInfo}>
-                    <Text
-                        variant="labelMedium"
-                        style={[styles.artistKicker, { color: artistColors.isDark ? 'rgba(255,255,255,0.58)' : 'rgba(0,0,0,0.46)' }]}
-                    >
-                        ARTISTA
-                    </Text>
-                    <Text
-                        variant="headlineLarge"
-                        style={[styles.artistName, { color: artistColors.text }]}
-                    >
-                        {artist.name}
-                    </Text>
-                    <Text
-                        variant="bodyMedium"
-                        style={[styles.artistMeta, { color: artistColors.isDark ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.56)' }]}
-                    >
-                        {tracks.length} songs • {albums.length} albums
-                    </Text>
+                <Animated.View entering={FadeIn.delay(120)} style={styles.artistHero}>
+                    <View style={[styles.avatar, { backgroundColor: theme.colors.surfaceVariant }]}>
+                        {artworkUri ? (
+                            <Image source={{ uri: artworkUri }} style={styles.avatarImage} />
+                        ) : (
+                            <CustomIcon name="Artista" size={72} color={theme.colors.onSurfaceVariant} />
+                        )}
+                    </View>
+                    <View style={styles.artistInfo}>
+                        <Text style={[styles.artistKicker, { color: artistColors.primary }]}>ARTISTA</Text>
+                        <Text style={[styles.artistName, { color: artistColors.text }]} numberOfLines={3}>
+                            {artist.name}
+                        </Text>
+                        <Text style={[styles.artistMeta, { color: artistColors.isDark ? 'rgba(255,255,255,0.68)' : 'rgba(0,0,0,0.56)' }]}>
+                            {tracks.length} canciones · {albums.length} álbumes
+                        </Text>
+                        {topTracks[0] ? (
+                            <Pressable
+                                onPress={() => handleTrackPress(topTracks[0])}
+                                style={[styles.artistPlayButton, { backgroundColor: artistColors.primary }]}
+                            >
+                                <CustomIcon name="Play" size={18} color={artistColors.onPrimary} />
+                                <Text style={[styles.artistPlayLabel, { color: artistColors.onPrimary }]}>Reproducir</Text>
+                            </Pressable>
+                        ) : null}
+                    </View>
                 </Animated.View>
 
                 {/* Top Songs */}
@@ -234,26 +210,16 @@ const styles = StyleSheet.create({
     container: {
         flex: 1,
     },
-    heroBackdrop: {
-        ...StyleSheet.absoluteFillObject,
-        width: '100%',
-        height: HEADER_HEIGHT + 140,
-    },
-    avatarContainer: {
-        position: 'absolute',
-        left: 0,
-        right: 0,
-        alignItems: 'flex-start',
-        zIndex: 10,
-    },
     avatar: {
-        width: AVATAR_SIZE,
-        height: AVATAR_SIZE,
-        borderRadius: 30,
+        width: '45%',
+        aspectRatio: 1,
+        borderRadius: 32,
         alignItems: 'center',
         justifyContent: 'center',
         overflow: 'hidden',
-        elevation: 12,
+        borderWidth: StyleSheet.hairlineWidth,
+        borderColor: 'rgba(255,255,255,0.22)',
+        elevation: 10,
         shadowColor: '#000',
         shadowOffset: { width: 0, height: 6 },
         shadowOpacity: 0.25,
@@ -275,22 +241,45 @@ const styles = StyleSheet.create({
     content: {
         paddingBottom: 120,
     },
+    artistHero: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 18,
+        paddingHorizontal: 18,
+        marginBottom: 38,
+    },
     artistInfo: {
+        flex: 1,
         alignItems: 'flex-start',
-        paddingHorizontal: 24,
-        marginBottom: 28,
     },
     artistKicker: {
         letterSpacing: 1.4,
         marginBottom: 8,
     },
     artistName: {
-        fontWeight: 'bold',
+        fontSize: 31,
+        lineHeight: 32,
+        fontWeight: '900',
         textAlign: 'left',
-        letterSpacing: -1.1,
+        letterSpacing: -1.25,
     },
     artistMeta: {
         marginTop: 8,
+        fontSize: 11,
+        lineHeight: 15,
+    },
+    artistPlayButton: {
+        minHeight: 40,
+        marginTop: 14,
+        paddingHorizontal: 14,
+        borderRadius: 15,
+        flexDirection: 'row',
+        alignItems: 'center',
+        gap: 7,
+    },
+    artistPlayLabel: {
+        fontSize: 12,
+        fontWeight: '900',
     },
     section: {
         marginBottom: 36,
@@ -303,8 +292,9 @@ const styles = StyleSheet.create({
         marginBottom: 14,
     },
     sectionTitle: {
-        fontWeight: 'bold',
-        letterSpacing: -0.3,
+        fontWeight: '800',
+        letterSpacing: -0.45,
+        fontSize: 20,
     },
     albumsScroll: {
         paddingHorizontal: 24,

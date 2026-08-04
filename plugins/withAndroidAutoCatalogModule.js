@@ -1,9 +1,34 @@
-const { withDangerousMod, withMainApplication } = require('@expo/config-plugins');
+const {
+  AndroidConfig,
+  withAndroidManifest,
+  withDangerousMod,
+  withMainApplication,
+} = require('@expo/config-plugins');
 const fs = require('fs');
 const path = require('path');
 
 const MODULE_NAME = 'StaySoundAndroidAutoCatalogModule.kt';
 const PACKAGE_NAME = 'StaySoundAndroidAutoCatalogPackage.kt';
+const ANDROID_AUTO_METADATA_NAME = 'com.google.android.gms.car.application';
+const ANDROID_AUTO_DESCRIPTOR = '@xml/automotive_app_desc';
+const ATTRIBUTION_ICON_METADATA_NAME = 'androidx.car.app.TintableAttributionIcon';
+const ATTRIBUTION_ICON_RESOURCE = '@drawable/ic_staysound_car_attribution';
+const AUTOMOTIVE_DESCRIPTOR_SOURCE = `<?xml version="1.0" encoding="utf-8"?>
+<automotiveApp>
+  <uses name="media" />
+</automotiveApp>
+`;
+const ATTRIBUTION_ICON_SOURCE = `<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+  android:width="24dp"
+  android:height="24dp"
+  android:viewportWidth="24"
+  android:viewportHeight="24">
+  <path
+    android:fillColor="#FFFFFFFF"
+    android:pathData="M12,3v10.55A4,4 0,1 0,14 17V7h4V3h-6z" />
+</vector>
+`;
 
 function getPackageName(config) {
   return config.android?.package || 'com.staysound.app.pro';
@@ -80,15 +105,83 @@ class StaySoundAndroidAutoCatalogPackage : ReactPackage {
 }
 
 function withAndroidAutoCatalogModule(config) {
+  config = withAndroidManifest(config, config => {
+    const mainApplication = AndroidConfig.Manifest.getMainApplicationOrThrow(
+      config.modResults
+    );
+    const metadata = mainApplication['meta-data'] || [];
+    const existingEntry = metadata.find(
+      entry => entry.$?.['android:name'] === ANDROID_AUTO_METADATA_NAME
+    );
+    const existingAttributionIcon = metadata.find(
+      entry => entry.$?.['android:name'] === ATTRIBUTION_ICON_METADATA_NAME
+    );
+
+    if (existingEntry) {
+      existingEntry.$['android:resource'] = ANDROID_AUTO_DESCRIPTOR;
+      delete existingEntry.$['android:value'];
+    } else {
+      metadata.push({
+        $: {
+          'android:name': ANDROID_AUTO_METADATA_NAME,
+          'android:resource': ANDROID_AUTO_DESCRIPTOR,
+        },
+      });
+    }
+
+    if (existingAttributionIcon) {
+      existingAttributionIcon.$['android:resource'] = ATTRIBUTION_ICON_RESOURCE;
+      delete existingAttributionIcon.$['android:value'];
+    } else {
+      metadata.push({
+        $: {
+          'android:name': ATTRIBUTION_ICON_METADATA_NAME,
+          'android:resource': ATTRIBUTION_ICON_RESOURCE,
+        },
+      });
+    }
+
+    mainApplication['meta-data'] = metadata;
+    return config;
+  });
+
   config = withDangerousMod(config, [
     'android',
     async config => {
       const packageName = getPackageName(config);
       const packageDir = getPackageDir(config.modRequest.projectRoot, packageName);
+      const xmlDir = path.join(
+        config.modRequest.projectRoot,
+        'android',
+        'app',
+        'src',
+        'main',
+        'res',
+        'xml'
+      );
+      const drawableDir = path.join(
+        config.modRequest.projectRoot,
+        'android',
+        'app',
+        'src',
+        'main',
+        'res',
+        'drawable'
+      );
 
       fs.mkdirSync(packageDir, { recursive: true });
+      fs.mkdirSync(xmlDir, { recursive: true });
+      fs.mkdirSync(drawableDir, { recursive: true });
       fs.writeFileSync(path.join(packageDir, MODULE_NAME), buildModuleSource(packageName));
       fs.writeFileSync(path.join(packageDir, PACKAGE_NAME), buildPackageSource(packageName));
+      fs.writeFileSync(
+        path.join(xmlDir, 'automotive_app_desc.xml'),
+        AUTOMOTIVE_DESCRIPTOR_SOURCE
+      );
+      fs.writeFileSync(
+        path.join(drawableDir, 'ic_staysound_car_attribution.xml'),
+        ATTRIBUTION_ICON_SOURCE
+      );
 
       return config;
     },
@@ -100,8 +193,15 @@ function withAndroidAutoCatalogModule(config) {
       return config;
     }
 
+    const packagesApplyPattern = /(PackageList\(this\)\.packages\.apply\s*\{\s*\n)/;
+    if (!packagesApplyPattern.test(config.modResults.contents)) {
+      throw new Error(
+        'Could not register StaySoundAndroidAutoCatalogPackage in MainApplication.kt'
+      );
+    }
+
     config.modResults.contents = config.modResults.contents.replace(
-      /(\s*\/\/ add\(MyReactNativePackage\(\)\)\n)/,
+      packagesApplyPattern,
       `$1              ${registration}\n`
     );
 

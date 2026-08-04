@@ -75,9 +75,9 @@ function LibraryTrackListItemInner({
         styles.container,
         {
             height: trackStyles.height,
-            borderRadius: 14,
+            borderRadius: 0,
             marginHorizontal: outerInset ?? (globalStyles.screenPadding / 2),
-            marginVertical: 1,
+            marginVertical: 0,
             overflow: 'hidden' as const,
         }
     ]), [globalStyles.screenPadding, outerInset, trackStyles.height]);
@@ -88,7 +88,7 @@ function LibraryTrackListItemInner({
         {
             width: trackStyles.artworkSize,
             height: trackStyles.artworkSize,
-            borderRadius: trackStyles.artworkRadius,
+            borderRadius: 7,
         }
     ]), [trackStyles.artworkRadius, trackStyles.artworkSize]);
 
@@ -127,7 +127,7 @@ function LibraryTrackListItemInner({
                     pointerEvents="none"
                     style={[
                         StyleSheet.absoluteFillObject,
-                        { borderRadius: 14 },
+                        { borderRadius: 0 },
                         animatedPlayingStyle,
                     ]}
                 />
@@ -175,6 +175,17 @@ function LibraryTrackListItemInner({
                             <CustomIcon name="Cancion" size={trackStyles.artworkSize * 0.6} color={theme.colors.primary} />
                         )}
                     </Animated.View>
+                ) : null}
+                {!showIndex && showArtwork && index !== undefined ? (
+                    <Animated.Text
+                        style={[
+                            styles.libraryInlineIndex,
+                            animatedSubtleStyle,
+                            isPlaying ? { opacity: 1 } : null,
+                        ]}
+                    >
+                        {(index + 1).toString().padStart(2, '0')}
+                    </Animated.Text>
                 ) : null}
 
                 <View style={styles.info}>
@@ -312,11 +323,11 @@ function DefaultTrackListItemInner({
         styles.container,
         {
             height: trackStyles.height,
-            borderRadius: isLibraryStyle ? 14 : globalStyles.buttonRadius,
-            borderWidth: isLibraryStyle ? 0 : (isMaterial3 ? 1 : 0),
-            borderColor: isLibraryStyle ? 'transparent' : (isMaterial3 ? `${theme.colors.outline}4D` : globalStyles.borderColor),
+            borderRadius: isLibraryStyle ? 18 : Math.max(globalStyles.buttonRadius, 18),
+            borderWidth: StyleSheet.hairlineWidth,
+            borderColor: isLibraryStyle ? `${theme.colors.outline}24` : (isMaterial3 ? `${theme.colors.outline}38` : globalStyles.borderColor),
             marginHorizontal: outerInset ?? (globalStyles.screenPadding / 2),
-            marginVertical: isLibraryStyle ? 1 : (isMaterial3 ? 4 : 0),
+            marginVertical: isLibraryStyle ? 3 : (isMaterial3 ? 4 : 0),
             overflow: 'hidden' as const,
             shadowColor: 'transparent',
             shadowOffset: { width: 0, height: 0 },
@@ -329,8 +340,8 @@ function DefaultTrackListItemInner({
     // Animated background â€” runs on the UI thread, bypasses React.memo block
     const animatedContainerStyle = useAnimatedStyle(() => ({
         backgroundColor: isLibraryStyle
-            ? 'transparent'
-            : (isMaterial3 ? aC.surface.value : 'transparent'),
+            ? `${aC.surface.value}78`
+            : (isMaterial3 ? `${aC.surface.value}A8` : 'transparent'),
     }));
 
     const animatedArtworkStyle = useAnimatedStyle(() => ({
@@ -419,7 +430,7 @@ function DefaultTrackListItemInner({
                     style={[
                         StyleSheet.absoluteFillObject,
                         {
-                            borderRadius: isLibraryStyle ? 14 : globalStyles.buttonRadius,
+                            borderRadius: isLibraryStyle ? 18 : Math.max(globalStyles.buttonRadius, 18),
                         },
                         animatedPlayingStyle,
                     ]}
@@ -539,19 +550,7 @@ function DefaultTrackListItemInner({
                     ) : null}
                 </View>
             </Pressable>
-            {isLibraryStyle && !isPlaying ? (
-                <View
-                    pointerEvents="none"
-                    style={[
-                        styles.libraryDivider,
-                        {
-                            left: dividerInset,
-                            right: Math.max(contentPaddingHorizontal, 4),
-                            backgroundColor: `${theme.colors.outline}26`,
-                        },
-                    ]}
-                />
-            ) : null}
+            {null}
         </Animated.View>
     );
 }
@@ -689,6 +688,14 @@ const styles = StyleSheet.create({
         position: 'absolute',
         bottom: 0,
         height: StyleSheet.hairlineWidth,
+    },
+    libraryInlineIndex: {
+        width: 28,
+        marginLeft: 10,
+        fontFamily: 'StaySound',
+        fontSize: 11,
+        lineHeight: 14,
+        textAlign: 'center',
     },
 });
 

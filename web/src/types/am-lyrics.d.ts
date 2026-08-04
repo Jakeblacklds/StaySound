@@ -12,7 +12,7 @@ declare module 'react/jsx-runtime' {
         'music-id'?: string;
         isrc?: string;
         ttml?: string;
-        'current-time'?: number;
+        currenttime?: number;
         duration?: number;
         'highlight-color'?: string;
         'font-family'?: string;

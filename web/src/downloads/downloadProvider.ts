@@ -1,6 +1,13 @@
 import { generateAlbumId, generateArtistId } from '@staysound/services/metadataService';
 import type { TidalQuality, TidalTrack, Track } from '@staysound/types/audio';
 import CryptoJS from 'crypto-js';
+import {
+  desktopMusicFileUrl,
+  ensureDesktopSoulseekBridge,
+  getDesktopMusicFolder,
+  isTauriDesktop,
+  readDesktopMusicFile,
+} from '../desktop/tauriMusicLibrary';
 import { fileToTrack } from '../library/importLocalFiles';
 import { resolveTidalArtworkForTrack } from '../library/tidalArtworkResolver';
 import { cacheRemoteArtwork, saveArtworkBlob } from '../storage/webArtworkCache';
@@ -30,6 +37,16 @@ export interface ResolvedDownload {
   segmentUrls?: string[];
 }
 
+export type DownloadActivity = {
+  stage: 'connecting' | 'peer' | 'transfer' | 'reading' | 'importing' | 'metadata' | 'saving';
+  message: string;
+  detail?: string;
+  peer?: string;
+  attempt?: number;
+  received?: number;
+  total?: number;
+};
+
 export interface DownloadProvider {
   search(query: string): Promise<DownloadSearchResult[]>;
   resolveStream(result: DownloadSearchResult): Promise<Track>;
@@ -40,6 +57,7 @@ export interface DownloadProvider {
       folderHandle?: FileSystemDirectoryHandle | null;
       signal?: AbortSignal;
       onProgress?: (progress: number) => void;
+      onActivity?: (activity: DownloadActivity) => void;
     },
   ): Promise<Track>;
 }
@@ -85,8 +103,7 @@ const AMAZON_CONFIG_KEY = 'staysound.web.amazon.config.v1';
 const AMAZON_TURNSTILE_JWT_KEY = 'staysound.web.amazon.turnstile.jwt.v1';
 const AMAZON_TURNSTILE_EXPIRY_KEY = 'staysound.web.amazon.turnstile.expiry.v1';
 const DEEZER_API_BASE_URL = 'https://dzr.tabs-vs-spaces.wtf';
-const SAAVN_SEARCH_API_BASE_URL = 'https://js-odskyler.vercel.app';
-const SAAVN_RESOLVE_API_BASE_URL = 'https://sda.rhythmax.workers.dev';
+const SAAVN_PROXY_URL = '/api/saavn';
 const SAAVN_DES_KEY = '38346591';
 const REQUEST_TIMEOUT_MS = 12_000;
 const INSTANCE_CACHE_KEY = 'staysound.web.monochrome.instances.v1';
@@ -95,6 +112,7 @@ const INSTANCE_URLS = ['https://tidal-uptime.geeked.wtf'];
 const DEFAULT_QUALITY: TidalQuality = 'LOSSLESS';
 const SOULSEEK_BRIDGE_CONFIG_KEY = 'staysound.web.soulseek.bridge.v2';
 const SOULSEEK_CREDENTIALS_KEY = 'staysound.web.soulseek.credentials.v1';
+const DEFAULT_SOULSEEK_BRIDGE_URL = 'http://localhost:4317';
 
 type TidalTrackApiResponse = {
   id?: number;
@@ -214,13 +232,22 @@ type SaavnSong = {
     album?: string;
     duration?: string;
     encrypted_media_url?: string;
+    media_url?: string;
+    singers?: string;
+    primary_artists?: string;
     artists?: { primary?: SaavnArtist[] };
   };
 };
 
-type SaavnSearchResponse = {
-  results?: SaavnSong[];
-  data?: { results?: SaavnSong[] };
+type SaavnAlbum = {
+  id?: string;
+  title?: string;
+  subtitle?: string;
+  list?: SaavnSong[];
+};
+
+type SaavnAlbumSearchResponse = {
+  results?: SaavnAlbum[];
 };
 
 type ExternalAudioProvider = 'qobuz' | 'amazon' | 'saavn' | 'deezer';
@@ -268,6 +295,8 @@ type SoulseekMatch = {
   bitRate?: number;
   sampleRate?: number;
   bitDepth?: number;
+  speed?: number;
+  slots?: boolean;
   raw?: unknown;
 };
 
@@ -297,8 +326,48 @@ async function fetchJson<T>(url: string, options: RequestInit = {}, timeoutMs = 
   }
 }
 
+async function fetchBridgeJson<T>(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs = REQUEST_TIMEOUT_MS,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await fetchJson<T>(url, options, timeoutMs);
+    } catch (error) {
+      lastError = error;
+      if (options.signal?.aborted) throw error;
+      const message = error instanceof Error ? error.message.toLowerCase() : '';
+      const transient = error instanceof DOMException && error.name === 'AbortError'
+        || message.includes('fetch is aborted')
+        || message.includes('failed to fetch')
+        || message.includes('load failed')
+        // The bundled Soulseek bridge returns this when a peer drops a socket
+        // while the desktop is polling or starting a transfer. It is safe to
+        // retry the local request; a terminal peer failure is still surfaced
+        // by the job-status response and advances to another match below.
+        || message.includes('econnreset');
+      if (!transient || attempt === 1) throw error;
+      if (message.includes('load failed') && isTauriDesktop()) {
+        await ensureDesktopSoulseekBridge().catch(() => false);
+      }
+      await new Promise(resolve => window.setTimeout(resolve, 250));
+    }
+  }
+  throw lastError;
+}
+
+function friendlySoulseekError(error: unknown): Error {
+  const message = error instanceof Error ? error.message : String(error);
+  if (/econnreset|connection reset|socket (?:is )?closed/i.test(message)) {
+    return new Error('La fuente de Soulseek cerró la conexión. Intenta de nuevo para probar otro peer.');
+  }
+  return error instanceof Error ? error : new Error(message);
+}
+
 function getLocalBridgeProxyUrl(url: string): string | null {
-  const config = getSoulseekBridgeConfig() ?? { baseUrl: 'http://localhost:4317' };
+  const config = getSoulseekBridgeConfig();
   if (!config.baseUrl) return null;
   return `${config.baseUrl}/proxy?url=${encodeURIComponent(url)}`;
 }
@@ -814,11 +883,13 @@ function getSaavnArtist(song: SaavnSong): string {
   const subtitleArtist = song.subtitle?.split(' - ')[0]?.trim();
   if (subtitleArtist) return decodeSaavnText(subtitleArtist);
   const primary = song.more_info?.artists?.primary?.map(artist => artist.name).filter(Boolean).join(', ');
-  return decodeSaavnText(primary) || 'Unknown Artist';
+  return decodeSaavnText(
+    primary || song.more_info?.primary_artists || song.more_info?.singers,
+  ) || 'Unknown Artist';
 }
 
 function getSaavnAudioQuality(quality: TidalQuality): string {
-  if (quality === 'LOW') return '128';
+  if (quality === 'LOW') return '160';
   if (quality === 'HIGH' || quality === 'MP3' || quality === 'LOSSLESS' || quality === 'HI_RES_LOSSLESS') return '320';
   return '320';
 }
@@ -836,6 +907,10 @@ function decryptSaavnMediaUrl(encryptedMediaUrl: string): string {
 }
 
 function getSaavnStreamUrl(song: SaavnSong, quality: TidalQuality): string {
+  const directUrl = song.more_info?.media_url?.trim();
+  if (directUrl) {
+    return directUrl.replace(/_\d+\.mp4(\?.*)?$/i, `_${getSaavnAudioQuality(quality)}.mp4$1`);
+  }
   const encrypted = song.more_info?.encrypted_media_url?.trim();
   if (!encrypted) return '';
   const decrypted = decryptSaavnMediaUrl(encrypted);
@@ -869,8 +944,62 @@ function scoreSaavnCandidate(source: TidalTrack, song: SaavnSong): number {
     else if (delta <= 8000) score += 12;
   }
 
-  if (song.more_info?.encrypted_media_url) score += 20;
+  if (song.more_info?.encrypted_media_url || song.more_info?.media_url) score += 20;
   return score;
+}
+
+function scoreSaavnAlbumCandidate(source: TidalTrack, album: SaavnAlbum): number {
+  const sourceAlbum = comparable(source.album);
+  const candidateAlbum = comparable(album.title ?? '');
+  const sourceArtist = comparable(source.artist);
+  const candidateArtist = comparable(album.subtitle ?? '');
+  let score = 0;
+
+  if (sourceAlbum && sourceAlbum === candidateAlbum) score += 180;
+  if (sourceAlbum && (candidateAlbum.includes(sourceAlbum) || sourceAlbum.includes(candidateAlbum))) score += 90;
+  if (sourceArtist && sourceArtist === candidateArtist) score += 80;
+  if (sourceArtist && (candidateArtist.includes(sourceArtist) || sourceArtist.includes(candidateArtist))) score += 40;
+  return score;
+}
+
+async function findSaavnSongByAlbum(track: TidalTrack): Promise<SaavnSong | null> {
+  const queries = Array.from(new Set([
+    `${track.album} ${track.artist}`.trim(),
+    track.album.trim(),
+  ].filter(Boolean)));
+  const searches = await Promise.all(queries.map(async query => {
+    try {
+      const searchParams = new URLSearchParams({ action: 'album-search', q: query });
+      return await fetchJson<SaavnAlbumSearchResponse>(`${SAAVN_PROXY_URL}?${searchParams}`, {}, 15_000);
+    } catch {
+      return null;
+    }
+  }));
+  const uniqueAlbums = new Map<string, SaavnAlbum>();
+  searches.flatMap(search => search?.results ?? []).forEach(album => {
+    if (album.id) uniqueAlbums.set(album.id, album);
+  });
+  const albums = Array.from(uniqueAlbums.values())
+    .filter(album => album.id)
+    .map(album => ({ album, score: scoreSaavnAlbumCandidate(track, album) }))
+    .sort((left, right) => right.score - left.score)
+    .slice(0, 6);
+
+  const details = await Promise.all(albums.map(async ({ album }) => {
+    try {
+      const detailParams = new URLSearchParams({ action: 'album-details', id: String(album.id) });
+      return await fetchJson<SaavnAlbum>(`${SAAVN_PROXY_URL}?${detailParams}`, {}, 15_000);
+    } catch {
+      return null;
+    }
+  }));
+
+  const best = details
+    .flatMap(album => album?.list ?? [])
+    .map(song => ({ song, score: scoreSaavnCandidate(track, song) }))
+    .filter(item => item.score >= 150)
+    .sort((left, right) => right.score - left.score)[0];
+  return best?.song ?? null;
 }
 
 function normalizeAmazonQuality(payload: AmazonTrackPayload, qualityInfo: AmazonQualityInfo | null): string {
@@ -1207,34 +1336,11 @@ async function resolveAmazonUrl(track: TidalTrack, quality: TidalQuality): Promi
 }
 
 async function resolveSaavnUrl(track: TidalTrack, quality: TidalQuality): Promise<ExternalAudio | null> {
-  const query = `${track.artist} ${track.title}`.trim();
-  if (!query) return null;
+  if (!track.album.trim() || !track.title.trim()) return null;
+  const song = await findSaavnSongByAlbum(track);
+  if (!song) return null;
 
-  const search = await fetchJsonWithLocalProxyFallback<SaavnSearchResponse>(
-    `${SAAVN_SEARCH_API_BASE_URL}/api/songs?q=${encodeURIComponent(query)}`,
-    {},
-    15_000,
-    true,
-  );
-  const results = Array.isArray(search.results) ? search.results : search.data?.results ?? [];
-  const best = results
-    .map(song => ({ song, score: scoreSaavnCandidate(track, song) }))
-    .filter(item => item.score >= 150)
-    .sort((a, b) => b.score - a.score)[0]?.song;
-
-  if (!best) return null;
-
-  let resolvedSong = best;
-  if (!best.more_info?.encrypted_media_url && best.perma_url) {
-    resolvedSong = await fetchJsonWithLocalProxyFallback<SaavnSong>(
-      `${SAAVN_RESOLVE_API_BASE_URL}/song?url=${encodeURIComponent(best.perma_url)}`,
-      {},
-      15_000,
-      true,
-    ).catch(() => best);
-  }
-
-  const url = getSaavnStreamUrl(resolvedSong, quality);
+  const url = getSaavnStreamUrl(song, quality);
   if (!url) return null;
 
   return {
@@ -1468,15 +1574,15 @@ async function fetchHlsBlobWithProgress(
   return new Blob(chunks, { type: first.endsWith('.m4s') || first.includes('mp4') ? 'video/mp4' : 'video/mp2t' });
 }
 
-function getSoulseekBridgeConfig(): SlskdConfig | null {
+function getSoulseekBridgeConfig(): SlskdConfig {
   try {
     const parsed = JSON.parse(window.localStorage.getItem(SOULSEEK_BRIDGE_CONFIG_KEY) || 'null') as Partial<SlskdConfig> | null;
-    if (!parsed?.baseUrl) return null;
+    if (!parsed?.baseUrl) return { baseUrl: DEFAULT_SOULSEEK_BRIDGE_URL };
     return {
       baseUrl: parsed.baseUrl.replace(/\/+$/, ''),
     };
   } catch {
-    return null;
+    return { baseUrl: DEFAULT_SOULSEEK_BRIDGE_URL };
   }
 }
 
@@ -1487,7 +1593,69 @@ export function saveSoulseekBridgeConfig(config: SlskdConfig): void {
 }
 
 export function loadSoulseekBridgeConfig(): SlskdConfig {
-  return getSoulseekBridgeConfig() ?? { baseUrl: 'http://localhost:4317' };
+  return getSoulseekBridgeConfig();
+}
+
+export async function isSoulseekBridgeAvailable(): Promise<boolean> {
+  const { baseUrl } = getSoulseekBridgeConfig();
+  try {
+    const health = await fetchBridgeJson<{ ok?: boolean }>(`${baseUrl}/health`, {}, 2_500);
+    return health.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+export async function warmSoulseekBridge(): Promise<boolean> {
+  const credentials = loadSoulseekCredentials();
+  if (!credentials) return false;
+  const { baseUrl } = getSoulseekBridgeConfig();
+  try {
+    const result = await fetchBridgeJson<{ ok?: boolean }>(`${baseUrl}/session/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials }),
+    }, 8_000);
+    return result.ok === true;
+  } catch {
+    return false;
+  }
+}
+
+export type SoulseekShareStatus = {
+  files: number;
+  folders: number;
+  roots: string[];
+};
+
+export async function configureSoulseekShares(directories: string[]): Promise<SoulseekShareStatus> {
+  const credentials = getRequiredSoulseekCredentials();
+  const { baseUrl } = getSoulseekBridgeConfig();
+  const result = await fetchBridgeJson<{ ok?: boolean; shares: SoulseekShareStatus }>(
+    `${baseUrl}/shares/configure`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials, directories }),
+    },
+    120_000,
+  );
+  return result.shares;
+}
+
+export async function rescanSoulseekShares(): Promise<SoulseekShareStatus> {
+  const credentials = getRequiredSoulseekCredentials();
+  const { baseUrl } = getSoulseekBridgeConfig();
+  const result = await fetchBridgeJson<{ ok?: boolean; shares: SoulseekShareStatus }>(
+    `${baseUrl}/shares/rescan`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ credentials }),
+    },
+    120_000,
+  );
+  return result.shares;
 }
 
 export function loadSoulseekCredentials(): SoulseekCredentials | null {
@@ -1618,64 +1786,382 @@ function virtualTrackFromSoulseek(match: SoulseekMatch): TidalTrack {
   };
 }
 
-async function searchSoulseekBridge(query: string): Promise<DownloadSearchResult[]> {
+async function requestSoulseekMatches(query: string): Promise<SoulseekMatch[]> {
   const config = getSoulseekBridgeConfig();
-  if (!config) throw new Error('Configura el bridge de Soulseek antes de buscar.');
   const credentials = getRequiredSoulseekCredentials();
-  const payload = await fetchJson<{ results?: SoulseekMatch[] }>(`${config.baseUrl}/search`, {
+  const payload = await fetchBridgeJson<{ results?: SoulseekMatch[] }>(`${config.baseUrl}/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ query, timeoutMs: 9000, maxResults: 40, credentials }),
-  }, 20_000);
-  return (payload.results ?? []).slice(0, 40).map(match => {
-    const track = virtualTrackFromSoulseek(match);
-    return {
-      id: `soulseek_${Math.abs(track.id)}`,
-      source: 'soulseek',
-      title: track.title,
-      artist: track.artist,
-      album: track.album,
-      quality: track.quality,
-      durationMs: track.durationMs,
-      size: match.size,
-      raw: match,
-    };
-  });
+    // Peer replies arrive independently after the server dispatch. Popular
+    // tracks can still take longer than nine seconds when the bridge has just
+    // connected, so do not turn a slow reply into a false "not found".
+    body: JSON.stringify({ query, timeoutMs: 18_000, maxResults: 60, credentials }),
+  // The bridge may reconnect once when a logged-in but stale Soulseek route
+  // returns no peers, so leave room for that retry as well.
+  }, 55_000);
+  return payload.results ?? [];
 }
 
-async function resolveSoulseekDownload(result: DownloadSearchResult): Promise<ResolvedDownload> {
-  const match = result.raw as SoulseekMatch;
-  const track = virtualTrackFromSoulseek(match);
-  const ext = match.extension ?? extensionFromUrl(match.filename, 'mp3');
+const SOULSEEK_EDITION_MARKERS = ['live', 'remix', 'instrumental', 'karaoke', 'acoustic', 'sped up', 'slowed'];
+// Availability on Soulseek changes quickly; long-lived search results often
+// point at peers that have already disconnected by the time the user clicks.
+const SOULSEEK_MATCH_CACHE_TTL_MS = 30 * 1000;
+const SOULSEEK_MATCH_CACHE_MAX_ENTRIES = 48;
+const soulseekMatchCache = new Map<string, { expiresAt: number; promise: Promise<SoulseekMatch[]> }>();
+
+function soulseekTrackKey(track: TidalTrack): string {
+  return `${comparable(track.artist)}|${comparable(track.title)}`;
+}
+
+export function invalidateSoulseekMatches(result: DownloadSearchResult): void {
+  const track = result.raw as TidalTrack;
+  if (track?.title && track?.artist) soulseekMatchCache.delete(soulseekTrackKey(track));
+}
+
+function getSoulseekMatchesForTrack(track: TidalTrack): Promise<SoulseekMatch[]> {
+  const key = soulseekTrackKey(track);
+  const cached = soulseekMatchCache.get(key);
+  if (cached && cached.expiresAt > Date.now()) {
+    soulseekMatchCache.delete(key);
+    soulseekMatchCache.set(key, cached);
+    return cached.promise;
+  }
+  if (cached) soulseekMatchCache.delete(key);
+
+  const promise = requestSoulseekMatches(`${track.artist} ${track.title}`.trim())
+    .catch(error => {
+      soulseekMatchCache.delete(key);
+      throw error;
+    });
+  soulseekMatchCache.set(key, {
+    expiresAt: Date.now() + SOULSEEK_MATCH_CACHE_TTL_MS,
+    promise,
+  });
+  const now = Date.now();
+  for (const [cacheKey, entry] of soulseekMatchCache) {
+    if (entry.expiresAt <= now) soulseekMatchCache.delete(cacheKey);
+  }
+  while (soulseekMatchCache.size > SOULSEEK_MATCH_CACHE_MAX_ENTRIES) {
+    const oldestKey = soulseekMatchCache.keys().next().value;
+    if (!oldestKey) break;
+    soulseekMatchCache.delete(oldestKey);
+  }
+  return promise;
+}
+
+function scoreSoulseekMatch(track: TidalTrack, match: SoulseekMatch): number {
+  const path = comparable(match.filename.replace(/[\\/]+/g, ' '));
+  const leaf = comparable(match.filename.replace(/\//g, '\\').split('\\').pop() ?? match.filename);
+  const title = comparable(track.title);
+  const artist = comparable(track.artist);
+  const album = comparable(track.album);
+  const catalogEdition = comparable(`${track.title} ${track.album}`);
+  let score = 0;
+
+  if (leaf.includes(title)) score += 140;
+  else {
+    const matchedTitleWords = title.split(' ').filter(word => word.length > 2 && leaf.includes(word)).length;
+    score += matchedTitleWords * 14;
+  }
+  if (path.includes(artist)) score += 100;
+  if (album && path.includes(album)) score += 30;
+
+  const stemMarkers = ['drum', 'guitar', 'vocal', 'rhythm', 'bass', 'keys', 'stem', 'backing track'];
+  if (stemMarkers.some(marker => leaf.includes(marker)) && !catalogEdition.includes(leaf)) score -= 1_000;
+
+  if (track.durationMs && match.durationMs) {
+    const durationDifference = Math.abs(track.durationMs - match.durationMs);
+    if (durationDifference <= 2_000) score += 55;
+    else if (durationDifference <= 5_000) score += 25;
+    else if (durationDifference > 15_000) score -= 80;
+  }
+
+  for (const marker of SOULSEEK_EDITION_MARKERS) {
+    if (path.includes(marker) !== catalogEdition.includes(marker)) score -= 45;
+  }
+
+  const extension = (match.extension ?? extensionFromUrl(match.filename, '')).toLowerCase();
+  if (extension === 'flac') score += 22;
+  else if (extension === 'm4a') score += 10;
+  if ((match.bitDepth ?? 0) >= 24) score += 8;
+  if ((match.sampleRate ?? 0) >= 88_200) score += 8;
+  if ((match.size ?? 0) > 0) score += 3;
+  // A closed slot means "queued", not "wrong song".  Availability is
+  // already used by the bridge to order candidates and by the download retry
+  // flow; it must not make an exact filename fail the identity threshold.
+  score += match.slots ? 180 : -12;
+  if (match.speed && match.speed > 0) {
+    const estimatedSeconds = match.size ? match.size / match.speed : Number.POSITIVE_INFINITY;
+    if (estimatedSeconds <= 30) score += 90;
+    else if (estimatedSeconds <= 90) score += 55;
+    else if (estimatedSeconds <= 240) score += 20;
+    score += Math.min(45, Math.log10(Math.max(1, match.speed)) * 7);
+  }
+  return score;
+}
+
+async function resolveMonochromeResultToSoulseek(result: DownloadSearchResult): Promise<ResolvedDownload> {
+  const track = result.raw as TidalTrack;
+  if (!track?.title || !track?.artist) {
+    throw new Error('Monochrome no devolvió metadatos suficientes para buscar el archivo P2P.');
+  }
+
+  const matches = await getSoulseekMatchesForTrack(track);
+  const ranked = matches
+    .map(match => ({ match, score: scoreSoulseekMatch(track, match) }))
+    .sort((left, right) => right.score - left.score);
+  const best = ranked[0];
+
+  if (!best || best.score < 100) {
+    throw new Error(`No encontré en Soulseek un archivo que coincida con "${track.artist} - ${track.title}".`);
+  }
+
+  const match = best.match;
+  const extension = match.extension ?? extensionFromUrl(match.filename, 'mp3');
+  // Several files from the same user are not independent fallback sources.
+  // Keep only that user's best-ranked match so the UI reports real peers.
+  const uniquePeerCandidates = ranked
+    .filter(candidate => candidate.score >= 100)
+    .filter((candidate, index, all) => (
+      all.findIndex(other => other.match.username.toLocaleLowerCase() === candidate.match.username.toLocaleLowerCase()) === index
+    ))
+    .slice(0, 6)
+    .map(candidate => candidate.match);
+  const matchedTrack = {
+    ...track,
+    quality: extension === 'flac' ? 'LOSSLESS' : 'HIGH',
+    isHiRes: (match.sampleRate ?? 0) >= 88_200 || (match.bitDepth ?? 0) >= 24,
+    codec: extension,
+    sampleRate: match.sampleRate ?? track.sampleRate,
+    bitDepth: match.bitDepth ?? track.bitDepth,
+    match,
+    matchCandidates: uniquePeerCandidates,
+  } as TidalTrack & { match: SoulseekMatch; matchCandidates: SoulseekMatch[] };
+
   return {
     url: '',
-    filename: `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.${ext}`,
-    mimeType: mimeFromExtension(ext),
+    filename: `${sanitizeFilename(track.artist)} - ${sanitizeFilename(track.title)}.${extension}`,
+    mimeType: mimeFromExtension(extension),
     source: 'soulseek',
-    track,
+    track: matchedTrack,
   };
 }
 
-async function resolveSoulseekBridgeFile(resolved: ResolvedDownload): Promise<ResolvedDownload> {
+type SoulseekBridgeFile = ResolvedDownload & { nativePath?: string };
+
+type SoulseekJobStatus = {
+  status: 'downloading' | 'done' | 'error';
+  received?: number;
+  total?: number;
+  filename?: string;
+  mimeType?: string;
+  url?: string;
+  path?: string;
+  error?: string;
+  peer?: string;
+  attempts?: number;
+};
+
+const SOULSEEK_DOWNLOAD_DEADLINE_MS = 15 * 60 * 1000;
+const SOULSEEK_POLL_INTERVAL_MS = 600;
+
+function wait(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+function formatDiagnosticBytes(value?: number): string {
+  if (!value || value <= 0) return 'tamaño desconocido';
+  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
+  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+  return `${Math.max(1, Math.round(value / 1024))} KB`;
+}
+
+/**
+ * Runs the P2P transfer on the bridge. Prefers the job API (/download/start +
+ * /download/status) so the UI gets real byte-level progress while the peer
+ * uploads; falls back to the legacy blocking /download for older bridges.
+ * `targetDir` (desktop) makes the bridge write straight into the user's
+ * music folder so the file survives restarts.
+ */
+async function resolveSoulseekBridgeFile(
+  resolved: ResolvedDownload,
+  options?: {
+    signal?: AbortSignal;
+    onProgress?: (progress: number) => void;
+    onActivity?: (activity: DownloadActivity) => void;
+    targetDir?: string;
+  },
+): Promise<SoulseekBridgeFile> {
   const config = getSoulseekBridgeConfig();
-  if (!config) throw new Error('Configura el bridge de Soulseek antes de descargar.');
   const credentials = getRequiredSoulseekCredentials();
-  const match = (resolved.track as TidalTrack & { match?: SoulseekMatch }).match
+  const soulseekTrack = resolved.track as TidalTrack & {
+    match?: SoulseekMatch;
+    matchCandidates?: SoulseekMatch[];
+  };
+  const match = soulseekTrack.match
     ?? null;
   if (!match) {
     throw new Error('La descarga Soulseek necesita el match original del bridge.');
   }
-  const payload = await fetchJson<{ url: string; filename: string; mimeType?: string }>(`${config.baseUrl}/download`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ match, filename: resolved.filename, credentials }),
-  }, 900_000);
-  return {
-    ...resolved,
-    url: payload.url,
-    filename: payload.filename || resolved.filename,
-    mimeType: payload.mimeType || resolved.mimeType,
+
+  const candidates = soulseekTrack.matchCandidates?.length
+    ? soulseekTrack.matchCandidates
+    : [match];
+  const activeJobs: Array<{ jobId: string; match: SoulseekMatch }> = [];
+  let nextCandidateIndex = 0;
+  let lastJobStartedAt = 0;
+
+  const startCandidate = async (): Promise<boolean> => {
+    const candidate = candidates[nextCandidateIndex++];
+    if (!candidate) return false;
+    options?.onActivity?.({
+      stage: 'peer',
+      message: `Solicitando el archivo a ${candidate.username}`,
+      detail: `${nextCandidateIndex} de ${candidates.length} fuentes candidatas`,
+      peer: candidate.username,
+      attempt: nextCandidateIndex,
+      total: candidate.size,
+    });
+    const started = await fetchBridgeJson<{ jobId?: string }>(`${config.baseUrl}/download/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ match: candidate, filename: resolved.filename, credentials, dir: options?.targetDir }),
+    }, 30_000);
+    if (!started.jobId) return false;
+    activeJobs.push({ jobId: started.jobId, match: candidate });
+    lastJobStartedAt = Date.now();
+    return true;
   };
+
+  let jobApiUnavailable = false;
+  try {
+    await startCandidate();
+  } catch (error) {
+    // Only old bridges lack the job endpoint. Do not hide a real connection
+    // failure by immediately issuing a second, blocking request that surfaces
+    // the raw HTTP 500 to the user.
+    if (/^404\b/.test(error instanceof Error ? error.message : String(error))) {
+      jobApiUnavailable = true;
+      activeJobs.length = 0;
+    } else {
+      throw friendlySoulseekError(error);
+    }
+  }
+
+  if (jobApiUnavailable) {
+    const payload = await fetchBridgeJson<{ url: string; filename: string; mimeType?: string; path?: string }>(`${config.baseUrl}/download`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ match, filename: resolved.filename, credentials }),
+    }, 900_000);
+    return {
+      ...resolved,
+      url: payload.url,
+      filename: payload.filename || resolved.filename,
+      mimeType: payload.mimeType || resolved.mimeType,
+    };
+  }
+
+  const deadline = Date.now() + SOULSEEK_DOWNLOAD_DEADLINE_MS;
+  while (true) {
+    if (options?.signal?.aborted) throw new Error('Descarga cancelada');
+    if (Date.now() > deadline) throw new Error('La descarga Soulseek tardó demasiado; intenta otro resultado.');
+
+    const pollResults = await Promise.all(activeJobs.map(async job => {
+      try {
+        return {
+          job,
+          status: await fetchBridgeJson<SoulseekJobStatus>(
+            `${config.baseUrl}/download/status?id=${encodeURIComponent(job.jobId)}`,
+            {},
+            10_000,
+          ) as SoulseekJobStatus | null,
+        };
+      } catch (error) {
+        // Un 404 aquí significa que el bridge se reinició (crash del sidecar o
+        // respawn desde ensure_soulseek_bridge) y perdió sus jobs en memoria.
+        // El job se relanza con el mismo match en vez de abortar la descarga.
+        if (/^404\b/.test(error instanceof Error ? error.message : String(error))) {
+          return { job, status: null };
+        }
+        throw error;
+      }
+    }));
+    const lostJobs = pollResults.filter(item => !item.status).map(item => item.job);
+    for (const lost of lostJobs) {
+      activeJobs.splice(activeJobs.indexOf(lost), 1);
+      try {
+        const restarted = await fetchBridgeJson<{ jobId?: string }>(`${config.baseUrl}/download/start`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ match: lost.match, filename: resolved.filename, credentials, dir: options?.targetDir }),
+        }, 30_000);
+        if (restarted.jobId) {
+          activeJobs.push({ jobId: restarted.jobId, match: lost.match });
+          lastJobStartedAt = Date.now();
+        }
+      } catch {
+        // La siguiente vuelta del bucle probará otra fuente candidata.
+      }
+    }
+    const statuses = pollResults.flatMap(item => (item.status ? [{ job: item.job, status: item.status }] : []));
+    const completed = statuses.find(item => item.status.status === 'done' && item.status.url);
+    if (completed) {
+      void Promise.all(activeJobs
+        .filter(job => job.jobId !== completed.job.jobId)
+        .map(job => fetchBridgeJson(`${config.baseUrl}/download/abandon`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ jobId: job.jobId }),
+        }).catch(() => undefined)));
+      options?.onProgress?.(1);
+      return {
+        ...resolved,
+        url: completed.status.url!,
+        filename: completed.status.filename || resolved.filename,
+        mimeType: completed.status.mimeType || resolved.mimeType,
+        nativePath: completed.status.path,
+      };
+    }
+
+    const running = statuses.filter(item => item.status.status === 'downloading');
+    const mostAdvanced = running.reduce<(typeof running)[number] | undefined>((best, item) => {
+      if (!best) return item;
+      return (item.status.received ?? 0) > (best.status.received ?? 0) ? item : best;
+    }, undefined);
+    if (mostAdvanced) {
+      options?.onActivity?.({
+        stage: 'transfer',
+        message: (mostAdvanced.status.received ?? 0) > 0
+          ? `Recibiendo desde ${mostAdvanced.status.peer || mostAdvanced.job.match.username}`
+          : `Esperando respuesta de ${mostAdvanced.status.peer || mostAdvanced.job.match.username}`,
+        detail: (mostAdvanced.status.received ?? 0) > 0
+          ? `${formatDiagnosticBytes(mostAdvanced.status.received)} de ${formatDiagnosticBytes(mostAdvanced.status.total)}`
+          : 'El peer aceptó la solicitud, pero todavía no envía datos',
+        peer: mostAdvanced.status.peer || mostAdvanced.job.match.username,
+        attempt: (mostAdvanced.status.attempts ?? 0) + 1,
+        received: mostAdvanced.status.received,
+        total: mostAdvanced.status.total,
+      });
+    }
+    const bestProgress = running.reduce((best, item) => {
+      const progress = item.status.total ? (item.status.received ?? 0) / item.status.total : 0;
+      return Math.max(best, progress);
+    }, 0);
+    if (bestProgress > 0) {
+      options?.onProgress?.(Math.min(0.99, bestProgress));
+    } else if (Date.now() - lastJobStartedAt >= 7_000 && nextCandidateIndex < candidates.length && activeJobs.length < 3) {
+      await startCandidate().catch(() => false);
+    } else if (running.length === 0) {
+      if (nextCandidateIndex < candidates.length) {
+        await startCandidate().catch(() => false);
+      } else {
+        const error = statuses.find(item => item.status.error)?.status.error;
+        throw friendlySoulseekError(error || 'Soulseek no pudo completar la descarga.');
+      }
+    }
+    await wait(SOULSEEK_POLL_INTERVAL_MS);
+  }
 }
 
 export const monochromeDownloadProvider: DownloadProvider = {
@@ -1734,14 +2220,35 @@ export const monochromeDownloadProvider: DownloadProvider = {
   resolveDownload: resolveMonochromeDownload,
 
   async download(resolved, options) {
-    const blob = await fetchBlobWithProgress(resolved, options?.signal, options?.onProgress);
+    const nativePath = (resolved as SoulseekBridgeFile).nativePath;
+    let blob: Blob;
+    if (nativePath && isTauriDesktop()) {
+      options?.onActivity?.({
+        stage: 'reading',
+        message: 'Transferencia terminada; leyendo el archivo local',
+        detail: nativePath,
+      });
+      const bytes = await readDesktopMusicFile(nativePath);
+      const arrayBuffer = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
+      blob = new Blob([arrayBuffer], { type: resolved.mimeType || 'application/octet-stream' });
+      options?.onProgress?.(1);
+    } else {
+      options?.onActivity?.({ stage: 'transfer', message: 'Recibiendo el archivo de audio' });
+      blob = await fetchBlobWithProgress(resolved, options?.signal, options?.onProgress);
+    }
     const written = options?.folderHandle
       ? await writeBlobToDownloadFolder(options.folderHandle, resolved.filename, blob)
       : null;
     const file = written?.file ?? new File([blob], resolved.filename, { type: resolved.mimeType || blob.type });
+    options?.onActivity?.({
+      stage: 'importing',
+      message: 'Validando audio y leyendo etiquetas',
+      detail: `${resolved.filename} · ${formatDiagnosticBytes(blob.size)}`,
+    });
     const imported = await fileToTrack(file, resolved.filename);
     const trackId = `tidal_${resolved.track.id}`;
     const remoteArtwork = await resolveTidalArtworkForTrack(resolved.track).catch(() => undefined);
+    options?.onActivity?.({ stage: 'metadata', message: 'Guardando portada y metadatos' });
     const artworkSource = remoteArtwork || resolved.track.artworkUrl || imported.artwork;
     const artworkAsset = await fetchPersistableArtwork(artworkSource);
     if (options?.folderHandle && artworkAsset) {
@@ -1752,11 +2259,16 @@ export const monochromeDownloadProvider: DownloadProvider = {
     const albumId = generateAlbumId(resolved.track.album, resolved.track.artist);
     const artworkKey = albumId || imported.artworkKey;
     if (artworkAsset && artworkKey) await saveArtworkBlob(artworkKey, artworkAsset.blob);
-    const proxiedArtwork = artworkAsset ? undefined : await cacheRemoteArtwork(artworkKey, artworkSource);
+    const proxiedArtwork = artworkAsset || !artworkKey
+      ? undefined
+      : await cacheRemoteArtwork(artworkKey, artworkSource);
     const artwork = artworkAsset && artworkKey
       ? URL.createObjectURL(artworkAsset.blob)
       : proxiedArtwork
-        ?? await persistableArtworkUrl(artworkSource)
+        // The downloaded audio may already contain a perfectly valid embedded
+        // cover. Never replace it with the original remote URL after that URL
+        // failed validation/fetching — WebKit would render a broken-image icon.
+        ?? imported.artwork
         ?? await persistableArtworkUrl(imported.artwork);
     return {
       ...imported,
@@ -1784,20 +2296,57 @@ export const monochromeDownloadProvider: DownloadProvider = {
 };
 
 export const soulseekDownloadProvider: DownloadProvider = {
-  search: searchSoulseekBridge,
+  async search(query) {
+    const catalogResults = await monochromeDownloadProvider.search(query);
+    const results = catalogResults.map(result => ({
+      ...result,
+      id: `soulseek_catalog_${result.id}`,
+      source: 'soulseek' as const,
+    }));
+    return results;
+  },
   async resolveStream(result) {
     throw new Error(`Soulseek web necesita descargar o usar el reproductor del bridge para "${result.title}".`);
   },
-  async resolveDownload(result) {
-    const resolved = await resolveSoulseekDownload(result);
-    resolved.track = {
-      ...resolved.track,
-      match: result.raw as SoulseekMatch,
-    } as TidalTrack & { match: SoulseekMatch };
-    return resolved;
-  },
+  resolveDownload: resolveMonochromeResultToSoulseek,
   async download(resolved, options) {
-    const bridgeFile = await resolveSoulseekBridgeFile(resolved);
-    return monochromeDownloadProvider.download(bridgeFile, options);
+    // On desktop the bridge writes straight into the user's music folder so
+    // the track keeps playing after a restart (nativePath + asset URL). On
+    // web it stays in the bridge's temp dir and imports as a blob.
+    let targetDir: string | undefined;
+    if (isTauriDesktop()) {
+      const musicFolder = await getDesktopMusicFolder().catch(() => null);
+      if (musicFolder) targetDir = `${musicFolder}/StaySound Soulseek`;
+    }
+
+    // The P2P transfer is the long part; the local import gets the tail end.
+    const bridgeFile = await resolveSoulseekBridgeFile(resolved, {
+      signal: options?.signal,
+      targetDir,
+      onActivity: options?.onActivity,
+      onProgress: value => options?.onProgress?.(value * 0.9),
+    });
+    options?.onActivity?.({
+      stage: 'reading',
+      message: 'Soulseek terminó; preparando el archivo para la biblioteca',
+      detail: bridgeFile.nativePath || bridgeFile.filename,
+    });
+    const track = await monochromeDownloadProvider.download(bridgeFile, {
+      ...options,
+      onProgress: value => options?.onProgress?.(0.9 + value * 0.1),
+    });
+
+    if (targetDir && bridgeFile.nativePath) {
+      const nativeUrl = desktopMusicFileUrl(bridgeFile.nativePath);
+      return {
+        ...track,
+        uri: nativeUrl,
+        objectUrl: nativeUrl,
+        nativePath: bridgeFile.nativePath,
+        needsRelink: false,
+        relinkable: true,
+      } as Track;
+    }
+    return track;
   },
 };

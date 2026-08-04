@@ -27,10 +27,10 @@ Desktop Chromium browsers can import a folder with the File System Access picker
 - Monochrome streaming/downloads resolve audio the same way upstream does: Qobuz first, then Amazon Music (`https://amz.geeked.wtf`), then Deezer by ISRC, and finally Tidal DASH/HLS manifests as a last fallback. Amazon can use a Turnstile site key or bypass token saved from the Downloads tab; without one, protected Amazon responses are skipped cleanly.
 - Desktop Chromium browsers can choose and remember a destination folder with the File System Access API. Other browsers fall back to an in-session `File` object.
 - Downloaded Monochrome tracks are imported back into the web library so they can be played immediately.
-- Soulseek runs through the local StaySound companion bridge because browsers cannot connect to the Soulseek P2P network directly. Start it with:
+- Soulseek runs through the local StaySound companion bridge because browsers cannot connect to the Soulseek P2P network directly. The StaySound desktop app starts and stops this companion automatically. When developing the plain browser version, start it with:
 
 ```bash
 npm run web:soulseek
 ```
 
-The bridge listens at `http://localhost:4317` by default. Put the Soulseek username and password in the web Downloads tab, just like Android. The web app sends those credentials to the local bridge for search/download, fetches the finished file back into the browser, and saves it into the selected destination folder.
+The bridge listens at `http://localhost:4317` by default and is detected automatically. Put the Soulseek username and password in the Downloads tab, just like Android. The UI sends those credentials to the local bridge for search/download, fetches the finished file back into the library, and saves it into the selected destination folder when the browser exposes the File System Access API.

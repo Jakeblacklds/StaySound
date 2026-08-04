@@ -8,6 +8,7 @@ import { StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
 import Animated, { FadeIn } from 'react-native-reanimated';
 import { CustomIcon, IconName } from './CustomIcon';
+import { ImmersiveGlass } from './ImmersiveSurface';
 
 interface EmptyStateProps {
     icon?: string | IconName | null;
@@ -41,6 +42,7 @@ export function EmptyState({
             entering={FadeIn.delay(200)}
             style={styles.container}
         >
+            <ImmersiveGlass tone="quiet" style={styles.panel}>
             {icon ? (
                 <View style={styles.iconContainer}>
                     {isCustomIcon(icon) ? (
@@ -73,6 +75,7 @@ export function EmptyState({
                     {actionLabel}
                 </Button>
             )}
+            </ImmersiveGlass>
         </Animated.View>
     );
 }
@@ -82,16 +85,29 @@ const styles = StyleSheet.create({
         flex: 1,
         alignItems: 'center',
         justifyContent: 'center',
-        padding: 32,
+        padding: 22,
+    },
+    panel: {
+        width: '100%',
+        maxWidth: 430,
+        alignItems: 'center',
+        paddingHorizontal: 28,
+        paddingVertical: 34,
     },
     iconContainer: {
-        marginBottom: 16,
+        width: 82,
+        height: 82,
+        borderRadius: 30,
+        alignItems: 'center',
+        justifyContent: 'center',
+        backgroundColor: 'rgba(255,255,255,0.07)',
+        marginBottom: 20,
     },
     icon: {
         fontSize: 64,
     },
     title: {
-        fontWeight: '600',
+        fontWeight: '800',
         textAlign: 'center',
         marginBottom: 8,
     },

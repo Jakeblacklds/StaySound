@@ -47,6 +47,8 @@ function SharedPlayerShellInner() {
     const isPlaying = usePlayerStore(s => s.isPlaying);
     const isLoading = usePlayerStore(s => s.isLoading);
     const togglePlayPause = usePlayerStore(s => s.togglePlayPause);
+    const previous = usePlayerStore(s => s.previous);
+    const next = usePlayerStore(s => s.next);
     const setPlayerVisible = usePlayerStore(s => s.setPlayerVisible);
     const expansion = usePlayerStore(s => s.expansion);
     const playerVisible = usePlayerStore(s => s.playerVisible);
@@ -154,8 +156,8 @@ function SharedPlayerShellInner() {
             left: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
             right: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
             height: interpolate(routeP, [0, 1], [MINI_HEIGHT, DETAIL_HEIGHT], Extrapolation.CLAMP),
-            borderTopLeftRadius: interpolate(routeP, [0, 1], [22, 0], Extrapolation.CLAMP),
-            borderTopRightRadius: interpolate(routeP, [0, 1], [22, 0], Extrapolation.CLAMP),
+            borderTopLeftRadius: 0,
+            borderTopRightRadius: 0,
             borderBottomLeftRadius: 0,
             borderBottomRightRadius: 0,
         };
@@ -290,6 +292,8 @@ function SharedPlayerShellInner() {
                     showPause={shouldHoldPauseAffordance}
                     onPress={handleTap}
                     onToggle={handleToggle}
+                    onPrevious={previous}
+                    onNext={next}
                     onPressIn={handlePlayPressIn}
                     onPressOut={handlePlayPressOut}
                     contentStyle={shellContentStyle}

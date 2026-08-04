@@ -58,7 +58,11 @@
       "Bash(grep -o \"_getTextWidth\\(.\\\\{0,300\\\\}\" /Users/jacob/Documents/Staysound/node_modules/@uimaxbai/am-lyrics/dist/src/am-lyrics.js)",
       "Bash(grep -o \"_updateCharTimingData\\(\\).\\\\{0,900\\\\}\" /Users/jacob/Documents/Staysound/node_modules/@uimaxbai/am-lyrics/dist/src/am-lyrics.js)",
       "Bash(grep -o \"_updateCharTimingData\\\\s*=\\\\s*.\\\\{0,100\\\\}\\\\|_updateCharTimingData\\(\\)\\\\s*{.\\\\{0,1200\\\\}\" /Users/jacob/Documents/Staysound/node_modules/@uimaxbai/am-lyrics/dist/src/am-lyrics.js)",
-      "Bash(python3 -)"
+      "Bash(python3 -)",
+      "Bash(gh pr *)",
+      "Bash(gh auth *)",
+      "Read(//Applications/StaySound.app/**)",
+      "Read(//Applications/StaySound.app/Contents/MacOS/**)"
     ]
   }
 }

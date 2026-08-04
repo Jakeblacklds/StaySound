@@ -2,13 +2,15 @@ import { Ionicons } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
 import Animated, {
     Easing,
     useAnimatedStyle,
     useSharedValue,
+    cancelAnimation,
+    withRepeat,
     withTiming,
 } from 'react-native-reanimated';
 import { useTheme, withAlpha } from '@/src/theme';
@@ -27,6 +29,9 @@ export interface TidalCoverCardProps {
     meta?: string;
     /** 'glass' tunes label colors brighter for translucent backgrounds. */
     tone?: 'default' | 'glass';
+    /** Download state shown as a rising layer inside the artwork. */
+    downloadStatus?: 'idle' | 'downloading' | 'done' | 'error';
+    downloadProgress?: number;
     onPress: () => void;
 }
 
@@ -40,10 +45,15 @@ export const TidalCoverCard: React.FC<TidalCoverCardProps> = ({
     badge,
     meta,
     tone = 'default',
+    downloadStatus = 'idle',
+    downloadProgress = 0,
     onPress,
 }) => {
     const { theme } = useTheme();
     const scale = useSharedValue(1);
+    const downloadFill = useSharedValue(downloadStatus === 'done' ? 1 : 0);
+    const shimmer = useSharedValue(-1);
+    const completion = useSharedValue(downloadStatus === 'done' ? 1 : 0);
     const circle = variant === 'circle';
     const portrait = variant === 'portrait';
     const glass = tone === 'glass';
@@ -55,6 +65,41 @@ export const TidalCoverCard: React.FC<TidalCoverCardProps> = ({
 
     const animatedStyle = useAnimatedStyle(() => ({
         transform: [{ scale: scale.value }],
+    }));
+
+    useEffect(() => {
+        const nextProgress = downloadStatus === 'done'
+            ? 1
+            : downloadStatus === 'downloading'
+                ? Math.max(0.04, Math.min(0.96, downloadProgress))
+                : downloadStatus === 'error' ? 0.32 : 0;
+
+        downloadFill.value = withTiming(nextProgress, { duration: 280, easing: Easing.out(Easing.cubic) });
+        completion.value = withTiming(downloadStatus === 'done' ? 1 : 0, { duration: 220, easing: Easing.out(Easing.cubic) });
+
+        if (downloadStatus === 'downloading') {
+            shimmer.value = -1;
+            shimmer.value = withRepeat(
+                withTiming(1, { duration: 1250, easing: Easing.linear }),
+                -1,
+                false,
+            );
+        } else {
+            cancelAnimation(shimmer);
+        }
+    }, [downloadProgress, downloadStatus]);
+
+    const downloadFillStyle = useAnimatedStyle(() => ({
+        transform: [{ translateY: (1 - downloadFill.value) * coverHeight }],
+    }));
+
+    const shimmerStyle = useAnimatedStyle(() => ({
+        transform: [{ translateX: shimmer.value * size * 2 }],
+    }));
+
+    const completionStyle = useAnimatedStyle(() => ({
+        opacity: completion.value,
+        transform: [{ scale: 0.7 + completion.value * 0.3 }],
     }));
 
     const handlePressIn = () => {
@@ -112,6 +157,33 @@ export const TidalCoverCard: React.FC<TidalCoverCardProps> = ({
                     <View style={styles.playBadge}>
                         <Ionicons name="play" size={15} color="#FFFFFF" />
                     </View>
+                ) : null}
+                {downloadStatus !== 'idle' ? (
+                    <Animated.View pointerEvents="none" style={[styles.downloadTide, { height: coverHeight }, downloadFillStyle]}>
+                        <LinearGradient
+                            colors={[
+                                withAlpha(theme.colors.primary, 'EE'),
+                                withAlpha((theme.colors as any).tertiary ?? theme.colors.secondary, 'D9'),
+                            ]}
+                            start={{ x: 0, y: 0 }}
+                            end={{ x: 1, y: 1 }}
+                            style={StyleSheet.absoluteFill}
+                        />
+                        {downloadStatus === 'downloading' ? (
+                            <Animated.View style={[styles.downloadShimmer, shimmerStyle]} />
+                        ) : null}
+                        <View style={styles.downloadTideContent}>
+                            {downloadStatus === 'done' ? (
+                                <Animated.View style={completionStyle}>
+                                    <Ionicons name="checkmark" size={32} color={theme.colors.onPrimary} />
+                                </Animated.View>
+                            ) : downloadStatus === 'error' ? (
+                                <Ionicons name="alert" size={26} color={theme.colors.onError} />
+                            ) : (
+                                <Ionicons name="arrow-down" size={28} color={theme.colors.onPrimary} />
+                            )}
+                        </View>
+                    </Animated.View>
                 ) : null}
             </View>
             {title ? (
@@ -172,6 +244,26 @@ const styles = StyleSheet.create({
         fontSize: 10,
         fontWeight: '800',
         letterSpacing: 0.6,
+    },
+    downloadTide: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+        bottom: 0,
+        overflow: 'hidden',
+    },
+    downloadTideContent: {
+        ...StyleSheet.absoluteFillObject,
+        alignItems: 'center',
+        justifyContent: 'center',
+    },
+    downloadShimmer: {
+        position: 'absolute',
+        top: -24,
+        bottom: -24,
+        width: '42%',
+        backgroundColor: 'rgba(255,255,255,0.18)',
+        transform: [{ skewX: '-18deg' }],
     },
     title: {
         fontSize: 14,

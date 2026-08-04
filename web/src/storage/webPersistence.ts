@@ -3,6 +3,7 @@ import type { Playlist, Track } from '@staysound/types/audio';
 const LIBRARY_KEY = 'staysound.web.library.v1';
 const SETTINGS_KEY = 'staysound.web.settings.v1';
 const PLAYLISTS_KEY = 'staysound.web.playlists.v1';
+const RECENTLY_PLAYED_KEY = 'staysound.web.recently-played.v1';
 
 export interface PersistedWebTrack extends Omit<Track, 'uri'> {
   uri?: string;
@@ -11,6 +12,7 @@ export interface PersistedWebTrack extends Omit<Track, 'uri'> {
   fileSize: number;
   fileType: string;
   relativePath?: string;
+  nativePath?: string;
   needsRelink: boolean;
   /** Key into the artwork cache (IndexedDB) so covers survive reloads. */
   artworkKey?: string;
@@ -32,6 +34,10 @@ export interface PersistedWebPlaylists {
   savedAt: number;
 }
 
+export interface PersistedRecentlyPlayed {
+  trackIds: string[];
+}
+
 function readJson<T>(key: string): T | null {
   try {
     const raw = window.localStorage.getItem(key);
@@ -47,6 +53,15 @@ function writeJson(key: string, value: unknown): void {
   } catch {
     // Browsers can reject storage in private mode. The app still works for the session.
   }
+}
+
+export function loadRecentlyPlayed(): string[] {
+  const saved = readJson<PersistedRecentlyPlayed>(RECENTLY_PLAYED_KEY);
+  return Array.isArray(saved?.trackIds) ? saved.trackIds.filter(Boolean).slice(0, 24) : [];
+}
+
+export function saveRecentlyPlayed(trackIds: string[]): void {
+  writeJson(RECENTLY_PLAYED_KEY, { trackIds: Array.from(new Set(trackIds)).slice(0, 24) });
 }
 
 // --- Durable library store (IndexedDB) ------------------------------------

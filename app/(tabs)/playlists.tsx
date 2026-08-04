@@ -1,15 +1,17 @@
-import { CustomIcon, EmptyState, PlaylistCard } from '@/src/components/ui';
+import { CustomIcon, EmptyState, ImmersiveHeading } from '@/src/components/ui';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n } from '@/src/i18n';
 import { useLibraryStore } from '@/src/stores';
 import { useTheme } from '@/src/theme';
 import { Playlist } from '@/src/types';
 import { FlashList } from '@shopify/flash-list';
+import { Ionicons } from '@expo/vector-icons';
+import { Image } from 'expo-image';
 import { router } from 'expo-router';
-import React, { useCallback, useMemo } from 'react';
-import { StyleSheet, View } from 'react-native';
+import React, { useCallback, useEffect, useMemo } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
-import Animated from 'react-native-reanimated';
+import Animated, { Easing, useAnimatedStyle, useSharedValue, withRepeat, withTiming } from 'react-native-reanimated';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 export default function PlaylistsScreen() {
@@ -26,6 +28,21 @@ export default function PlaylistsScreen() {
     () => Array.from(playlistsMap.values()).sort((a, b) => b.updatedAt - a.updatedAt),
     [playlistsMap]
   );
+  const featuredPlaylist = playlists[0];
+  const remainingPlaylists = playlists.slice(1);
+  const featureRotation = useSharedValue(0);
+
+  useEffect(() => {
+    featureRotation.value = withRepeat(
+      withTiming(360, { duration: 36000, easing: Easing.linear }),
+      -1,
+      false,
+    );
+  }, [featureRotation]);
+
+  const featureArtworkStyle = useAnimatedStyle(() => ({
+    transform: [{ rotate: `${featureRotation.value}deg` }],
+  }));
 
   const openCreatePlaylist = useCallback(() => {
     router.push('/playlist-create');
@@ -37,38 +54,16 @@ export default function PlaylistsScreen() {
 
   return (
     <SafeAreaView
-      style={[styles.container, { backgroundColor: theme.colors.background }]}
+      style={styles.container}
       edges={['top']}
     >
       <Animated.View
         style={[styles.headerShell, headerEntryStyle]}
       >
-        <View style={styles.header}>
-          <View style={styles.headerCopy}>
-            <Text
-              variant="headlineMedium"
-              style={[styles.title, { color: theme.colors.onBackground }]}
-            >
-              {t('playlists.title')}
-            </Text>
-          </View>
-
-          <Button
-            mode="contained-tonal"
-            style={styles.newButton}
-            contentStyle={{ flexDirection: 'row-reverse' }}
-            icon={() => (
-              <CustomIcon
-                name="Playlist"
-                size={18}
-                color={theme.colors.onSecondaryContainer}
-              />
-            )}
-            onPress={openCreatePlaylist}
-          >
-            {t('playlists.new')}
-          </Button>
-        </View>
+        <Text style={[styles.screenTitle, { color: theme.colors.onBackground }]}>{t('playlists.title')}</Text>
+        <Pressable onPress={openCreatePlaylist} hitSlop={14}>
+          <Ionicons name="add" size={28} color={theme.colors.onSurfaceVariant} />
+        </Pressable>
       </Animated.View>
 
       <Animated.View
@@ -94,26 +89,47 @@ export default function PlaylistsScreen() {
           </View>
         ) : (
           <FlashList
-            data={playlists}
+            data={remainingPlaylists}
             keyExtractor={item => item.id}
-            numColumns={2}
-            masonry
-            optimizeItemArrangement
-            renderItem={({ item, index }) => {
-              const isTall = index % 3 === 0;
-              const height = isTall ? 260 : index % 2 === 0 ? 180 : 220;
-
+            ListHeaderComponent={featuredPlaylist ? (
+              <View style={styles.featuredBlock}>
+                <Animated.Text style={[styles.featuredLabel, { color: theme.colors.onSurfaceVariant }]}>MEZCLA DESTACADA</Animated.Text>
+                <Pressable onPress={() => handleOpenPlaylist(featuredPlaylist)} style={styles.featuredHero}>
+                  <Animated.View style={[styles.featuredArtwork, { borderColor: theme.colors.primary }, featureArtworkStyle]}>
+                    {featuredPlaylist.artwork ? (
+                      <Image source={{ uri: featuredPlaylist.artwork }} style={StyleSheet.absoluteFill} contentFit="cover" />
+                    ) : (
+                      <CustomIcon name="Playlist" size={68} color={theme.colors.primary} />
+                    )}
+                  </Animated.View>
+                  <View style={styles.featuredCopy}>
+                    <Text style={[styles.featuredName, { color: theme.colors.onBackground }]} numberOfLines={2}>
+                      {featuredPlaylist.name}
+                    </Text>
+                    <Text style={[styles.featuredDescription, { color: theme.colors.onSurfaceVariant }]} numberOfLines={3}>
+                      {featuredPlaylist.description || 'Una selección para escuchar sin interrupciones.'}
+                    </Text>
+                    <View style={[styles.featuredPlay, { backgroundColor: theme.colors.primary }]}>
+                      <CustomIcon name="Play" size={18} color={theme.colors.onPrimary} />
+                    </View>
+                  </View>
+                </Pressable>
+                {remainingPlaylists.length > 0 ? (
+                  <Animated.Text style={[styles.moreTitle, { color: theme.colors.onSurfaceVariant }]}>TUS PLAYLISTS</Animated.Text>
+                ) : null}
+              </View>
+            ) : null}
+            renderItem={({ item }) => {
               return (
-                <View style={styles.cardWrap}>
-                  <PlaylistCard
-                    playlist={item}
-                    size="full"
-                    height={height}
-                    trackCount={item.trackIds.length}
-                    onPress={handleOpenPlaylist}
-                    onOptionsPress={handleOpenPlaylist}
-                  />
-                </View>
+                <Pressable onPress={() => handleOpenPlaylist(item)} style={({ pressed }) => [styles.playlistRow, pressed && styles.rowPressed]}>
+                  <View style={[styles.rowArtwork, { backgroundColor: theme.colors.surfaceVariant }]}>
+                    {item.artwork ? <Image source={{ uri: item.artwork }} style={StyleSheet.absoluteFill} contentFit="cover" /> : (
+                      <CustomIcon name="Playlist" size={25} color={theme.colors.primary} />
+                    )}
+                  </View>
+                  <Text style={[styles.rowName, { color: theme.colors.onBackground }]} numberOfLines={1}>{item.name}</Text>
+                  <Ionicons name="ellipsis-horizontal" size={20} color={theme.colors.onSurfaceVariant} />
+                </Pressable>
               );
             }}
             contentContainerStyle={[
@@ -134,27 +150,26 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   headerShell: {
-    marginHorizontal: 16,
-    marginTop: 12,
-    marginBottom: 14,
-  },
-  header: {
-    paddingHorizontal: 2,
-    paddingVertical: 4,
+    marginHorizontal: 20,
+    marginTop: 14,
+    marginBottom: 10,
     flexDirection: 'row',
+    alignItems: 'center',
     justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    gap: 12,
   },
-  headerCopy: {
-    flex: 1,
-    paddingRight: 8,
-  },
-  title: {
-    fontWeight: '800',
+  screenTitle: {
+    fontFamily: 'StaySound',
+    fontSize: 30,
+    lineHeight: 36,
+    fontWeight: '900',
+    letterSpacing: -1.25,
   },
   newButton: {
-    borderRadius: 14,
+    borderRadius: 17,
+  },
+  newButtonContent: {
+    minHeight: 44,
+    flexDirection: 'row-reverse',
   },
   content: {
     flex: 1,
@@ -167,10 +182,91 @@ const styles = StyleSheet.create({
     gap: 12,
   },
   gridContent: {
-    paddingHorizontal: 12,
-    paddingTop: 12,
+    paddingHorizontal: 20,
+    paddingTop: 4,
   },
   cardWrap: {
     padding: 4,
+  },
+  featuredBlock: {
+    paddingBottom: 22,
+  },
+  featuredLabel: {
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+    marginBottom: 14,
+  },
+  featuredHero: {
+    minHeight: 190,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 20,
+  },
+  featuredArtwork: {
+    width: 172,
+    height: 172,
+    borderRadius: 86,
+    borderWidth: 1.5,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  featuredCopy: {
+    flex: 1,
+    alignItems: 'flex-start',
+  },
+  featuredName: {
+    fontFamily: 'StaySound',
+    fontSize: 20,
+    lineHeight: 24,
+    fontWeight: '900',
+    letterSpacing: -0.6,
+  },
+  featuredDescription: {
+    fontSize: 13,
+    lineHeight: 18,
+    marginTop: 7,
+  },
+  featuredPlay: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 14,
+  },
+  moreTitle: {
+    marginTop: 30,
+    marginBottom: 14,
+    fontSize: 10,
+    lineHeight: 14,
+    fontWeight: '900',
+    letterSpacing: 1.5,
+  },
+  playlistRow: {
+    minHeight: 68,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 14,
+  },
+  rowPressed: {
+    opacity: 0.58,
+  },
+  rowArtwork: {
+    width: 50,
+    height: 50,
+    borderRadius: 7,
+    overflow: 'hidden',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  rowName: {
+    fontFamily: 'StaySound',
+    flex: 1,
+    fontSize: 15,
+    lineHeight: 20,
+    fontWeight: '700',
   },
 });

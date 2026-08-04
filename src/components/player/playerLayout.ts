@@ -1,6 +1,6 @@
 export const MINI_HEIGHT = 66;
 export const MINI_MARGIN = 0;
-export const TAB_BAR_HEIGHT = 78;
+export const TAB_BAR_HEIGHT = 70;
 export const TAB_BAR_FLOAT_OFFSET = 12;
 export const MINI_GAP_FROM_TAB = 6;
 export const DETAIL_HEIGHT = 78;

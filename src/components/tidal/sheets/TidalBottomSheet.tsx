@@ -8,7 +8,7 @@
  */
 import { BlurView } from 'expo-blur';
 import React, { useCallback, useEffect } from 'react';
-import { BackHandler, Dimensions, Pressable, ScrollView, StyleSheet, View } from 'react-native';
+import { BackHandler, Dimensions, Modal, Pressable, ScrollView, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { Text } from 'react-native-paper';
 import Animated, {
@@ -88,7 +88,15 @@ export const TidalBottomSheet: React.FC<TidalBottomSheetProps> = ({
     if (!visible) return null;
 
     return (
-        <View style={StyleSheet.absoluteFill} pointerEvents="box-none">
+        <Modal
+            transparent
+            visible={visible}
+            animationType="none"
+            statusBarTranslucent
+            navigationBarTranslucent
+            onRequestClose={handleClose}
+        >
+        <View style={styles.modalRoot}>
             <Animated.View style={[styles.backdrop, backdropStyle]}>
                 <Pressable style={StyleSheet.absoluteFill} onPress={handleClose} />
             </Animated.View>
@@ -138,10 +146,14 @@ export const TidalBottomSheet: React.FC<TidalBottomSheetProps> = ({
                 </Animated.View>
             </GestureDetector>
         </View>
+        </Modal>
     );
 };
 
 const styles = StyleSheet.create({
+    modalRoot: {
+        flex: 1,
+    },
     backdrop: {
         ...StyleSheet.absoluteFillObject,
         backgroundColor: 'rgba(0,0,0,0.5)',
