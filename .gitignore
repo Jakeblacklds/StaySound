@@ -76,3 +76,4 @@ design-qa.md
 
 # Tooling session state
 .impeccable/
+.env*

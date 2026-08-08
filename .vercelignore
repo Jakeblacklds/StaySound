@@ -1,19 +1,48 @@
-node_modules
-.git
-.expo
-.vercel
-android
-ios
-out
-tmp_apk_inspect
-tmp_*
+# The Vercel deploy only builds the web app (`npm run web:build` → web/dist) plus the
+# serverless functions in api/. Everything the mobile and desktop targets need is dead
+# weight in the upload, and the CLI does NOT fall back to .gitignore here: without this
+# file the deploy ships 41k files and fails the 15k limit outright.
+#
+# What the build actually reads: web/, src/ (aliased as @staysound), api/, package.json,
+# package-lock.json, vercel.json, tsconfig.json.
+#
+# Every pattern is anchored with a leading slash. Unanchored, this file uses .gitignore
+# matching, so a bare `components/` would also swallow web/src/components/ and break the
+# build.
+
+# Rust desktop app — target/ alone is ~22k files
+/src-tauri/
+
+# Native mobile projects and modules
+/android/
+/ios/
+/modules/
+/macos-native/
+/plugins/
+/patches/
+
+# Expo/React Native app shell, unused by the web build
+/app/
+/components/
+/constants/
+/assets/
+
+# Build output, media renders and scratch
+/out/
+/sites/
+/remotion/
+/docs/
+/update/
+/.audit/
+/tmp_*
+/design-qa*
 *.apk
-*.aab
-*.mp3
+*.dmg
 *.mp4
-*.mov
-*.zip
-dist
-web/dist
-coverage
-.DS_Store
+*.mp3
+
+# Tooling state
+/.expo/
+/.impeccable/
+/.desktop-sidecar/
+/.venv-demucs/
