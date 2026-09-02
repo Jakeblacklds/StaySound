@@ -93,14 +93,6 @@ function ArtistCardInner({ artist, size = 'medium', height: customHeight, presen
     }));
 
     // Artist name / subtitle text colors — cross-fade with the background
-    const animatedNameStyle = useAnimatedStyle(() => ({
-        color: aC.onSurface.value,
-    }));
-    const animatedCountStyle = useAnimatedStyle(() => ({
-        color: aC.onSurfaceVariant.value,
-        opacity: 0.72,
-    }));
-
     const containerStyle = useMemo(() => ([
         styles.container,
         { width: cardSize }

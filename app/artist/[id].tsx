@@ -13,22 +13,15 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
 import { Image, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { IconButton, Text } from 'react-native-paper';
-import Animated, { FadeIn, FadeInDown, FadeInRight, interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
+import Animated, { FadeIn, FadeInDown, FadeInRight } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const HEADER_HEIGHT = 300;
-const AVATAR_SIZE = 220;
-const HERO_TOP_OFFSET = 56;
 const BACK_BUTTON_TOP_OFFSET = 10;
-const CONTENT_TOP_GAP = 24;
-
-const AnimatedScrollView = Animated.createAnimatedComponent(ScrollView);
 
 export default function ArtistDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const { theme, isDark } = useTheme();
     const insets = useSafeAreaInsets();
-    const scrollY = useSharedValue(0);
 
     const getArtistById = useLibraryStore(state => state.getArtistById);
     const getTracksByArtist = useLibraryStore(state => state.getTracksByArtist);
@@ -50,19 +43,6 @@ export default function ArtistDetailScreen() {
 
     // Show top 5 songs
     const topTracks = tracks.slice(0, 5);
-
-    const scrollHandler = useAnimatedScrollHandler({
-        onScroll: (event) => {
-            scrollY.value = event.contentOffset.y;
-        },
-    });
-
-    const avatarStyle = useAnimatedStyle(() => ({
-        transform: [
-            { scale: interpolate(scrollY.value, [-100, 0, 100], [1.3, 1, 0.8], 'clamp') },
-        ],
-        opacity: interpolate(scrollY.value, [0, 150], [1, 0.3]),
-    }));
 
     const handleTrackPress = useCallback((track: Track) => {
         play(track, tracks);
@@ -97,9 +77,7 @@ export default function ArtistDetailScreen() {
             </View>
 
             {/* Content */}
-            <AnimatedScrollView
-                onScroll={scrollHandler}
-                scrollEventThrottle={16}
+            <ScrollView
                 contentContainerStyle={[
                     styles.content,
                     { paddingTop: insets.top + 72 }
@@ -201,7 +179,7 @@ export default function ArtistDetailScreen() {
                 {/* About Section */}
                 <ArtistAbout artistName={artist.name} accentColor={artistColors.primary} />
 
-            </AnimatedScrollView>
+            </ScrollView>
         </View>
     );
 }

@@ -71,7 +71,6 @@ export default function LyricsScreen() {
                 <ThemeBackground
                     colors={albumColors}
                     animColors={animColors}
-                    isVisible={true}
                 />
                 {/* Layer 3: dark overlay that mutes the blobs to a safe level */}
                 <View style={styles.bgOverlay} />

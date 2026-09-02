@@ -2,6 +2,7 @@ import React, { createContext, ReactNode, useCallback, useContext, useState } fr
 import { useColorScheme } from 'react-native';
 import { useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors, isAlbumPaletteMonochrome } from '../services/colorExtractor';
+import { deepenAlbumBackground } from '../utils/albumSurface';
 import { useSettingsStore } from '../stores/settingsStore';
 import { Theme, ThemeMode, ThemeStyle } from '../types/theme';
 import { ensureColorContrast, mixHexColors, pickReadableColor } from '../utils/colorContrast';
@@ -249,19 +250,36 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
 
             if (isDynamic) {
                 if (isDark) {
+                    // The extractor keeps the artwork's own lightness, which reads
+                    // as a vivid wash once it becomes the app surface. Deepen it
+                    // first (idempotent clamp — the player may have deepened it
+                    // already) so the chrome is a dark room lit by the cover.
+                    const albumSurface = deepenAlbumBackground(dynamicPalette.background);
                     const mutedBackground = mixHexColors(
-                        dynamicPalette.background,
+                        albumSurface,
                         selectedTheme.colors.background,
-                        0.34
+                        0.5
+                    );
+                    // Re-derive from the DEEPENED surface: light artwork used to
+                    // hand us near-black onSurface, unreadable on a dark surface.
+                    const onSurface = pickReadableColor(albumSurface, [
+                        dynamicPalette.onSurface,
+                        selectedTheme.colors.onSurface,
+                        '#FFFFFF',
+                    ]);
+                    const onSurfaceVariant = ensureColorContrast(
+                        mixHexColors(onSurface, albumSurface, 0.34),
+                        albumSurface,
+                        { minRatio: 4.2, targetColor: onSurface, fallbackColor: onSurface },
                     );
 
                     finalColors = {
                         ...selectedTheme.colors,
                         ...m3Colors,
                         background: mutedBackground,
-                        surface: dynamicPalette.background,
-                        onSurface: dynamicPalette.onSurface,
-                        onSurfaceVariant: dynamicPalette.onSurface,
+                        surface: albumSurface,
+                        onSurface,
+                        onSurfaceVariant,
                     };
                 } else {
                     finalColors = buildReadableLightDynamicColors(selectedTheme, m3Colors, dynamicPalette);

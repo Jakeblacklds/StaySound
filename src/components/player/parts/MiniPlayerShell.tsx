@@ -5,7 +5,6 @@ import React from 'react';
 import { ActivityIndicator, Pressable, StyleProp, StyleSheet, TextStyle, View, ViewStyle } from 'react-native';
 import Animated from 'react-native-reanimated';
 import Svg, { Path } from 'react-native-svg';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
 
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
@@ -21,6 +20,9 @@ type MiniPlayerShellProps = {
     track: MiniPlayerTrack;
     showArtwork?: boolean;
     textColor: string;
+    /** Color for the skip controls, which sit on the BAR surface — not inside
+     *  the play pill. Falls back to textColor for callers that don't pass it. */
+    controlColor?: string;
     buttonFillColor: string;
     buttonBorderColor: string;
     showLoading: boolean;
@@ -63,11 +65,49 @@ function MiniPlayerPauseIcon({ color, size = 24 }: { color: string; size?: numbe
     );
 }
 
+// Skip marks drawn to match the pause glyph above: leading wedge solid, trailing
+// wedge at 45%. Fill + round-joined stroke of the same color gives soft corners
+// without a second path.
+function MiniSkipIcon({
+    direction,
+    color,
+    size = 22,
+}: {
+    direction: 'previous' | 'next';
+    color: string;
+    size?: number;
+}) {
+    const isNext = direction === 'next';
+    const leading = isNext ? 'M12 7 19 12 12 17Z' : 'M12 7 5 12 12 17Z';
+    const trailing = isNext ? 'M4.6 7 11.6 12 4.6 17Z' : 'M19.4 7 12.4 12 19.4 17Z';
+    const wedge = {
+        fill: color,
+        stroke: color,
+        strokeWidth: 2.1,
+        strokeLinejoin: 'round' as const,
+    };
+
+    return (
+        <Svg width={size} height={size} viewBox="0 0 24 24">
+            <Path d={trailing} {...wedge} fillOpacity={0.45} strokeOpacity={0.45} />
+            <Path d={leading} {...wedge} />
+        </Svg>
+    );
+}
+
+// Skip controls dim + recede while held — the same touch language as the
+// play pill, so the row doesn't feel like a static strip of glyphs.
+const skipButtonStyle = ({ pressed }: { pressed: boolean }): StyleProp<ViewStyle> => [
+    styles.rowSkipButton,
+    pressed ? styles.rowSkipButtonPressed : null,
+];
+
 function MiniPlayerShellInner({
     variant,
     track,
     showArtwork = true,
     textColor,
+    controlColor,
     buttonFillColor,
     buttonBorderColor,
     showLoading,
@@ -85,6 +125,7 @@ function MiniPlayerShellInner({
     playButtonStyle,
 }: MiniPlayerShellProps) {
     const isOverlay = variant === 'overlay';
+    const skipColor = controlColor ?? textColor;
     const performanceProfile = usePerformanceProfile();
     const imageCachePolicy = performanceProfile.imageCachePolicyList;
 
@@ -166,8 +207,8 @@ function MiniPlayerShellInner({
                     </Pressable>
 
                     <View style={styles.rowControls}>
-                        <Pressable onPress={onPrevious} hitSlop={10} style={styles.rowSkipButton}>
-                            <MaterialCommunityIcons name="skip-previous" size={23} color={textColor} />
+                        <Pressable onPress={onPrevious} hitSlop={10} style={skipButtonStyle}>
+                            <MiniSkipIcon direction="previous" color={skipColor} />
                         </Pressable>
                         <AnimatedPressable
                             onPress={onToggle}
@@ -193,8 +234,8 @@ function MiniPlayerShellInner({
                                 />
                             )}
                         </AnimatedPressable>
-                        <Pressable onPress={onNext} hitSlop={10} style={styles.rowSkipButton}>
-                            <MaterialCommunityIcons name="skip-next" size={23} color={textColor} />
+                        <Pressable onPress={onNext} hitSlop={10} style={skipButtonStyle}>
+                            <MiniSkipIcon direction="next" color={skipColor} />
                         </Pressable>
                     </View>
                 </>
@@ -225,7 +266,7 @@ const styles = StyleSheet.create({
     rowArtworkWrap: {
         width: 48,
         height: 48,
-        borderRadius: 7,
+        borderRadius: 24,
         overflow: 'hidden',
     },
     overlayArtworkWrap: {
@@ -234,7 +275,7 @@ const styles = StyleSheet.create({
         top: 9,
         width: 48,
         height: 48,
-        borderRadius: 16,
+        borderRadius: 24,
         overflow: 'hidden',
         zIndex: 3,
     },
@@ -274,10 +315,14 @@ const styles = StyleSheet.create({
         gap: 2,
     },
     rowSkipButton: {
-        width: 30,
+        width: 34,
         height: 40,
         alignItems: 'center',
         justifyContent: 'center',
+    },
+    rowSkipButtonPressed: {
+        opacity: 0.55,
+        transform: [{ scale: 0.88 }],
     },
     rowPlayButton: {
         width: 36,

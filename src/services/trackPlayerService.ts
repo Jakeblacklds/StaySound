@@ -269,7 +269,7 @@ function normalizeArtworkUri(value?: string | null): string | undefined {
   return undefined;
 }
 
-function resolveArtworkForQueue(track: Track): string | undefined {
+function resolveArtworkForQueue(_track: Track): string | undefined {
   // Keep the native queue as light as possible on low-memory Android devices.
   // Artwork for the active item is injected separately via updateNowPlayingMetadata.
   return undefined;

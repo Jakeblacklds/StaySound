@@ -71,6 +71,15 @@ internal class KaraokeSpectrumRenderer(
     private var bassVel = 0f
     private var midDisplay = 0f
     private var trebleDisplay = 0f
+    // Audio changes a velocity target, never the matrix position itself. The
+    // very slow followers give direction changes several seconds of inertia.
+    private var matrixVelocityX = 0f
+    private var matrixVelocityY = 0f
+    private var matrixFlowX = 0f
+    private var matrixFlowY = 0f
+    private var matrixBassShape = 0f
+    private var matrixMidShape = 0f
+    private var matrixTrebleShape = 0f
 
     // Per-ray smoothed levels for the mid god-rays (one envelope per ray).
     private val midBeamDisplay = FloatArray(MID_BEAMS)
@@ -201,6 +210,24 @@ internal class KaraokeSpectrumRenderer(
         midDisplay = ease(midDisplay, mid, dt, attack = 0.05f, release = 0.006f)
         trebleDisplay = ease(trebleDisplay, treble, dt, attack = 0.06f, release = 0.014f)
 
+        // Geometry follows a much heavier envelope than glow/colour. A transient
+        // bends the next shape over time instead of filling every dot in one frame.
+        matrixBassShape = ease(matrixBassShape, bass.coerceIn(0f, 1f), dt, attack = 0.0013f, release = 0.00075f)
+        matrixMidShape = ease(matrixMidShape, mid.coerceIn(0f, 1f), dt, attack = 0.0011f, release = 0.00068f)
+        matrixTrebleShape = ease(matrixTrebleShape, treble.coerceIn(0f, 1f), dt, attack = 0.00095f, release = 0.00078f)
+
+        // Keep the movement musical but calm: mids/treble gently steer the
+        // procedural signal while bass adds weight to the cells. Changes take
+        // seconds to settle, so no energy spike can jump the matrix.
+        val matrixTargetX = 0.002f + (matrixTrebleShape - matrixBassShape * 0.54f) * 0.006f
+        val matrixTargetY = 0.001f + (matrixMidShape - matrixBassShape * 0.55f) * 0.005f
+        matrixVelocityX = ease(matrixVelocityX, matrixTargetX, dt, attack = 0.00055f, release = 0.00038f)
+        matrixVelocityY = ease(matrixVelocityY, matrixTargetY, dt, attack = 0.00048f, release = 0.00034f)
+        if (isPlaying) {
+            matrixFlowX += matrixVelocityX * dt / 1000f
+            matrixFlowY += matrixVelocityY * dt / 1000f
+        }
+
         // --- Draw order: horizon → bloom → mids/agudos → (lyrics veil) ---------------
         // GRAVES stay the hero (horizon + bloom). In ARTWORK mode the medios+agudos are
         // one cohesive AGSL AURORA field framing that core; in LYRICS mode they remain the
@@ -225,8 +252,13 @@ internal class KaraokeSpectrumRenderer(
                     drawShimmerVeil(canvas, w, h, t, alpha)
                 }
                 Theme.AURORA, Theme.CAUSTICS -> {
-                    drawHorizon(canvas, w, h, alpha)
-                    drawBloom(canvas, alpha)
+                    // Aurora is composited over the album-color Skia field in
+                    // FullPlayer, so it only contributes translucent audio-led
+                    // dot highlights. Caustics remains a complete standalone theme.
+                    if (theme == Theme.CAUSTICS) {
+                        drawHorizon(canvas, w, h, alpha)
+                        drawBloom(canvas, alpha)
+                    }
                     val style = if (theme == Theme.CAUSTICS) {
                         KaraokeAuroraShader.STYLE_CAUSTICS
                     } else {
@@ -394,8 +426,11 @@ internal class KaraokeSpectrumRenderer(
             width = w,
             height = h,
             timeSec = t / 1000f,
-            mid = mid,
-            treble = tre,
+            bass = if (style == KaraokeAuroraShader.STYLE_DOT_MATRIX) matrixBassShape else bassDisplay.coerceIn(0f, 1f),
+            mid = if (style == KaraokeAuroraShader.STYLE_DOT_MATRIX) matrixMidShape else mid,
+            treble = if (style == KaraokeAuroraShader.STYLE_DOT_MATRIX) matrixTrebleShape else tre,
+            flowX = matrixFlowX,
+            flowY = matrixFlowY,
             master = alpha,
             topFrac = AURORA_TOP_FRAC,
             focusY = focusYNorm,
@@ -409,7 +444,7 @@ internal class KaraokeSpectrumRenderer(
         ) ?: return false
         auroraPaint.shader = shader
         auroraPaint.alpha = 255 // intensity baked into the uniforms (premultiplied)
-        auroraPaint.xfermode = addXfer
+        auroraPaint.xfermode = if (style == KaraokeAuroraShader.STYLE_DOT_MATRIX) null else addXfer
         canvas.drawRect(0f, 0f, w, h, auroraPaint)
         auroraPaint.xfermode = null
         return true

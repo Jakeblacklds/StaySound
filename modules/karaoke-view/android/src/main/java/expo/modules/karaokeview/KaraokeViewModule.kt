@@ -117,6 +117,10 @@ class KaraokeViewModule : Module() {
                 view.setDisplayMode(value)
             }
 
+            Prop("lyricsFont") { view: KaraokeView, value: String? ->
+                view.setLyricsFont(value)
+            }
+
             Prop("motionProfile") { view: KaraokeView, value: String? ->
                 view.setMotionProfile(value)
             }

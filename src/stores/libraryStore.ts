@@ -21,7 +21,7 @@ let isHydratingArtworkThumbs = false;
 function rebuildDerivedLibraryCollections(tracksMap: Map<string, Track>, existingArtists?: Map<string, Artist>) {
     const trackList = Array.from(tracksMap.values());
     const albums = organizeIntoAlbums(trackList);
-    const artists = organizeIntoArtists(trackList, albums, existingArtists);
+    const artists = organizeIntoArtists(trackList, existingArtists);
 
     return { albums, artists };
 }
@@ -429,7 +429,7 @@ export const useLibraryStore = create<LibraryStore>()(
                     // PHASE 3: Final Organization
                     const finalTracks = Array.from(collectedTracks.values());
                     const initialAlbums = organizeIntoAlbums(finalTracks);
-                    const initialArtists = organizeIntoArtists(finalTracks, initialAlbums, get().artists);
+                    const initialArtists = organizeIntoArtists(finalTracks, get().artists);
 
                     set({
                         tracks: collectedTracks,
@@ -962,7 +962,7 @@ export const useLibraryStore = create<LibraryStore>()(
                 // Re-organize to maintain consistency in albums/artists
                 const tracksArray = Array.from(newTracks.values());
                 const nextAlbums = organizeIntoAlbums(tracksArray);
-                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums, get().artists);
+                const nextArtists = organizeIntoArtists(tracksArray, get().artists);
 
                 set({
                     tracks: newTracks,
@@ -1032,7 +1032,7 @@ export const useLibraryStore = create<LibraryStore>()(
                 // 4. Re-organize Albums and Artists
                 const tracksArray = Array.from(nextTracks.values());
                 const nextAlbums = organizeIntoAlbums(tracksArray);
-                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums, get().artists);
+                const nextArtists = organizeIntoArtists(tracksArray, get().artists);
 
                 set({
                     tracks: nextTracks,

@@ -111,7 +111,6 @@ export function organizeIntoAlbums(tracks: Track[]): Map<string, Album> {
  */
 export function organizeIntoArtists(
     tracks: Track[],
-    albums: Map<string, Album>,
     existingArtists?: Map<string, Artist>,
 ): Map<string, Artist> {
     const artists = new Map<string, Artist>();

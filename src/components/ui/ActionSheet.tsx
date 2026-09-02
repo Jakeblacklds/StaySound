@@ -3,7 +3,7 @@ import { Image } from 'expo-image';
 import React, { useCallback, useEffect } from 'react';
 import { BackHandler, Dimensions, Pressable, StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import { IconButton, Text, useTheme as usePaperTheme } from 'react-native-paper';
+import { IconButton, Text } from 'react-native-paper';
 import Animated, {
     Easing,
     interpolate,
@@ -18,13 +18,12 @@ import { useUIStore } from '../../stores/uiStore';
 import { usePerformanceProfile, useTheme } from '../../theme';
 import { CustomIcon, IconName } from './CustomIcon';
 
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+const { height: SCREEN_HEIGHT } = Dimensions.get('window');
 const SHEET_HEIGHT = SCREEN_HEIGHT * 0.6;
 
 export function ActionSheet() {
     const { theme, isDark } = useTheme();
     const performanceProfile = usePerformanceProfile();
-    const paperTheme = usePaperTheme();
     const insets = useSafeAreaInsets();
 
     const visible = useUIStore(s => s.actionSheetVisible);

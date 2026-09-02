@@ -1,8 +1,9 @@
 import { useDynamicColors } from '@/src/hooks';
-import { pickReadableColor } from '@/src/utils/colorContrast';
+import { ensureColorContrast, mixHexColors, pickReadableColor } from '@/src/utils/colorContrast';
 import { usePlayerStore } from '@/src/stores';
 import { useUIStore } from '@/src/stores/uiStore';
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
+import * as Haptics from 'expo-haptics';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Dimensions, StyleSheet } from 'react-native';
@@ -73,6 +74,7 @@ function SharedPlayerShellInner() {
     const shellArtworkUri = pendingTrackPreview?.artwork || currentTrack?.artwork || currentTrack?.artworkThumb;
     const { colors: albumColors, animated: animColors } = useDynamicColors(shellArtworkUri, {
         enabled: performanceProfile.enableDynamicColors,
+        deepenDarkBackground: true,
     });
     const shouldUseThemePlayerColors = !performanceProfile.enableDynamicColors;
     const playerColors = shouldUseThemePlayerColors
@@ -104,6 +106,17 @@ function SharedPlayerShellInner() {
         theme.colors.onSurface,
         theme.colors.onBackground,
     ]);
+    // The skip controls sit on the BAR, not inside the pill — tinting them with
+    // the pill's on-color made them read as flat white and ignore the album
+    // palette. Carry the accent, then guarantee contrast against the bar.
+    const skipIconColor = useMemo(() => {
+        const tinted = mixHexColors(theme.colors.onSurface, theme.colors.primary, 0.45);
+        return ensureColorContrast(tinted, theme.colors.surface, {
+            minRatio: 4.5,
+            targetColor: theme.colors.onSurface,
+            fallbackColor: theme.colors.onSurface,
+        });
+    }, [theme.colors.onSurface, theme.colors.primary, theme.colors.surface]);
     const routeProgress = useSharedValue(0);
     const isVertical = useSharedValue(false);
     const playPress = useSharedValue(0);
@@ -259,6 +272,16 @@ function SharedPlayerShellInner() {
         togglePlayPause();
     }, [shouldShowTidalLoading, togglePlayPause]);
 
+    const handlePrevious = useCallback(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        previous();
+    }, [previous]);
+
+    const handleNext = useCallback(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        next();
+    }, [next]);
+
     const handlePlayPressIn = useCallback(() => {
         playPress.value = withTiming(1, {
             duration: 90,
@@ -286,14 +309,15 @@ function SharedPlayerShellInner() {
                     track={displayTrack}
                     showArtwork={false}
                     textColor={playPillIcon}
+                    controlColor={skipIconColor}
                     buttonFillColor={playPillFill}
                     buttonBorderColor="transparent"
                     showLoading={shouldShowTidalLoading}
                     showPause={shouldHoldPauseAffordance}
                     onPress={handleTap}
                     onToggle={handleToggle}
-                    onPrevious={previous}
-                    onNext={next}
+                    onPrevious={handlePrevious}
+                    onNext={handleNext}
                     onPressIn={handlePlayPressIn}
                     onPressOut={handlePlayPressOut}
                     contentStyle={shellContentStyle}

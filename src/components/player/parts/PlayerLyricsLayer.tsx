@@ -11,7 +11,7 @@ import { BlurView } from 'expo-blur';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { KaraokeView, KaraokeSpectrumView } from 'karaoke-view';
+import { KaraokeSpectrumView, KaraokeView } from 'karaoke-view';
 import React, { useCallback, useEffect } from 'react';
 import { Pressable, StyleSheet, View, processColor } from 'react-native';
 import { Text } from 'react-native-paper';
@@ -19,6 +19,7 @@ import Animated, { Easing, Extrapolation, interpolate, runOnJS, useAnimatedReact
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { LYRICS_MOTION_OPTIONS } from '../lyricsMotionProfiles';
+import { LYRICS_FONT_OPTIONS } from '../lyricsFonts';
 import { playerStyles as styles } from '../playerStyles';
 import { ThemeBackground } from '../backgrounds/ThemeBackground';
 import { ProgressSlider } from '../ProgressSlider';
@@ -47,7 +48,6 @@ type PlayerLyricsLayerProps = {
   shuffleEnabled: boolean;
   repeatMode: RepeatMode;
   qualityBadge?: { label: string; tone: string };
-  trackTechLabel?: string;
   onPrimaryColor?: string;
   animStyle: any;
   onClose: () => void;
@@ -342,7 +342,6 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
   shuffleEnabled,
   repeatMode,
   qualityBadge,
-  trackTechLabel,
   onPrimaryColor,
   animStyle,
   onPlayPause,
@@ -361,9 +360,17 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
   const performanceProfile = usePerformanceProfile();
   const positionShared = usePlayerStore(state => state.positionShared);
   const spectrumDelayMs = useSettingsStore(state => state.spectrumDelayMs);
+  const lyricsFont = useSettingsStore(state => state.lyricsFont);
+  const setLyricsFont = useSettingsStore(state => state.setLyricsFont);
   const karaokeViewRef = React.useRef<{ setNativeProps?: (props: { currentTimeMs: number }) => void } | null>(null);
   const syncedRenderTimeRef = React.useRef(0);
   const lyricsCdSpin = useSharedValue(0);
+  const activeLyricsFont = LYRICS_FONT_OPTIONS.find(option => option.id === lyricsFont) ?? LYRICS_FONT_OPTIONS[1];
+  const cycleLyricsFont = useCallback(() => {
+    const currentIndex = LYRICS_FONT_OPTIONS.findIndex(option => option.id === lyricsFont);
+    const nextIndex = (currentIndex + 1) % LYRICS_FONT_OPTIONS.length;
+    setLyricsFont(LYRICS_FONT_OPTIONS[nextIndex].id);
+  }, [lyricsFont, setLyricsFont]);
 
   const {
     trackLyricsOptions,
@@ -494,14 +501,26 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
       <View style={StyleSheet.absoluteFill}>
         <View style={[StyleSheet.absoluteFill, { backgroundColor: lyricsBaseSurface }]} />
         {shouldRenderThemeBackground ? (
-          <ThemeBackground
-            colors={colors}
-            animColors={animColors}
-            artwork={lyricsBackdropUri}
-            isVisible={visible}
-            lightweight={performanceProfile.mode === 'lite'}
-            isDark={colors.isDark}
-          />
+          <>
+            <ThemeBackground
+              colors={colors}
+              animColors={animColors}
+              artwork={lyricsBackdropUri}
+              lightweight={performanceProfile.mode === 'lite'}
+              isDark={colors.isDark}
+            />
+            <KaraokeSpectrumView
+              pointerEvents="none"
+              style={StyleSheet.absoluteFill}
+              enabled={shouldRenderThemeBackground}
+              isPlaying={isPlaying}
+              anchorMode="artwork"
+              spectrumTheme="aurora"
+              particleIntensity={0.42}
+              renderDelayMs={spectrumDelayMs}
+              glowColor={processColor(protectedSpectrumGlowColor)}
+            />
+          </>
         ) : null}
         <View
           pointerEvents="none"
@@ -511,15 +530,6 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
               backgroundColor: withAlpha('#000000', colors.isDark ? 0.26 : 0.08),
             },
           ]}
-        />
-
-        <KaraokeSpectrumView
-          pointerEvents="none"
-          style={StyleSheet.absoluteFill}
-          enabled={visible && expanded}
-          isPlaying={isPlaying}
-          renderDelayMs={spectrumDelayMs}
-          glowColor={processColor(protectedSpectrumGlowColor)}
         />
 
         <View pointerEvents="none" style={styles.lyricsTopBlurBand}>
@@ -633,19 +643,20 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
             <View style={styles.syncedLyricsViewport}>
               <KaraokeView
                 ref={karaokeViewRef}
-                key={`karaoke-${appliedMotionProfile}`}
+                key={`karaoke-${appliedMotionProfile}-${lyricsFont}`}
                 style={{ flex: 1 }}
                 lyrics={selectedTrackLyrics.lyrics}
                 currentTimeMs={syncedCurrentTimeMs}
                 isPlaying={isPlaying}
                 fontSize={26}
+                lyricsFont={lyricsFont}
                 isLineByLine={false}
                 enableSeekOnTap={true}
                 activeColor={processColor(lyricsHighlightColor)}
                 inactiveColor={processColor(protectedInactiveColor)}
                 glowColor={processColor(protectedGlowColor)}
                 backgroundColor={processColor(lyricsBaseSurface)}
-                enableAmbientBackground={performanceProfile.enableAnimatedBackgrounds && performanceProfile.mode !== 'lite'}
+                enableAmbientBackground={false}
                 enableSpectralParticles={isPlaying}
                 motionProfile={appliedMotionProfile}
                 introTitle=""
@@ -718,6 +729,27 @@ export const PlayerLyricsLayer = React.memo(function PlayerLyricsLayer({
 
               <LyricsToolbarItem
                 index={hasMultipleSyncedLyricsOptions ? 2 : 1}
+                expanded={lyricsControlsExpanded}
+                bgColor={motionRailBackground}
+                borderColor={motionRailBorder}
+              >
+                <AnimatedPressable
+                  onPress={cycleLyricsFont}
+                  style={styles.lyricsToolbarFontRow}
+                  pressedScale={0.96}
+                  accessibilityRole="button"
+                  accessibilityLabel={`Fuente de letras: ${activeLyricsFont.label}`}
+                  accessibilityHint="Cambia a la siguiente fuente"
+                >
+                  <MaterialCommunityIcons name="format-font" size={18} color={protectedAccentColor} />
+                  <Text numberOfLines={1} style={[styles.lyricsToolbarFontText, { color: secondaryLyricsTextColor }]}>
+                    {activeLyricsFont.label}
+                  </Text>
+                </AnimatedPressable>
+              </LyricsToolbarItem>
+
+              <LyricsToolbarItem
+                index={hasMultipleSyncedLyricsOptions ? 3 : 2}
                 expanded={lyricsControlsExpanded}
                 bgColor={motionRailBackground}
                 borderColor={motionRailBorder}

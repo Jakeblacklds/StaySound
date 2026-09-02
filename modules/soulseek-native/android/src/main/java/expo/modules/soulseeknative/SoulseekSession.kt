@@ -18,6 +18,9 @@ internal class SoulseekSession(
   private val peerConnections = CopyOnWriteArrayList<PeerSearchConnection>()
   private val searchResults = LinkedBlockingQueue<SoulseekMatch>()
   private val incomingTransferRequests = LinkedBlockingQueue<IncomingTransferRequest>()
+  private val incomingTransferFailures = LinkedBlockingQueue<String>()
+  private val incomingFileSockets = LinkedBlockingQueue<Socket>()
+  private val incomingFileConnectRequests = LinkedBlockingQueue<ConnectToPeerInfo>()
   private val peerAddresses = ConcurrentHashMap<String, PeerAddress>()
   private val peerMessageConnections = ConcurrentHashMap<String, PeerSearchConnection>()
 
@@ -183,6 +186,9 @@ internal class SoulseekSession(
       pumpIncomingPeerSocket = ::handleIncomingPeerSocket,
       pumpServerPackets = { handleServerPacketsForSearchBurst(6) },
       pollIncomingTransferRequest = { incomingTransferRequests.poll() },
+      pollIncomingTransferFailure = { incomingTransferFailures.poll() },
+      pollIncomingFileSocket = { incomingFileSockets.poll() },
+      pollIncomingFileConnectRequest = { incomingFileConnectRequests.poll() },
       handleUnhandledServerCode = ::handleServerCode,
     ).download(match, outputPath)
   }
@@ -204,9 +210,11 @@ internal class SoulseekSession(
         socket = socket,
         onMatch = { match -> searchResults.offer(match) },
         onTransferRequest = { request -> incomingTransferRequests.offer(request) },
+        onTransferFailure = { failure -> incomingTransferFailures.offer(failure) },
         onIdentity = { username, identifiedConnection ->
           peerMessageConnections[username] = identifiedConnection
         },
+        onFileConnection = { fileSocket -> incomingFileSockets.offer(fileSocket) },
       )
       peerConnections.add(connection)
       closeables.add(connection)
@@ -248,11 +256,10 @@ internal class SoulseekSession(
 
       18 -> {
         val info = readConnectToPeer(parser) ?: return
-        if (!info.type.equals("P", ignoreCase = true)) {
-          return
+        when {
+          info.type.equals("F", ignoreCase = true) -> incomingFileConnectRequests.offer(info)
+          info.type.equals("P", ignoreCase = true) -> connectPeerForSearch(info)
         }
-
-        connectPeerForSearch(info)
       }
 
       102 -> {
@@ -333,9 +340,11 @@ internal class SoulseekSession(
           socket = socket,
           onMatch = { match -> searchResults.offer(match) },
           onTransferRequest = { request -> incomingTransferRequests.offer(request) },
+          onTransferFailure = { failure -> incomingTransferFailures.offer(failure) },
           onIdentity = { username, identifiedConnection ->
             peerMessageConnections[username] = identifiedConnection
           },
+          onFileConnection = { fileSocket -> incomingFileSockets.offer(fileSocket) },
         )
         peerConnections.add(connection)
         closeables.add(connection)
@@ -391,9 +400,11 @@ internal class SoulseekSession(
         socket = socket,
         onMatch = { match -> searchResults.offer(match) },
         onTransferRequest = { request -> incomingTransferRequests.offer(request) },
+        onTransferFailure = { failure -> incomingTransferFailures.offer(failure) },
         onIdentity = { identity, identifiedConnection ->
           peerMessageConnections[identity] = identifiedConnection
         },
+        onFileConnection = { fileSocket -> incomingFileSockets.offer(fileSocket) },
       )
       peerConnections.add(connection)
       closeables.add(connection)

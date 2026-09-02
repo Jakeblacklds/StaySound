@@ -1,5 +1,3 @@
-import { decode as decodeBase64 } from "base-64";
-import { DOMParser } from "@xmldom/xmldom";
 import * as FileSystem from "expo-file-system/legacy";
 import { Platform } from "react-native";
 import { useSettingsStore } from "../stores/settingsStore";
@@ -16,6 +14,27 @@ import {
   Track,
 } from "../types/audio";
 import { FileSystemStorage } from "./storage";
+import { isValidAudioFile } from "../features/tidal/data/audioFileValidation";
+import { parseDashManifestForQuality } from "../features/tidal/data/dashManifestParser";
+import type {
+  DownloadOptions,
+  ParsedManifest,
+  TidalAlbumApiResponse,
+  TidalAlbumDetailApiResponse,
+  TidalAlbumSearchApiResponse,
+  TidalArtistApiResponse,
+  TidalArtistDetailApiResponse,
+  TidalArtistSearchApiResponse,
+  TidalPlaylistApiResponse,
+  TidalPlaylistSearchApiResponse,
+  TidalSearchApiResponse,
+  TidalSimilarAlbumsApiResponse,
+  TidalSimilarArtistsApiResponse,
+  TidalTrackApiResponse,
+  TidalTrackManifestResponse,
+} from "../features/tidal/data/tidalApiTypes";
+
+export { isValidAudioFile };
 type MirrorProvider = "tidal";
 
 export const TIDAL_API_BASES = [
@@ -127,14 +146,6 @@ type MirrorJsonResult<T> = {
   data: T;
   base: string;
 };
-type DashRepresentation = {
-  id: string;
-  codecs?: string;
-  mimeType?: string;
-  sampleRate?: number;
-  bitDepth?: number;
-  urls: string[];
-};
 let dynamicMirrorCatalogPromise: Promise<DynamicMirrorCatalog> | null = null;
 let dynamicMirrorCatalogCache: DynamicMirrorCatalog | null = null;
 const SEARCH_CACHE_TTL_MS = 45 * 1000;
@@ -142,187 +153,6 @@ const DETAIL_CACHE_TTL_MS = 2 * 60 * 1000;
 const tidalDataCache = new Map<string, { value: unknown; expiresAt: number }>();
 const inflightTidalDataRequests = new Map<string, Promise<unknown>>();
 
-interface TidalTrackApiResponse {
-  id: number;
-  title: string;
-  duration: number;
-  trackNumber?: number;
-  isrc?: string;
-  explicit?: boolean;
-  audioQuality?: string;
-  mediaMetadata?: { tags?: string[] };
-  album?: {
-    id?: number;
-    title?: string;
-    cover?: string | null;
-    releaseDate?: string;
-    numberOfTracks?: number;
-  };
-  artist?: { id?: number; name?: string; picture?: string | null };
-  artists?: Array<{ id?: number; name?: string; picture?: string | null }>;
-  popularity?: number;
-}
-
-interface TidalSearchApiResponse {
-  data?: {
-    items?: TidalTrackApiResponse[];
-  };
-}
-
-interface TidalAlbumSearchApiResponse {
-  data?: {
-    albums?: {
-      items?: TidalAlbumApiResponse[];
-    };
-    items?: TidalAlbumApiResponse[];
-  };
-}
-
-interface TidalArtistApiResponse {
-  id: number;
-  name: string;
-  picture?: string | null;
-  popularity?: number;
-}
-
-interface TidalArtistSearchApiResponse {
-  data?: {
-    artists?: {
-      items?: TidalArtistApiResponse[];
-    };
-    items?: TidalArtistApiResponse[];
-  };
-}
-
-interface TidalRecommendationsApiResponse {
-  items?: TidalTrackApiResponse[];
-  data?: {
-    items?: TidalTrackApiResponse[];
-  };
-}
-
-interface TidalSimilarArtistsApiResponse {
-  artists?: TidalArtistApiResponse[];
-  items?: TidalArtistApiResponse[];
-  data?: {
-    artists?: TidalArtistApiResponse[];
-    items?: TidalArtistApiResponse[];
-  };
-}
-
-interface TidalSimilarAlbumsApiResponse {
-  albums?: TidalAlbumApiResponse[];
-  items?: TidalAlbumApiResponse[];
-  data?: {
-    albums?: TidalAlbumApiResponse[];
-    items?: TidalAlbumApiResponse[];
-  };
-}
-
-interface TidalArtistDetailApiResponse {
-  artist?: TidalArtistApiResponse;
-  cover?: {
-    ["750"]?: string;
-  };
-}
-
-interface TidalAlbumApiResponse {
-  id: number;
-  title: string;
-  releaseDate?: string;
-  explicit?: boolean;
-  numberOfTracks?: number;
-  cover?: string | null;
-  artist?: {
-    id?: number;
-    name?: string;
-  };
-  artists?: Array<{
-    id?: number;
-    name?: string;
-  }>;
-}
-
-interface TidalAlbumDetailApiResponse {
-  data?: TidalAlbumApiResponse & {
-    items?: Array<{
-      item?: TidalTrackApiResponse;
-    }>;
-  };
-}
-
-interface TidalPlaylistApiResponse {
-  uuid: string;
-  title: string;
-  description?: string;
-  numberOfTracks?: number;
-  image?: string;
-  cover?: string;
-  picture?: string;
-  squareImage?: string;
-}
-
-interface TidalPlaylistSearchApiResponse {
-  data?: {
-    playlists?: {
-      items?: TidalPlaylistApiResponse[];
-    };
-    items?: TidalPlaylistApiResponse[];
-  };
-}
-
-interface TidalPlaylistDetailApiResponse {
-  data?: TidalPlaylistApiResponse & {
-    items?: Array<{
-      item?: TidalTrackApiResponse;
-    }>;
-  };
-  playlist?: TidalPlaylistApiResponse;
-  items?: Array<{
-    item?: TidalTrackApiResponse;
-  }>;
-}
-
-interface ParsedManifest {
-  urls: string[];
-  quality: string;
-  mimeType?: string;
-  codecs?: string;
-  isSegmented: boolean;
-  sampleRate?: number;
-  bitDepth?: number;
-  manifestUrl?: string;
-}
-
-interface TidalTrackManifestResponse {
-  data?: {
-    data?: {
-      id?: string;
-      type?: string;
-      attributes?: {
-        trackPresentation?: string;
-        previewReason?: string;
-        uri?: string;
-        formats?: string[];
-        trackAudioNormalizationData?: {
-          replayGain?: number;
-          peakAmplitude?: number;
-        };
-        albumAudioNormalizationData?: {
-          replayGain?: number;
-          peakAmplitude?: number;
-        };
-      };
-    };
-  };
-}
-
-interface DownloadOptions {
-  onProgress?: (progress: number) => void;
-  onTask?: (task: FileSystem.DownloadResumable | null) => void;
-  qobuzFallback?: boolean;
-  qobuzOnly?: boolean;
-}
 
 type PersistedPublicDownloadsPermission = {
   directoryUri: string;
@@ -939,7 +769,7 @@ function isHtmlResponse(contentType: string | null, body: string): boolean {
   );
 }
 
-function inferMirrorProvider(baseUrl: string): MirrorProvider {
+function inferMirrorProvider(_baseUrl: string): MirrorProvider {
   return "tidal";
 }
 
@@ -1449,270 +1279,6 @@ async function fetchJsonWithMirror<T>(
   throw lastError || new Error("All Tidal mirrors failed");
 }
 
-function resolveUrl(baseUrl: string, maybeRelative: string): string {
-  if (!maybeRelative) return baseUrl;
-  if (/^https?:\/\//i.test(maybeRelative)) return maybeRelative;
-  if (!baseUrl) return maybeRelative;
-
-  const normalizedBase = baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`;
-  return `${normalizedBase}${maybeRelative.replace(/^\/+/, "")}`;
-}
-
-function extractSegmentCountFromTimeline(xml: string): number {
-  const segmentNodes = Array.from(xml.matchAll(/<S\b([^>]*)\/?\s*>/gi));
-  if (segmentNodes.length === 0) return 0;
-
-  let count = 0;
-  for (const node of segmentNodes) {
-    const attrs = node[1] ?? "";
-    const repeatMatch = attrs.match(/\br="(-?\d+)"/i);
-    const repeat = repeatMatch ? Number.parseInt(repeatMatch[1], 10) : 0;
-    count += repeat >= 0 ? repeat + 1 : 1;
-  }
-
-  return count;
-}
-
-function buildSegmentTemplateMedia(
-  mediaTemplate: string,
-  number: number,
-): string {
-  return mediaTemplate.replace(
-    /\$Number(%0(\d+)d)?\$/g,
-    (_full, _format, width) => {
-      if (!width) return String(number);
-      return String(number).padStart(Number.parseInt(width, 10), "0");
-    },
-  );
-}
-
-function parseDashRepresentationUrls(
-  representation: Element,
-  adaptationSet: Element,
-): DashRepresentation | null {
-  const segmentTemplate =
-    representation.getElementsByTagName("SegmentTemplate")[0] ??
-    adaptationSet.getElementsByTagName("SegmentTemplate")[0];
-  if (!segmentTemplate) return null;
-
-  const initialization = segmentTemplate.getAttribute("initialization") ?? "";
-  const media = segmentTemplate.getAttribute("media") ?? "";
-  const startNumber = Number.parseInt(
-    segmentTemplate.getAttribute("startNumber") ?? "1",
-    10,
-  );
-  const timelineNodes = segmentTemplate.getElementsByTagName("S");
-  let segmentCount = 0;
-  for (let i = 0; i < timelineNodes.length; i++) {
-    const repeat = Number.parseInt(
-      timelineNodes[i].getAttribute("r") ?? "0",
-      10,
-    );
-    segmentCount += repeat >= 0 ? repeat + 1 : 1;
-  }
-
-  const baseUrlNode =
-    representation.getElementsByTagName("BaseURL")[0] ??
-    adaptationSet.getElementsByTagName("BaseURL")[0];
-  const baseUrl = baseUrlNode?.textContent?.trim() ?? "";
-
-  const urls: string[] = [];
-  if (initialization) {
-    urls.push(resolveUrl(baseUrl, initialization));
-  }
-
-  if (media && segmentCount > 0) {
-    for (
-      let segmentNumber = startNumber;
-      segmentNumber < startNumber + segmentCount;
-      segmentNumber++
-    ) {
-      urls.push(
-        resolveUrl(baseUrl, buildSegmentTemplateMedia(media, segmentNumber)),
-      );
-    }
-  }
-
-  if (urls.length === 0) {
-    return null;
-  }
-
-  const representationId = representation.getAttribute("id") ?? "";
-  const codecs =
-    representation.getAttribute("codecs") ??
-    adaptationSet.getAttribute("codecs") ??
-    undefined;
-  const mimeType =
-    representation.getAttribute("mimeType") ??
-    adaptationSet.getAttribute("mimeType") ??
-    undefined;
-  const sampleRate = Number.parseInt(
-    representation.getAttribute("audioSamplingRate") ??
-      adaptationSet.getAttribute("audioSamplingRate") ??
-      "0",
-    10,
-  );
-  const bitDepthMatch = representationId.match(/FLAC,(\d+),(\d+)/i);
-
-  return {
-    id: representationId,
-    codecs,
-    mimeType,
-    sampleRate:
-      Number.isFinite(sampleRate) && sampleRate > 0 ? sampleRate : undefined,
-    bitDepth: bitDepthMatch ? Number.parseInt(bitDepthMatch[2], 10) : undefined,
-    urls,
-  };
-}
-
-function scoreDashRepresentation(
-  representation: DashRepresentation,
-  quality: string,
-): number {
-  const id = representation.id.toUpperCase();
-  const codecs = (representation.codecs ?? "").toLowerCase();
-  const sampleRate = representation.sampleRate ?? 0;
-  const bitDepth = representation.bitDepth ?? 0;
-
-  if (quality === "LOW") {
-    if (id.includes("HEAACV1")) return 100;
-    if (id.includes("AACLC")) return 50;
-    return 0;
-  }
-
-  if (quality === "HIGH") {
-    if (id.includes("AACLC")) return 100;
-    if (id.includes("HEAACV1")) return 50;
-    return 0;
-  }
-
-  if (quality === "LOSSLESS") {
-    if (codecs.includes("flac")) {
-      return 1000 + sampleRate + bitDepth;
-    }
-    if (id.includes("AACLC")) return 50;
-    return 0;
-  }
-
-  if (quality === "HI_RES_LOSSLESS") {
-    if (codecs.includes("flac")) {
-      return 1000 + sampleRate + bitDepth * 10;
-    }
-    return 0;
-  }
-
-  return 0;
-}
-
-function parseDashManifestForQuality(
-  manifestXml: string,
-  quality: string,
-): {
-  urls: string[];
-  mimeType?: string;
-  codecs?: string;
-  sampleRate?: number;
-  bitDepth?: number;
-} {
-  const document = new DOMParser().parseFromString(
-    manifestXml,
-    "application/xml",
-  );
-  const adaptationSets = Array.from(
-    document.getElementsByTagName("AdaptationSet"),
-  );
-  const representations: DashRepresentation[] = [];
-
-  for (const adaptationSet of adaptationSets) {
-    const mimeType = adaptationSet.getAttribute("mimeType") ?? "";
-    if (!mimeType.toLowerCase().includes("audio")) continue;
-
-    const repNodes = Array.from(
-      adaptationSet.getElementsByTagName("Representation"),
-    );
-    for (const representation of repNodes) {
-      const parsed = parseDashRepresentationUrls(representation, adaptationSet);
-      if (parsed) {
-        representations.push(parsed);
-      }
-    }
-  }
-
-  const ranked = representations
-    .map((representation) => ({
-      representation,
-      score: scoreDashRepresentation(representation, quality),
-    }))
-    .sort((a, b) => b.score - a.score);
-
-  const selected = ranked[0]?.representation;
-  if (!selected) {
-    throw new Error("Tidal DASH manifest did not produce segment URLs");
-  }
-
-  return {
-    urls: selected.urls,
-    mimeType: selected.mimeType,
-    codecs: selected.codecs,
-    sampleRate: selected.sampleRate,
-    bitDepth: selected.bitDepth,
-  };
-}
-
-function parseDashManifest(manifestXml: string): string[] {
-  const baseUrlMatch = manifestXml.match(/<BaseURL>([^<]+)<\/BaseURL>/i);
-  const baseUrl = baseUrlMatch?.[1]?.trim() ?? "";
-
-  const segmentListInit = manifestXml.match(
-    /<SegmentList[^>]*\binitialization="([^"]+)"/i,
-  )?.[1];
-  const segmentListUrls = Array.from(
-    manifestXml.matchAll(/<SegmentURL[^>]*\bmedia="([^"]+)"/gi),
-  );
-  if (segmentListUrls.length > 0) {
-    const urls = segmentListUrls.map((match) => resolveUrl(baseUrl, match[1]));
-    if (segmentListInit) {
-      return [resolveUrl(baseUrl, segmentListInit), ...urls];
-    }
-    return urls;
-  }
-
-  const segmentTemplateMatch =
-    manifestXml.match(/<SegmentTemplate[^>]*>/i)?.[0] ?? "";
-  const initialization = segmentTemplateMatch.match(
-    /\binitialization="([^"]+)"/i,
-  )?.[1];
-  const media = segmentTemplateMatch.match(/\bmedia="([^"]+)"/i)?.[1];
-  const startNumber = Number.parseInt(
-    segmentTemplateMatch.match(/\bstartNumber="(\d+)"/i)?.[1] ?? "1",
-    10,
-  );
-  const segmentCount = extractSegmentCountFromTimeline(manifestXml);
-
-  if (media && segmentCount > 0) {
-    const urls: string[] = [];
-    if (initialization) {
-      urls.push(resolveUrl(baseUrl, initialization));
-    }
-
-    for (
-      let segmentNumber = startNumber;
-      segmentNumber < startNumber + segmentCount;
-      segmentNumber++
-    ) {
-      urls.push(
-        resolveUrl(baseUrl, buildSegmentTemplateMedia(media, segmentNumber)),
-      );
-    }
-
-    return urls;
-  }
-
-  const absoluteUrls = Array.from(
-    manifestXml.matchAll(/https?:\/\/[^"'\s<]+/gi),
-  ).map((match) => match[0]);
-  return absoluteUrls;
-}
 
 function normalizeSearchItem(item: TidalTrackApiResponse): TidalSearchResult {
   const quality = item.audioQuality ?? "LOSSLESS";
@@ -1741,12 +1307,6 @@ function normalizeSearchItem(item: TidalTrackApiResponse): TidalSearchResult {
     artistId: item.artist?.id,
     albumId: item.album?.id,
   };
-}
-
-function parseYearFromReleaseDate(releaseDate?: string): number | undefined {
-  if (!releaseDate) return undefined;
-  const year = Number.parseInt(releaseDate.slice(0, 4), 10);
-  return Number.isFinite(year) ? year : undefined;
 }
 
 function normalizeArtistItem(item: TidalArtistApiResponse): TidalArtist {
@@ -3418,121 +2978,6 @@ export async function createTidalStreamTrack(
     tidalAlbumId: tidalTrack.albumId,
     dateAdded: Date.now(),
   };
-}
-
-function decodeBase64ToBytes(base64Value: string): Uint8Array {
-  const decoded = decodeBase64(base64Value);
-  const bytes = new Uint8Array(decoded.length);
-
-  for (let index = 0; index < decoded.length; index++) {
-    bytes[index] = decoded.charCodeAt(index) & 0xff;
-  }
-
-  return bytes;
-}
-
-function bytesIncludeAscii(bytes: Uint8Array, value: string): boolean {
-  if (!value || bytes.length < value.length) return false;
-
-  for (let offset = 0; offset <= bytes.length - value.length; offset++) {
-    let matched = true;
-    for (let index = 0; index < value.length; index++) {
-      if (bytes[offset + index] !== value.charCodeAt(index)) {
-        matched = false;
-        break;
-      }
-    }
-
-    if (matched) return true;
-  }
-
-  return false;
-}
-
-function hasIsoBmffHeader(bytes: Uint8Array): boolean {
-  if (bytes.length < 8) return false;
-
-  const knownBoxes = new Set([
-    "ftyp",
-    "styp",
-    "moov",
-    "moof",
-    "mdat",
-  ]);
-
-  for (let offset = 0; offset <= bytes.length - 8; offset++) {
-    const boxType = String.fromCharCode(
-      bytes[offset + 4],
-      bytes[offset + 5],
-      bytes[offset + 6],
-      bytes[offset + 7],
-    );
-
-    if (knownBoxes.has(boxType)) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-function hasMp3FrameSync(bytes: Uint8Array): boolean {
-  for (let index = 0; index < bytes.length - 1; index++) {
-    if (bytes[index] === 0xff && (bytes[index + 1] & 0xe0) === 0xe0) {
-      return true;
-    }
-  }
-
-  return false;
-}
-
-export async function isValidAudioFile(
-  uri: string,
-  extension: string,
-): Promise<boolean> {
-  try {
-    const base64Prefix = await FileSystem.readAsStringAsync(uri, {
-      encoding: FileSystem.EncodingType.Base64,
-      position: 0,
-      length: 96,
-    } as never);
-
-    const prefixBytes = decodeBase64ToBytes(base64Prefix);
-
-    if (extension === "flac") {
-      return bytesIncludeAscii(prefixBytes, "fLaC");
-    }
-
-    if (extension === "m4a") {
-      return hasIsoBmffHeader(prefixBytes);
-    }
-
-    if (extension === "mp3") {
-      return bytesIncludeAscii(prefixBytes, "ID3") || hasMp3FrameSync(prefixBytes);
-    }
-
-    return true; // fallback
-  } catch {
-    return false;
-  }
-}
-
-export async function getTidalTrackRecommendations(
-  trackId: number,
-): Promise<TidalTrack[]> {
-  try {
-    const response = await fetchJson<TidalRecommendationsApiResponse>(
-      `/recommendations/?id=${trackId}`,
-    );
-    const items = response.items || response.data?.items || [];
-    return items.map(normalizeSearchItem);
-  } catch (error) {
-    console.warn(
-      `[TidalService] Failed to fetch track recommendations for ${trackId}:`,
-      error,
-    );
-    return [];
-  }
 }
 
 export async function getTidalSimilarArtists(

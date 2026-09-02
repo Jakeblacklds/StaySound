@@ -218,7 +218,9 @@ const ActiveGlyph = React.memo(function ActiveGlyph({
 
 /* ------------------------------------------------------------------ *
  *  LrcPreviewLine — single current-phrase line from the LRC engine.
- *  Each new phrase fades + slides up; while loading it whispers "…".
+ *  Each new phrase hands off vertically to the next one; while loading it
+ *  whispers "…". The active phrase gets two lines plus font fitting so a
+ *  longer lyric remains readable instead of truncating to an ellipsis.
  *  Tapping it opens the full lyrics view.
  * ------------------------------------------------------------------ */
 const LrcPreviewLine = React.memo(function LrcPreviewLine({
@@ -236,17 +238,40 @@ const LrcPreviewLine = React.memo(function LrcPreviewLine({
     inactiveColor: string;
     onPress: () => void;
 }) {
-    const enter = useSharedValue(1);
+    const transition = useSharedValue(1);
     const visibleText = text && text.length > 0 ? text : '···';
+    const previousTextRef = useRef(visibleText);
+    const [outgoingText, setOutgoingText] = useState('');
 
     useEffect(() => {
-        enter.value = 1;
-        enter.value = withTiming(0, { duration: 300, easing: Easing.out(Easing.cubic) });
-    }, [visibleText, enter]);
+        const previousText = previousTextRef.current;
+        previousTextRef.current = visibleText;
+        if (previousText === visibleText) return;
 
-    const lineStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(enter.value, [0, 1], [1, 0]),
-        transform: [{ translateY: interpolate(enter.value, [0, 1], [0, 10]) }],
+        setOutgoingText(previousText === '···' ? '' : previousText);
+        transition.value = 0;
+        transition.value = withTiming(1, { duration: 440, easing: Easing.out(Easing.cubic) });
+        const timer = setTimeout(() => setOutgoingText(''), 460);
+        return () => clearTimeout(timer);
+    }, [transition, visibleText]);
+
+    const incomingLineStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(transition.value, [0, 0.22, 1], [0, 0.82, 1]),
+        transform: [
+            { translateY: interpolate(transition.value, [0, 1], [13, 0]) },
+            { scale: interpolate(transition.value, [0, 1], [0.975, 1]) },
+        ],
+    }));
+    const outgoingLineStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(transition.value, [0, 0.72, 1], [0.58, 0.16, 0]),
+        transform: [{ translateY: interpolate(transition.value, [0, 1], [0, -13]) }],
+    }));
+    const markerStyle = useAnimatedStyle(() => ({
+        opacity: interpolate(transition.value, [0, 0.35, 1], [0.42, 1, 0.76]),
+        transform: [
+            { scaleX: interpolate(transition.value, [0, 0.35, 1], [0.4, 1.12, 1]) },
+            { scaleY: interpolate(transition.value, [0, 0.35, 1], [0.8, 1.2, 1]) },
+        ],
     }));
 
     return (
@@ -258,14 +283,28 @@ const LrcPreviewLine = React.memo(function LrcPreviewLine({
             style={styles.lyricRail}
         >
             <View style={[styles.lyricRailRule, { backgroundColor: inactiveColor }]}>
-                <View style={[styles.lyricRailMarker, { backgroundColor: color }]} />
+                <Animated.View style={[styles.lyricRailMarker, { backgroundColor: color }, markerStyle]} />
             </View>
-            <Animated.Text
-                style={[styles.lrcLineText, { color }, lineStyle]}
-                numberOfLines={1}
-            >
-                {visibleText}
-            </Animated.Text>
+            <View style={styles.lyricCurrentStage}>
+                {outgoingText ? (
+                    <Animated.Text
+                        style={[styles.lrcLineText, styles.lyricLineLayer, { color }, outgoingLineStyle]}
+                        numberOfLines={2}
+                        adjustsFontSizeToFit
+                        minimumFontScale={0.72}
+                    >
+                        {outgoingText}
+                    </Animated.Text>
+                ) : null}
+                <Animated.Text
+                    style={[styles.lrcLineText, styles.lyricLineLayer, { color }, incomingLineStyle]}
+                    numberOfLines={2}
+                    adjustsFontSizeToFit
+                    minimumFontScale={0.72}
+                >
+                    {visibleText}
+                </Animated.Text>
+            </View>
             <Animated.Text
                 style={[styles.lyricRailGhost, { color: inactiveColor }]}
                 numberOfLines={1}
@@ -316,27 +355,29 @@ export function ImmersiveVariant({
     ARTWORK_SIZE,
 }: ImmersiveVariantProps) {
     return (
-        <View style={[styles.contentMinimal, { paddingTop: topInset, paddingBottom: Math.max(bottomInset + 18, 40) }]}>
-            {/* Top: explicit close affordance + quiet track context */}
-            <Pressable
-                onPress={onClose}
-                accessibilityRole="button"
-                accessibilityLabel="Cerrar reproductor"
-                hitSlop={12}
-                style={styles.playerCloseButton}
-            >
-                <MaterialCommunityIcons
-                    name="chevron-down"
-                    size={34}
-                    color={textColor + '70'}
-                />
-            </Pressable>
-            <Animated.Text
-                style={[styles.topContextLabel, textStyle]}
-                numberOfLines={1}
-            >
-                {track.title}
-            </Animated.Text>
+        <View style={[styles.contentMinimal, { paddingTop: topInset, paddingBottom: Math.max(bottomInset + 8, 26) }]}>
+            {/* Top chrome floats upward without changing the reserved cover slot. */}
+            <View style={styles.topChromeMinimal}>
+                <Pressable
+                    onPress={onClose}
+                    accessibilityRole="button"
+                    accessibilityLabel="Cerrar reproductor"
+                    hitSlop={12}
+                    style={styles.playerCloseButton}
+                >
+                    <MaterialCommunityIcons
+                        name="chevron-down"
+                        size={34}
+                        color={textColor + '70'}
+                    />
+                </Pressable>
+                <Animated.Text
+                    style={[styles.topContextLabel, textStyle]}
+                    numberOfLines={1}
+                >
+                    {track.title}
+                </Animated.Text>
+            </View>
 
             {/* Cover slot — the real cover is the absolute morphing layer in
                 FullPlayer; this reserves its exact footprint so nothing below

@@ -16,14 +16,6 @@ export const GlobalNotification = () => {
         }
     };
 
-    const getTextColor = () => {
-        switch (type) {
-            case 'success': return theme.colors.onPrimary;
-            case 'error': return theme.colors.onError;
-            default: return theme.colors.onSecondary;
-        }
-    };
-
     return (
         <Portal>
             <Snackbar

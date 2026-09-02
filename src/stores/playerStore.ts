@@ -185,7 +185,7 @@ function moveQueueItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
     return nextItems;
 }
 
-function shouldAcceptEngineTrackId(nextTrackId: string | undefined, currentQueue: Track[]): boolean {
+function shouldAcceptEngineTrackId(nextTrackId: string | undefined): boolean {
     if (!nextTrackId) return true;
 
     // If the reported track IS the currently playing track in the store, always accept.
@@ -1153,7 +1153,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             // CRITICAL BUG FIX: Never let the engine "downgrade" our current track
             // if we already have one and the engine reports null or the same ID (avoid unnecessary re-renders).
             // Passing the current queue to help validate the incoming track.
-            if (shouldAcceptEngineTrackId(nextTrack?.id, currentState.queue)) {
+            if (shouldAcceptEngineTrackId(nextTrack?.id)) {
                 // If we have a track in store, but engine says null, ignore it unless we are not playing.
                 if (currentStoreTrack && !nextTrack && currentState.isPlaying) {
                     // Ignore empty track report while playing (likely a brief transition state in native)

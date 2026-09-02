@@ -19,7 +19,7 @@ const TIDAL_API_BASES = [
 
 const REQUEST_TIMEOUT_MS = 12000;
 
-type TidalTrackApiResponse = {
+export type TidalTrackApiResponse = {
   id?: number;
   title?: string;
   duration?: number;
@@ -67,13 +67,13 @@ export const TIDAL_DISCOVERY_MOODS: TidalDiscoveryMood[] = [
   { id: 'discover', label: 'Nuevo', query: 'new music discovery indie pop electronic', description: 'hallazgos frescos y melódicos' },
 ];
 
-function getArtworkUrl(coverUuid?: string | null): string | undefined {
+export function getTidalArtworkUrl(coverUuid?: string | null): string | undefined {
   if (!coverUuid || coverUuid === '00000000-0000-0000-0000-000000000000' || coverUuid === 'null') return undefined;
   if (coverUuid.startsWith('http')) return coverUuid;
   return `https://resources.tidal.com/images/${coverUuid.replace(/-/g, '/')}/640x640.jpg`;
 }
 
-function normalizeTidalTrack(item: TidalTrackApiResponse): TidalTrack | null {
+export function normalizeTidalTrack(item: TidalTrackApiResponse): TidalTrack | null {
   if (!item.id || !item.title) return null;
   const coverUuid = item.album?.cover ?? null;
   const quality = item.audioQuality ?? 'LOSSLESS';
@@ -89,7 +89,7 @@ function normalizeTidalTrack(item: TidalTrackApiResponse): TidalTrack | null {
     quality,
     isHiRes: tags.includes('HIRES_LOSSLESS') || quality === 'HI_RES_LOSSLESS',
     coverUuid,
-    artworkUrl: getArtworkUrl(coverUuid),
+    artworkUrl: getTidalArtworkUrl(coverUuid),
     trackNumber: item.trackNumber,
     isrc: item.isrc,
     explicit: item.explicit,
@@ -113,7 +113,7 @@ async function fetchJson<T>(url: string): Promise<T> {
   }
 }
 
-async function fetchFromTidalMirrors<T>(path: string): Promise<T> {
+export async function fetchFromTidalMirrors<T>(path: string): Promise<T> {
   let lastError: unknown;
   for (const base of TIDAL_API_BASES) {
     try {

@@ -1,4 +1,4 @@
-import { CustomIcon, EmptyState, ImmersiveHeading } from '@/src/components/ui';
+import { CustomIcon, EmptyState } from '@/src/components/ui';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n } from '@/src/i18n';
 import { useLibraryStore } from '@/src/stores';

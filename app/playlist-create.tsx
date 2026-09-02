@@ -22,7 +22,6 @@ import { Snackbar, Text } from 'react-native-paper';
 import Animated, {
   Easing,
   FadeIn,
-  FadeInDown,
   LinearTransition,
   useAnimatedStyle,
   useSharedValue,

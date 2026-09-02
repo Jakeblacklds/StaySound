@@ -6,64 +6,68 @@ interface AtmosphereCanvasProps {
   palette: WebDynamicPalette | null;
   isPlaying: boolean;
   motionKey?: string | null;
-  /** Element that receives live --atmo-bass/--atmo-mid/--atmo-treble vars */
+  /** Element that receives live --atmo-bass/--atmo-mid/--atmo-treble vars. */
   reactiveTarget?: RefObject<HTMLElement | null>;
 }
 
-interface OrbConfig {
-  /** Base position as fraction of viewport */
-  x: number;
-  y: number;
-  /** Drift amplitude as fraction of viewport */
-  ampX: number;
-  ampY: number;
-  /** Drift angular speeds (rad/ms), mirrors the Android orb cycles */
-  speedX: number;
-  speedY: number;
-  phaseX: number;
-  phaseY: number;
-  /** Radius as fraction of viewport height */
-  radius: number;
-  alpha: number;
-  /** Which band drives this orb's pulse */
-  band: 'bass' | 'mid' | 'treble';
-}
-
-const ORBS: OrbConfig[] = [
-  { x: 0.32, y: 0.3, ampX: 0.16, ampY: 0.12, speedX: 0.000285, speedY: 0.00022, phaseX: 0, phaseY: 0, radius: 0.72, alpha: 0.62, band: 'bass' },
-  { x: 0.74, y: 0.68, ampX: 0.18, ampY: 0.14, speedX: 0.00037, speedY: 0.00029, phaseX: 1.1, phaseY: 2.2, radius: 0.58, alpha: 0.5, band: 'mid' },
-  { x: 0.2, y: 0.78, ampX: 0.16, ampY: 0.13, speedX: 0.00023, speedY: 0.00019, phaseX: 3.3, phaseY: 0.7, radius: 0.42, alpha: 0.3, band: 'treble' },
-];
-
-/** Blob count of the mid-band aurora ribbon */
-const RIBBON_SEGMENTS = 6;
-
-interface Spark {
-  x: number;
-  y: number;
-  life: number;
-  maxLife: number;
-  size: number;
-}
-
-/** Soft shockwave emitted from the bass orb on every detected beat */
-interface Ripple {
-  born: number;
-  x: number;
-  y: number;
-  strength: number;
-}
+type Rgb = [number, number, number];
 
 const ZERO_BANDS: SpectrumBands = { bass: 0, mid: 0, treble: 0, level: 0 };
-const RIPPLE_LIFE_MS = 1150;
+const PALETTE_STEPS = 36;
 
-function hexToRgbTuple(hex: string): [number, number, number] {
-  const normalized = hex.replace('#', '');
+function hexToRgbTuple(value: string): Rgb {
+  const normalized = value.replace('#', '');
+  if (normalized.length !== 6) return [255, 255, 255];
   return [
     Number.parseInt(normalized.slice(0, 2), 16),
     Number.parseInt(normalized.slice(2, 4), 16),
     Number.parseInt(normalized.slice(4, 6), 16),
   ];
+}
+
+function mixRgb(left: Rgb, right: Rgb, amount: number): Rgb {
+  const t = Math.max(0, Math.min(1, amount));
+  return [
+    Math.round(left[0] + (right[0] - left[0]) * t),
+    Math.round(left[1] + (right[1] - left[1]) * t),
+    Math.round(left[2] + (right[2] - left[2]) * t),
+  ];
+}
+
+function rgbCss([red, green, blue]: Rgb): string {
+  return `rgb(${red} ${green} ${blue})`;
+}
+
+function hashGrid(x: number, y: number): number {
+  let value = Math.imul(x, 374761393) + Math.imul(y, 668265263);
+  value = Math.imul(value ^ (value >>> 13), 1274126177);
+  return ((value ^ (value >>> 16)) >>> 0) / 4294967295;
+}
+
+function smoothNoise(x: number, y: number): number {
+  const ix = Math.floor(x);
+  const iy = Math.floor(y);
+  const fx = x - ix;
+  const fy = y - iy;
+  const ux = fx * fx * (3 - 2 * fx);
+  const uy = fy * fy * (3 - 2 * fy);
+  const top = hashGrid(ix, iy) * (1 - ux) + hashGrid(ix + 1, iy) * ux;
+  const bottom = hashGrid(ix, iy + 1) * (1 - ux) + hashGrid(ix + 1, iy + 1) * ux;
+  return top * (1 - uy) + bottom * uy;
+}
+
+function fbm(x: number, y: number): number {
+  let total = 0;
+  let amplitude = 0.54;
+  let px = x;
+  let py = y;
+  for (let octave = 0; octave < 3; octave += 1) {
+    total += smoothNoise(px, py) * amplitude;
+    px = px * 2.02 + 4.17;
+    py = py * 2.02 + 1.31;
+    amplitude *= 0.5;
+  }
+  return total;
 }
 
 function followVisual(current: number, target: number, dt: number, attack = 0.075, release = 0.035): number {
@@ -76,20 +80,29 @@ function compressBand(value: number, amount = 0.82, ceiling = 0.86): number {
   return Math.min(ceiling, Math.pow(Math.max(0, value), amount));
 }
 
+function buildDotPalette(palette: WebDynamicPalette): string[] {
+  const primary = hexToRgbTuple(palette.primary);
+  const secondary = hexToRgbTuple(palette.secondary);
+  const accent = hexToRgbTuple(palette.accent);
+  return Array.from({ length: PALETTE_STEPS }, (_, index) => {
+    const position = index / (PALETTE_STEPS - 1);
+    const color = position < 0.5
+      ? mixRgb(secondary, primary, position * 2)
+      : mixRgb(primary, accent, (position - 0.5) * 2);
+    return rgbCss(color);
+  });
+}
+
 /**
- * Canvas port of the Android KaraokeAmbientBackgroundRenderer with a legible
- * per-band language: bass beats punch the main orb and emit soft shockwave
- * ripples, mids light and undulate a flowing aurora ribbon (and speed up the
- * orb drift), treble scatters short glitter sparks across the upper field.
- * Rendered at reduced resolution and blurred via CSS for the soft look.
+ * OriginKit Dot Matrix adapted to StaySound's existing spectrum engine. The
+ * broad domain-warped waves decide where the matrix is visible; audio only nudges
+ * radius, luminance and a high-inertia flow vector, so transients never shake it.
  */
 export function AtmosphereCanvas({ palette, isPlaying, motionKey, reactiveTarget }: AtmosphereCanvasProps) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const paletteRef = useRef(palette);
   const playingRef = useRef(isPlaying);
   const motionKeyRef = useRef(motionKey);
-  const sparksRef = useRef<Spark[]>([]);
-  const ripplesRef = useRef<Ripple[]>([]);
 
   paletteRef.current = palette;
   playingRef.current = isPlaying;
@@ -108,31 +121,24 @@ export function AtmosphereCanvas({ palette, isPlaying, motionKey, reactiveTarget
     let rafId = 0;
     let width = 0;
     let height = 0;
-    const lastWrittenVars = new Map<string, string>();
-    let previousFrameTime = performance.now();
+    let lastFrameTime = performance.now();
     let visualBands = { ...ZERO_BANDS };
+    let shapeBands = { ...ZERO_BANDS };
     let activeMotionKey = motionKeyRef.current;
-    // Accumulated drift phase in ms. Advanced per-frame so the mid-band only
-    // modulates drift *velocity*; scaling absolute time would teleport the
-    // orbs whenever the band energy shifts (worse the longer the session).
-    let flowTime = 0;
-    // Bass onset detector: a fast follower compared against a slow baseline,
-    // edge-triggered on their difference so sustained bass (pads, basslines)
-    // never retriggers. `audibleMs` gates a warm-up after silence/pauses so
-    // resuming playback doesn't burst-fire ripples. A beat kicks `beatPunch`
-    // (decays each frame) and, when strong, spawns a ripple from the bass orb.
-    let bassFast = 0;
-    let bassSlow = 0;
-    let onsetArmed = true;
-    let audibleMs = 0;
-    let lastBeatTime = 0;
-    let beatPunch = 0;
+    let flowVelocityX = 0;
+    let flowVelocityY = 0;
+    let flowX = 0;
+    let flowY = 0;
+    let paletteKey = '';
+    let dotPalette: string[] = [];
+    let topologySeed = 0;
+    const lastWrittenVars = new Map<string, string>();
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
     const resize = () => {
       const rect = canvas.getBoundingClientRect();
-      // Quarter resolution: gradients stay soft and the CSS blur hides banding.
-      width = Math.max(160, Math.round(rect.width / 4));
-      height = Math.max(120, Math.round(rect.height / 4));
+      width = Math.max(320, Math.round(rect.width));
+      height = Math.max(240, Math.round(rect.height));
       canvas.width = width;
       canvas.height = height;
     };
@@ -141,231 +147,175 @@ export function AtmosphereCanvas({ palette, isPlaying, motionKey, reactiveTarget
     const observer = new ResizeObserver(resize);
     observer.observe(canvas);
 
-    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const writeSpectrumVars = (rawBands: SpectrumBands) => {
+      const target = reactiveTarget?.current;
+      if (!target) return;
+      const values: Array<[string, number]> = [
+        ['--atmo-bass', rawBands.bass],
+        ['--atmo-mid', rawBands.mid],
+        ['--atmo-treble', rawBands.treble],
+        ['--atmo-bass-smooth', visualBands.bass],
+        ['--atmo-mid-smooth', visualBands.mid],
+        ['--atmo-treble-smooth', visualBands.treble],
+        ['--atmo-beat', visualBands.bass * 0.22],
+      ];
+      values.forEach(([name, value]) => {
+        const serialized = value.toFixed(2);
+        if (lastWrittenVars.get(name) === serialized) return;
+        lastWrittenVars.set(name, serialized);
+        target.style.setProperty(name, serialized);
+      });
+    };
 
     const draw = (time: number) => {
       rafId = requestAnimationFrame(draw);
-      // Hidden windows have nothing to paint. Visible animation quality and
-      // timing remain unchanged, while background CPU/GPU work drops to zero.
-      if (document.hidden) {
-        previousFrameTime = time;
+      if (document.hidden || width === 0 || height === 0) {
+        lastFrameTime = time;
         return;
       }
-      const currentPalette = paletteRef.current;
-      if (!currentPalette || width === 0) return;
 
-      // The ambient field is deliberately soft, so 30 FPS while playing and
-      // 15 FPS while paused preserve the compositor budget for scrolling.
-      const minimumFrameMs = playingRef.current ? 30 : 60;
-      if (time - previousFrameTime < minimumFrameMs) return;
+      const currentPalette = paletteRef.current;
+      if (!currentPalette) return;
+      const minimumFrameMs = playingRef.current ? 32 : 64;
+      if (time - lastFrameTime < minimumFrameMs) return;
+
+      const frameMs = Math.min(64, Math.max(8, time - lastFrameTime || 16.7));
+      const dt = frameMs / 16.7;
+      lastFrameTime = time;
 
       if (activeMotionKey !== motionKeyRef.current) {
         activeMotionKey = motionKeyRef.current;
         visualBands = { ...ZERO_BANDS };
-        sparksRef.current = [];
-        ripplesRef.current = [];
-        bassFast = 0;
-        bassSlow = 0;
-        audibleMs = 0;
-        onsetArmed = true;
-        beatPunch = 0;
+        shapeBands = { ...ZERO_BANDS };
+        flowVelocityX = 0;
+        flowVelocityY = 0;
       }
 
       const debugBands = import.meta.env.DEV
         ? (window as Window & { __atmoDebugBands?: SpectrumBands | null }).__atmoDebugBands ?? null
         : null;
-      const sampledBands = debugBands ?? (playingRef.current && !reduceMotion
-        ? spectrumEngine.sample()
-        : ZERO_BANDS);
-      const rawBands = {
-        bass: compressBand(sampledBands.bass, 0.74, 0.94),
-        mid: compressBand(sampledBands.mid, 0.84),
-        treble: compressBand(sampledBands.treble, 1.05, 0.62),
-        level: compressBand(sampledBands.level, 0.84),
+      const sampled = debugBands ?? (playingRef.current && !reduceMotion ? spectrumEngine.sample() : ZERO_BANDS);
+      const rawBands: SpectrumBands = {
+        bass: compressBand(sampled.bass, 0.74, 0.94),
+        mid: compressBand(sampled.mid, 0.84),
+        treble: compressBand(sampled.treble, 1.05, 0.62),
+        level: compressBand(sampled.level, 0.84),
       };
-      const frameMs = Math.min(58.4, Math.max(8.35, time - previousFrameTime || 16.7));
-      const dt = frameMs / 16.7;
-      previousFrameTime = time;
-      flowTime += frameMs * (1 + visualBands.mid * 0.55);
       visualBands = {
-        bass: followVisual(visualBands.bass, rawBands.bass, dt, 0.17, 0.052),
-        mid: followVisual(visualBands.mid, rawBands.mid, dt, 0.11, 0.04),
-        treble: followVisual(visualBands.treble, rawBands.treble, dt, 0.13, 0.055),
+        bass: followVisual(visualBands.bass, rawBands.bass, dt, 0.15, 0.045),
+        mid: followVisual(visualBands.mid, rawBands.mid, dt, 0.1, 0.035),
+        treble: followVisual(visualBands.treble, rawBands.treble, dt, 0.12, 0.05),
         level: followVisual(visualBands.level, rawBands.level, dt),
       };
+      // A second, deliberately heavy envelope drives geometry. Fast spectrum
+      // values may tint the atmosphere, but can never fill the matrix abruptly.
+      shapeBands = {
+        bass: followVisual(shapeBands.bass, rawBands.bass, dt, 0.022, 0.012),
+        mid: followVisual(shapeBands.mid, rawBands.mid, dt, 0.018, 0.01),
+        treble: followVisual(shapeBands.treble, rawBands.treble, dt, 0.016, 0.012),
+        level: followVisual(shapeBands.level, rawBands.level, dt, 0.02, 0.011),
+      };
+      writeSpectrumVars(rawBands);
 
-      // Onset detection on the uncompressed bass band.
-      const bassSignal = sampledBands.bass;
-      bassFast = followVisual(bassFast, bassSignal, dt, 0.5, 0.28);
-      bassSlow = followVisual(bassSlow, bassSignal, dt, 0.045, 0.045);
-      audibleMs = bassFast < 0.06 ? 0 : audibleMs + frameMs;
-      const onset = bassFast - bassSlow;
-      if (onset < 0.045) onsetArmed = true;
-      const ripples = ripplesRef.current;
-      if (
-        !reduceMotion &&
-        onsetArmed &&
-        onset > 0.075 &&
-        bassFast > 0.3 &&
-        audibleMs > 650 &&
-        time - lastBeatTime > 320
-      ) {
-        onsetArmed = false;
-        lastBeatTime = time;
-        beatPunch = Math.min(1, 0.3 + onset * 2.2);
-        if (beatPunch > 0.45 && ripples.length < 2) {
-          ripples.push({ born: time, x: 0, y: 0, strength: beatPunch });
-        }
-      }
-      beatPunch *= Math.pow(0.925, dt);
-
-      // Expose live band energies as CSS vars (artwork pulse, glow, etc.).
-      // Every write invalidates style for the target's whole subtree, so the
-      // target must stay a small leaf layer (never the full-player root) and
-      // unchanged values are skipped — otherwise a silent/paused player keeps
-      // recomputing styles 30 times a second.
-      const target = reactiveTarget?.current;
-      if (target) {
-        const writeBandVar = (name: string, value: number) => {
-          // Two decimals: coarse enough to skip most frames, far below what
-          // the eye can see on a 0.5-weighted opacity/scale mix.
-          const serialized = value.toFixed(2);
-          if (lastWrittenVars.get(name) === serialized) return;
-          lastWrittenVars.set(name, serialized);
-          target.style.setProperty(name, serialized);
-        };
-        writeBandVar('--atmo-bass', rawBands.bass);
-        writeBandVar('--atmo-mid', rawBands.mid);
-        writeBandVar('--atmo-treble', rawBands.treble);
-        writeBandVar('--atmo-bass-smooth', visualBands.bass);
-        writeBandVar('--atmo-mid-smooth', visualBands.mid);
-        writeBandVar('--atmo-treble-smooth', visualBands.treble);
-        writeBandVar('--atmo-beat', beatPunch);
+      if (!reduceMotion) {
+        const targetVelocityX = 0.018 + (shapeBands.treble - shapeBands.bass * 0.54) * 0.035;
+        const targetVelocityY = 0.009 + (shapeBands.mid - shapeBands.bass * 0.55) * 0.03;
+        flowVelocityX = followVisual(flowVelocityX, targetVelocityX, dt, 0.009, 0.006);
+        flowVelocityY = followVisual(flowVelocityY, targetVelocityY, dt, 0.008, 0.005);
+        flowX += flowVelocityX * frameMs / 1000;
+        flowY += flowVelocityY * frameMs / 1000;
       }
 
-      context.clearRect(0, 0, width, height);
-      context.globalCompositeOperation = 'lighter';
-
-      const colors = [currentPalette.primary, currentPalette.secondary, currentPalette.accent]
-        .map(hexToRgbTuple);
-      const driftTime = flowTime;
-      let bassOrbX = width * ORBS[0].x;
-      let bassOrbY = height * ORBS[0].y;
-
-      for (let index = 0; index < ORBS.length; index += 1) {
-        const orb = ORBS[index];
-        const [r, g, b] = colors[index % colors.length];
-        const energy = orb.band === 'treble'
-          ? visualBands.treble * 0.5 + visualBands.level * 0.12
-          : visualBands[orb.band];
-        const punch = orb.band === 'bass' ? beatPunch : 0;
-
-        const cx = (orb.x + orb.ampX * Math.sin(driftTime * orb.speedX + orb.phaseX)) * width;
-        const cy = (orb.y + orb.ampY * Math.cos(driftTime * orb.speedY + orb.phaseY)) * height;
-        if (orb.band === 'bass') {
-          bassOrbX = cx;
-          bassOrbY = cy;
-        }
-        const radius = orb.radius * height * (1 + energy * 0.3 + punch * 0.1 + visualBands.level * 0.06);
-        const alpha = orb.alpha * (0.34 + energy * 0.6 + punch * 0.12);
-
-        const gradientFill = context.createRadialGradient(cx, cy, 0, cx, cy, radius);
-        gradientFill.addColorStop(0, `rgba(${r}, ${g}, ${b}, ${Math.min(1, alpha)})`);
-        gradientFill.addColorStop(0.55, `rgba(${r}, ${g}, ${b}, ${Math.min(1, alpha * 0.35)})`);
-        gradientFill.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        context.fillStyle = gradientFill;
-        context.beginPath();
-        context.arc(cx, cy, radius, 0, Math.PI * 2);
-        context.fill();
-      }
-
-      // Bass shockwaves: soft annular waves expanding from the bass orb.
-      const [br, bg, bb] = colors[0];
-      for (let index = ripples.length - 1; index >= 0; index -= 1) {
-        const ripple = ripples[index];
-        if (ripple.x === 0 && ripple.y === 0) {
-          ripple.x = bassOrbX;
-          ripple.y = bassOrbY;
-        }
-        const age = (time - ripple.born) / RIPPLE_LIFE_MS;
-        if (age >= 1) {
-          ripples.splice(index, 1);
-          continue;
-        }
-        const radius = (0.2 + age * 1.05) * height;
-        const fade = (1 - age) * (1 - age) * 0.22 * ripple.strength;
-        const wave = context.createRadialGradient(ripple.x, ripple.y, radius * 0.66, ripple.x, ripple.y, radius);
-        wave.addColorStop(0, 'rgba(0, 0, 0, 0)');
-        wave.addColorStop(0.72, `rgba(${br}, ${bg}, ${bb}, ${fade})`);
-        wave.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        context.fillStyle = wave;
-        context.beginPath();
-        context.arc(ripple.x, ripple.y, radius, 0, Math.PI * 2);
-        context.fill();
-      }
-
-      // Mid aurora ribbon: a flowing band across the lower field that lights
-      // up and undulates harder as the mids push.
-      const ribbonEnergy = visualBands.mid;
-      if (ribbonEnergy > 0.03) {
-        const [mr, mg, mb] = colors[1];
-        const ribbonRadius = height * (0.19 + ribbonEnergy * 0.13);
-        const ribbonAlpha = Math.min(0.5, 0.05 + ribbonEnergy * 0.5);
-        for (let index = 0; index <= RIBBON_SEGMENTS; index += 1) {
-          const t = index / RIBBON_SEGMENTS;
-          const x = (t * 1.24 - 0.12) * width;
-          const y = height * (
-            0.62 +
-            Math.sin(flowTime * 0.00042 + t * Math.PI * 2.3) * (0.05 + ribbonEnergy * 0.09) +
-            Math.sin(flowTime * 0.00019 + t * Math.PI * 4.7) * 0.025
-          );
-          const blob = context.createRadialGradient(x, y, 0, x, y, ribbonRadius);
-          blob.addColorStop(0, `rgba(${mr}, ${mg}, ${mb}, ${ribbonAlpha})`);
-          blob.addColorStop(0.6, `rgba(${mr}, ${mg}, ${mb}, ${ribbonAlpha * 0.3})`);
-          blob.addColorStop(1, 'rgba(0, 0, 0, 0)');
-          context.fillStyle = blob;
-          context.beginPath();
-          context.arc(x, y, ribbonRadius, 0, Math.PI * 2);
-          context.fill();
-        }
-      }
-
-      // Treble glitter: short-lived glints scattered across the upper field.
-      const sparks = sparksRef.current;
-      if (visualBands.treble > 0.1 && sparks.length < 12 && Math.random() < visualBands.treble * 0.3) {
-        sparks.push({
-          x: Math.random() * width,
-          y: Math.random() * height * 0.62,
-          life: 0,
-          maxLife: 26 + Math.random() * 40,
-          size: (1.4 + Math.random() * 2.4) * (0.7 + visualBands.treble),
-        });
-      }
-
-      const [ar, ag, ab] = colors[2];
-      for (let index = sparks.length - 1; index >= 0; index -= 1) {
-        const spark = sparks[index];
-        spark.life += dt;
-        if (spark.life >= spark.maxLife) {
-          sparks.splice(index, 1);
-          continue;
-        }
-        const progress = spark.life / spark.maxLife;
-        const fade = Math.sin(progress * Math.PI) * (0.4 + visualBands.treble * 0.5);
-        const sparkGradient = context.createRadialGradient(
-          spark.x, spark.y, 0,
-          spark.x, spark.y, spark.size * 4,
-        );
-        sparkGradient.addColorStop(0, `rgba(255, 255, 255, ${0.32 * fade})`);
-        sparkGradient.addColorStop(0.4, `rgba(${ar}, ${ag}, ${ab}, ${0.26 * fade})`);
-        sparkGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
-        context.fillStyle = sparkGradient;
-        context.beginPath();
-        context.arc(spark.x, spark.y, spark.size * 4, 0, Math.PI * 2);
-        context.fill();
+      const nextPaletteKey = `${currentPalette.primary}|${currentPalette.secondary}|${currentPalette.accent}`;
+      if (nextPaletteKey !== paletteKey) {
+        paletteKey = nextPaletteKey;
+        dotPalette = buildDotPalette(currentPalette);
+        const [seedR, seedG, seedB] = hexToRgbTuple(currentPalette.primary);
+        topologySeed = (seedR * 0.017 + seedG * 0.031 + seedB * 0.047) % (Math.PI * 2);
       }
 
       context.globalCompositeOperation = 'source-over';
+      context.globalAlpha = 1;
+      context.fillStyle = currentPalette.background;
+      context.fillRect(0, 0, width, height);
+
+      const minSide = Math.min(width, height);
+      const cell = Math.max(14, Math.min(34, minSide / 28));
+      const columns = Math.ceil(width / cell);
+      const rows = Math.ceil(height / cell);
+      const aspect = width / height;
+      const paths = Array.from({ length: PALETTE_STEPS }, () => new Path2D());
+      // Dot size belongs to the procedural surface, not to the beat meter. Only
+      // a nearly imperceptible breath remains; music primarily sculpts topology.
+      const audioRadius = 1 + shapeBands.level * 0.012;
+      // Incommensurate rates keep the topology evolving without a visible loop.
+      // Audio changes the pace slightly, never the continuity of the field.
+      const morphTime = reduceMotion
+        ? topologySeed
+        : topologySeed + time * 0.0001 * (1 + shapeBands.mid * 0.1);
+      const angle = Math.sin(morphTime * 0.71) * 0.48
+        + Math.cos(morphTime * 0.37) * 0.22
+        + (shapeBands.treble - shapeBands.bass) * 0.09;
+      const angleCos = Math.cos(angle);
+      const angleSin = Math.sin(angle);
+      const familyBlendRaw = 0.5 + 0.5 * Math.sin(morphTime * 0.23 + Math.sin(morphTime * 0.11) * 1.7);
+      const familyBlendBase = familyBlendRaw * familyBlendRaw * (3 - 2 * familyBlendRaw);
+      const familyBlend = Math.max(0, Math.min(1, familyBlendBase + (shapeBands.treble - shapeBands.mid) * 0.055));
+
+      for (let row = 0; row < rows; row += 1) {
+        const y = (row + 0.5) * cell;
+        const uvY = y / height - 0.5;
+        for (let column = 0; column < columns; column += 1) {
+          const x = (column + 0.5) * cell;
+          const uvX = (x / width - 0.5) * aspect;
+          const rotatedX = uvX * angleCos - uvY * angleSin;
+          const rotatedY = uvX * angleSin + uvY * angleCos;
+          const scaleX = 1 + Math.sin(morphTime * 0.29) * 0.18 + shapeBands.bass * 0.045;
+          const scaleY = 1 + Math.cos(morphTime * 0.19) * 0.16 + shapeBands.mid * 0.04;
+          const warpX = fbm(
+            rotatedX * 1.32 * scaleX + flowX * 0.42 + Math.sin(morphTime * 0.43) * 0.8 + 3.2,
+            rotatedY * 1.32 * scaleY - flowY * 0.28 + Math.cos(morphTime * 0.31) * 0.7 + 6.7,
+          ) - 0.5;
+          const warpY = fbm(
+            rotatedX * 1.08 * scaleY - flowX * 0.31 + Math.cos(morphTime * 0.27) * 0.9 + 8.1,
+            rotatedY * 1.08 * scaleX + flowY * 0.36 + Math.sin(morphTime * 0.39) * 0.75 + 1.4,
+          ) - 0.5;
+          const warpStrength = 0.78 + shapeBands.mid * 0.16 + shapeBands.bass * 0.055;
+          const phaseA = (rotatedX + warpX * warpStrength) * (6.4 + Math.sin(morphTime * 0.43) * 1.1)
+            + (rotatedY + warpY * 0.62) * (2.0 + Math.cos(morphTime * 0.31) * 1.15)
+            + Math.sin((rotatedY + warpY * 0.42) * (7.2 + Math.cos(morphTime * 0.17)) + morphTime * 0.7)
+              * (1.25 + shapeBands.treble * 0.14);
+          const phaseB = (rotatedY - warpY * 0.72) * (5.1 + Math.cos(morphTime * 0.41) * 1.05)
+            - (rotatedX + warpX * 0.55) * (2.7 + Math.sin(morphTime * 0.33) * 0.9)
+            + Math.sin((rotatedX - warpX * 0.36) * 6.1 - morphTime * 0.53) * 1.08;
+          const waveA = 0.5 + 0.5 * Math.sin(phaseA);
+          const waveB = 0.5 + 0.5 * Math.sin(phaseB);
+          const organic = fbm(
+            rotatedX * 2.05 + Math.sin(morphTime * 0.21) * 1.2 + 5.6,
+            rotatedY * 2.05 + Math.cos(morphTime * 0.16) * 1.1 + 2.2,
+          );
+          const organicMix = 0.26 + shapeBands.bass * 0.065;
+          const wave = (waveA * (1 - familyBlend) + waveB * familyBlend) * (1 - organicMix)
+            + organic * organicMix;
+          const ridge = Math.max(0, Math.min(1, (wave - 0.22) / 0.54));
+          const shaped = ridge * ridge * (3 - 2 * ridge);
+          const signal = Math.pow(Math.max(0, Math.min(1, shaped * (0.88 + organic * 0.2))), 1.08);
+          const radius = cell * (0.045 + signal * 0.39) * audioRadius;
+          const palettePosition = Math.max(0, Math.min(1, 0.08 + signal * 0.92));
+          const paletteIndex = Math.min(PALETTE_STEPS - 1, Math.round(palettePosition * (PALETTE_STEPS - 1)));
+          paths[paletteIndex].moveTo(x + radius, y);
+          paths[paletteIndex].arc(x, y, radius, 0, Math.PI * 2);
+        }
+      }
+
+      context.globalCompositeOperation = 'lighter';
+      context.globalAlpha = 0.54 + visualBands.level * 0.13 + visualBands.treble * 0.035;
+      paths.forEach((path, index) => {
+        context.fillStyle = dotPalette[index];
+        context.fill(path);
+      });
+      context.globalCompositeOperation = 'source-over';
+      context.globalAlpha = 1;
     };
 
     rafId = requestAnimationFrame(draw);

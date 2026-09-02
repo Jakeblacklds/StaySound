@@ -1,33 +1,32 @@
 /**
  * MaterialLiquidTabBar — polished navigation bar:
- *   - Ionicons filled ↔ outline crossfade on selection
+ *   - Bespoke line icons (see TabBarIcons) — no stock glyph fonts
+ *   - Icons lift + light up on touch, and stay lifted while selected
+ *   - Radial accent glow behind the active icon (real light, not a pill)
  *   - Spring pop when a tab becomes active
- *   - Press-scale touch feedback (no ripple)
- *   - Liquid pill with squish-stretch spring
  *   - Simulated frosted-glass base (album tint + sheen) + dynamic album art tint
  */
-import { useDynamicColors } from '@/src/hooks';
 import { usePlayerStore } from '@/src/stores';
-import { typeScale, useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
-import { ColorTokens } from '@/src/types/theme';
-import { mixHexColors, pickReadableColor } from '@/src/utils/colorContrast';
-import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useAnimatedColors, useTheme } from '@/src/theme';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePathname } from 'expo-router';
-import React, { memo, useEffect, useMemo, useRef, useState } from 'react';
+import React, { memo, useEffect, useMemo, useRef } from 'react';
 import { Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   Extrapolation,
   interpolate,
+  interpolateColor,
   useAnimatedStyle,
   useSharedValue,
   withSequence,
   withSpring,
   withTiming,
 } from 'react-native-reanimated';
+import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
+import { TabBarIcon, TabIconName } from './TabBarIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TAB_BAR_HEIGHT as BAR_HEIGHT } from '../player/playerLayout';
 
@@ -39,37 +38,51 @@ const BLUR_COLLAPSE_THRESHOLD = 0.12;
 const NAV_FREEZE_MS = 320;
 
 const H_INSET = 12;
-const PILL_W = 54;
-const PILL_H = 34;
-const ICON_SIZE = 24;
-const LABEL_RISE = 10;
-const BAR_CONTENT_OFFSET = -2;
-const PILL_TOP = Math.round((BAR_HEIGHT - PILL_H) / 2);
-const LABEL_TOP = PILL_TOP + PILL_H + 3;
+const ICON_SIZE = 26;
+const GLOW_SIZE = 52;
+const LABEL_HEIGHT = 13;
+const ICON_LABEL_GAP = 5;
+// Icon + label are laid out as one stack and centered as a group. Before, the
+// icon was centered on its own and the label hung below it, which pushed the
+// whole pair visually toward the bottom edge of the dock.
+const CONTENT_HEIGHT = ICON_SIZE + ICON_LABEL_GAP + LABEL_HEIGHT;
+// A hair above true center: the dock sits over the gesture inset, so optical
+// center reads slightly high.
+const CONTENT_TOP = Math.round((BAR_HEIGHT - CONTENT_HEIGHT) / 2) - 2;
 
-const TAB_ICONS = {
-  index:     { filled: 'home-variant' as const,   outline: 'home-variant-outline' as const },
-  library:   { filled: 'album' as const,          outline: 'album' as const },
-  playlists: { filled: 'playlist-music' as const, outline: 'playlist-music-outline' as const },
-  tidal:     { filled: 'magnify' as const,        outline: 'magnify' as const },
-  settings:  { filled: 'tune-variant' as const,   outline: 'tune-variant' as const },
-} as const;
+// How far the icon rises when it becomes active, and the extra rise while held.
+const SELECTED_LIFT = -7;
+const PRESS_LIFT = -5;
 
-function getTabColors(colors: ColorTokens) {
-  const activeIcon = pickReadableColor(colors.primaryContainer, [
-    colors.onPrimaryContainer,
-    colors.onPrimary,
-    colors.onSurface,
-    colors.onBackground,
-  ]);
-  return { activeIcon, accent: colors.primary };
-}
+const TAB_ICONS: Record<string, TabIconName> = {
+  index: 'home',
+  library: 'library',
+  playlists: 'playlists',
+  tidal: 'search',
+};
+
+/** Soft radial light behind the icon — a lamp, not a chip. */
+const TabGlow = memo(function TabGlow({ id, color }: { id: string; color: string }) {
+  const gradientId = `tabGlow-${id}`;
+  return (
+    <Svg width={GLOW_SIZE} height={GLOW_SIZE} viewBox="0 0 100 100">
+      <Defs>
+        <RadialGradient id={gradientId} cx="50%" cy="50%" r="50%">
+          <Stop offset="0" stopColor={color} stopOpacity={0.62} />
+          <Stop offset="0.42" stopColor={color} stopOpacity={0.24} />
+          <Stop offset="0.75" stopColor={color} stopOpacity={0.07} />
+          <Stop offset="1" stopColor={color} stopOpacity={0} />
+        </RadialGradient>
+      </Defs>
+      <Circle cx="50" cy="50" r="50" fill={`url(#${gradientId})`} />
+    </Svg>
+  );
+});
 
 type ItemProps = {
   label: string;
   routeName: string;
   focused: boolean;
-  activeIconColor: string;
   mutedColor: string;
   accentColor: string;
   onPress: () => void;
@@ -80,7 +93,6 @@ const TabItem = memo(function TabItem({
   label,
   routeName,
   focused,
-  activeIconColor,
   mutedColor,
   accentColor,
   onPress,
@@ -96,27 +108,43 @@ const TabItem = memo(function TabItem({
     prevFocused.current = focused;
 
     sel.value = withSpring(focused ? 1 : 0, {
-      damping: 22,
-      stiffness: 300,
+      damping: 17,
+      stiffness: 260,
       mass: 0.8,
     });
 
     if (becoming) {
       popScale.value = withSequence(
-        withTiming(1.22, { duration: 88, easing: Easing.out(Easing.quad) }),
-        withSpring(1, { damping: 8, stiffness: 380, mass: 0.65 })
+        withTiming(1.3, { duration: 110, easing: Easing.out(Easing.quad) }),
+        withSpring(1, { damping: 9, stiffness: 320, mass: 0.7 })
       );
     }
   }, [focused, popScale, sel]);
 
-  const icons = (TAB_ICONS as Record<string, { filled: string; outline: string }>)[routeName] ?? TAB_ICONS.index;
+  const iconName = TAB_ICONS[routeName] ?? 'home';
 
+  // Lift is the whole point of the gesture: it rises on touch and STAYS risen
+  // while the tab is selected, so the press reads as picking the icon up.
   const iconWrapStyle = useAnimatedStyle(() => ({
     transform: [
-      { translateY: interpolate(sel.value, [0, 1], [0, -2]) },
-      { scale: popScale.value * interpolate(pressAmt.value, [0, 1], [1, 0.80]) },
+      { translateY: sel.value * SELECTED_LIFT + pressAmt.value * PRESS_LIFT },
+      { scale: popScale.value * (1 + sel.value * 0.06 + pressAmt.value * 0.12) },
     ],
   }));
+
+  // The glow trails the lift instead of matching it: the light pools on the
+  // dock while the icon rises out of it (and it keeps the halo clear of the
+  // dock's clipped top edge, which would otherwise slice it).
+  const glowStyle = useAnimatedStyle(() => {
+    const lift = sel.value * SELECTED_LIFT + pressAmt.value * PRESS_LIFT;
+    return {
+      opacity: Math.max(sel.value * 0.95, pressAmt.value),
+      transform: [
+        { translateY: -lift * 0.55 },
+        { scale: 0.55 + sel.value * 0.45 + pressAmt.value * 0.2 },
+      ],
+    };
+  });
 
   const activeIconStyle = useAnimatedStyle(() => ({
     opacity: sel.value,
@@ -127,46 +155,43 @@ const TabItem = memo(function TabItem({
   }));
 
   const labelStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(sel.value, [0, 1], [0.66, 1]),
+    color: interpolateColor(sel.value, [0, 1], [mutedColor, accentColor]),
+    opacity: interpolate(sel.value, [0, 1], [0.62, 1]),
     transform: [{ translateY: interpolate(sel.value, [0, 1], [0, -1]) }],
   }));
+
   return (
     <Pressable
       onPress={onPress}
       onLongPress={onLongPress}
       onPressIn={() => {
-        pressAmt.value = withTiming(1, { duration: 75, easing: Easing.out(Easing.quad) });
+        pressAmt.value = withTiming(1, { duration: 110, easing: Easing.out(Easing.cubic) });
       }}
       onPressOut={() => {
-        pressAmt.value = withSpring(0, { damping: 12, stiffness: 450, mass: 0.7 });
+        // Bouncy release — the icon settles back down instead of snapping.
+        pressAmt.value = withSpring(0, { damping: 11, stiffness: 320, mass: 0.7 });
       }}
       style={styles.itemButton}
-      android_ripple={{ color: `${accentColor}18`, borderless: true, radius: 30 }}
       accessibilityRole="tab"
       accessibilityState={{ selected: focused }}
     >
-      {/* Icon — pop scale + vertical lift + press squish */}
-      <Animated.View
-        style={[
-          styles.iconArea,
-          iconWrapStyle,
-        ]}
-      >
-        {/* Outline icon fades out */}
-        <Animated.View style={inactiveIconStyle}>
-          <MaterialCommunityIcons name={icons.outline as any} size={ICON_SIZE} color={mutedColor} />
+      {/* Icon — lift + pop + glow. The glow rides along with the lift so the
+          light stays attached to the icon. */}
+      <Animated.View style={[styles.iconArea, iconWrapStyle]}>
+        <Animated.View style={[styles.glow, glowStyle]} pointerEvents="none">
+          <TabGlow id={routeName} color={accentColor} />
         </Animated.View>
-        {/* Filled icon fades in, absolutely overlaid */}
+        {/* Muted outline fades out */}
+        <Animated.View style={inactiveIconStyle}>
+          <TabBarIcon name={iconName} size={ICON_SIZE} color={mutedColor} />
+        </Animated.View>
+        {/* Accent copy — same geometry, lit from the inside — fades in */}
         <Animated.View style={[styles.iconOverlay, activeIconStyle]}>
-          <MaterialCommunityIcons name={icons.filled as any} size={ICON_SIZE} color={accentColor} />
+          <TabBarIcon name={iconName} size={ICON_SIZE} color={accentColor} filled />
         </Animated.View>
       </Animated.View>
 
-      {/* Label springs up from below */}
-      <Animated.Text
-        style={[styles.itemLabel, { color: focused ? accentColor : mutedColor }, labelStyle]}
-        numberOfLines={1}
-      >
+      <Animated.Text style={[styles.itemLabel, labelStyle]} numberOfLines={1}>
         {label}
       </Animated.Text>
     </Pressable>
@@ -180,12 +205,8 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
 }: BottomTabBarProps) {
   const { theme, isDark } = useTheme();
   const insets = useSafeAreaInsets();
-  const performanceProfile = usePerformanceProfile();
   const aC = useAnimatedColors();
   const expansion = usePlayerStore(s => s.expansion);
-  const currentTrack = usePlayerStore(s => s.currentTrack);
-  const pendingTrackPreview = usePlayerStore(s => s.pendingTrackPreview);
-  const [barWidth, setBarWidth] = useState(0);
   const pathname = usePathname();
 
   // ---- Simulated frost (perf) ------------------------------------------
@@ -206,35 +227,6 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
     return () => clearTimeout(t);
   }, [pathname, forceSolid]);
 
-  const navArtworkUri =
-    pendingTrackPreview?.artwork || currentTrack?.artwork || currentTrack?.artworkThumb;
-  const { colors: albumColors, animated: navAnimColors } = useDynamicColors(navArtworkUri, {
-    enabled: performanceProfile.enableDynamicColors,
-  });
-
-  const shouldUseThemeColors = !performanceProfile.enableDynamicColors;
-  const navPlayerColors = shouldUseThemeColors
-    ? {
-        primary: theme.colors.primary,
-        secondary: theme.colors.secondary,
-        background: theme.colors.background,
-        text: theme.colors.onSurface,
-        onPrimary: theme.colors.onPrimary,
-        onSurface: theme.colors.onSurface,
-        accent: theme.colors.primary,
-        isDark,
-      }
-    : albumColors;
-
-  const navSurfaceColor = useMemo(() => {
-    if (shouldUseThemeColors) return theme.colors.surface;
-    return mixHexColors(
-      theme.colors.surface,
-      navPlayerColors.background || theme.colors.surface,
-      isDark ? 1.0 : 0.25
-    );
-  }, [isDark, navPlayerColors.background, shouldUseThemeColors, theme.colors.surface]);
-
   const visibleRoutes = useMemo(
     () => state.routes.filter((route) => {
       const options = descriptors[route.key]?.options;
@@ -247,35 +239,6 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
     const activeKey = state.routes[state.index]?.key;
     return Math.max(0, visibleRoutes.findIndex((r) => r.key === activeKey));
   }, [state.index, state.routes, visibleRoutes]);
-
-  const slotWidth =
-    barWidth > 0 ? (barWidth - H_INSET * 2) / Math.max(visibleRoutes.length, 1) : 0;
-
-  const pillX = useSharedValue(0);
-  const stretch = useSharedValue(0);
-
-  useEffect(() => {
-    if (slotWidth <= 0) return;
-    const target = H_INSET + activeIdx * slotWidth + (slotWidth - PILL_W) / 2;
-    const delta = Math.abs(target - pillX.value);
-    const energy = Math.min(delta / Math.max(slotWidth, 1), 1);
-
-    stretch.value = energy * 0.9;
-    pillX.value = withSpring(target, { damping: 24, stiffness: 220, mass: 0.9 });
-    stretch.value = withTiming(0, { duration: 520, easing: Easing.out(Easing.cubic) });
-  }, [activeIdx, slotWidth, pillX, stretch]);
-
-  const pillTransformStyle = useAnimatedStyle(() => ({
-    transform: [
-      { translateX: pillX.value },
-      { scaleX: interpolate(stretch.value, [0, 1], [1, 1.22]) },
-      { scaleY: interpolate(stretch.value, [0, 1], [1, 0.82]) },
-    ],
-  }));
-
-  const pillBgStyle = useAnimatedStyle(() => ({
-    backgroundColor: aC.primaryContainer?.value ?? theme.colors.primaryContainer,
-  }));
 
   // Album-hued frost base (replaces the live blur). Near-opaque and matched to
   // the mini player's tint (dark 0.90 / light 0.92) so the two surfaces read as
@@ -324,8 +287,6 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
     };
   }, [insets.bottom, expansion]);
 
-  const palette = getTabColors(theme.colors);
-
   return (
     <View
       style={[styles.outer, { height: BAR_HEIGHT + insets.bottom }]}
@@ -361,7 +322,6 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
       <Animated.View style={navExitStyle}>
         <View
           style={styles.itemsRow}
-          onLayout={(e) => setBarWidth(e.nativeEvent.layout.width)}
         >
           {visibleRoutes.map((route, index) => {
             const descriptor = descriptors[route.key];
@@ -376,7 +336,13 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
                   : route.name;
 
             const onPress = () => {
-              Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+              // A tab that actually changes screen deserves a firmer thump than
+              // re-tapping the one you're already on.
+              Haptics.impactAsync(
+                focused
+                  ? Haptics.ImpactFeedbackStyle.Light
+                  : Haptics.ImpactFeedbackStyle.Medium,
+              );
               const event = navigation.emit({
                 type: 'tabPress',
                 target: route.key,
@@ -397,9 +363,8 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
                   label={label}
                   routeName={route.name}
                   focused={focused}
-                  activeIconColor={palette.accent}
                   mutedColor={theme.colors.onSurfaceVariant}
-                  accentColor={palette.accent}
+                  accentColor={theme.colors.primary}
                   onPress={onPress}
                   onLongPress={onLongPress}
                 />
@@ -419,8 +384,6 @@ const styles = StyleSheet.create({
     right: 0,
     bottom: 0,
     overflow: 'hidden',
-    borderTopWidth: StyleSheet.hairlineWidth,
-    borderColor: 'rgba(255,255,255,0.14)',
     elevation: 0,
   },
   itemsRow: {
@@ -434,12 +397,22 @@ const styles = StyleSheet.create({
   itemButton: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: CONTENT_TOP,
     overflow: 'visible',
   },
   iconArea: {
-    width: PILL_W,
-    height: PILL_H,
+    width: ICON_SIZE,
+    height: ICON_SIZE,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  glow: {
+    position: 'absolute',
+    width: GLOW_SIZE,
+    height: GLOW_SIZE,
+    top: (ICON_SIZE - GLOW_SIZE) / 2,
+    left: (ICON_SIZE - GLOW_SIZE) / 2,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -451,23 +424,11 @@ const styles = StyleSheet.create({
   itemLabel: {
     fontFamily: 'StaySound',
     fontSize: 10.5,
-    lineHeight: 13,
-    position: 'absolute',
-    top: LABEL_TOP,
-    maxWidth: PILL_W + 22,
+    lineHeight: LABEL_HEIGHT,
+    marginTop: ICON_LABEL_GAP,
+    maxWidth: 76,
     letterSpacing: 0.1,
     textAlign: 'center',
     fontWeight: '500',
-  },
-  pill: {
-    position: 'absolute',
-    top: PILL_TOP + BAR_CONTENT_OFFSET,
-    left: 0,
-    borderRadius: PILL_H / 2,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.15,
-    shadowRadius: 6,
-    elevation: 2,
   },
 });

@@ -160,7 +160,9 @@ function mapNativeConfig(raw: unknown): SoulseekRuntimeConfig {
     listenPort: Math.min(65535, Math.max(0, toInt(source.listenPort, 2234))),
     clientVersion: Math.min(9999, Math.max(1, toInt(source.clientVersion, 160))),
     searchTimeoutMs: Math.min(30_000, Math.max(2_500, toInt(source.searchTimeoutMs, 9_000))),
-    maxResults: Math.min(40, Math.max(1, toInt(source.maxResults, 24))),
+    // The native module accepts up to 120 results. Keeping the JS cap at 40
+    // discarded useful matches before ranking, especially for popular titles.
+    maxResults: Math.min(120, Math.max(1, toInt(source.maxResults, 24))),
   };
 }
 
@@ -244,6 +246,14 @@ function normalizeExtension(value?: string): string {
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeSoulseekSearchTerms(value: string): string {
+  // Soulseek treats punctuation as search syntax in some clients (notably a
+  // hyphen can exclude the following term). Send plain positive terms only.
+  return normalizeWhitespace(
+    value.replace(/[\\/_()[\]{}.,;:!?"'`~@#$%^&*+=|<>-]+/g, ' '),
+  );
 }
 
 function stripFileExtension(value: string): string {
@@ -533,16 +543,19 @@ function buildTrackSearchQueries(
   qualityPreference: TidalQuality,
   allowCompressedFallback = false,
 ): string[] {
-  const base = `${tidalTrack.artist} - ${tidalTrack.title}`.trim();
-  const plain = normalizeWhitespace(base || `${tidalTrack.artist} ${tidalTrack.title}`);
+  const artist = normalizeSoulseekSearchTerms(tidalTrack.artist);
+  const title = normalizeSoulseekSearchTerms(tidalTrack.title);
+  const artistAndTitle = normalizeWhitespace(`${artist} ${title}`);
   const formats = wantsLossless(qualityPreference)
     ? (allowCompressedFallback ? ['flac', 'mp3'] : ['flac'])
     : ['mp3'];
   const queries = formats.flatMap(format => [
-    `${plain} ${format}`,
-    `${tidalTrack.artist} ${tidalTrack.title} ${format}`.trim(),
+    `${artistAndTitle} ${format}`,
+    // Some shares only contain the song title in their folder/file names.
+    // The ranker still validates artist, duration and version after retrieval.
+    `${title} ${format}`,
   ]);
-  queries.push(plain);
+  queries.push(artistAndTitle, title);
 
   return Array.from(new Set(queries.map(normalizeWhitespace).filter(Boolean)));
 }
@@ -830,6 +843,12 @@ function isRetryablePeerError(error: unknown): boolean {
     message.includes('connection reset') ||
     message.includes('connection closed') ||
     message.includes('connection refused') ||
+    message.includes('connection abort') ||
+    message.includes('software caused abort') ||
+    message.includes('fallo de subida') ||
+    message.includes('uploadfailed') ||
+    message.includes('queuefailed') ||
+    message.includes('file not shared') ||
     message.includes('broken pipe') ||
     message.includes('user not exist') ||
     message.includes('canal p directo ni indirecto') ||
@@ -1117,7 +1136,9 @@ export async function searchSoulseekTracksByQuery(
   const parsed = parseSoulseekQuery(query);
   if (!parsed.title && !parsed.artist) return [];
 
-  const baseQuery = `${parsed.artist ? `${parsed.artist} - ` : ''}${parsed.title || query.trim()}`.trim();
+  const baseQuery = normalizeSoulseekSearchTerms(
+    `${parsed.artist} ${parsed.title || query.trim()}`,
+  );
   const formats = wantsLossless(qualityPreference) ? ['flac', 'mp3'] : ['mp3', 'flac'];
   const collected: SoulseekTrackMatch[] = [];
 

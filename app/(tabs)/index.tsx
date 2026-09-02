@@ -1,4 +1,4 @@
-import { AlbumCard, CustomIcon, EmptyState, GlassIconButton, TrackListItem } from '@/src/components/ui';
+import { AlbumCard, CustomIcon, EmptyState } from '@/src/components/ui';
 import { useDynamicColors, useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n, type TranslationKey } from '@/src/i18n';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
@@ -8,7 +8,6 @@ import { useOnboardingStore } from '@/src/stores/onboardingStore';
 import { typeScale, usePerformanceProfile, useTheme } from '@/src/theme';
 import { Album, TidalTrack, Track } from '@/src/types';
 import { FlashList } from '@shopify/flash-list';
-import { LinearGradient } from 'expo-linear-gradient';
 import { Image } from 'expo-image';
 import { router } from 'expo-router';
 import React, { useCallback, useMemo, useRef } from 'react';
@@ -181,7 +180,6 @@ const SectionHeader = React.memo(({
   onSeeAll?: () => void;
 }) => {
   const { theme } = useTheme();
-  const { t } = useI18n();
   const titleStyle = useMemo(() => ({ color: theme.colors.onBackground }), [theme.colors.onBackground]);
   const seeAllStyle = useMemo(() => ({ color: theme.colors.primary }), [theme.colors.primary]);
 
@@ -446,9 +444,11 @@ export default function HomeScreen() {
   const { width: screenWidth } = useWindowDimensions();
   const screenEntryKey = useScreenEntryKey('home-tab');
   const heroEntryStyle = useScreenEntryAnimation(screenEntryKey, { duration: 400 });
-  const recentlyPlayedEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 70 });
-  const recentlyAddedEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 130 });
-  const albumsEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 190 });
+  const picksEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 70 });
+  const recentlyPlayedEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 130 });
+  const downloadsEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 190 });
+  const recentlyAddedEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 250 });
+  const albumsEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 310 });
   const emptyEntryStyle = useScreenEntryAnimation(screenEntryKey, { delay: 120, duration: 260, translateY: 0 });
 
   const tracksMap = useLibraryStore(s => s.tracks);
@@ -489,12 +489,29 @@ export default function HomeScreen() {
   const albums = useMemo(() => toValues<Album>(albumsMap as unknown), [toValues, albumsMap]);
 
   const recentlyAddedAlbums = useMemo(
-    () => [...albums].sort((a, b) => (b.year ?? 0) - (a.year ?? 0)).slice(0, 6),
-    [albums]
+    () => {
+      const addedAtByTrackId = new Map(tracks.map(track => [track.id, track.dateAdded ?? 0]));
+      return [...albums]
+        .sort((a, b) => {
+          const aLatest = Math.max(0, ...a.tracks.map(trackId => addedAtByTrackId.get(trackId) ?? 0));
+          const bLatest = Math.max(0, ...b.tracks.map(trackId => addedAtByTrackId.get(trackId) ?? 0));
+          return bLatest - aLatest;
+        })
+        .slice(0, 6);
+    },
+    [albums, tracks]
   );
 
   const recentlyAddedTracks = useMemo(
     () => [...tracks].sort((a, b) => (b.dateAdded ?? 0) - (a.dateAdded ?? 0)).slice(0, 15),
+    [tracks]
+  );
+
+  const recentlyDownloadedTracks = useMemo(
+    () => [...tracks]
+      .filter(track => typeof track.downloadedAt === 'number')
+      .sort((a, b) => (b.downloadedAt ?? 0) - (a.downloadedAt ?? 0))
+      .slice(0, 12),
     [tracks]
   );
 
@@ -636,8 +653,8 @@ export default function HomeScreen() {
         </Animated.View>
 
         {quickPicks.length > 0 && (
-          <Animated.View style={[styles.sectionBlock, recentlyAddedEntryStyle]}>
-            <SectionHeader title="Para esta noche" icon="Reciente" onSeeAll={goToLibrary} />
+          <Animated.View style={[styles.sectionBlock, picksEntryStyle]}>
+            <SectionHeader title={t('home.picks')} icon="Reciente" onSeeAll={goToLibrary} />
             <FlashList
               data={quickPicks}
               renderItem={renderTrackCard}
@@ -648,6 +665,71 @@ export default function HomeScreen() {
               contentContainerStyle={styles.horizontalList}
               drawDistance={horizontalDrawDistance}
             />
+          </Animated.View>
+        )}
+
+        {recentlyPlayedSlice.length > 0 && (
+          <Animated.View style={[styles.sectionBlock, recentlyPlayedEntryStyle]}>
+            <SectionHeader title={t('home.recentlyPlayed')} icon="Reciente" onSeeAll={goToLibrary} />
+            <FlashList
+              data={recentlyPlayedSlice}
+              renderItem={renderTrackCard}
+              keyExtractor={trackKeyExtractor}
+              ItemSeparatorComponent={renderHorizontalSeparator}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              drawDistance={horizontalDrawDistance}
+            />
+          </Animated.View>
+        )}
+
+        {recentlyDownloadedTracks.length > 0 && (
+          <Animated.View style={[styles.sectionBlock, downloadsEntryStyle]}>
+            <SectionHeader title={t('home.recentDownloads')} icon="Descargar" onSeeAll={goToLibrary} />
+            <FlashList
+              data={recentlyDownloadedTracks}
+              renderItem={renderTrackCard}
+              keyExtractor={trackKeyExtractor}
+              ItemSeparatorComponent={renderHorizontalSeparator}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              drawDistance={horizontalDrawDistance}
+            />
+          </Animated.View>
+        )}
+
+        {recentlyAddedTracks.length > 0 && (
+          <Animated.View style={[styles.sectionBlock, recentlyAddedEntryStyle]}>
+            <SectionHeader title={t('home.recentlyAdded')} icon="Reciente" onSeeAll={goToLibrary} />
+            <FlashList
+              data={recentlyAddedTracks}
+              renderItem={renderTrackCard}
+              keyExtractor={trackKeyExtractor}
+              ItemSeparatorComponent={renderHorizontalSeparator}
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.horizontalList}
+              drawDistance={horizontalDrawDistance}
+            />
+          </Animated.View>
+        )}
+
+        {recentlyAddedAlbums.length > 0 && (
+          <Animated.View style={[styles.sectionBlock, albumsEntryStyle]}>
+            <SectionHeader title={t('home.albumsSection')} icon="Album" onSeeAll={goToLibrary} />
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={styles.albumRail}
+            >
+              {recentlyAddedAlbums.map(album => (
+                <View key={album.id} style={styles.albumWrapper}>
+                  <AlbumCard album={album} size="medium" presentation="stacked" onPress={handleAlbumPress} />
+                </View>
+              ))}
+            </ScrollView>
           </Animated.View>
         )}
 

@@ -874,6 +874,233 @@
     font-variant-numeric: tabular-nums;
   }
 
+  /* ---------- Biblioteca: fichas de álbum y artista ----------
+     AlbumDetail/ArtistDetail nunca tuvieron pasada de Círculo: heredaban el skin
+     "Sala de escucha" (el bloque @media ≥821px de app.css) y quedaban pegadas al
+     borde izquierdo, porque en este shell el gutter no lo pone .circ-content sino
+     cada pantalla. Aquí reciben el mismo margen, el mismo ritmo tipográfico y el
+     mismo vocabulario circular que Inicio, Biblioteca y Descargas. */
+  .circ-app-shell .detail-view {
+    padding: 22px var(--circ-pad-x) 40px;
+    font-family: var(--circ-font);
+  }
+
+  .circ-app-shell .back-btn {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 8px;
+    margin-bottom: 24px;
+    font-family: var(--circ-font);
+    font-size: 0.92rem;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  .circ-app-shell .back-btn span:first-child {
+    color: var(--text-secondary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-app-shell .back-btn:hover span:first-child { color: var(--accent); }
+  .circ-app-shell .back-btn strong { color: var(--text-primary); font-weight: 700; }
+
+  /* Una sola cabecera para las dos fichas: disco/retrato circular a la izquierda,
+     bloque editorial a la derecha. El mural con foto difuminada del skin anterior
+     no cabe en un tema plano y negro, así que se apaga. */
+  .circ-app-shell .detail-header,
+  .circ-app-shell .artist-mural {
+    display: grid;
+    grid-template-columns: 216px minmax(0, 1fr);
+    gap: 34px;
+    align-items: center;
+    min-height: 0;
+    margin: 0 0 30px;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    overflow: visible;
+  }
+
+  .circ-app-shell .artist-mural-bg,
+  .circ-app-shell .artist-mural-scrim { display: none; }
+
+  .circ-app-shell .detail-artwork,
+  .circ-app-shell .artist-mural-portrait {
+    width: 216px;
+    height: 216px;
+    max-width: none;
+    aspect-ratio: 1;
+    border-radius: 50%;
+    overflow: hidden;
+    background: var(--bg-elevated);
+    box-shadow: none;
+  }
+
+  .circ-app-shell .detail-artwork-letter,
+  .circ-app-shell .artist-mural-portrait span {
+    color: var(--text-secondary);
+    background: var(--bg-elevated);
+    font-family: var(--circ-font);
+    font-size: 4.2rem;
+    font-weight: 800;
+  }
+
+  .circ-app-shell .detail-meta,
+  .circ-app-shell .artist-mural-copy {
+    display: grid;
+    justify-items: start;
+    gap: 6px;
+    align-self: center;
+    min-width: 0;
+  }
+
+  .circ-app-shell .detail-meta .eyebrow,
+  .circ-app-shell .artist-mural-copy .eyebrow {
+    margin: 0;
+    color: var(--text-muted);
+    font-family: var(--circ-font);
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .circ-app-shell .detail-meta h2,
+  .circ-app-shell .artist-mural-copy h2 {
+    margin: 2px 0 0;
+    max-width: 100%;
+    font-family: var(--circ-font);
+    font-size: clamp(2rem, 3.6vw, 3rem);
+    font-weight: 800;
+    letter-spacing: -0.03em;
+    line-height: 1.04;
+    color: var(--text-primary);
+  }
+
+  .circ-app-shell .detail-meta p,
+  .circ-app-shell .detail-meta .artist-link {
+    color: var(--text-secondary);
+    font-family: var(--circ-font);
+    font-size: 1.02rem;
+    font-weight: 600;
+  }
+
+  .circ-app-shell .detail-meta .artist-link:hover { color: var(--accent); }
+
+  /* Los datos son texto separado por puntos, no chips: las píldoras grises
+     competían con el título y no dicen nada que el texto no diga. */
+  .circ-app-shell .detail-stats {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 4px;
+  }
+
+  .circ-app-shell .detail-stats span {
+    min-height: 0;
+    padding: 0;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font-size: 0.84rem;
+    font-weight: 400;
+    text-transform: none;
+  }
+
+  .circ-app-shell .detail-stats span + span::before {
+    content: '·';
+    margin: 0 8px 0 0;
+    color: var(--text-muted);
+    opacity: 0.6;
+  }
+
+  .circ-app-shell .artist-bio {
+    max-width: 68ch;
+    margin: 10px 0 0;
+    color: var(--text-secondary);
+    font-size: 0.92rem;
+    line-height: 1.6;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .circ-app-shell .detail-actions {
+    display: flex;
+    gap: 10px;
+    margin: 16px 0 0;
+  }
+
+  .circ-app-shell .detail-view .btn {
+    min-height: 42px;
+    border-radius: 999px;
+    padding: 0 22px;
+    font-family: var(--circ-font);
+    font-size: 0.85rem;
+    font-weight: 700;
+  }
+
+  .circ-app-shell .detail-view .btn-primary {
+    color: var(--text-on-accent);
+    background: var(--accent);
+    box-shadow: none;
+  }
+
+  .circ-app-shell .detail-view .btn-primary:hover:not(:disabled) {
+    background: var(--accent-hover);
+  }
+
+  .circ-app-shell .detail-view .btn-ghost {
+    color: var(--text-secondary);
+    border: 1px solid var(--border-strong);
+    background: transparent;
+  }
+
+  .circ-app-shell .detail-view .btn-ghost:hover:not(:disabled) {
+    color: var(--text-primary);
+    border-color: var(--text-muted);
+    background: transparent;
+  }
+
+  .circ-app-shell .artist-albums-section { margin-top: 30px; }
+
+  .circ-app-shell .artist-albums-section h3 {
+    margin: 0;
+    font-family: var(--circ-font);
+    font-size: 1.16rem;
+    font-weight: 700;
+    letter-spacing: -0.015em;
+    color: var(--text-primary);
+  }
+
+  /* La misma rejilla de discos de Biblioteca, pero anidada dentro de una ficha
+     que ya trae su propio gutter. */
+  .circ-tile-grid.inline {
+    padding: 18px 0 4px;
+    gap: 26px 22px;
+  }
+
+  .circ-tile-grid.inline .circ-tile { width: 132px; }
+  .circ-tile-grid.inline .circ-art { width: 112px; height: 112px; }
+  .circ-tile-grid.inline .circ-tile strong { margin-top: 8px; font-size: 0.94rem; }
+  .circ-tile-grid.inline .circ-tile small { font-size: 0.82rem; color: var(--text-muted); }
+
+  .circ-art-letter {
+    display: grid;
+    place-items: center;
+    width: 100%;
+    height: 100%;
+    color: var(--text-primary);
+    font-weight: 700;
+    font-size: 1.4rem;
+  }
+
+  .circ-app-shell .detail-view .track-list { margin-top: 14px; }
+
   /* ---------- Buscar ---------- */
   .circ-search {
     padding: 26px var(--circ-pad-x) 40px;
@@ -935,7 +1162,10 @@
     margin-top: 14px;
   }
 
-  /* ---------- Descargas ---------- */
+  /* ---------- Descargas ----------
+     La pestaña trae su propio layout (styles/downloads.css, cargado después de
+     este archivo) y lee los tokens de Círculo directamente, así que aquí solo
+     queda el gutter compartido con el resto de pantallas del shell. */
   .circ-app-shell .downloads-panel {
     min-height: 100%;
     padding: 26px var(--circ-pad-x) 40px;
@@ -991,93 +1221,6 @@
   .circ-app-shell .desktop-required-body p,
   .circ-app-shell .desktop-required-list span {
     color: var(--circ-text-2);
-  }
-
-  .circ-app-shell .download-toolbar {
-    grid-template-columns: minmax(190px, .34fr) minmax(500px, 1fr);
-    padding: 2px 0 24px;
-  }
-
-  .circ-app-shell .download-toolbar-copy strong {
-    font-size: 1.05rem;
-    font-weight: 700;
-  }
-
-  .circ-app-shell .download-toolbar-copy small {
-    color: var(--circ-text-3);
-  }
-
-  .circ-app-shell .download-search {
-    gap: 10px;
-  }
-
-  .circ-app-shell .download-search input {
-    height: 44px;
-    border-color: var(--circ-hairline);
-    background: transparent;
-    font-size: .95rem;
-    transition: border-color var(--circ-dur-fast) var(--circ-ease-standard);
-  }
-
-  .circ-app-shell .download-search input:focus {
-    border-color: var(--accent);
-  }
-
-  .circ-app-shell .download-empty-state {
-    min-height: min(46vh, 400px);
-    color: var(--circ-text-3);
-  }
-
-  .circ-app-shell .download-empty-state h2 {
-    color: var(--circ-text);
-    font-size: 1.3rem;
-  }
-
-  .circ-app-shell .download-empty-state .empty-state-icon {
-    color: var(--circ-text-2);
-  }
-
-  .circ-app-shell .download-results {
-    gap: 0;
-    border-top: 1px solid var(--circ-hairline);
-  }
-
-  .circ-app-shell .download-result {
-    min-height: 66px;
-    padding: 8px 4px;
-    border: 0;
-    border-bottom: 1px solid var(--circ-hairline);
-    border-radius: 0;
-    background: transparent;
-    transition: background-color var(--circ-dur-fast) var(--circ-ease-standard);
-  }
-
-  .circ-app-shell .download-result:hover {
-    background: var(--bg-hover);
-  }
-
-  .circ-app-shell .download-result.featured {
-    min-height: 88px;
-    border-top: 1px solid var(--circ-hairline);
-    background: transparent;
-  }
-
-  .circ-app-shell .download-result.featured .track-thumb {
-    width: 64px;
-    height: 64px;
-  }
-
-  .circ-app-shell .download-entity-card {
-    border: 0;
-    border-radius: 0;
-    padding: 0;
-    background: transparent;
-  }
-
-  .circ-app-shell .download-queue-banner,
-  .circ-app-shell .download-settings {
-    border-color: var(--circ-hairline);
-    background: var(--circ-surface);
   }
 
   .circ-search-track-row {
@@ -1146,13 +1289,13 @@
   }
 
   /* ---------- circles everywhere: broad-stroke pass over screens this project didn't
-     give a dedicated Círculo layout (Descargas, Playlists, Radio's result thumbs, and
+     give a dedicated Círculo layout (Playlists, Radio's result thumbs, and
      ArtistDetail's still-legacy "Álbumes" sub-grid). Their surrounding chrome already
      re-themed for free via the --bg-root / --text-* / --font-ui remap above; this just
-     rounds off whatever square thumbnails they still render. */
+     rounds off whatever square thumbnails they still render. Descargas ya no está en
+     la lista: tiene su propia hoja (styles/downloads.css) y redondea sus carátulas ahí. */
   .track-thumb,
   .card-artwork,
-  .download-entity-artwork,
   .recommendation-artwork,
   .playlist-art,
   .mini-art,
@@ -1204,22 +1347,19 @@
   }
 
   /* The atmosphere stays. `.fp-bg` stacks four layers: (1) a full-bleed artwork
-     gradient wash, (2) AtmosphereCanvas — the spectrum-reactive orbs/beat ripples/
-     aurora ribbon/treble glitter, (3) a bass-reactive edge glow, (4) a readability
-     scrim. Only layer 1 genuinely fights Círculo's pure black, so it's the only one
-     that goes. Layers 2–3 blend with `screen`, and screen-over-#000 is a no-op —
-     the orbs keep their own colour and read as light emitted from the black itself,
-     which is exactly the restrained-psychedelic look this direction wants. */
+     gradient wash, (2) the spectrum-reactive Dot Matrix, (3) a bass-reactive edge
+     glow, (4) a readability scrim. Only layer 1 fights Círculo's pure black, so it
+     is the only one removed; the matrix keeps the album palette as emitted light. */
   .full-player-overlay.circ .fp-bg-base {
     display: none;
   }
 
-  /* Restrained, not flashy: the stock values are tuned to sit over a bright
-     artwork wash. Against pure black the same energy reads far louder, so pull
-     the canvas back and let the beat do the talking rather than the baseline. */
-  .full-player-overlay.circ .atmosphere-canvas {
-    opacity: 0.5;
-    filter: blur(clamp(20px, 2.6vw, 34px)) saturate(1.05);
+  /* Restrained, not flashy: against pure black the cells read louder, so keep
+     enough opacity to show the pattern while leaving artwork and controls dominant. */
+  .full-player-overlay.circ .atmosphere-canvas,
+  .full-player-overlay.circ .origin-kit-dot-matrix {
+    opacity: 0.72;
+    filter: saturate(1.02) contrast(1.04);
   }
 
   .full-player-overlay.circ .fp-bg-edge-glow {

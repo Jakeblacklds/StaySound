@@ -12,7 +12,9 @@ internal class PeerSearchConnection(
   private val socket: Socket,
   private val onMatch: (SoulseekMatch) -> Unit,
   private val onTransferRequest: ((IncomingTransferRequest) -> Unit)? = null,
+  private val onTransferFailure: ((String) -> Unit)? = null,
   private val onIdentity: ((String, PeerSearchConnection) -> Unit)? = null,
+  private val onFileConnection: ((Socket) -> Unit)? = null,
 ) : Closeable {
   private val reader = SlskPacketReader(socket, socket.getInputStream())
   private val output = socket.getOutputStream()
@@ -43,7 +45,11 @@ internal class PeerSearchConnection(
 
         val first = packet[0].toInt() and 0xFF
         if (first == 1) {
-          handlePeerInitPacket(packet)
+          if (handlePeerInitPacket(packet).equals("F", ignoreCase = true)) {
+            running.set(false)
+            onFileConnection?.invoke(socket)
+            return@Thread
+          }
           continue
         }
         if (first == 0) {
@@ -56,6 +62,19 @@ internal class PeerSearchConnection(
 
         if (code == 40) {
           handleTransferRequestPacket(parser)
+          continue
+        }
+
+        if (code == 46) {
+          val filename = parser.readStringSafe()
+          onTransferFailure?.invoke("UploadFailed: ${filename.ifBlank { "archivo" }}")
+          continue
+        }
+
+        if (code == 50) {
+          val filename = parser.readStringSafe()
+          val reason = parser.readStringSafe()
+          onTransferFailure?.invoke("QueueFailed: ${reason.ifBlank { "rechazado" }} (${filename.ifBlank { "archivo" }})")
           continue
         }
 
@@ -79,13 +98,15 @@ internal class PeerSearchConnection(
     runCatching { socket.close() }
   }
 
-  private fun handlePeerInitPacket(packet: ByteArray) {
+  private fun handlePeerInitPacket(packet: ByteArray): String? {
     val parser = SlskMessageParser(packet)
-    if (parser.readUInt8() != 1) return
+    if (parser.readUInt8() != 1) return null
     val username = parser.readStringSafe()
     val type = parser.readStringSafe()
-    if (username.isBlank() || !type.equals("P", ignoreCase = true)) return
-    onIdentity?.invoke(username, this)
+    if (username.isNotBlank() && type.equals("P", ignoreCase = true)) {
+      onIdentity?.invoke(username, this)
+    }
+    return type
   }
 
   private fun handleTransferRequestPacket(parser: SlskMessageParser) {
@@ -103,7 +124,7 @@ internal class PeerSearchConnection(
     val expectedSize = if (sizeLow == null) {
       null
     } else {
-      ((sizeHigh ?: 0L) and 0xFFFFFFFFL shl 32) or (sizeLow and 0xFFFFFFFFL)
+      (((sizeHigh ?: 0L) and 0xFFFFFFFFL) shl 32) or (sizeLow and 0xFFFFFFFFL)
     }
 
     callback(

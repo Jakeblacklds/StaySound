@@ -21,6 +21,7 @@ import {
   type LyricsThemeId,
 } from '../library/lyricsThemes';
 import { AtmosphereCanvas } from './AtmosphereCanvas';
+import { OriginKitDotMatrixBackground } from './OriginKitDotMatrixBackground';
 import {
   ChevronDownIcon,
   CloseIcon,
@@ -340,12 +341,21 @@ export function FullPlayer({
           />
         ) : null}
         <div key={`current-${paletteTransitionKey}`} className="fp-bg-base current" />
-        <AtmosphereCanvas
-          palette={palette}
-          isPlaying={isPlaying}
-          motionKey={trackKey}
-          reactiveTarget={overlayRef}
-        />
+        {isDesktopApp && palette ? (
+          <OriginKitDotMatrixBackground
+            palette={palette}
+            isPlaying={isPlaying}
+            motionKey={trackKey}
+            reactiveTarget={overlayRef}
+          />
+        ) : (
+          <AtmosphereCanvas
+            palette={palette}
+            isPlaying={isPlaying}
+            motionKey={trackKey}
+            reactiveTarget={overlayRef}
+          />
+        )}
         {previousPalette ? (
           <div
             key={`edge-previous-${paletteTransitionKey}`}

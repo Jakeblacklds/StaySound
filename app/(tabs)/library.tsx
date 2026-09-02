@@ -2,7 +2,7 @@
  * LibraryScreen - Main library view with tabs for songs, albums, artists, playlists
  */
 
-import { AlbumCard, ArtistCard, EmptyState, ImmersiveHeading, ScanButton, SegmentedTabs, TrackListItem } from '@/src/components/ui';
+import { AlbumCard, ArtistCard, EmptyState, ScanButton, SegmentedTabs, TrackListItem } from '@/src/components/ui';
 import { useScreenEntryAnimation, useScreenEntryKey } from '@/src/hooks';
 import { useI18n } from '@/src/i18n';
 import { openTrackActionsMenu } from '@/src/services/playlistActions';
@@ -13,7 +13,7 @@ import { FlashList } from '@shopify/flash-list';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import React, { useCallback, useDeferredValue, useEffect, useMemo } from 'react';
-import { InteractionManager, NativeSyntheticEvent, NativeScrollEvent, Pressable, StyleSheet, View } from 'react-native';
+import { InteractionManager, Pressable, StyleSheet, View } from 'react-native';
 import { Searchbar, Text } from 'react-native-paper';
 import Animated, {
     Easing,
@@ -28,11 +28,8 @@ import Animated, {
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 
 type LibraryTab = 'songs' | 'albums' | 'artists';
-const ESTIMATED_ALBUM_SIZE = 212;
-const ESTIMATED_ARTIST_SIZE = 138;
 const DEFAULT_TRACK_SIZE = 76;
 const BASE_TRACK_DRAW_DISTANCE = 360;
-const SCRUB_TRACK_DRAW_DISTANCE = 560;
 const THUMBNAIL_PRELOAD_COUNT = 72;
 const THUMBNAIL_PRELOAD_DELAY_MS = 450;
 
@@ -54,7 +51,6 @@ export default function LibraryScreen() {
     const [tab, setTab] = React.useState<LibraryTab>('songs');
     const [searchQuery, setSearchQuery] = React.useState('');
     const [isSearchExpanded, setIsSearchExpanded] = React.useState(false);
-    const [isAlphabetScrubbing, setIsAlphabetScrubbing] = React.useState(false);
     const deferredSearchQuery = useDeferredValue(searchQuery);
     const lightweightMode = useSettingsStore(s => s.lightweightMode);
     const searchInputRef = React.useRef<any>(null);
@@ -188,36 +184,6 @@ export default function LibraryScreen() {
         router.push({ pathname: '/artist/[id]', params: { id: artist.id } });
     }, []);
 
-    const songsListRef = React.useRef<any>(null);
-    const pendingScrollIndexRef = React.useRef<number | null>(null);
-    const rafScrollRef = React.useRef<number | null>(null);
-    const lastScrolledIndexRef = React.useRef(-1);
-    const approximateVisibleIndexRef = React.useRef(0);
-
-    const firstIndexByLetter = useMemo(() => {
-        const indexMap = new Map<string, number>();
-
-        for (let i = 0; i < filteredTracks.length; i++) {
-            const firstChar = filteredTracks[i].title.charAt(0).toUpperCase();
-            const letter = /[A-Z]/.test(firstChar) ? firstChar : '#';
-            if (!indexMap.has(letter)) indexMap.set(letter, i);
-        }
-
-        return indexMap;
-    }, [filteredTracks]);
-
-    useEffect(() => {
-        lastScrolledIndexRef.current = -1;
-        pendingScrollIndexRef.current = null;
-        approximateVisibleIndexRef.current = 0;
-    }, [filteredTracks]);
-
-    useEffect(() => {
-        if (tab !== 'songs' || searchQuery) {
-            setIsAlphabetScrubbing(false);
-        }
-    }, [searchQuery, tab]);
-
     useEffect(() => {
         if (!isSearchExpanded && searchQuery) {
             setIsSearchExpanded(true);
@@ -238,15 +204,6 @@ export default function LibraryScreen() {
         });
         return () => task.cancel();
     }, [isSearchExpanded]);
-
-    useEffect(() => {
-        return () => {
-            if (rafScrollRef.current !== null) {
-                cancelAnimationFrame(rafScrollRef.current);
-                rafScrollRef.current = null;
-            }
-        };
-    }, []);
 
     const renderTrackItem = useCallback(({ item, index }: { item: Track; index: number }) => (
         <TrackListItem
@@ -310,44 +267,9 @@ export default function LibraryScreen() {
     const isMaterial3 = theme.id.startsWith('material3');
     const trackVerticalMargin = theme.components.trackItem.variant === 'brutal' ? 16 : (isMaterial3 ? 8 : 0);
     const trackSize = (theme.components.trackItem.height || DEFAULT_TRACK_SIZE) + trackVerticalMargin;
-    const scrubAnimatedIndexThreshold = 18;
     const trackListDrawDistance = performanceProfile.reducedListWindowing
-        ? Math.round((isAlphabetScrubbing ? SCRUB_TRACK_DRAW_DISTANCE : BASE_TRACK_DRAW_DISTANCE) * 0.65)
-        : (isAlphabetScrubbing ? SCRUB_TRACK_DRAW_DISTANCE : BASE_TRACK_DRAW_DISTANCE);
-
-    const handleSongsScroll = useCallback((event: NativeSyntheticEvent<NativeScrollEvent>) => {
-        const offsetY = Math.max(0, event.nativeEvent.contentOffset.y);
-        approximateVisibleIndexRef.current = Math.round(offsetY / Math.max(trackSize, 1));
-    }, [trackSize]);
-
-    const handleLetterScrub = useCallback((letter: string) => {
-        if (!songsListRef.current || filteredTracks.length === 0) return;
-
-        const targetIndex = firstIndexByLetter.get(letter) ?? (filteredTracks.length - 1);
-        pendingScrollIndexRef.current = targetIndex;
-
-        if (rafScrollRef.current !== null) return;
-
-        rafScrollRef.current = requestAnimationFrame(() => {
-            rafScrollRef.current = null;
-            const index = pendingScrollIndexRef.current;
-            if (index == null || !songsListRef.current) return;
-            if (lastScrolledIndexRef.current === index) return;
-
-            const distance = Math.abs(index - approximateVisibleIndexRef.current);
-            const shouldAnimate = distance <= scrubAnimatedIndexThreshold;
-            const targetOffset = Math.max(0, index * trackSize);
-
-            lastScrolledIndexRef.current = index;
-            approximateVisibleIndexRef.current = index;
-            if (typeof songsListRef.current.scrollToOffset === 'function') {
-                songsListRef.current.scrollToOffset({ offset: targetOffset, animated: shouldAnimate });
-                return;
-            }
-
-            songsListRef.current.scrollToIndex({ index, animated: shouldAnimate, viewPosition: 0 });
-        });
-    }, [filteredTracks.length, firstIndexByLetter, scrubAnimatedIndexThreshold, trackSize]);
+        ? Math.round(BASE_TRACK_DRAW_DISTANCE * 0.65)
+        : BASE_TRACK_DRAW_DISTANCE;
 
     const aC = useAnimatedColors();
     const animSearchbarBg = useAnimatedStyle(() => ({ backgroundColor: aC.surfaceVariant.value + 'A6' }));
@@ -484,7 +406,6 @@ export default function LibraryScreen() {
                             ) : (
                                 <View style={{ flex: 1 }}>
                                     <FlashList
-                                        ref={songsListRef}
                                         data={filteredTracks}
                                         keyExtractor={trackKeyExtractor}
                                         renderItem={renderTrackItem}
@@ -494,8 +415,6 @@ export default function LibraryScreen() {
                                     getItemType={getTrackItemType}
                                     removeClippedSubviews={lightweightMode}
                                     drawDistance={trackListDrawDistance}
-                                    onScroll={handleSongsScroll}
-                                    scrollEventThrottle={16}
                                     showsVerticalScrollIndicator={false}
                                 />
                                 </View>

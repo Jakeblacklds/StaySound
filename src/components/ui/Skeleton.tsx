@@ -1,10 +1,8 @@
 import { useTheme } from '@/src/theme';
-import { LinearGradient } from 'expo-linear-gradient';
 import React, { useEffect } from 'react';
 import { StyleSheet, View, ViewStyle } from 'react-native';
 import Animated, {
     Easing,
-    interpolate,
     useAnimatedStyle,
     useSharedValue,
     withRepeat,
@@ -17,8 +15,6 @@ interface SkeletonProps {
     borderRadius?: number;
     style?: ViewStyle;
 }
-
-const AnimatedLinearGradient = Animated.createAnimatedComponent(LinearGradient);
 
 export const Skeleton = ({ width = '100%', height, borderRadius = 8, style }: SkeletonProps) => {
     const { isDark } = useTheme();

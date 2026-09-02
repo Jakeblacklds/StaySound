@@ -74,9 +74,9 @@ export default function SettingsScreen() {
         toggleLightweightMode,
         isDark
     } = useTheme();
-    const { t, locale } = useI18n();
+    const { t } = useI18n();
     const insets = useSafeAreaInsets();
-    const { isScanning, scanLibrary, getAllTracks, lastScanDate, repairMissingMetadata, hydrateMetadataFromTidalForLibrary } = useLibraryStore();
+    const { isScanning, scanLibrary, getAllTracks, repairMissingMetadata, hydrateMetadataFromTidalForLibrary } = useLibraryStore();
 
     const [hexInput, setHexInput] = useState(config.accentColor);
     const [tempColor, setTempColor] = useState(config.accentColor);
@@ -84,7 +84,6 @@ export default function SettingsScreen() {
     const [showQualityModal, setShowQualityModal] = useState(false);
     const [showMirrorModal, setShowMirrorModal] = useState(false);
     const [showArtworkHydrationModal, setShowArtworkHydrationModal] = useState(false);
-    const [showLegacyMirrors, setShowLegacyMirrors] = useState(false);
     const [isRepairingMetadata, setIsRepairingMetadata] = useState(false);
     const [isHydratingTidalMetadata, setIsHydratingTidalMetadata] = useState(false);
     const [artworkHydrationLogs, setArtworkHydrationLogs] = useState<string[]>([]);
@@ -97,8 +96,7 @@ export default function SettingsScreen() {
         language, setLanguage,
         tidalDownloadQuality, setTidalDownloadQuality,
         tidalMirror, setTidalMirror,
-        equalizer,
-        equalizerCapabilities
+        equalizer
     } = useSettingsStore();
 
     const { userName, userAvatarUri, setUserName, setUserAvatarUri } = useOnboardingStore();
@@ -205,10 +203,6 @@ export default function SettingsScreen() {
         () => allTracks.filter(trackNeedsMetadataRepair).length,
         [allTracks],
     );
-    const lastScan = lastScanDate
-        ? new Date(lastScanDate).toLocaleDateString(locale)
-        : t('common.never');
-
     const handleScan = async () => {
         try {
             await scanLibrary();
@@ -270,11 +264,6 @@ export default function SettingsScreen() {
 
     // Worklet callbacks: reanimated-color-picker calls these on the UI thread.
     // runOnJS bridges them back to the JS thread so React state updates safely.
-    const onColorPickerChange = ({ hex }: { hex: string }) => {
-        'worklet';
-        // No-op during drag to avoid flooding the JS thread.
-    };
-
     const onColorPickerComplete = ({ hex }: { hex: string }) => {
         'worklet';
         runOnJS(_jsSetTempColor)(hex);
@@ -349,11 +338,6 @@ export default function SettingsScreen() {
         () => getPrimaryMirrorOptions(availableMirrors),
         [availableMirrors],
     );
-    const legacyMirrors = useMemo(
-        () => availableMirrors.filter(mirror => !recommendedMirrors.includes(mirror)),
-        [availableMirrors, recommendedMirrors],
-    );
-
     const qualityModalOptions = useMemo(
         () => ['LOSSLESS', 'MP3', 'HI_RES_LOSSLESS', 'LOW'] as TidalQuality[],
         [],

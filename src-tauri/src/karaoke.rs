@@ -3,8 +3,9 @@ use std::{
     collections::hash_map::DefaultHasher,
     env, fs,
     hash::{Hash, Hasher},
+    io::{BufReader, Read},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::UNIX_EPOCH,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -39,6 +40,13 @@ pub struct KaraokeProgress {
     stage: String,
     progress: f32,
     detail: String,
+    /// Live technical line (model, device, package being downloaded…) so the UI
+    /// can show what the machine is really doing instead of a generic message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+    /// Remaining time for the current stage when the underlying tool reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eta_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -418,14 +426,174 @@ fn python_version(python: &Path) -> Option<String> {
 }
 
 fn emit_progress(app: &AppHandle, stage: &str, progress: f32, detail: &str) {
+    emit_progress_detailed(app, stage, progress, detail, None, None);
+}
+
+fn emit_progress_detailed(
+    app: &AppHandle,
+    stage: &str,
+    progress: f32,
+    detail: &str,
+    note: Option<String>,
+    eta_ms: Option<u64>,
+) {
     let _ = app.emit(
         "karaoke://progress",
         KaraokeProgress {
             stage: stage.to_string(),
             progress,
             detail: detail.to_string(),
+            note,
+            eta_ms,
         },
     );
+}
+
+/// Reads a child process stream that mixes `\n` lines with `\r`-refreshed
+/// progress bars (tqdm) and hands every finished segment to `on_segment`.
+fn stream_segments<R: Read>(reader: R, mut on_segment: impl FnMut(&str)) {
+    let mut reader = BufReader::new(reader);
+    let mut buffer: Vec<u8> = Vec::with_capacity(256);
+    let mut byte = [0u8; 1];
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) => {
+                if byte[0] == b'\n' || byte[0] == b'\r' {
+                    let segment = String::from_utf8_lossy(&buffer).trim().to_string();
+                    buffer.clear();
+                    if !segment.is_empty() {
+                        on_segment(&segment);
+                    }
+                } else {
+                    buffer.push(byte[0]);
+                    // A pathological line without separators must not grow forever.
+                    if buffer.len() > 8_192 {
+                        buffer.clear();
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let tail = String::from_utf8_lossy(&buffer).trim().to_string();
+    if !tail.is_empty() {
+        on_segment(&tail);
+    }
+}
+
+/// Extracts the `NN%` ratio tqdm prints at the head of its bar.
+fn parse_tqdm_percent(segment: &str) -> Option<f32> {
+    let index = segment.find('%')?;
+    let digits: String = segment[..index]
+        .chars()
+        .rev()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<f32>().ok().map(|value| value / 100.0)
+}
+
+/// Extracts the remaining time from tqdm's `[elapsed<remaining, rate]` block.
+fn parse_tqdm_eta_ms(segment: &str) -> Option<u64> {
+    let start = segment.rfind('[')?;
+    let block = &segment[start + 1..];
+    let end = block.find(']').unwrap_or(block.len());
+    let block = &block[..end];
+    let remaining = block.split('<').nth(1)?.split(',').next()?.trim();
+    parse_clock_ms(remaining)
+}
+
+/// Turns one line of pip output into a progress update. `packages` counts the
+/// dependencies seen so far, which is the only length signal pip gives before
+/// it finishes resolving, so the bar approaches — but never reaches — the end
+/// of the stage while the note carries the literal package being downloaded.
+fn pip_progress_line(
+    segment: &str,
+    packages: &mut f32,
+    current: &mut String,
+) -> Option<(f32, &'static str, Option<String>, Option<u64>)> {
+    let advance = |packages: f32| 0.22 + 0.68 * (1.0 - (-packages / 14.0).exp());
+
+    if let Some(rest) = segment.strip_prefix("Collecting ") {
+        let name = rest.split(['=', '<', '>', '!', '[', ' ']).next().unwrap_or(rest);
+        *packages += 1.0;
+        *current = name.to_string();
+        return Some((
+            advance(*packages),
+            "Descargando componentes…",
+            Some(format!("Resolviendo {name}")),
+            None,
+        ));
+    }
+
+    if let Some(rest) = segment.strip_prefix("Downloading ") {
+        let size = rest
+            .rfind('(')
+            .map(|index| rest[index + 1..].trim_end_matches(')').to_string());
+        let name = if current.is_empty() {
+            rest.split(['-', ' ']).next().unwrap_or(rest).to_string()
+        } else {
+            current.clone()
+        };
+        let note = match size {
+            Some(size) => format!("Descargando {name} · {size}"),
+            None => format!("Descargando {name}"),
+        };
+        return Some((advance(*packages), "Descargando componentes…", Some(note), None));
+    }
+
+    if segment.starts_with("Installing collected packages") {
+        return Some((
+            0.94,
+            "Instalando componentes…",
+            Some(format!("{} paquetes", *packages as u32)),
+            None,
+        ));
+    }
+
+    // pip's own bar: "   ━━━━━━━ 12.4/61.0 MB 5.1 MB/s eta 0:00:09"
+    if let Some(index) = segment.find("eta ") {
+        let eta = parse_clock_ms(segment[index + 4..].split_whitespace().next().unwrap_or(""));
+        let transferred = segment
+            .split_whitespace()
+            .find(|token| token.contains('/') && token.contains('.'))
+            .map(|token| token.to_string());
+        let unit = segment
+            .split_whitespace()
+            .find(|token| matches!(*token, "MB" | "kB" | "GB"))
+            .unwrap_or("MB");
+        let note = match transferred {
+            Some(transferred) if !current.is_empty() => {
+                Some(format!("{current} · {transferred} {unit}"))
+            }
+            Some(transferred) => Some(format!("{transferred} {unit}")),
+            None if !current.is_empty() => Some(format!("Descargando {current}")),
+            None => None,
+        };
+        return Some((advance(*packages), "Descargando componentes…", note, eta));
+    }
+
+    None
+}
+
+/// Parses `mm:ss` / `hh:mm:ss` into milliseconds.
+fn parse_clock_ms(value: &str) -> Option<u64> {
+    let parts: Vec<&str> = value.split(':').collect();
+    if parts.len() < 2 || parts.len() > 3 {
+        return None;
+    }
+    let mut seconds = 0u64;
+    for part in &parts {
+        let unit = part.trim().parse::<u64>().ok()?;
+        seconds = seconds * 60 + unit;
+    }
+    Some(seconds * 1_000)
 }
 
 fn authorized_audio_path(
@@ -603,7 +771,7 @@ pub async fn install_demucs_runtime(app: AppHandle) -> Result<KaraokeCapabilitie
         }
 
         emit_progress(&app_for_task, "runtime", 0.22, "Descargando componentes…");
-        let install = Command::new(&runtime_python)
+        let mut install = Command::new(&runtime_python)
             .args([
                 "-m",
                 "pip",
@@ -615,13 +783,55 @@ pub async fn install_demucs_runtime(app: AppHandle) -> Result<KaraokeCapabilitie
                 "static-ffmpeg",
                 "soundfile",
             ])
-            .output()
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|error| error.to_string())?;
-        if !install.status.success() {
-            let error = String::from_utf8_lossy(&install.stderr);
+
+        let stdout = install
+            .stdout
+            .take()
+            .ok_or_else(|| "No pude leer la salida del instalador.".to_string())?;
+        let stderr = install
+            .stderr
+            .take()
+            .ok_or_else(|| "No pude leer la salida del instalador.".to_string())?;
+        // pip writes failures to stderr while the package log goes to stdout,
+        // so the error tail is collected on its own thread.
+        let error_tail = std::thread::spawn(move || {
+            let mut lines: Vec<String> = Vec::new();
+            stream_segments(stderr, |segment| {
+                lines.push(segment.to_string());
+                if lines.len() > 12 {
+                    lines.remove(0);
+                }
+            });
+            lines
+        });
+
+        let app_for_pip = app_for_task.clone();
+        let mut packages = 0f32;
+        let mut current = String::new();
+        stream_segments(stdout, |segment| {
+            if let Some(progress) = pip_progress_line(segment, &mut packages, &mut current) {
+                emit_progress_detailed(
+                    &app_for_pip,
+                    "runtime",
+                    progress.0,
+                    progress.1,
+                    progress.2,
+                    progress.3,
+                );
+            }
+        });
+
+        let status = install.wait().map_err(|error| error.to_string())?;
+        let tail = error_tail.join().unwrap_or_default();
+        if !status.success() {
             return Err(format!(
                 "No pude instalar Demucs. {}",
-                error.lines().rev().take(4).collect::<Vec<_>>().join(" ")
+                tail.iter().rev().take(4).cloned().collect::<Vec<_>>().join(" ")
             ));
         }
         install_private_ffmpeg(&runtime_python)?;
@@ -678,7 +888,19 @@ pub async fn prepare_karaoke_stems(
                 "import torch; raise SystemExit(0 if torch.backends.mps.is_available() else 1)",
             ],
         );
-        emit_progress(&app_for_task, "separation", 0.08, "Aislando la voz…");
+        let device_note = if use_mps {
+            format!("{DEMUCS_MODEL} · GPU Metal")
+        } else {
+            format!("{DEMUCS_MODEL} · CPU")
+        };
+        emit_progress_detailed(
+            &app_for_task,
+            "separation",
+            0.02,
+            "Cargando el modelo de separación…",
+            Some(device_note.clone()),
+            None,
+        );
         let private_bin = python
             .parent()
             .ok_or_else(|| "La ruta del motor vocal no es válida.".to_string())?;
@@ -700,21 +922,64 @@ pub async fn prepare_karaoke_stems(
         if use_mps {
             command.args(["-d", "mps"]);
         }
-        let output = command
+        let mut child = command
             .arg("-o")
             .arg(&cache_for_task)
             .arg(&source_for_task)
             .env("PATH", command_path)
-            .output()
+            // Demucs streams its tqdm bar to stderr; keeping it unbuffered lets
+            // the loader mirror the real percentage instead of guessing.
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|error| error.to_string())?;
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
+
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "No pude leer la salida del separador.".to_string())?;
+        let mut tail: Vec<String> = Vec::new();
+        let mut last_percent = -1i32;
+        stream_segments(stderr, |segment| {
+            if let Some(ratio) = parse_tqdm_percent(segment) {
+                let percent = (ratio * 100.0).round() as i32;
+                if percent == last_percent {
+                    return;
+                }
+                last_percent = percent;
+                emit_progress_detailed(
+                    &app_for_task,
+                    "separation",
+                    // Model load and file writing bookend the actual inference.
+                    0.04 + ratio * 0.92,
+                    "El modelo recorre la canción bloque a bloque…",
+                    Some(format!("{device_note} · {percent} %")),
+                    parse_tqdm_eta_ms(segment),
+                );
+                return;
+            }
+            tail.push(segment.to_string());
+            if tail.len() > 12 {
+                tail.remove(0);
+            }
+        });
+
+        let status = child.wait().map_err(|error| error.to_string())?;
+        if !status.success() {
             return Err(format!(
                 "Demucs no pudo separar esta canción. {}",
-                error.lines().rev().take(5).collect::<Vec<_>>().join(" ")
+                tail.iter().rev().take(5).cloned().collect::<Vec<_>>().join(" ")
             ));
         }
-        emit_progress(&app_for_task, "separation", 0.98, "Terminando audio…");
+        emit_progress_detailed(
+            &app_for_task,
+            "separation",
+            0.98,
+            "Guardando las pistas separadas…",
+            Some(format!("{device_note} · escribiendo FLAC")),
+            None,
+        );
         Ok(())
     })
     .await
@@ -1837,4 +2102,73 @@ pub async fn classify_karaoke_genre(
     result.confidence = result.confidence.clamp(0.0, 1.0);
     result.source = "gemini".into();
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_percentage_out_of_a_demucs_bar() {
+        let bar = " 42%|████▏     | 116.0/275.0 [00:24<00:33, 4.8seconds/s]";
+        assert_eq!(parse_tqdm_percent(bar), Some(0.42));
+        assert_eq!(parse_tqdm_percent("  0%|          | 0/275 [00:00<?, ?it/s]"), Some(0.0));
+        assert_eq!(parse_tqdm_percent("Separated tracks will be stored in /tmp"), None);
+    }
+
+    #[test]
+    fn reads_the_remaining_time_out_of_a_demucs_bar() {
+        let bar = " 42%|████▏     | 116.0/275.0 [00:24<01:33, 4.8seconds/s]";
+        assert_eq!(parse_tqdm_eta_ms(bar), Some(93_000));
+        // An unknown remaining time must not be reported as zero.
+        assert_eq!(parse_tqdm_eta_ms("  0%|          | 0/275 [00:00<?, ?it/s]"), None);
+    }
+
+    #[test]
+    fn parses_clock_values() {
+        assert_eq!(parse_clock_ms("01:30"), Some(90_000));
+        assert_eq!(parse_clock_ms("0:00:09"), Some(9_000));
+        assert_eq!(parse_clock_ms("?"), None);
+    }
+
+    #[test]
+    fn turns_pip_output_into_progress() {
+        let mut packages = 0f32;
+        let mut current = String::new();
+
+        let collecting = pip_progress_line("Collecting demucs==4.0.1", &mut packages, &mut current)
+            .expect("a Collecting line reports progress");
+        assert_eq!(current, "demucs");
+        assert_eq!(collecting.2.as_deref(), Some("Resolviendo demucs"));
+        assert!(collecting.0 > 0.22);
+
+        let downloading = pip_progress_line(
+            "Downloading torch-2.2.0-cp311-none-macosx_11_0_arm64.whl (61.0 MB)",
+            &mut packages,
+            &mut current,
+        )
+        .expect("a Downloading line reports progress");
+        assert_eq!(downloading.2.as_deref(), Some("Descargando demucs · 61.0 MB"));
+
+        let bar = pip_progress_line(
+            "   ━━━━━━━━ 12.4/61.0 MB 5.1 MB/s eta 0:00:09",
+            &mut packages,
+            &mut current,
+        )
+        .expect("a pip bar reports progress");
+        assert_eq!(bar.2.as_deref(), Some("demucs · 12.4/61.0 MB"));
+        assert_eq!(bar.3, Some(9_000));
+
+        assert!(pip_progress_line("Using cached wheel", &mut packages, &mut current).is_none());
+    }
+
+    #[test]
+    fn splits_carriage_returns_and_newlines_into_segments() {
+        let payload = "first line\n 10%|# | 1/10\r 20%|## | 2/10\rtail";
+        let mut segments: Vec<String> = Vec::new();
+        stream_segments(payload.as_bytes(), |segment| segments.push(segment.to_string()));
+        assert_eq!(segments.len(), 4);
+        assert_eq!(segments[0], "first line");
+        assert_eq!(segments[3], "tail");
+    }
 }

@@ -239,6 +239,7 @@ function connectClient(credentials) {
       host: process.env.SOULSEEK_SERVER_HOST || 'server.slsknet.org',
       port: Number.parseInt(process.env.SOULSEEK_SERVER_PORT ?? '2242', 10),
       incomingPort: Number.parseInt(process.env.SOULSEEK_LISTEN_PORT ?? '2234', 10),
+      uploadSlots: Number.parseInt(process.env.SOULSEEK_UPLOAD_SLOTS ?? '2', 10),
       // StaySound only re-shares its own completed Soulseek downloads by
       // default. It never exposes the user's broader music library.
       sharedFolders,
@@ -369,14 +370,25 @@ async function searchSoulseek(query, timeoutMs, maxResults, credentials, allowRe
   return searchSoulseek(query, timeoutMs, maxResults, credentials, false);
 }
 
-async function uniqueOutputPath(directory, base, extension) {
-  let candidate = path.join(directory, `${base}.${extension}`);
-  let sequence = 2;
-  while (fs.existsSync(candidate)) {
-    candidate = path.join(directory, `${base} (${sequence}).${extension}`);
+async function reserveDownloadPaths(directory, base, extension) {
+  let sequence = 1;
+  while (true) {
+    const suffix = sequence === 1 ? '' : ` (${sequence})`;
+    const finalPath = path.join(directory, `${base}${suffix}.${extension}`);
+    const partialPath = `${finalPath}.part`;
+    if (!fs.existsSync(finalPath)) {
+      try {
+        // Reserving the .part file atomically also prevents simultaneous peer
+        // candidates from writing into the same destination.
+        const reservation = await fs.promises.open(partialPath, 'wx');
+        await reservation.close();
+        return { finalPath, partialPath };
+      } catch (error) {
+        if (error?.code !== 'EEXIST') throw error;
+      }
+    }
     sequence += 1;
   }
-  return candidate;
 }
 
 function pruneJobs() {
@@ -418,14 +430,15 @@ async function startDownloadJob(match, requestedFilename, credentials, targetDir
   const leaf = path.basename(String(match.filename || 'track').replaceAll('\\', '/'));
   const extension = extensionFromFilename(leaf);
   const base = sanitizeFileSegment(requestedFilename || leaf).replace(new RegExp(`\\.${extension}$`, 'i'), '');
-  const outputPath = await uniqueOutputPath(downloadDir, base, extension);
+  const { finalPath, partialPath } = await reserveDownloadPaths(downloadDir, base, extension);
 
   pruneJobs();
   const job = {
     id: crypto.randomUUID(),
     status: 'downloading',
-    path: outputPath,
-    filename: path.basename(outputPath),
+    path: partialPath,
+    finalPath,
+    filename: path.basename(finalPath),
     mimeType: mimeFromExtension(extension),
     total: Number.isFinite(match.size) ? match.size : 0,
     size: 0,
@@ -446,9 +459,9 @@ async function startDownloadJob(match, requestedFilename, credentials, targetDir
     speed: match.speed,
   };
 
-  const runTransfer = () => client.download({ file, path: outputPath }, (error) => {
+  const runTransfer = () => client.download({ file, path: partialPath }, (error) => {
     if (job.abandoned) {
-      fs.promises.unlink(outputPath).catch(() => {});
+      fs.promises.unlink(partialPath).catch(() => {});
       return;
     }
     if (error) {
@@ -457,26 +470,33 @@ async function startDownloadJob(match, requestedFilename, credentials, targetDir
         // A reset can occur during a peer's handoff even though it advertised
         // an available slot. Retry the same transfer once with a clean output
         // file before the UI promotes another verified peer.
-        fs.promises.unlink(outputPath)
+        fs.promises.unlink(partialPath)
           .catch(() => {})
           .finally(() => setTimeout(runTransfer, 750));
         return;
       }
       job.status = 'error';
       job.error = error instanceof Error ? error.message : String(error);
+      fs.promises.unlink(partialPath).catch(() => {});
       return;
     }
-    fs.promises.stat(outputPath)
-      .then(stat => {
+    fs.promises.stat(partialPath)
+      .then(async stat => {
         if (!stat.size) throw new Error('Soulseek devolvio un archivo vacio.');
+        if (job.total > 0 && stat.size !== job.total) {
+          throw new Error(`Soulseek devolvio un archivo incompleto (${stat.size}/${job.total} bytes).`);
+        }
+        await fs.promises.rename(partialPath, finalPath);
+        job.path = finalPath;
         job.size = stat.size;
-        job.fileId = registerFile(outputPath, job.filename, job.mimeType, stat.size);
+        job.fileId = registerFile(finalPath, job.filename, job.mimeType, stat.size);
         client.rescanShares?.();
         job.status = 'done';
       })
       .catch(statError => {
         job.status = 'error';
         job.error = statError instanceof Error ? statError.message : String(statError);
+        fs.promises.unlink(partialPath).catch(() => {});
       });
   });
 
@@ -492,7 +512,7 @@ async function downloadSoulseek(match, requestedFilename, credentials) {
   const leaf = path.basename(String(match.filename || 'track').replaceAll('\\', '/'));
   const extension = extensionFromFilename(leaf);
   const filename = sanitizeFileSegment(requestedFilename || leaf).replace(new RegExp(`\\.${extension}$`, 'i'), '');
-  const outputPath = path.join(DOWNLOAD_DIR, `${filename}-${Date.now()}.${extension}`);
+  const { finalPath, partialPath } = await reserveDownloadPaths(DOWNLOAD_DIR, `${filename}-${Date.now()}`, extension);
   const file = {
     user: match.username,
     file: match.filename,
@@ -502,23 +522,36 @@ async function downloadSoulseek(match, requestedFilename, credentials) {
     speed: match.speed,
   };
 
-  await new Promise((resolve, reject) => {
-    client.download({ file, path: outputPath }, (error) => {
-      if (error) {
-        reject(error);
-        return;
-      }
-      resolve();
+  try {
+    await new Promise((resolve, reject) => {
+      client.download({ file, path: partialPath }, (error) => {
+        if (error) {
+          reject(error);
+          return;
+        }
+        resolve();
+      });
     });
-  });
+  } catch (error) {
+    await fs.promises.unlink(partialPath).catch(() => {});
+    throw error;
+  }
 
-  const stat = await fs.promises.stat(outputPath);
-  if (!stat.size) throw new Error('Soulseek devolvio un archivo vacio.');
+  const stat = await fs.promises.stat(partialPath);
+  if (!stat.size) {
+    await fs.promises.unlink(partialPath).catch(() => {});
+    throw new Error('Soulseek devolvio un archivo vacio.');
+  }
+  if (Number.isFinite(match.size) && match.size > 0 && stat.size !== match.size) {
+    await fs.promises.unlink(partialPath).catch(() => {});
+    throw new Error(`Soulseek devolvio un archivo incompleto (${stat.size}/${match.size} bytes).`);
+  }
+  await fs.promises.rename(partialPath, finalPath);
   client.rescanShares?.();
 
   const id = crypto.randomUUID();
   files.set(id, {
-    path: outputPath,
+    path: finalPath,
     filename: `${filename}.${extension}`,
     mimeType: mimeFromExtension(extension),
     size: stat.size,

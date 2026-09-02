@@ -12,22 +12,14 @@ import { router, useLocalSearchParams } from 'expo-router';
 import React, { useCallback, useMemo } from 'react';
 import { Pressable, StatusBar, StyleSheet, View } from 'react-native';
 import { IconButton, Text } from 'react-native-paper';
-import Animated, { interpolate, useAnimatedScrollHandler, useAnimatedStyle, useSharedValue } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-const HEADER_HEIGHT = 300;
-const ARTWORK_SIZE = 224;
-const HERO_TOP_OFFSET = 56;
 const BACK_BUTTON_TOP_OFFSET = 10;
-const CONTENT_TOP_GAP = 24;
-
-const AnimatedFlashList = Animated.createAnimatedComponent(FlashList<Track>);
 
 export default function AlbumDetailScreen() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const { theme, isDark } = useTheme();
     const insets = useSafeAreaInsets();
-    const scrollY = useSharedValue(0);
 
     const getAlbumById = useLibraryStore(state => state.getAlbumById);
     const getTracksByAlbum = useLibraryStore(state => state.getTracksByAlbum);
@@ -43,19 +35,6 @@ export default function AlbumDetailScreen() {
     const totalDuration = useMemo(() => {
         return tracks.reduce((acc, track) => acc + track.duration, 0);
     }, [tracks]);
-
-    const scrollHandler = useAnimatedScrollHandler({
-        onScroll: (event) => {
-            scrollY.value = event.contentOffset.y;
-        },
-    });
-
-    const artworkStyle = useAnimatedStyle(() => ({
-        transform: [
-            { scale: interpolate(scrollY.value, [-100, 0, 100], [1.3, 1, 0.9], 'clamp') },
-        ],
-        opacity: interpolate(scrollY.value, [0, 150], [1, 0.5]),
-    }));
 
     const handleTrackPress = useCallback((track: Track) => {
         play(track, tracks);
@@ -161,12 +140,10 @@ export default function AlbumDetailScreen() {
             </View>
 
             {/* Track List */}
-            <AnimatedFlashList
+            <FlashList
                 data={tracks}
                 keyExtractor={keyExtractor}
                 renderItem={renderTrackItem}
-                onScroll={scrollHandler}
-                scrollEventThrottle={16}
                 ListHeaderComponent={ListHeader}
                 contentContainerStyle={[
                     styles.listContent,

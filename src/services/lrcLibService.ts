@@ -24,10 +24,6 @@ class LrcLibService {
             .trim();
     }
 
-    private removeDiacritics(str: string): string {
-        return str.normalize('NFD').replace(/[\u0300-\u036f]/g, '');
-    }
-
     private async sleep(ms: number) {
         return new Promise(resolve => setTimeout(resolve, ms));
     }
@@ -154,9 +150,6 @@ class LrcLibService {
     async fetchLyrics(title: string, artist: string, duration?: number): Promise<KaraokeLyricsJSON | null> {
         const cleanTitle = this.cleanMetadata(title);
         const cleanArtist = this.cleanMetadata(artist);
-
-        const noAccentTitle = this.removeDiacritics(cleanTitle);
-        const noAccentArtist = this.removeDiacritics(cleanArtist);
 
         // Intentos en orden de especificidad
         const attempts: Array<{ t: string; a: string; d: boolean }> = [

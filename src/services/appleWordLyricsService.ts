@@ -364,10 +364,6 @@ class AppleWordLyricsService {
             .replace(/&#(\d+);/g, (_, num: string) => String.fromCodePoint(parseInt(num, 10)));
     }
 
-    private stripXmlTags(text: string): string {
-        return text.replace(/<[^>]+>/g, ' ');
-    }
-
     private nodeMatchesLocalName(nodeName: string | null | undefined, target: string): boolean {
         if (!nodeName) return false;
         const normalized = nodeName.toLowerCase();
@@ -378,11 +374,6 @@ class AppleWordLyricsService {
     private getElementsByLocalName(root: Document | Element, target: string): Element[] {
         const all = Array.from(root.getElementsByTagName('*')) as Element[];
         return all.filter(element => this.nodeMatchesLocalName(element.nodeName, target));
-    }
-
-    private readXmlAttribute(source: string, name: string): string | null {
-        const match = source.match(new RegExp(`${name}\\s*=\\s*"([^"]*)"`, 'i'));
-        return match?.[1] ?? null;
     }
 
     private parseTtmlTimestamp(value?: string | null): number {

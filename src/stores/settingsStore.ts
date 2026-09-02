@@ -8,6 +8,7 @@ import {
 } from '../services/lyricsSources';
 import { EqualizerCapabilities, EqualizerBandLevels, EqualizerMode, EqualizerSettings, TidalQuality } from '../types';
 import { ThemeConfig, ThemeMode, ThemeStyle } from '../types/theme';
+import { type LyricsFontId, sanitizeLyricsFont } from '../components/player/lyricsFonts';
 
 export type AppLanguage = 'es' | 'en';
 
@@ -33,6 +34,8 @@ interface SettingsState extends ThemeConfig {
     spectrumTheme: SpectrumTheme;
     /** Lyrics providers to query, in preference order. Empty falls back to defaults. */
     lyricsSources: LyricsSourceId[];
+    /** Typography used by the native synchronized lyrics renderer. */
+    lyricsFont: LyricsFontId;
     _hasHydrated: boolean;
 }
 
@@ -55,6 +58,7 @@ interface SettingsActions {
     setSpectrumDelayMs: (delayMs: number) => void;
     setSpectrumTheme: (theme: SpectrumTheme) => void;
     setLyricsSourceEnabled: (sourceId: LyricsSourceId, enabled: boolean) => void;
+    setLyricsFont: (font: LyricsFontId) => void;
     resetEqualizer: () => void;
     setHasHydrated: (hasHydrated: boolean) => void;
 }
@@ -76,6 +80,7 @@ const initialState: SettingsState = {
     spectrumDelayMs: 380,
     spectrumTheme: 'aurora',
     lyricsSources: [...DEFAULT_LYRICS_SOURCE_IDS],
+    lyricsFont: 'classic',
     _hasHydrated: false,
 };
 
@@ -85,7 +90,7 @@ export const SPECTRUM_DELAY_STEP = 20;
 
 type PersistedSettingsState = Pick<
     SettingsState,
-    'language' | 'tidalDownloadQuality' | 'tidalMirror' | 'style' | 'mode' | 'accentColor' | 'dynamicColors' | 'lightweightMode' | 'schemeVariant' | 'equalizer' | 'spectrumDelayMs' | 'spectrumTheme' | 'lyricsSources'
+    'language' | 'tidalDownloadQuality' | 'tidalMirror' | 'style' | 'mode' | 'accentColor' | 'dynamicColors' | 'lightweightMode' | 'schemeVariant' | 'equalizer' | 'spectrumDelayMs' | 'spectrumTheme' | 'lyricsSources' | 'lyricsFont'
 >;
 
 export const useSettingsStore = create<SettingsStore>()(
@@ -144,6 +149,7 @@ export const useSettingsStore = create<SettingsStore>()(
                 ),
             }),
             setSpectrumTheme: (spectrumTheme) => set({ spectrumTheme }),
+            setLyricsFont: (lyricsFont) => set({ lyricsFont: sanitizeLyricsFont(lyricsFont) }),
             setLyricsSourceEnabled: (sourceId, enabled) => set(state => {
                 const current = new Set(state.lyricsSources);
                 if (enabled) {
@@ -175,11 +181,13 @@ export const useSettingsStore = create<SettingsStore>()(
                 spectrumDelayMs: state.spectrumDelayMs,
                 spectrumTheme: state.spectrumTheme,
                 lyricsSources: state.lyricsSources,
+                lyricsFont: state.lyricsFont,
             }),
             onRehydrateStorage: () => (state) => {
                 if (state) {
                     // Drop unknown ids / restore defaults if persisted empty.
                     state.lyricsSources = sanitizeLyricsSourceIds(state.lyricsSources);
+                    state.lyricsFont = sanitizeLyricsFont(state.lyricsFont);
                 }
                 state?.setHasHydrated(true);
             },

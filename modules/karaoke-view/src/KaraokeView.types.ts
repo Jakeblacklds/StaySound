@@ -1,6 +1,7 @@
 import type { ViewProps } from 'react-native';
 
 export type KaraokeMotionProfile = 'ambient' | 'pulse' | 'fire' | 'velvet' | 'cosmic';
+export type KaraokeLyricsFont = 'newsreader' | 'classic' | 'syne' | 'grotesk' | 'fraunces' | 'nunito';
 
 /**
  * Raw lyric word format from JSON
@@ -39,6 +40,9 @@ export interface KaraokeViewProps extends ViewProps {
 
     /** Optional font size override */
     fontSize?: number;
+
+    /** Typography preset shared with the Tauri lyrics experience */
+    lyricsFont?: KaraokeLyricsFont;
 
     /** Primary color for active lyrics */
     activeColor?: any;

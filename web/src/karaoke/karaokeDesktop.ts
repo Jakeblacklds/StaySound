@@ -18,6 +18,10 @@ export interface KaraokeProgress {
   stage: 'runtime' | 'separation' | string;
   progress: number;
   detail: string;
+  /** Live technical line straight from the tool that is running. */
+  note?: string;
+  /** Remaining time for the current stage when the tool reports one. */
+  etaMs?: number;
 }
 
 export interface KaraokeStems {

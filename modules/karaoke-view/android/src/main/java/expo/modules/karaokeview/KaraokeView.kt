@@ -25,17 +25,13 @@ import expo.modules.karaokeview.motionprofiles.VelvetProfileRenderer
  */
 class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, appContext) {
     private companion object {
-        private const val MONOCHROME_FONT_ASSET = "fonts/SFPRODISPLAYMEDIUM.ttf"
-        private const val MONOCHROME_FONT_WEIGHT = 600
         private const val MONOCHROME_FONT_SIZE_MIN_DP = 28f
         private const val MONOCHROME_FONT_SIZE_MAX_DP = 37.6f
         private const val MONOCHROME_FONT_SIZE_VW = 0.07f
         // Leading WITHIN a phrase (between wrapped rows of the same line). Matches the
         // web reference's "normal" (~1.2) so wrapped rows read as one phrase instead of
         // looking like separate verses. Inter-phrase separation comes from PADDING_LINE.
-        private const val MONOCHROME_LINE_HEIGHT = 1.2f
         private const val MONOCHROME_PADDING_LINE_DP = 10f
-        private const val MONOCHROME_LETTER_SPACING_EM = -0.04f
         private const val MONOCHROME_SUBTEXT_SCALE = 0.6f
         private const val MAX_SPECTRAL_PARTICLES = 128
         private const val MAX_RETAINED_PROFILE_ACCENTS = 128
@@ -238,6 +234,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var backgroundSpaceWidth = 0f
     private var backgroundGap = 0f
     private var density = 1f
+    private var lyricsTypography = LyricsTypography.CLASSIC
 
     // --- Colors ---
     private var activeColor: Int = Color.WHITE
@@ -262,11 +259,11 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var enableBottomSpectrum = false
 
     // --- Paints ---
-    private val monochromeTypeface: Typeface by lazy { createMonochromeTypeface() }
+    private var lyricsTypeface: Typeface = createLyricsTypeface(lyricsTypography)
     private val basePaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.LINEAR_TEXT_FLAG or Paint.SUBPIXEL_TEXT_FLAG).apply {
-        typeface = monochromeTypeface
+        typeface = lyricsTypeface
         textAlign = Paint.Align.LEFT
-        letterSpacing = MONOCHROME_LETTER_SPACING_EM
+        letterSpacing = lyricsTypography.letterSpacingEm
     }
     private val highlightPaint = Paint(basePaint)
     private val backgroundBasePaint = Paint(basePaint)
@@ -422,20 +419,30 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         invalidate()
     }
 
-    private fun createMonochromeTypeface(): Typeface {
+    fun setLyricsFont(fontName: String?) {
+        val resolved = LyricsTypography.from(fontName)
+        if (resolved == lyricsTypography) return
+        lyricsTypography = resolved
+        lyricsTypeface = createLyricsTypeface(resolved)
+        applyMonochromeTypography()
+        precomputePositions()
+        requestLayout()
+        invalidate()
+    }
+
+    private fun createLyricsTypeface(typography: LyricsTypography): Typeface {
         return try {
-            val assetTypeface = Typeface.createFromAsset(context.assets, MONOCHROME_FONT_ASSET)
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                Typeface.create(assetTypeface, MONOCHROME_FONT_WEIGHT, false)
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                Typeface.Builder(context.assets, typography.assetPath)
+                    .setWeight(typography.weight)
+                    .setItalic(false)
+                    .setFontVariationSettings(typography.variationSettings)
+                    .build()
             } else {
-                assetTypeface
+                Typeface.create(Typeface.createFromAsset(context.assets, typography.assetPath), Typeface.BOLD)
             }
         } catch (_: Throwable) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-                Typeface.create(Typeface.create("sans-serif", Typeface.NORMAL), MONOCHROME_FONT_WEIGHT, false)
-            } else {
-                Typeface.create("sans-serif-medium", Typeface.NORMAL)
-            }
+            Typeface.create(typography.fallbackFamily, Typeface.BOLD)
         }
     }
 
@@ -445,27 +452,28 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         } else {
             360f
         }
-        return (widthDp * MONOCHROME_FONT_SIZE_VW)
+        return ((widthDp * MONOCHROME_FONT_SIZE_VW)
             .coerceIn(MONOCHROME_FONT_SIZE_MIN_DP, MONOCHROME_FONT_SIZE_MAX_DP) * density
+            * lyricsTypography.fontScale)
     }
 
     private fun applyMonochromeTypography(viewWidthPx: Int = width) {
         fontSize = resolveMonochromeFontSizePx(viewWidthPx)
-        lineHeight = fontSize * MONOCHROME_LINE_HEIGHT
+        lineHeight = fontSize * lyricsTypography.lineHeight
         lineSpacing = MONOCHROME_PADDING_LINE_DP * density
         backgroundFontSize = fontSize * MONOCHROME_SUBTEXT_SCALE
         backgroundLineHeight = backgroundFontSize * 1.15f
         backgroundGap = fontSize * 0.3f
 
         listOf(basePaint, highlightPaint).forEach { paint ->
-            paint.typeface = monochromeTypeface
+            paint.typeface = lyricsTypeface
             paint.textSize = fontSize
-            paint.letterSpacing = MONOCHROME_LETTER_SPACING_EM
+            paint.letterSpacing = lyricsTypography.letterSpacingEm
         }
         listOf(backgroundBasePaint, backgroundHighlightPaint).forEach { paint ->
-            paint.typeface = monochromeTypeface
+            paint.typeface = lyricsTypeface
             paint.textSize = backgroundFontSize
-            paint.letterSpacing = MONOCHROME_LETTER_SPACING_EM
+            paint.letterSpacing = lyricsTypography.letterSpacingEm
         }
 
         spaceWidth = basePaint.measureText(" ")
@@ -852,6 +860,10 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                     backgroundRevealDurationMs = backgroundRevealDurationMs,
                     backgroundFadeOutDurationMs = backgroundFadeOutDurationMs,
                     featherPx = FEATHER_PX,
+                    wipeWidthEm = lyricsTypography.wipeWidthEm,
+                    preWipeDistanceEm = lyricsTypography.preWipeDistanceEm,
+                    foregroundLiftRatio = lyricsTypography.foregroundLiftRatio,
+                    backgroundLiftRatio = lyricsTypography.backgroundLiftRatio,
                     isLineByLine = isLineByLine,
                     basePaint = basePaint,
                     highlightPaint = highlightPaint,
@@ -940,7 +952,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             .filter { !it.isBackground && Math.abs(it.yOffset - word.yOffset) < density }
             .minByOrNull { it.xOffset } == word
         val initialOffset = if (isFirstWord) {
-            -paint.textSize * 0.375f * (1f - smootherStep((clampedProgress * 4f).coerceIn(0f, 1f)))
+            -paint.textSize * lyricsTypography.preWipeDistanceEm *
+                (1f - smootherStep((clampedProgress * 4f).coerceIn(0f, 1f)))
         } else {
             0f
         }
@@ -978,8 +991,9 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         // Shader on the paint itself — no saveLayer/DST_IN, no visible boundary line.
         // The bright text fades to transparent at sweepX; the dim base text underneath
         // shows through organically, matching Apple Music's liquid fill look.
-        val endSettleT = smootherStep(((clampedProgress - 0.82f) / 0.18f).coerceIn(0f, 1f))
-        val fadeWidth = FEATHER_PX * (4f * (1f - endSettleT * 0.88f))
+        // Desktop uses a fixed 0.75em wipe brush. A changing 3–4× feather makes
+        // Android look like a soft flood instead of the narrow, linear web sweep.
+        val fadeWidth = paint.textSize * lyricsTypography.wipeWidthEm
         val r = Color.red(paint.color)
         val g = Color.green(paint.color)
         val b = Color.blue(paint.color)
@@ -988,10 +1002,12 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         val agslShader = KaraokeWipeShader.getWipeColorShader(sweepX, fadeWidth, paint.color, a)
         if (agslShader != null) {
             paint.shader = agslShader
+            // Alpha is already baked into the premultiplied shader output.
+            paint.alpha = 255
         } else {
             paint.shader = LinearGradient(
-                sweepX - fadeWidth, 0f,
-                sweepX + fadeWidth * 0.4f, 0f,
+                sweepX - fadeWidth * 0.5f, 0f,
+                sweepX + fadeWidth * 0.5f, 0f,
                 intArrayOf(
                     Color.argb(a, r, g, b),
                     Color.argb(a, r, g, b),
@@ -1019,6 +1035,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             drawWordTranslated(canvas, line, word, paint, -rowHeight * finalLiftRatio)
         }
 
+        paint.alpha = a
         paint.shader = originalShader
         // Keep stardust visible on short notes only for the cosmic profile.
         // Long notes still use the stronger cross-theme glow path below.
@@ -1061,12 +1078,16 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         // the masked glow barely landed on the letters and the pre-sweep looked invisible
         // until the word became active. Landing the peak at wordX makes the glow lead the
         // word exactly like the web reference (and ahead of the wipe fill, which follows it).
-        val preBandWidth = (paint.textSize * 0.75f).coerceAtLeast(4f * density)
+        val preBandWidth = (paint.textSize * lyricsTypography.wipeWidthEm).coerceAtLeast(4f * density)
         val preBandHalf = preBandWidth * 0.5f
-        val centerStart = wordX - paint.textSize * 0.375f
+        val centerStart = wordX - paint.textSize * lyricsTypography.preWipeDistanceEm
         val centerEnd = wordX
         val bandCenter = centerStart + (centerEnd - centerStart) * progress.coerceIn(0f, 1f)
-        val liftRatio = if (word.isBackground) 0.025f else 0.035f
+        val liftRatio = if (word.isBackground) {
+            lyricsTypography.backgroundLiftRatio
+        } else {
+            lyricsTypography.foregroundLiftRatio
+        }
         val preLiftY = -rowHeight * liftRatio * smootherStep(progress)
 
         canvas.save()
@@ -1202,7 +1223,6 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         currentTimeMs: Long,
     ) {
         if (words.isEmpty()) return
-        val clampedProgress = progress.coerceIn(0f, 1f)
         val shouldRenderWipeShader = KaraokeHighlightStateMachine.shouldRenderWipeShader(progress)
 
         if (!shouldRenderWipeShader) {
@@ -1252,14 +1272,12 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             smootherStep = ::smootherStep,
         )
 
-        // Same settling logic: shrink feather toward end so no characters are left partially
-        // revealed when the word completes and transitions to the full-glow post-wipe state.
-        val endSettleT = smootherStep(((clampedProgress - 0.82f) / 0.18f).coerceIn(0f, 1f))
-        val fadeWidth = FEATHER_PX * (4f * (1f - endSettleT * 0.88f))
+        // Same fixed 0.75em brush as the ordinary desktop syllable wipe.
+        val fadeWidth = paint.textSize * lyricsTypography.wipeWidthEm
         val agslMask = KaraokeWipeShader.getWipeMaskShader(sweepX, fadeWidth)
         val maskShader: Shader = agslMask ?: LinearGradient(
-            sweepX - fadeWidth, 0f,
-            sweepX + fadeWidth * 0.4f, 0f,
+            sweepX - fadeWidth * 0.5f, 0f,
+            sweepX + fadeWidth * 0.5f, 0f,
             intArrayOf(
                 Color.BLACK,
                 Color.BLACK,
@@ -1351,11 +1369,11 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         }
 
         // Single feathered wipe mask for the whole row.
-        val fadeWidth = FEATHER_PX * 3.5f
+        val fadeWidth = paint.textSize * lyricsTypography.wipeWidthEm
         val agslMask = KaraokeWipeShader.getWipeMaskShader(sweepX, fadeWidth)
         val maskShader: Shader = agslMask ?: LinearGradient(
-            sweepX - fadeWidth, 0f,
-            sweepX + fadeWidth * 0.4f, 0f,
+            sweepX - fadeWidth * 0.5f, 0f,
+            sweepX + fadeWidth * 0.5f, 0f,
             intArrayOf(
                 Color.BLACK,
                 Color.BLACK,
@@ -1613,7 +1631,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
         // Mathematically perfect continuous boundaries for complementary fading:
         // 1. If transition hasn't touched the word yet, draw the full dim word.
-        if (fadeWidth > 0f && revealX + fadeWidth * 0.25f <= wordLeft) {
+        if (fadeWidth > 0f && revealX + fadeWidth * 0.8f <= wordLeft) {
             drawWordTranslated(canvas, line, word, paint, translateY)
             return
         }
@@ -1623,7 +1641,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
         }
 
         // 2. If transition has completely passed the word, render nothing.
-        if (fadeWidth > 0f && revealX - fadeWidth * 0.25f >= wordRight) {
+        if (fadeWidth > 0f && revealX - fadeWidth * 0.8f >= wordRight) {
             return
         }
         if (fadeWidth <= 0f && revealX >= wordRight) {
@@ -1648,8 +1666,15 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
             val bB = Color.blue(baseColor)
             val bA = Color.alpha(baseColor)
 
-            // Complementary curve: mirrors the wipe gradient so the sum ≈ constant
-            val maskShader = LinearGradient(
+            // Use the exact inverse of the highlight shader. Matching geometry
+            // prevents a bright/dark seam where the two text layers crossfade.
+            val tailShader = KaraokeWipeShader.getWipeTailColorShader(
+                sweepX = revealX,
+                fadeWidth = fadeWidth,
+                color = baseColor,
+                alpha = bA,
+            )
+            val maskShader = tailShader ?: LinearGradient(
                 startX, 0f,
                 endX, 0f,
                 intArrayOf(
@@ -1662,11 +1687,13 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 Shader.TileMode.CLAMP
             )
             paint.shader = maskShader
-
-            // Optimization & safety: clip from startX to prevent overdraw and ensure smooth clipping
-            canvas.clipRect(startX.coerceAtLeast(wordLeft), wordTop - rowHeight, wordRight + FEATHER_PX, wordBottom + rowHeight)
+            if (tailShader != null) {
+                // Alpha is already baked into the premultiplied shader output.
+                paint.alpha = 255
+            }
             drawWord(canvas, line, word, paint)
 
+            paint.alpha = bA
             paint.shader = originalShader
         } else {
             canvas.clipRect(revealX, wordTop - rowHeight, wordRight + FEATHER_PX, wordBottom + rowHeight)

@@ -8,7 +8,7 @@ import type { KaraokeLyricsJSON } from '@/src/types/karaokeTypes';
 import { usePerformanceProfile } from '@/src/theme';
 import { DEFAULT_LYRICS_MOTION_OPTION_ID, LYRICS_MOTION_OPTIONS } from '@/src/components/player/lyricsMotionProfiles';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import Animated, { runOnJS, useAnimatedReaction, useSharedValue, withTiming, Easing } from 'react-native-reanimated';
+import { runOnJS, useAnimatedReaction, useSharedValue, withTiming, Easing } from 'react-native-reanimated';
 
 const LYRICS_SYNC_OFFSET_STORAGE_KEY = 'lyrics-sync-offsets-v1';
 const LYRICS_MOTION_PROFILE_STORAGE_KEY = 'lyrics-motion-profile-v1';
