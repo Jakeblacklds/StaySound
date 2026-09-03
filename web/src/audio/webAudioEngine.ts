@@ -91,6 +91,22 @@ class WebAudioEngine {
   }
 
   /**
+   * The URL a non-playback consumer (the waveform analyser) can fetch this
+   * track from. The currently loaded element already holds a resolved URL, so
+   * prefer it over re-running the relinker and re-prompting for file handles.
+   */
+  async resolvePlayableUri(track: Track): Promise<string | null> {
+    if (this.state.currentTrack?.id === track.id && this.audio.currentSrc) return this.audio.currentSrc;
+    if (track.uri) return track.uri;
+    if (!this.resolveTrackUri) return null;
+    try {
+      return await this.resolveTrackUri(track);
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Once the media element is routed through Web Audio (for the spectrum
    * visualizer), control loudness in that graph. WebKit/WKWebView can ignore
    * HTMLMediaElement.volume after createMediaElementSource(), which made both

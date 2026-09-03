@@ -483,6 +483,10 @@ export default function DottedBackground({
     // Bumped whenever the GL context has to be rebuilt after a loss.
     const [contextEpoch, setContextEpoch] = useState(0);
 
+    // Survives the rebuild it schedules, so repeated losses can back off
+    // instead of restarting from the same delay every time.
+    const glRecoveryRef = useRef({ attempts: 0, lastLostAt: 0 });
+
     const containerRef = useRef<HTMLDivElement>(null);
     const perlinProgramRef = useRef<any>(null);
     const dotProgramRef = useRef<any>(null);
@@ -571,9 +575,25 @@ export default function DottedBackground({
                 cancelAnimationFrame(rafIdRef.current);
                 rafIdRef.current = null;
             }
-            // WKWebView does not reliably deliver `webglcontextrestored`, so a
-            // timer races it; whichever arrives first triggers the rebuild.
-            restoreTimer = window.setTimeout(requestRebuild, 1500);
+            // The rebuild does not reuse the lost context — it builds a new
+            // canvas with a new one — so there is nothing to wait for in the
+            // common case, and every millisecond spent waiting is a frozen
+            // picture with the audio still playing. Go almost immediately.
+            //
+            // The exception is a context that dies again right after a
+            // rebuild: the GPU is still under pressure and retrying at once
+            // would spin. Each loss inside five seconds of the last one backs
+            // the delay off toward the old ceiling.
+            //
+            // `webglcontextrestored` still races this timer, but WKWebView
+            // does not deliver it reliably, so it can only make things faster.
+            const now = performance.now();
+            const recovery = glRecoveryRef.current;
+            recovery.attempts =
+                now - recovery.lastLostAt < 5000 ? recovery.attempts + 1 : 0;
+            recovery.lastLostAt = now;
+            const delay = Math.min(1500, 120 * Math.pow(3, recovery.attempts));
+            restoreTimer = window.setTimeout(requestRebuild, delay);
         };
         const handleContextRestored = () => requestRebuild();
         gl.canvas.addEventListener("webglcontextlost", handleContextLost);

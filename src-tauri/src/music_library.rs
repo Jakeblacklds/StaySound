@@ -1,6 +1,8 @@
 use serde::Serialize;
 use std::{
+    collections::hash_map::DefaultHasher,
     fs,
+    hash::{Hash, Hasher},
     path::{Path, PathBuf},
     sync::Mutex,
     time::UNIX_EPOCH,
@@ -246,4 +248,91 @@ pub async fn fetch_tidal_artwork(url: String) -> Result<Response, String> {
         return Err("El artwork es demasiado grande.".into());
     }
     Ok(Response::new(bytes.to_vec()))
+}
+
+/// Downloads an Apple motion cover once and keeps it in the app cache.
+///
+/// Streaming these covers straight from Apple's CDN is what makes the full
+/// player hitch: the element is a looping `<video>` with `preload="metadata"`,
+/// so it re-fetches while playing, `stalled` fires when the CDN goes quiet,
+/// and every loop wrap re-seeks a source that is not fully buffered. Each of
+/// those stalls the media pipeline, and the picture freezes for as long as it
+/// lasts while the music keeps going. Served from disk, the video never
+/// touches the network again — the loop is seamless and the cache survives
+/// restarts.
+#[tauri::command]
+pub async fn cache_animated_artwork(app: AppHandle, url: String) -> Result<String, String> {
+    const MAX_VIDEO_BYTES: u64 = 40_000_000;
+
+    let source =
+        reqwest::Url::parse(&url).map_err(|_| "La URL del vídeo no es válida.".to_string())?;
+    // Same allowlist the web side applies before it ever asks for a download.
+    if source.scheme() != "https"
+        || !source
+            .host_str()
+            .is_some_and(|host| host.ends_with(".apple.com"))
+    {
+        return Err("El origen del vídeo no está permitido.".into());
+    }
+
+    let mut hasher = DefaultHasher::new();
+    url.hash(&mut hasher);
+    let name = format!("{:016x}.mp4", hasher.finish());
+
+    let cache_root = app
+        .path()
+        .app_cache_dir()
+        .map_err(|error| error.to_string())?
+        .join("animated-artwork");
+    fs::create_dir_all(&cache_root).map_err(|error| error.to_string())?;
+    app.asset_protocol_scope()
+        .allow_directory(&cache_root, false)
+        .map_err(|error| error.to_string())?;
+
+    let destination = cache_root.join(&name);
+    if destination.is_file() {
+        return Ok(destination.to_string_lossy().into_owned());
+    }
+
+    let response = reqwest::get(source)
+        .await
+        .map_err(|error| error.to_string())?;
+    if !response.status().is_success() {
+        return Err(format!(
+            "No se pudo descargar el vídeo ({}).",
+            response.status()
+        ));
+    }
+    if response
+        .content_length()
+        .is_some_and(|size| size > MAX_VIDEO_BYTES)
+    {
+        return Err("El vídeo es demasiado grande.".into());
+    }
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("desconocido")
+        .to_string();
+    if !content_type.starts_with("video/") {
+        // Naming the type matters: an HLS manifest
+        // (application/vnd.apple.mpegurl) means the cover is not one file at
+        // all but a playlist of segments, and no amount of retrying this
+        // download would fix it.
+        return Err(format!("La respuesta no es un vídeo (content-type: {content_type})."));
+    }
+
+    let bytes = response.bytes().await.map_err(|error| error.to_string())?;
+    if bytes.len() as u64 > MAX_VIDEO_BYTES {
+        return Err("El vídeo es demasiado grande.".into());
+    }
+
+    // Write beside the target and rename, so a download interrupted halfway
+    // never leaves a truncated file that would play once and then fail.
+    let staging = cache_root.join(format!("{name}.part"));
+    fs::write(&staging, &bytes).map_err(|error| error.to_string())?;
+    fs::rename(&staging, &destination).map_err(|error| error.to_string())?;
+
+    Ok(destination.to_string_lossy().into_owned())
 }

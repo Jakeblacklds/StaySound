@@ -247,33 +247,64 @@
     display: block;
   }
 
-  /* ---------- waveform ---------- */
+  /* ---------- waveform ----------
+     A canvas, not 88 spans: the bars carry the track's real decoded envelope
+     (audio/trackWaveform.ts) plus a live lift from the spectrum reactor, which
+     means every bar changes every frame — far past what styling DOM nodes can
+     do. The two probes below exist so the renderer can read the *resolved*
+     accent (repainted per track from the artwork palette) instead of parsing
+     whatever var() chain the token currently points at. */
   .circ-waveform {
     position: relative;
-    display: flex;
-    align-items: center;
-    gap: 1.5px;
+    display: block;
     width: 100%;
+    /* The scrubber owns horizontal drags; the page must not scroll under them. */
+    touch-action: none;
   }
 
-  .circ-waveform span:not(.circ-waveform-thumb) {
-    flex: 1;
-    border-radius: 1px;
-    background: var(--circ-wave-rest);
-    transition: background-color 120ms linear;
+  .circ-waveform:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 5px;
+    border-radius: 4px;
   }
 
-  .circ-waveform span.played {
-    background: var(--accent);
+  .circ-waveform-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
   }
 
-  .circ-waveform-thumb {
+  .circ-waveform-probe {
     position: absolute;
-    width: 14px;
-    height: 14px;
-    border-radius: 50%;
-    background: var(--accent);
-    box-shadow: 0 0 0 3px var(--bg-root);
+    left: 0;
+    top: 0;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+  }
+
+  .circ-waveform-probe.accent {
+    color: var(--accent);
+  }
+
+  .circ-waveform-probe.rest {
+    color: var(--circ-wave-rest);
+  }
+
+  .circ-waveform-tip {
+    position: absolute;
+    z-index: 1;
+    bottom: calc(100% + 9px);
+    transform: translateX(-50%);
+    padding: 3px 9px;
+    border-radius: 999px;
+    background: var(--bg-elevated);
+    border: 1px solid var(--border-subtle);
+    color: var(--text-primary);
+    font-size: 0.72rem;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
     pointer-events: none;
   }
 
@@ -378,6 +409,20 @@
     .circ-player-bar > * {
       animation: none;
     }
+  }
+
+  /* With the full player open, the bar keeps only what that screen does not
+     already show: no second disc, no second title/artist/format, no "Letras"
+     button pointing at the open screen, no second "Cola". Two columns instead
+     of three, with the transport centred so the zone that remains still reads
+     as the composition's spine. */
+  .circ-player-bar.is-immersive {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .circ-player-bar.is-immersive .circ-pb-transporte {
+    width: min(100%, 880px);
+    justify-self: center;
   }
 
   .circ-pb-obra {
@@ -521,6 +566,29 @@
     opacity: 0.55;
   }
 
+  /* "Agregar a playlist" moved here from under the full player's disc, so it is
+     reachable from anywhere in the app rather than only from that one screen.
+     The <select> covers the whole control invisibly: the icon and label keep the
+     shape of the buttons next to it, while the click opens the native menu. */
+  .circ-pb-playlist {
+    position: relative;
+    cursor: pointer;
+  }
+
+  .circ-pb-playlist select {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    cursor: inherit;
+    font: inherit;
+  }
+
+  .circ-pb-playlist:has(select:disabled) {
+    cursor: default;
+  }
+
   /* Volume lives here because Círculo's full player has no transport of its own —
      the bar is the only place playback is controlled at desktop width. */
   .circ-pb-volume {
@@ -624,6 +692,15 @@
     min-height: 100%;
     overflow: hidden;
     padding: 26px var(--circ-pad-x) 40px;
+
+    /* El disco del hero se mide con UNA curva continua, no con escalones por tier.
+       Antes saltaba de 520px a min(58vw, 760px) en cuanto la ventana pasaba de
+       1279.98px, y esa es justo la anchura con la que Tauri abre la ventana
+       (1280 en tauri.conf.json): al arrancar caía siempre del lado ancho y solo
+       se encogía cuando el usuario movía el borde un pixel. Con clamp() el
+       tamaño ya no depende de en qué lado de un breakpoint aterrice la ventana.
+         960px  -> 400px    1280px -> 512px    1900px+ -> 760px (tope del mock) */
+    --circ-hero-disc: clamp(400px, 40vw, 760px);
   }
 
   .circ-home-empty {
@@ -645,9 +722,11 @@
 
   .circ-home-hero-art {
     position: absolute;
-    top: -40px;
+    /* El sangrado superior escala con el disco para que la composición se vea
+       igual a cualquier anchura (-40px cuando el disco está a tope de 760px). */
+    top: calc(var(--circ-hero-disc) * -0.052);
     right: -16%;
-    width: min(58vw, 760px);
+    width: var(--circ-hero-disc);
     aspect-ratio: 1;
     pointer-events: none;
   }
@@ -733,10 +812,10 @@
   .circ-home-rail {
     position: relative;
     margin-top: 52px;
-    /* Tied to the hero disc's own math (right: -16%, width: min(58vw, 760px)) so the
-       rail's right edge can never land under the disc, at any viewport width — a fixed
-       percentage here drifted out of sync with the disc and let them overlap. */
-    max-width: calc(116vw - min(58vw, 760px) - var(--circ-pad-x) - 32px);
+    /* Tied to the hero disc's own math (right: -16%, width: var(--circ-hero-disc)) so
+       the rail's right edge can never land under the disc, at any viewport width — a
+       fixed percentage here drifted out of sync with the disc and let them overlap. */
+    max-width: calc(116vw - var(--circ-hero-disc) - var(--circ-pad-x) - 32px);
   }
 
   .circ-home-history-rail {
@@ -1327,6 +1406,13 @@
     display: none;
   }
 
+  /* Same reasoning as the deck: the persistent bar owns this action now, so the
+     copy under the disc stays copy. Mobile keeps its own control — the Círculo
+     bar does not exist below 821px, so there is nowhere else for it to live. */
+  .full-player-overlay.circ .fp-playlist-add {
+    display: none;
+  }
+
   /* One centred axis: disc, then title/artist/format stacked under it — the kit's
      composition. The Sala layout left-aligned this copy against the disc, which is
      what made the column read as off-balance. */
@@ -1530,18 +1616,10 @@
   }
 
   /* The welcome column and the bleeding hero disc compete for the same room once
-     the window is under ~1280; give the copy priority and pull the disc back. */
+     the window is under ~1280; give the copy priority. The disc no longer needs a
+     step here — --circ-hero-disc shrinks with the viewport on its own. */
   .circ-home-welcome {
     max-width: 58%;
-  }
-
-  .circ-home-hero-art {
-    width: min(52vw, 520px);
-    top: -20px;
-  }
-
-  .circ-home-rail {
-    max-width: calc(116vw - min(52vw, 520px) - var(--circ-pad-x) - 32px);
   }
 }
 
@@ -1570,13 +1648,9 @@
     max-width: 66%;
   }
 
+  /* Only the fade survives at this size; the width comes from --circ-hero-disc. */
   .circ-home-hero-art {
-    width: min(48vw, 420px);
     opacity: 0.75;
-  }
-
-  .circ-home-rail {
-    max-width: calc(116vw - min(48vw, 420px) - var(--circ-pad-x) - 32px);
   }
 
   .circ-segmented-tabs {

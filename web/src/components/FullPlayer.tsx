@@ -372,8 +372,11 @@ export function FullPlayer({
           <button ref={closeButtonRef} className="fp-chip-btn" onClick={handleClose} aria-label="Cerrar" title="Cerrar (Esc)">
             <ChevronDownIcon size={20} />
           </button>
+          {/* A breadcrumb says where you are, not what you already see: the
+              track title is set in display type under the disc, so repeating it
+              here just made the same words appear twice on one screen. */}
           <span key={`breadcrumb-${trackKey}`} className="fp-breadcrumb fp-breadcrumb-incoming">
-            {currentTrack ? `${currentTrack.album} / ${currentTrack.title}` : 'StaySound'}
+            {currentTrack ? currentTrack.album : 'StaySound'}
           </span>
         </div>
         {/* Bound to real playback state. This used to be the literal string
@@ -452,7 +455,9 @@ export function FullPlayer({
                     loop
                     muted
                     playsInline
-                    preload="metadata"
+                    // The source is a local file now, so there is no cost to
+                    // having it fully ready before the first loop wrap.
+                    preload="auto"
                     onCanPlay={() => setAnimatedArtworkReady(true)}
                     onError={() => {
                       setAnimatedArtworkReady(false);

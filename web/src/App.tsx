@@ -1465,6 +1465,9 @@ function PlaybackSurface({
           onStartRadio={() => void onStartRadio(audio.currentTrack)}
           isRadioLoading={radioBusy}
           queueOpen={showQueue}
+          playlists={playlists}
+          onAddToPlaylist={onAddToPlaylist}
+          fullPlayerOpen={showFullPlayer}
         />
       ) : (
         <PlayerBar

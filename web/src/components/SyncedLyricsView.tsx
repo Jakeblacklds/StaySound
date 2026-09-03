@@ -2,6 +2,7 @@ import '@uimaxbai/am-lyrics/am-lyrics.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Track } from '@staysound/types/audio';
 import { webAudioEngine } from '../audio/webAudioEngine';
+import { perfProbe } from '../debug/perfProbe';
 import type { WebDynamicPalette } from '../library/dynamicColors';
 import {
   getLyricsFont,
@@ -168,24 +169,42 @@ function getTrackDuration(currentTrack: Track, duration: number): number {
  * longhands whenever the shorthand comes in empty. If upstream renames the
  * method the patch silently no-ops, which just leaves upstream behavior.
  */
-function patchCharMeasurement(element: AmLyricsElement): void {
+function patchCharMeasurement(element: AmLyricsElement, fontKey: string): void {
   const internal = element as unknown as {
     _getTextWidth?: (text: string, font: string) => number;
     __ssMeasurePatched?: boolean;
+    __ssFontKey?: string;
+    __ssEffectiveFont?: string;
   };
+
+  // The resolved shorthand belongs to a font, not to a call: switching fonts
+  // is the only thing that can invalidate it.
+  if (internal.__ssFontKey !== fontKey) {
+    internal.__ssFontKey = fontKey;
+    internal.__ssEffectiveFont = undefined;
+  }
   if (internal.__ssMeasurePatched || typeof internal._getTextWidth !== 'function') return;
 
   const original = internal._getTextWidth.bind(element);
   internal._getTextWidth = (text: string, font: string) => {
-    let effective = font;
-    if (!effective || !effective.trim()) {
+    if (font && font.trim()) return original(text, font);
+
+    // The engine calls this once per character of the song. Resolving the
+    // font here with getComputedStyle — as this patch first did — forced a
+    // style and layout flush on every one of those calls, so a single
+    // measurement pass over a normal lyric could run hundreds of synchronous
+    // reflows back to back and freeze the picture for the length of it.
+    // Reading it once per font turns that into one flush.
+    if (internal.__ssEffectiveFont === undefined) {
       const syllable = element.shadowRoot?.querySelector('.lyrics-syllable');
-      if (syllable) {
-        const style = getComputedStyle(syllable);
-        effective = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-      }
+      // Nothing rendered yet: fall through untouched rather than caching a
+      // shorthand measured against the wrong element.
+      if (!syllable) return original(text, font);
+      const style = getComputedStyle(syllable);
+      internal.__ssEffectiveFont =
+        `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
     }
-    return original(text, effective);
+    return original(text, internal.__ssEffectiveFont);
   };
   internal.__ssMeasurePatched = true;
 }
@@ -209,6 +228,18 @@ function recalibrateFillMetrics(
     _updateCharTimingData?: () => void;
   };
 
+  // This pass walks every character in the song, so it is the one place in the
+  // lyrics that can block long enough to be seen. Timing it keeps the claim
+  // honest.
+  const remeasure = () => {
+    const startedAt = performance.now();
+    internal._updateCharTimingData?.();
+    const elapsed = performance.now() - startedAt;
+    if (elapsed >= 50) {
+      perfProbe.note(`letra remedida en ${Math.round(elapsed)}ms · ${font.id}`);
+    }
+  };
+
   const fontReady = font.loadFamily
     ? // Lyrics render at font-weight: bold; load that face specifically.
       document.fonts.load(`bold 32px "${font.loadFamily}"`).then(() => true, () => false)
@@ -220,7 +251,7 @@ function recalibrateFillMetrics(
     if (!loaded || cancelled || !element.isConnected) return;
 
     if (Array.isArray(internal.lyrics) && element.shadowRoot?.querySelector('.lyrics-syllable')) {
-      internal._updateCharTimingData?.();
+      remeasure();
       return;
     }
 
@@ -234,7 +265,7 @@ function recalibrateFillMetrics(
       }
       if (Array.isArray(internal.lyrics) && element.shadowRoot?.querySelector('.lyrics-syllable')) {
         window.clearInterval(watchTimer);
-        internal._updateCharTimingData?.();
+        remeasure();
       }
     }, 250);
   });
@@ -747,11 +778,18 @@ export function SyncedLyricsView({
     if (!element || !onAvailabilityChange) return;
     const internal = element as unknown as { isLoading?: boolean; lyrics?: unknown[] };
     let lastValue: boolean | null = null;
+    let settled = false;
     const report = () => {
-      if (internal.isLoading) return;
+      // The engine mutates its shadow tree on every line change; without this
+      // guard the answer keeps being recomputed — subtree query included —
+      // for the length of the song after it stopped being able to change.
+      if (settled || internal.isLoading) return;
       const hasLyrics = Array.isArray(internal.lyrics) && internal.lyrics.length > 0;
       const showsEmptyState = Boolean(element.shadowRoot?.querySelector('.no-lyrics'));
       if (!hasLyrics && !showsEmptyState) return;
+      settled = true;
+      observer?.disconnect();
+      window.clearInterval(timer);
       if (lastValue === hasLyrics) return;
       lastValue = hasLyrics;
       onAvailabilityChange(hasLyrics);
@@ -784,7 +822,7 @@ export function SyncedLyricsView({
     // recalibration below) reads the new computed font.
     element.fontFamily = activeFont.stack;
     element.style.fontFamily = activeFont.stack;
-    patchCharMeasurement(element);
+    patchCharMeasurement(element, activeFont.id);
     return recalibrateFillMetrics(element, activeFont);
   }, [lyricsElement, activeFont, currentTrack]);
 

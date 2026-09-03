@@ -1,3 +1,5 @@
+import { convertFileSrc, invoke } from '@tauri-apps/api/core';
+import { perfProbe } from '../debug/perfProbe';
 import type { Track } from '@staysound/types/audio';
 import { isTauriDesktop } from '../desktop/tauriMusicLibrary';
 
@@ -52,6 +54,28 @@ function validVideoUrl(value: unknown): string | null {
   }
 }
 
+/**
+ * Turns Apple's remote URL into a local file the <video> can loop without ever
+ * touching the network. Streaming it is what made the full player freeze for
+ * half a second at a time: the CDN goes quiet mid-playback (`stalled`) and
+ * every loop wrap re-seeks a partially buffered source, and both stall the
+ * media pipeline while the audio keeps going.
+ */
+async function localCopy(remoteUrl: string): Promise<string> {
+  try {
+    const path = await invoke<string>('cache_animated_artwork', { url: remoteUrl });
+    return convertFileSrc(path);
+  } catch (reason) {
+    // Streaming still shows the motion cover — with the stalls it came with —
+    // which beats dropping the feature because a download failed. But a silent
+    // fallback is what made this look fixed when it was not, so say why.
+    const message = reason instanceof Error ? reason.message : String(reason);
+    console.warn('Animated artwork stayed remote:', message);
+    perfProbe.note(`artwork remoto: ${message.slice(0, 120)}`);
+    return remoteUrl;
+  }
+}
+
 export async function getAnimatedArtwork(
   track: Track,
   signal?: AbortSignal,
@@ -63,7 +87,7 @@ export async function getAnimatedArtwork(
   const cached = memoryCache.get(key) ?? readCache()[key];
   if (cached && cached.expiresAt > now) {
     memoryCache.set(key, cached);
-    return cached.videoUrl;
+    return cached.videoUrl ? localCopy(cached.videoUrl) : null;
   }
 
   const timeoutController = new AbortController();
@@ -83,7 +107,7 @@ export async function getAnimatedArtwork(
       videoUrl,
       expiresAt: now + (videoUrl ? HIT_TTL : MISS_TTL),
     });
-    return videoUrl;
+    return videoUrl ? localCopy(videoUrl) : null;
   } catch {
     return null;
   } finally {
