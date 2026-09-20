@@ -127,6 +127,12 @@ export function FullPlayer({
 }: FullPlayerProps) {
   const isDesktopViewport = useIsDesktopViewport();
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  // The beat reactor writes eight `--atmo-*` custom properties every frame.
+  // Custom properties inherit — into am-lyrics' shadow tree too — so writing
+  // them on the overlay root invalidated style for the entire player, every
+  // lyric span included, sixty times a second. The only rule that reads them
+  // is the edge glow, which lives in here.
+  const backgroundRef = useRef<HTMLDivElement | null>(null);
   const paletteRef = useRef<WebDynamicPalette | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const [closing, setClosing] = useState(false);
@@ -194,14 +200,16 @@ export function FullPlayer({
     setLocalLyricsGeneratorOpen(false);
   }, [currentTrack?.id]);
 
-  // The desktop Live Artwork API is intentionally separate from the visual
-  // effects experiments: if Apple Music has a matching motion cover, show that
-  // actual video above the static album art; otherwise the ordinary cover stays
-  // in place. No CanvasUI processing is involved in this path.
+  // The Live Artwork lookup is intentionally separate from the visual effects
+  // experiments: if Apple Music has a matching motion cover, show that actual
+  // video above the static album art; otherwise the ordinary cover stays in
+  // place. No CanvasUI processing is involved in this path. Desktop plays a
+  // locally cached copy, the web build a rendition sized to the stage below
+  // (min(44vh, 68%, 420px), so 840 covers it at 2x).
   useEffect(() => {
     if (!currentTrack) return;
     const controller = new AbortController();
-    void getAnimatedArtwork(currentTrack, controller.signal).then(url => {
+    void getAnimatedArtwork(currentTrack, controller.signal, { size: 840 }).then(url => {
       if (!controller.signal.aborted) setAnimatedArtworkUrl(url);
     });
     return () => controller.abort();
@@ -332,7 +340,7 @@ export function FullPlayer({
       className={`full-player-overlay immersive track-swap-${trackSwapDirection > 0 ? 'forward' : 'backward'} ${closing ? 'closing' : ''} ${isDesktopViewport ? 'circ' : ''}`}
       style={paletteStyle}
     >
-      <div className="fp-bg" aria-hidden="true">
+      <div ref={backgroundRef} className="fp-bg" aria-hidden="true">
         {previousPalette ? (
           <div
             key={`previous-${paletteTransitionKey}`}
@@ -346,14 +354,14 @@ export function FullPlayer({
             palette={palette}
             isPlaying={isPlaying}
             motionKey={trackKey}
-            reactiveTarget={overlayRef}
+            reactiveTarget={backgroundRef}
           />
         ) : (
           <AtmosphereCanvas
             palette={palette}
             isPlaying={isPlaying}
             motionKey={trackKey}
-            reactiveTarget={overlayRef}
+            reactiveTarget={backgroundRef}
           />
         )}
         {previousPalette ? (
@@ -455,8 +463,10 @@ export function FullPlayer({
                     loop
                     muted
                     playsInline
-                    // The source is a local file now, so there is no cost to
-                    // having it fully ready before the first loop wrap.
+                    // On desktop the source is already a local file; on the
+                    // web it is a few hundred KB. Either way it is worth having
+                    // fully ready before the first loop wrap, which is where
+                    // partially buffered playback used to stall.
                     preload="auto"
                     onCanPlay={() => setAnimatedArtworkReady(true)}
                     onError={() => {

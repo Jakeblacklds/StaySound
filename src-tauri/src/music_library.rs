@@ -137,11 +137,14 @@ pub fn get_music_folder(state: State<'_, MusicLibraryState>) -> Result<Option<St
         .map(|path| path.to_string_lossy().into_owned()))
 }
 
-#[tauri::command]
-pub fn scan_music_folder(
-    state: State<'_, MusicLibraryState>,
-) -> Result<Vec<NativeMusicFile>, String> {
-    let root = current_root(&state)?;
+/// Tauri runs a command declared as a plain `fn` on the application's main
+/// thread — the same thread that owns the window and drives the webview's
+/// paint. Anything that touches the disk from there stops the picture: the
+/// lyrics stop advancing and the dot matrix stops drawing for exactly as long
+/// as the syscall takes, while the audio (which lives on its own thread) keeps
+/// playing. Every command below is therefore `async` and hands its blocking
+/// work to `spawn_blocking`; only the cheap argument validation stays inline.
+fn walk_music_folder(root: PathBuf) -> Result<Vec<NativeMusicFile>, String> {
     let mut pending = vec![root.clone()];
     let mut files = Vec::new();
 
@@ -194,20 +197,37 @@ pub fn scan_music_folder(
 }
 
 #[tauri::command]
-pub fn read_music_file(
+pub async fn scan_music_folder(
+    state: State<'_, MusicLibraryState>,
+) -> Result<Vec<NativeMusicFile>, String> {
+    let root = current_root(&state)?;
+    tauri::async_runtime::spawn_blocking(move || walk_music_folder(root))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
+pub async fn read_music_file(
     state: State<'_, MusicLibraryState>,
     path: String,
 ) -> Result<Response, String> {
     let root = current_root(&state)?;
-    let source = PathBuf::from(path)
-        .canonicalize()
-        .map_err(|error| error.to_string())?;
-    if !source.starts_with(&root) || !source.is_file() || !is_audio(&source) {
-        return Err("El archivo no pertenece a la carpeta de música autorizada.".into());
-    }
-    fs::read(source)
-        .map(Response::new)
-        .map_err(|error| error.to_string())
+    // A whole FLAC is tens of megabytes; reading one here rather than on a
+    // blocking thread is the single longest stall the desktop build can put in
+    // front of the compositor.
+    tauri::async_runtime::spawn_blocking(move || {
+        let source = PathBuf::from(path)
+            .canonicalize()
+            .map_err(|error| error.to_string())?;
+        if !source.starts_with(&root) || !source.is_file() || !is_audio(&source) {
+            return Err("El archivo no pertenece a la carpeta de música autorizada.".to_string());
+        }
+        fs::read(source)
+            .map(Response::new)
+            .map_err(|error| error.to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]

@@ -36,6 +36,24 @@ const ZERO_SIGNAL: DotMatrixSignal = {
   pulseAge: 4,
 };
 
+/**
+ * Resolved once. `matchMedia` parses its argument and allocates a live
+ * MediaQueryList on every call, and this used to run inside the frame loop —
+ * sixty throwaway objects a second, for an answer that changes when the user
+ * opens System Settings.
+ */
+let reduceMotionQuery: MediaQueryList | null | undefined;
+
+function prefersReducedMotion(): boolean {
+  if (reduceMotionQuery === undefined) {
+    reduceMotionQuery =
+      typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+  }
+  return reduceMotionQuery?.matches ?? false;
+}
+
 /** Time-constant based follower: frame-rate independent, no rate tuning per fps. */
 function approach(current: number, target: number, dt: number, tau: number): number {
   if (tau <= 0) return target;
@@ -120,9 +138,7 @@ class DotMatrixReactor {
   }
 
   private advance(dt: number): void {
-    const reduceMotion =
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const reduceMotion = prefersReducedMotion();
     // Same dev hook AtmosphereCanvas honours: set window.__atmoDebugBands to
     // drive the field by hand (e.g. pulse `bass` to fake a kick) with nothing
     // playing.

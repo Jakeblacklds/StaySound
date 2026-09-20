@@ -63,19 +63,7 @@ export interface DownloadProvider {
 }
 
 const TIDAL_API_BASES = [
-  'https://hifi.geeked.wtf',
-  'https://eu-central.monochrome.tf',
-  'https://us-west.monochrome.tf',
-  'https://arran.monochrome.tf',
-  'https://api.monochrome.tf',
-  'https://monochrome-api.samidy.com',
-  'https://triton.squid.wtf',
-  'https://wolf.qqdl.site',
-  'https://maus.qqdl.site',
-  'https://vogel.qqdl.site',
-  'https://katze.qqdl.site',
-  'https://hund.qqdl.site',
-  'https://tidal.kinoplus.online',
+  'https://lol.samidy.workers.dev',
 ];
 
 const TIDAL_STREAMING_BASES = [
@@ -108,7 +96,10 @@ const SAAVN_DES_KEY = '38346591';
 const REQUEST_TIMEOUT_MS = 12_000;
 const INSTANCE_CACHE_KEY = 'staysound.web.monochrome.instances.v1';
 const INSTANCE_CACHE_TTL_MS = 15 * 60 * 1000;
-const INSTANCE_URLS = ['https://tidal-uptime.geeked.wtf'];
+// Monochrome currently ships without an uptime catalog and falls back to the
+// maintained Samidy worker. Keep the static API list authoritative until the
+// upstream project publishes a live tracker again.
+const INSTANCE_URLS: string[] = [];
 const DEFAULT_QUALITY: TidalQuality = 'LOSSLESS';
 const SOULSEEK_BRIDGE_CONFIG_KEY = 'staysound.web.soulseek.bridge.v2';
 const SOULSEEK_CREDENTIALS_KEY = 'staysound.web.soulseek.credentials.v1';
@@ -1828,7 +1819,12 @@ function getSoulseekMatchesForTrack(track: TidalTrack): Promise<SoulseekMatch[]>
   }
   if (cached) soulseekMatchCache.delete(key);
 
-  const promise = requestSoulseekMatches(`${track.artist} ${track.title}`.trim())
+  // Soulseek distributes an excluded-phrases list that can suppress searches
+  // containing some well-known artist names. Search by title first and let the
+  // strict filename/path scorer below verify the artist, album and duration.
+  // This also avoids spending two full 18-second rounds retrying a query that
+  // the network will never distribute.
+  const promise = requestSoulseekMatches(track.title.trim())
     .catch(error => {
       soulseekMatchCache.delete(key);
       throw error;

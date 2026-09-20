@@ -708,27 +708,30 @@ export function DownloadsPanel({
           </div>
         </div>
 
-        <div className="dl-search-field">
+        <form className="dl-search-field" onSubmit={event => {
+          event.preventDefault();
+          void runSearch(queryDraft);
+        }}>
           <SearchIcon size={18} />
           <input
             ref={searchInputRef}
             value={queryDraft}
             onChange={event => setQueryDraft(event.target.value)}
             onKeyDown={event => {
-              if (event.key === 'Enter') void runSearch(queryDraft);
               if (event.key === 'Escape') { setQueryDraft(''); event.currentTarget.blur(); }
             }}
             placeholder="Busca una canción, un álbum o un artista"
-            aria-label="Buscar en Monochrome"
+            aria-label="Buscar música para descargar"
           />
           {isSearching
             ? <SpinnerIcon size={17} />
             : queryDraft && (
-              <button className="dl-search-clear" onClick={() => { setQueryDraft(''); searchInputRef.current?.focus(); }} aria-label="Limpiar búsqueda">
+              <button type="button" className="dl-search-clear" onClick={() => { setQueryDraft(''); searchInputRef.current?.focus(); }} aria-label="Limpiar búsqueda">
                 <CloseIcon size={15} />
               </button>
             )}
-        </div>
+          <button className="dl-btn primary dl-search-submit" type="submit" disabled={isSearching || !queryDraft.trim()}>Buscar</button>
+        </form>
 
         <div className="dl-status-line">
           <span className={`dl-dot ${bridgeTone}`} aria-hidden="true" />

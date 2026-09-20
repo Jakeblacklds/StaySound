@@ -128,8 +128,8 @@ def note_events(start_frame, end_frame, active, midi, voiced_probability, syllab
     return notes
 
 
-def next_onset_after(sorted_onsets, baseline_end):
-    position = bisect.bisect_right(sorted_onsets, baseline_end + 40)
+def next_onset_after(sorted_onsets, word_start):
+    position = bisect.bisect_right(sorted_onsets, word_start)
     return sorted_onsets[position] if position < len(sorted_onsets) else None
 
 
@@ -137,10 +137,13 @@ def main(vocals_path, lyrics_path):
     with open(lyrics_path, encoding="utf-8") as handle:
         lyrics = json.load(handle)
     bilingual = "bilingual" in str(lyrics.get("alignment", ""))
-    phoneme_alignment = "mfa-bilingual-phoneme-v1" if bilingual else "mfa-phoneme-v1"
+    phoneme_alignment = "mfa-bilingual-phoneme-v2" if bilingual else "mfa-phoneme-v2"
     acoustic_alignment = (
-        "mfa-bilingual-phoneme+acoustic-v2" if bilingual else "mfa-phoneme+acoustic-v2"
+        "mfa-bilingual-phoneme+acoustic-v3" if bilingual else "mfa-phoneme+acoustic-v3"
     )
+    if str(lyrics.get("alignment", "")).startswith("qwen3-sofa-"):
+        phoneme_alignment = lyrics["alignment"]
+        acoustic_alignment = lyrics["alignment"].replace("qwen3-sofa-", "qwen3-sofa+acoustic-", 1)
 
     audio, _ = librosa.load(vocals_path, sr=TARGET_SR, mono=True)
     if not len(audio):
@@ -189,6 +192,10 @@ def main(vocals_path, lyrics_path):
     for line in lyrics.get("lines", []):
         line_words = line.get("words") or []
         for word_index, word in enumerate(line_words):
+            # An interpolated text slot has no established acoustic identity.
+            # Pitch activity alone cannot establish which missing word was sung.
+            if float(word.get("confidence", 0) or 0) <= 0.15:
+                continue
             syllables = word.get("syllables") or []
             if not syllables:
                 continue
@@ -201,7 +208,7 @@ def main(vocals_path, lyrics_path):
             if word_index + 1 < len(line_words):
                 hard_limit = int(line_words[word_index + 1].get("startMs", baseline_end)) - 30
             else:
-                following_onset = next_onset_after(all_onsets, baseline_end)
+                following_onset = next_onset_after(all_onsets, int(word["startMs"]))
                 search_limit = min(audio_end_ms, baseline_end + MAX_EXTENSION_MS)
                 hard_limit = min(search_limit, following_onset - 30) if following_onset else search_limit
             hard_limit = max(baseline_end, hard_limit)

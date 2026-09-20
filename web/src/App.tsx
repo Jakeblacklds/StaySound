@@ -1,5 +1,5 @@
 import type { Album, Artist, Playlist, TidalTrack, Track } from '@staysound/types/audio';
-import { ChangeEvent, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { formatDuration } from '@staysound/services/metadataService';
 import {
@@ -47,7 +47,6 @@ import { TopNav } from './components/circulo/TopNav';
 import { PlayerBarCirculo } from './components/circulo/PlayerBarCirculo';
 import { CircleArt, hueFromId } from './components/circulo/CircleArt';
 import { CircleTile } from './components/circulo/CircleTile';
-import { CarouselChevron } from './components/circulo/CarouselChevron';
 import { SegmentedTabs } from './components/circulo/SegmentedTabs';
 import { SearchPanel } from './components/circulo/SearchPanel';
 import { QualityChip } from './components/circulo/QualityChip';
@@ -137,15 +136,15 @@ function shuffleForHome<T>(items: T[], seedText: string): T[] {
   return shuffled;
 }
 
-const TAB_ORDER: Tab[] = ['home', 'songs', 'albums', 'artists', 'playlists', 'downloads', 'radio', 'get-app'];
+const TAB_ORDER: Tab[] = ['home', 'songs', 'artists', 'albums', 'radio', 'playlists', 'downloads', 'get-app'];
 
 // The Círculo desktop nav merges these four into one "Biblioteca" destination — see TopNav's
 // navDestinationForTab — surfaced here as an underline sub-nav (SegmentedTabs).
-const LIBRARY_TABS: Tab[] = ['albums', 'songs', 'artists', 'radio'];
+const LIBRARY_TABS: Tab[] = ['songs', 'artists', 'albums', 'radio'];
 const LIBRARY_SEGMENTS: { id: 'albums' | 'songs' | 'artists' | 'radio'; label: string }[] = [
-  { id: 'albums', label: 'Álbumes' },
   { id: 'songs', label: 'Canciones' },
   { id: 'artists', label: 'Artistas' },
+  { id: 'albums', label: 'Álbumes' },
   { id: 'radio', label: 'Radio' },
 ];
 
@@ -203,7 +202,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>('home');
   // The Círculo desktop nav merges songs/albums/artists/radio into one "Biblioteca" entry;
   // clicking it should return to whichever of those the user was last looking at.
-  const lastLibraryTabRef = useRef<Tab>('albums');
+  const lastLibraryTabRef = useRef<Tab>('songs');
   const [librarySort, setLibrarySort] = useState<'recent' | 'az'>('recent');
   const [showFullPlayer, setShowFullPlayer] = useState(false);
   const [ambientPalette, setAmbientPalette] = useState<WebDynamicPalette | null>(null);
@@ -951,13 +950,13 @@ export function App() {
     (selectedAlbum && tab === 'albums') || (selectedArtist && tab === 'artists'),
   );
   const sectionCount = tab === 'songs'
-    ? `${filteredTracks.length} canciones`
+    ? `${filteredTracks.length} ${filteredTracks.length === 1 ? 'canción' : 'canciones'}`
     : tab === 'albums'
-      ? `${filteredAlbums.length} discos`
+      ? `${filteredAlbums.length} ${filteredAlbums.length === 1 ? 'disco' : 'discos'}`
       : tab === 'artists'
-        ? `${filteredArtists.length} artistas`
+        ? `${filteredArtists.length} ${filteredArtists.length === 1 ? 'artista' : 'artistas'}`
         : tab === 'playlists'
-          ? `${playlists.length} playlists`
+          ? `${playlists.length} ${playlists.length === 1 ? 'playlist' : 'playlists'}`
           : tabCopy.subtitle;
 
   // --- Determine content ---
@@ -1117,7 +1116,6 @@ export function App() {
           tab={tab}
           onSelectHome={() => handleTabChange('home')}
           onSelectLibrary={() => handleTabChange(lastLibraryTabRef.current)}
-          onSelectSearch={() => handleTabChange('search')}
           onSelectPlaylists={() => handleTabChange('playlists')}
           onSelectDownloads={() => handleTabChange('downloads')}
           onSelectGetApp={() => handleTabChange('get-app')}
@@ -1157,6 +1155,29 @@ export function App() {
           }
         />
         <section className="circ-content">
+          {(LIBRARY_TABS.includes(tab) || tab === 'playlists') && !isDetailView && (
+            <header className="collection-header">
+              <div>
+                <h1>{tab === 'playlists' ? 'Playlists' : 'Biblioteca'}</h1>
+                <p>{sectionCount}</p>
+              </div>
+              {LIBRARY_TABS.includes(tab) && (
+                <div className="collection-tools">
+                  <label className="collection-search">
+                    <SearchIcon size={18} />
+                    <input value={query} onChange={event => setQuery(event.target.value)}
+                      placeholder="Buscar en tu biblioteca" aria-label="Buscar en biblioteca" />
+                  </label>
+                  <select value={librarySort}
+                    onChange={event => setLibrarySort(event.target.value as 'recent' | 'az')}
+                    aria-label="Ordenar biblioteca">
+                    <option value="recent">Más recientes</option>
+                    <option value="az">Nombre A–Z</option>
+                  </select>
+                </div>
+              )}
+            </header>
+          )}
           {LIBRARY_TABS.includes(tab) && !isDetailView && (
             <SegmentedTabs
               items={LIBRARY_SEGMENTS}
@@ -1260,19 +1281,20 @@ export function App() {
           </header>}
 
           {/* Library sub-navigation on mobile. Primary destinations live in the bottom navbar. */}
-          {(tab === 'songs' || tab === 'albums' || tab === 'artists') && (
+          {(tab === 'songs' || tab === 'artists' || tab === 'albums' || tab === 'radio') && (
             <div className="mobile-tabs" aria-label="Vistas de biblioteca">
-              {(['songs', 'albums', 'artists'] as Tab[]).map(item => (
+              {(['songs', 'artists', 'albums', 'radio'] as Tab[]).map(item => (
                 <button
                   key={item}
                   className={tab === item ? 'active' : ''}
                   onClick={() => handleTabChange(item)}
-                  aria-label={item === 'songs' ? 'Canciones' : item === 'albums' ? 'Álbumes' : 'Artistas'}
+                  aria-label={item === 'songs' ? 'Canciones' : item === 'artists' ? 'Artistas' : item === 'albums' ? 'Álbumes' : 'Radio'}
                 >
                   {item === 'songs' ? <MusicNoteIcon size={18} />
+                    : item === 'artists' ? <ArtistIcon size={18} />
                     : item === 'albums' ? <DiscIcon size={18} />
-                    : <ArtistIcon size={18} />}
-                  <span>{item === 'songs' ? 'Canciones' : item === 'albums' ? 'Álbumes' : 'Artistas'}</span>
+                    : <MusicNoteIcon size={18} />}
+                  <span>{item === 'songs' ? 'Canciones' : item === 'artists' ? 'Artistas' : item === 'albums' ? 'Álbumes' : 'Radio'}</span>
                 </button>
               ))}
             </div>
@@ -1293,9 +1315,9 @@ export function App() {
 
   return (
     <>
-      {!showFullPlayer && ambientPalette ? (
+      {ambientPalette ? (
         <div
-          className="global-listening-atmosphere"
+          className={`global-listening-atmosphere ${showFullPlayer ? 'player-is-open' : ''}`}
           style={paletteToCssVars(ambientPalette) as CSSProperties}
           aria-hidden="true"
         >
@@ -1309,6 +1331,11 @@ export function App() {
               isPlaying={audio.isPlaying}
               motionKey={audio.currentTrack?.id ?? 'staysound-idle'}
               variant="ambient"
+              /* The overlay fades this layer to zero opacity, which stops it
+                 being seen but not being drawn: two full-screen shader passes
+                 per frame kept running underneath the player's own field, and
+                 that is the budget the lyrics were losing. */
+              paused={showFullPlayer}
             />
           ) : (
             <AtmosphereCanvas
@@ -1928,6 +1955,47 @@ function timeOfDayGreeting(): string {
   return 'Buenas noches';
 }
 
+/** Untagged files land in the library as "Unknown Album", and Home was printing that
+    placeholder as the largest type on the screen. Fall back to something that is
+    actually about the music — the track we would play, then the artist. */
+const PLACEHOLDER_ALBUM_NAMES = new Set([
+  'unknown album',
+  'unknown',
+  'untitled',
+  'álbum desconocido',
+  'album desconocido',
+]);
+
+function heroCopy(album: Album, track?: Track | null): { title: string; subtitle: string } {
+  const name = album.name?.trim() ?? '';
+  const artist = album.artist?.trim() ?? '';
+  if (name && !PLACEHOLDER_ALBUM_NAMES.has(name.toLowerCase())) return { title: name, subtitle: artist };
+  const trackTitle = track?.title?.trim();
+  if (trackTitle) return { title: trackTitle, subtitle: artist };
+  return { title: artist || 'Tu música', subtitle: 'En tu biblioteca' };
+}
+
+/** A rail on Círculo's home: section title on the left, its "see everything" action on
+    the right, and the scroller underneath. The action used to be a lone grey circle
+    parked after the last tile, where it read as a tile with broken artwork. */
+function CircHomeRail({ title, actionLabel, onAction, className, children }: {
+  title: string;
+  actionLabel: string;
+  onAction: () => void;
+  className?: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className={`circ-home-rail ${className ?? ''}`.trim()}>
+      <div className="circ-section-head">
+        <h2 className="circ-section-title">{title}</h2>
+        <button type="button" className="circ-section-more" onClick={onAction}>{actionLabel}</button>
+      </div>
+      <div className="circ-home-rail-row">{children}</div>
+    </div>
+  );
+}
+
 function HomePanel({
   recentTracks,
   recentlyPlayedTracks,
@@ -1971,7 +2039,9 @@ function HomePanel({
   const recommendationAlbums = useMemo(() => {
     const day = new Date().toISOString().slice(0, 10);
     const listeningSignal = [currentTrack?.id, ...recentlyPlayedTracks.map(track => track.id)].filter(Boolean).join('|');
-    return shuffleForHome(albums, `${day}|${listeningSignal}`).slice(0, 6);
+    // Nine, not six: the desktop rail is wide enough for seven tiles at 1650px, and the
+    // extra ones are what give its horizontal scroll somewhere to go.
+    return shuffleForHome(albums, `${day}|${listeningSignal}`).slice(0, 9);
   }, [albums, currentTrack?.id, recentlyPlayedTracks]);
   const featuredAlbums = recommendationAlbums;
   const featuredArtists = artists.slice(0, 5);
@@ -1980,6 +2050,51 @@ function HomePanel({
     ...(currentTrack ? [currentTrack] : []),
     ...recentTracks.filter(track => track.id !== currentTrack?.id),
   ].slice(0, 4), [currentTrack, recentTracks]);
+
+  // Hoisted above the early returns below so the hero's palette hook can depend on it.
+  const heroPick = useMemo(() => {
+    const seedTrack = currentTrack ?? recentlyPlayedTracks[0] ?? recentTracks[0] ?? null;
+    const album = (seedTrack && albums.find(item => item.tracks.includes(seedTrack.id))) || albums[0] || null;
+    const track = album ? recentTracks.find(item => album.tracks.includes(item.id)) ?? null : null;
+    return { seedTrack, album, track };
+  }, [albums, currentTrack, recentlyPlayedTracks, recentTracks]);
+
+  /* The accent used to come from --dyn-accent, which is extracted from whatever is
+     *playing* — not from the cover the hero is actually showing. When those differ you
+     get a pink play button over a green sleeve. Home now tints itself from its own hero,
+     while the nav and player bar keep tracking playback. Keyed on primitives so the seed
+     object stays referentially stable across renders. */
+  const heroAlbumId = heroPick.album?.id ?? null;
+  const heroAlbumArtwork = heroPick.album?.artwork ?? null;
+  const heroAlbumName = heroPick.album?.name ?? '';
+  const heroAlbumArtist = heroPick.album?.artist ?? '';
+  const heroPaletteSeed = useMemo<Track | null>(() => (
+    heroAlbumId && heroAlbumArtwork
+      ? {
+          id: `album:${heroAlbumId}`,
+          uri: '',
+          title: heroAlbumName,
+          artist: heroAlbumArtist,
+          album: heroAlbumName,
+          duration: 0,
+          dateAdded: 0,
+          artwork: heroAlbumArtwork,
+        }
+      : null
+  ), [heroAlbumId, heroAlbumArtwork, heroAlbumName, heroAlbumArtist]);
+  const [heroAccent, setHeroAccent] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!heroPaletteSeed) {
+      setHeroAccent(null);
+      return;
+    }
+    let cancelled = false;
+    void getDynamicPalette(heroPaletteSeed).then(palette => {
+      if (!cancelled) setHeroAccent(palette.accent);
+    });
+    return () => { cancelled = true; };
+  }, [heroPaletteSeed]);
 
   if (recentTracks.length === 0) {
     return (
@@ -1996,13 +2111,19 @@ function HomePanel({
   }
 
   if (isDesktopViewport) {
-    const latestTrack = currentTrack ?? recentlyPlayedTracks[0] ?? recentTracks[0];
-    const pickAlbum = (latestTrack && albums.find(album => album.tracks.includes(latestTrack.id))) || albums[0] || null;
-    const pickTrack = pickAlbum ? recentTracks.find(track => pickAlbum.tracks.includes(track.id)) : undefined;
+    const { seedTrack, album: pickAlbum, track: pickTrack } = heroPick;
     const heroHue = hueFromId(pickAlbum?.id ?? 'staysound');
+    const hero = pickAlbum ? heroCopy(pickAlbum, pickTrack) : null;
+    // Keep the featured album out of the rail immediately below it.
+    const nightAlbums = featuredAlbums.filter(album => album.id !== pickAlbum?.id).slice(0, 8);
+    const historyTracks = recentlyPlayedTracks.filter(track => track.id !== seedTrack?.id).slice(0, 8);
+    const downloadedTracks = recentlyDownloadedTracks.slice(0, 8);
 
     return (
-      <section className="circ-home">
+      <section
+        className="circ-home"
+        style={heroAccent ? ({ '--accent': heroAccent } as CSSProperties) : undefined}
+      >
         {pickAlbum && (
           <div aria-hidden="true" className="circ-home-hero-art">
             <CircleArt size="100%" src={pickAlbum.artwork} hue={heroHue} ring />
@@ -2010,83 +2131,81 @@ function HomePanel({
         )}
 
         <div className="circ-home-welcome">
-          <p className="ss-eyebrow">Bienvenido de vuelta</p>
-          <h1>{timeOfDayGreeting()}</h1>
-
-          {pickAlbum && (
+          {pickAlbum && hero ? (
             <>
-              <p className="ss-eyebrow circ-home-pick-eyebrow">StaySound te sugiere</p>
-              <h2>{pickAlbum.name}</h2>
-              <p className="circ-home-pick-artist">{pickAlbum.artist}</p>
+              <p className="circ-home-greeting">{timeOfDayGreeting()}</p>
+              <h1>{hero.title}</h1>
+              <p className="circ-home-pick-artist">{hero.subtitle}</p>
               <QualityChip quality={formatQualitySpecs(pickTrack)} />
               <div className="circ-home-pick-actions">
-                <button type="button" aria-label={`Reproducir ${pickAlbum.name}`} className="circ-home-play" onClick={() => onPlayAlbum(pickAlbum)}>
-                  <PlayIcon size={26} />
+                <button type="button" aria-label={`Reproducir ${hero.title}`} className="circ-home-play" onClick={() => onPlayAlbum(pickAlbum)}>
+                  <PlayIcon size={20} />
+                  <span>Reproducir</span>
                 </button>
                 <button type="button" className="circ-home-pick-link" onClick={() => onSelectAlbum(pickAlbum)}>Ver álbum</button>
               </div>
             </>
+          ) : (
+            <h1 className="circ-home-greeting-solo">{timeOfDayGreeting()}</h1>
           )}
         </div>
 
-        {featuredAlbums.length > 0 && (
-          <div className="circ-home-rail">
-            <p className="ss-eyebrow">Para esta noche</p>
-            <div className="circ-home-rail-row">
-              {featuredAlbums.map(album => (
-                <CircleTile
-                  key={album.id}
-                  src={album.artwork}
-                  hue={hueFromId(album.id)}
-                  title={album.name}
-                  subtitle={album.artist}
-                  ring={Boolean(currentTrack && album.tracks.includes(currentTrack.id))}
-                  onClick={() => onPlayAlbum(album)}
-                />
-              ))}
-              <CarouselChevron onClick={() => onOpenTab('albums')} />
-            </div>
-          </div>
+        {nightAlbums.length > 0 && (
+          <CircHomeRail title="De tu biblioteca" actionLabel="Ver todos" onAction={() => onOpenTab('albums')}>
+            {nightAlbums.map(album => (
+              <CircleTile
+                key={album.id}
+                src={album.artwork}
+                hue={hueFromId(album.id)}
+                title={album.name}
+                subtitle={album.artist}
+                ring={Boolean(currentTrack && album.tracks.includes(currentTrack.id))}
+                onClick={() => onPlayAlbum(album)}
+              />
+            ))}
+          </CircHomeRail>
         )}
 
-        {recentlyPlayedTracks.length > 0 && (
-          <div className="circ-home-rail circ-home-history-rail">
-            <p className="ss-eyebrow">Reproducidas recientemente</p>
-            <div className="circ-home-rail-row">
-              {recentlyPlayedTracks.slice(0, 6).map(track => (
-                <CircleTile
-                  key={track.id}
-                  src={track.artwork}
-                  hue={hueFromId(track.id)}
-                  title={track.title}
-                  subtitle={track.artist}
-                  ring={track.id === currentTrack?.id}
-                  onClick={() => onPlayTrack(track, recentlyPlayedTracks)}
-                />
-              ))}
-              <CarouselChevron onClick={() => onOpenTab('songs')} label="Ver canciones" />
-            </div>
-          </div>
+        {historyTracks.length > 0 && (
+          <CircHomeRail
+            className="circ-home-history-rail"
+            title="Reproducidas recientemente"
+            actionLabel="Ver todas"
+            onAction={() => onOpenTab('songs')}
+          >
+            {historyTracks.map(track => (
+              <CircleTile
+                key={track.id}
+                src={track.artwork}
+                hue={hueFromId(track.id)}
+                title={track.title}
+                subtitle={track.artist}
+                ring={track.id === currentTrack?.id}
+                onClick={() => onPlayTrack(track, historyTracks)}
+              />
+            ))}
+          </CircHomeRail>
         )}
 
-        {recentlyDownloadedTracks.length > 0 && (
-          <div className="circ-home-rail circ-home-history-rail">
-            <p className="ss-eyebrow">Recién descargadas</p>
-            <div className="circ-home-rail-row">
-              {recentlyDownloadedTracks.slice(0, 6).map(track => (
-                <CircleTile
-                  key={track.id}
-                  src={track.artwork}
-                  hue={hueFromId(track.id)}
-                  title={track.title}
-                  subtitle={track.artist}
-                  ring={track.id === currentTrack?.id}
-                  onClick={() => onPlayTrack(track, recentlyDownloadedTracks)}
-                />
-              ))}
-              <CarouselChevron onClick={() => onOpenTab('songs')} label="Ver canciones descargadas" />
-            </div>
-          </div>
+        {downloadedTracks.length > 0 && (
+          <CircHomeRail
+            className="circ-home-history-rail"
+            title="Recién descargadas"
+            actionLabel="Ver todas"
+            onAction={() => onOpenTab('songs')}
+          >
+            {downloadedTracks.map(track => (
+              <CircleTile
+                key={track.id}
+                src={track.artwork}
+                hue={hueFromId(track.id)}
+                title={track.title}
+                subtitle={track.artist}
+                ring={track.id === currentTrack?.id}
+                onClick={() => onPlayTrack(track, downloadedTracks)}
+              />
+            ))}
+          </CircHomeRail>
         )}
       </section>
     );
@@ -2261,6 +2380,7 @@ function PlaylistsPanel({
             onChange={event => setName(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') handleCreate(); }}
             placeholder="Nombre de la playlist"
+            aria-label="Nombre de la playlist"
           />
           <button className="btn btn-primary" onClick={handleCreate}>
             <PlusIcon size={16} />
@@ -2270,7 +2390,7 @@ function PlaylistsPanel({
         <div className="empty-state compact">
           <div className="empty-state-icon"><PlaylistIcon size={48} /></div>
           <h2>Crea tu primera playlist</h2>
-          <p>Las playlists viven en este navegador y usan las canciones de tu biblioteca local.</p>
+          <p>Reúne tus canciones favoritas de la biblioteca en una lista.</p>
         </div>
       </section>
     );
@@ -2285,6 +2405,7 @@ function PlaylistsPanel({
             onChange={event => setName(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') handleCreate(); }}
             placeholder="Nueva playlist"
+            aria-label="Nombre de la nueva playlist"
           />
           <button className="icon-btn" onClick={handleCreate} aria-label="Crear playlist" title="Crear playlist">
             <PlusIcon size={18} />
@@ -2293,14 +2414,17 @@ function PlaylistsPanel({
 
         <div className="playlist-list">
           {playlists.map(playlist => {
-            const count = getPlaylistTracks(playlist).length;
+            const tracks = getPlaylistTracks(playlist);
+            const count = tracks.length;
+            const artwork = tracks.find(track => track.artwork)?.artwork;
             return (
               <button
                 key={playlist.id}
                 className={selectedPlaylist?.id === playlist.id ? 'active' : ''}
+                aria-pressed={selectedPlaylist?.id === playlist.id}
                 onClick={() => setSelectedPlaylistId(playlist.id)}
               >
-                <span className="playlist-dot"><PlaylistIcon size={18} /></span>
+                <span className="playlist-dot">{artwork ? <img src={artwork} alt="" /> : <PlaylistIcon size={18} />}</span>
                 <span>
                   <strong>{playlist.name}</strong>
                 <small>{count} {count === 1 ? 'canción' : 'canciones'}</small>
@@ -2315,8 +2439,12 @@ function PlaylistsPanel({
         {selectedPlaylist && (
           <>
             <div className="playlist-detail-head">
-              <div>
-                <span className="eyebrow">Playlist local</span>
+              <div className="playlist-cover" aria-hidden="true">
+                {selectedTracks.find(track => track.artwork)?.artwork
+                  ? <img src={selectedTracks.find(track => track.artwork)!.artwork} alt="" />
+                  : <PlaylistIcon size={48} />}
+              </div>
+              <div className="playlist-heading">
                 <h2>{selectedPlaylist.name}</h2>
                 <p>{selectedTracks.length} {selectedTracks.length === 1 ? 'canción' : 'canciones'} · {formatDuration(selectedTracks.reduce((sum, track) => sum + track.duration, 0))}</p>
               </div>
@@ -2337,7 +2465,7 @@ function PlaylistsPanel({
             </div>
 
             <div className="playlist-add-row">
-              <select value={selectedTrackId} onChange={event => setSelectedTrackId(event.target.value)}>
+              <select aria-label="Canción para agregar a la playlist" value={selectedTrackId} onChange={event => setSelectedTrackId(event.target.value)}>
                 <option value="">Agregar canción...</option>
                 {availableTracks.map(track => (
                   <option key={track.id} value={track.id}>{track.title} - {track.artist}</option>
@@ -2663,4 +2791,3 @@ function TidalDiscoveryPanel({
     </section>
   );
 }
-

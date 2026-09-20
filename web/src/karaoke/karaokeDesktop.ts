@@ -32,6 +32,7 @@ export interface KaraokeStems {
 }
 
 export type LocalLyricsLanguage = 'auto' | 'en-es' | 'es' | 'en';
+export type LyricsAlignmentEngine = 'mfa' | 'qwen-sofa';
 
 export interface LyricsLanguageHint {
   text: string;
@@ -80,6 +81,7 @@ export interface GeneratedLyrics {
   textSource?: string | null;
   textMatch?: number | null;
   acousticModel?: string | null;
+  alignmentNotes?: string[];
   lines: GeneratedLyricsLine[];
 }
 
@@ -236,8 +238,9 @@ export async function transcribeKaraokeVocals(
 export async function saveLocalGeneratedLyrics(
   path: string,
   lyrics: GeneratedLyrics,
+  engine: LyricsAlignmentEngine = 'mfa',
 ): Promise<GeneratedLyrics> {
-  return invoke<GeneratedLyrics>('save_local_generated_lyrics', { path, lyrics });
+  return invoke<GeneratedLyrics>('save_local_generated_lyrics', { path, lyrics, engine });
 }
 
 export async function persistLocalGeneratedLyrics(

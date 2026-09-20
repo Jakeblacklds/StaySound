@@ -11,6 +11,7 @@ import './styles/circulo.css';
 // Después de circulo.css a propósito: la pestaña de Descargas tiene su propio
 // layout y necesita ganarle a las reglas genéricas de `.downloads-panel`.
 import './styles/downloads.css';
+import './styles/collections.css';
 
 // Frame-hitch probe: idle until Cmd/Ctrl + Alt + P (or a stored opt-in).
 installPerfProbe();

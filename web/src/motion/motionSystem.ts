@@ -37,7 +37,8 @@ function copyForFlight(source: Element, kind: 'surface' | 'text') {
   const clone = source.cloneNode(true) as HTMLElement;
   Object.assign(clone.style, {
     position: 'fixed',
-    zIndex: '10000',
+    // Desktop flights stay below the persistent player (40).
+    zIndex: document.querySelector('.circ-app-shell') ? '30' : '10000',
     left: `${rect.left}px`,
     top: `${rect.top}px`,
     width: `${rect.width}px`,

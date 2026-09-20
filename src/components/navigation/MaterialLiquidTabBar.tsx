@@ -4,16 +4,17 @@
  *   - Icons lift + light up on touch, and stay lifted while selected
  *   - Radial accent glow behind the active icon (real light, not a pill)
  *   - Spring pop when a tab becomes active
+ *   - Android: inset capsule with a separately clipped material and lifted icons
  *   - Simulated frosted-glass base (album tint + sheen) + dynamic album art tint
  */
 import { usePlayerStore } from '@/src/stores';
-import { useAnimatedColors, useTheme } from '@/src/theme';
+import { typeScale, useAnimatedColors, useTheme } from '@/src/theme';
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { LinearGradient } from 'expo-linear-gradient';
 import * as Haptics from 'expo-haptics';
 import { usePathname } from 'expo-router';
 import React, { memo, useEffect, useMemo, useRef } from 'react';
-import { Pressable, StyleSheet, View } from 'react-native';
+import { Platform, Pressable, StyleSheet, View } from 'react-native';
 import Animated, {
   Easing,
   Extrapolation,
@@ -28,7 +29,7 @@ import Animated, {
 import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { TabBarIcon, TabIconName } from './TabBarIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { TAB_BAR_HEIGHT as BAR_HEIGHT } from '../player/playerLayout';
+import { TAB_BAR_HEIGHT as BAR_HEIGHT, ANDROID_DOCK_INSET } from '../player/playerLayout';
 
 // Above this expansion the dock is sliding away under the player — drop the
 // costly live blur and use an opaque album surface instead.
@@ -37,9 +38,14 @@ const BLUR_COLLAPSE_THRESHOLD = 0.12;
 // doesn't render a stale, still-scrolling snapshot of the previous screen.
 const NAV_FREEZE_MS = 320;
 
+const IS_ANDROID = Platform.OS === 'android';
+// Keep the existing player/content reservation; float the Android surface
+// inside it so the mini player and expanded-player transition stay aligned.
+const DOCK_HEIGHT = BAR_HEIGHT - 8;
+const DOCK_INSET = ANDROID_DOCK_INSET;
 const H_INSET = 12;
 const ICON_SIZE = 26;
-const GLOW_SIZE = 52;
+const GLOW_SIZE = IS_ANDROID ? 36 : 52;
 const LABEL_HEIGHT = 13;
 const ICON_LABEL_GAP = 5;
 // Icon + label are laid out as one stack and centered as a group. Before, the
@@ -51,8 +57,8 @@ const CONTENT_HEIGHT = ICON_SIZE + ICON_LABEL_GAP + LABEL_HEIGHT;
 const CONTENT_TOP = Math.round((BAR_HEIGHT - CONTENT_HEIGHT) / 2) - 2;
 
 // How far the icon rises when it becomes active, and the extra rise while held.
-const SELECTED_LIFT = -7;
-const PRESS_LIFT = -5;
+const SELECTED_LIFT = IS_ANDROID ? -1 : -7;
+const PRESS_LIFT = IS_ANDROID ? -1 : -5;
 
 const TAB_ICONS: Record<string, TabIconName> = {
   index: 'home',
@@ -115,8 +121,8 @@ const TabItem = memo(function TabItem({
 
     if (becoming) {
       popScale.value = withSequence(
-        withTiming(1.3, { duration: 110, easing: Easing.out(Easing.quad) }),
-        withSpring(1, { damping: 9, stiffness: 320, mass: 0.7 })
+        withTiming(IS_ANDROID ? 1.04 : 1.3, { duration: 110, easing: Easing.out(Easing.quad) }),
+        withSpring(1, { damping: IS_ANDROID ? 22 : 9, stiffness: 320, mass: 0.7 })
       );
     }
   }, [focused, popScale, sel]);
@@ -128,7 +134,7 @@ const TabItem = memo(function TabItem({
   const iconWrapStyle = useAnimatedStyle(() => ({
     transform: [
       { translateY: sel.value * SELECTED_LIFT + pressAmt.value * PRESS_LIFT },
-      { scale: popScale.value * (1 + sel.value * 0.06 + pressAmt.value * 0.12) },
+      { scale: popScale.value * (1 + sel.value * (IS_ANDROID ? 0.02 : 0.06) + pressAmt.value * (IS_ANDROID ? 0.03 : 0.12)) },
     ],
   }));
 
@@ -138,7 +144,7 @@ const TabItem = memo(function TabItem({
   const glowStyle = useAnimatedStyle(() => {
     const lift = sel.value * SELECTED_LIFT + pressAmt.value * PRESS_LIFT;
     return {
-      opacity: Math.max(sel.value * 0.95, pressAmt.value),
+      opacity: Math.max(sel.value * 0.95, pressAmt.value) * (IS_ANDROID ? 0.28 : 1),
       transform: [
         { translateY: -lift * 0.55 },
         { scale: 0.55 + sel.value * 0.45 + pressAmt.value * 0.2 },
@@ -156,7 +162,7 @@ const TabItem = memo(function TabItem({
 
   const labelStyle = useAnimatedStyle(() => ({
     color: interpolateColor(sel.value, [0, 1], [mutedColor, accentColor]),
-    opacity: interpolate(sel.value, [0, 1], [0.62, 1]),
+    opacity: interpolate(sel.value, [0, 1], [IS_ANDROID ? 0.9 : 0.62, 1]),
     transform: [{ translateY: interpolate(sel.value, [0, 1], [0, -1]) }],
   }));
 
@@ -169,10 +175,11 @@ const TabItem = memo(function TabItem({
       }}
       onPressOut={() => {
         // Bouncy release — the icon settles back down instead of snapping.
-        pressAmt.value = withSpring(0, { damping: 11, stiffness: 320, mass: 0.7 });
+        pressAmt.value = withSpring(0, { damping: IS_ANDROID ? 22 : 11, stiffness: 320, mass: 0.7 });
       }}
-      style={styles.itemButton}
+      style={[styles.itemButton, IS_ANDROID && styles.androidItemButton]}
       accessibilityRole="tab"
+      accessibilityLabel={label}
       accessibilityState={{ selected: focused }}
     >
       {/* Icon — lift + pop + glow. The glow rides along with the lift so the
@@ -191,7 +198,7 @@ const TabItem = memo(function TabItem({
         </Animated.View>
       </Animated.View>
 
-      <Animated.Text style={[styles.itemLabel, labelStyle]} numberOfLines={1}>
+      <Animated.Text style={[styles.itemLabel, IS_ANDROID && styles.androidItemLabel, labelStyle]} numberOfLines={1}>
         {label}
       </Animated.Text>
     </Pressable>
@@ -287,15 +294,27 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
     };
   }, [insets.bottom, expansion]);
 
+  const dockFrame = IS_ANDROID ? {
+    left: Math.max(DOCK_INSET, insets.left + 8),
+    right: Math.max(DOCK_INSET, insets.right + 8),
+    top: 4,
+    height: DOCK_HEIGHT,
+  } : undefined;
+
   return (
     <View
-      style={[styles.outer, { height: BAR_HEIGHT + insets.bottom }]}
+      style={[styles.outer, IS_ANDROID && styles.androidOuter, { height: BAR_HEIGHT + insets.bottom }]}
       pointerEvents="box-none"
     >
       {/* Frosted glass dock (blur + dynamic tint). Descends together with the
           icons as the player expands. */}
       <Animated.View
-        style={[StyleSheet.absoluteFill, navExitStyle]}
+        style={[
+          StyleSheet.absoluteFill,
+          IS_ANDROID && styles.androidSurface,
+          dockFrame,
+          navExitStyle,
+        ]}
         pointerEvents="none"
       >
         {/* Album-tinted frost base (replaces the costly live blur) */}
@@ -319,9 +338,13 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
         <Animated.View style={[StyleSheet.absoluteFill, navSolidStyle]} />
       </Animated.View>
 
-      <Animated.View style={navExitStyle}>
+      <Animated.View style={[
+        IS_ANDROID && styles.androidContent,
+        dockFrame,
+        navExitStyle,
+      ]}>
         <View
-          style={styles.itemsRow}
+          style={[styles.itemsRow, IS_ANDROID && styles.androidItemsRow]}
         >
           {visibleRoutes.map((route, index) => {
             const descriptor = descriptors[route.key];
@@ -339,7 +362,7 @@ export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
               // A tab that actually changes screen deserves a firmer thump than
               // re-tapping the one you're already on.
               Haptics.impactAsync(
-                focused
+                IS_ANDROID || focused
                   ? Haptics.ImpactFeedbackStyle.Light
                   : Haptics.ImpactFeedbackStyle.Medium,
               );
@@ -385,6 +408,29 @@ const styles = StyleSheet.create({
     bottom: 0,
     overflow: 'hidden',
     elevation: 0,
+  },
+  // Clip only the material, allowing the selected icon to rise naturally.
+  androidOuter: {
+    overflow: 'visible',
+  },
+  androidItemButton: {
+    paddingTop: Math.round((DOCK_HEIGHT - ICON_SIZE - ICON_LABEL_GAP - typeScale.micro.lineHeight) / 2),
+  },
+  androidSurface: {
+    bottom: undefined,
+    borderRadius: DOCK_HEIGHT / 2,
+    overflow: 'hidden',
+  },
+  androidContent: {
+    position: 'absolute',
+  },
+  androidItemsRow: {
+    height: DOCK_HEIGHT,
+    paddingHorizontal: 8,
+  },
+  androidItemLabel: {
+    ...typeScale.micro,
+    letterSpacing: 0.1,
   },
   itemsRow: {
     height: BAR_HEIGHT,

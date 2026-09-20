@@ -10,6 +10,13 @@ import refine_sustains
 
 
 class RefineSustainsTests(unittest.TestCase):
+    def test_next_onset_keeps_nearby_and_overlapping_following_lines(self):
+        # A word ending at 1000 ms must not extend through a new line at
+        # 1020 ms (previously skipped by the +40 ms lookup tolerance).
+        self.assertEqual(refine_sustains.next_onset_after([100, 1020, 2500], 100), 1020)
+        self.assertEqual(refine_sustains.next_onset_after([100, 900, 2500], 100), 900)
+        self.assertIsNone(refine_sustains.next_onset_after([100], 100))
+
     def test_extends_a_connected_sung_vowel_but_stops_at_silence(self):
         sample_rate = refine_sustains.TARGET_SR
         time = np.arange(round(sample_rate * 2.2)) / sample_rate

@@ -13,6 +13,7 @@ import {
   type GeneratedLyrics,
   type GeneratedLyricsLine,
   type LocalLyricsLanguage,
+  type LyricsAlignmentEngine,
 } from '../karaoke/karaokeDesktop';
 import { lyricsSourcesStore } from '../library/lyricsSources';
 import { CloseIcon, SpinnerIcon } from './icons';
@@ -373,6 +374,7 @@ function formatLyricsJson(lyrics: GeneratedLyrics): string {
 export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorProps) {
   const [phase, setPhase] = useState<GeneratorPhase>('setup');
   const [language, setLanguage] = useState<LocalLyricsLanguage>('auto');
+  const [alignmentEngine, setAlignmentEngine] = useState<LyricsAlignmentEngine>('qwen-sofa');
   const [progress, setProgress] = useState(0);
   const [detail, setDetail] = useState('');
   const [error, setError] = useState('');
@@ -517,8 +519,8 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
       }
       const aligned = saveExactJson
         ? await persistLocalGeneratedLyrics(nativePath, edited)
-        : await saveLocalGeneratedLyrics(nativePath, edited);
-      lyricsSourcesStore.saveGenerated(aligned);
+        : await saveLocalGeneratedLyrics(nativePath, edited, alignmentEngine);
+      lyricsSourcesStore.saveGenerated(track, aligned);
       setDraft(aligned);
       setEditedText(aligned.lines.map(line => line.text).join('\n'));
       setEditedJson(formatLyricsJson(aligned));
@@ -527,6 +529,8 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
       setJsonDirty(false);
       setSavedNotice(saveExactJson
         ? 'Guardado.'
+        : aligned.alignmentNotes?.length
+          ? aligned.alignmentNotes.join(' ')
         : aligned.alignment === 'word-timing-fallback'
           ? 'Guardado con tiempos de palabras.'
           : 'Sincronización lista.');
@@ -539,7 +543,7 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
     } finally {
       unlisten?.();
     }
-  }, [draft, editedJson, editedText, editorMode, nativePath, savedAligned]);
+  }, [draft, editedJson, editedText, editorMode, nativePath, savedAligned, track, alignmentEngine]);
 
   const selectEditorMode = useCallback((mode: EditorMode) => {
     if (!draft || mode === editorMode) return;
@@ -631,6 +635,23 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
                 ))}
               </div>
             </div>
+            <div className="local-lyrics-field">
+              <span className="local-lyrics-field-label">Sincronización</span>
+              <div className="local-lyrics-language" role="radiogroup" aria-label="Motor de sincronización">
+                {([
+                  ['qwen-sofa', 'Qwen + SOFA · experimental'],
+                  ['mfa', 'MFA · clásico'],
+                ] as const).map(([id, label]) => (
+                  <button key={id} type="button" role="radio"
+                    aria-checked={alignmentEngine === id}
+                    className={alignmentEngine === id ? 'active' : ''}
+                    onClick={() => setAlignmentEngine(id)}>{label}</button>
+                ))}
+              </div>
+              <p>{alignmentEngine === 'qwen-sofa'
+                ? 'Descarga modelos adicionales la primera vez. Usa MFA como respaldo y SOFA para fonemas en inglés.'
+                : 'Alineación local por palabras y fonemas.'}</p>
+            </div>
             {error ? <p className="local-lyrics-error">{error}</p> : null}
             {!nativePath ? (
               <p className="local-lyrics-error">Esta función requiere una canción de tu biblioteca local.</p>
@@ -667,7 +688,7 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
               <div className="local-lyrics-editor-meta" aria-label="Información de la letra">
                 <span>{editedText.split(/\r?\n/).filter(line => line.trim()).length} líneas</span>
                 <span>{draft.textSource ?? 'Transcripción'}</span>
-                {draft.textMatch != null ? <span>{Math.round(draft.textMatch * 100)}%</span> : null}
+                {draft.textMatch != null ? <span>{Math.round(draft.textMatch * 100)}% coincidencia de texto</span> : null}
                 {savedAligned && sustainedCount > 0 ? <span>{sustainedCount} sostenidas</span> : null}
               </div>
               <div className="local-lyrics-editor-tabs" role="tablist" aria-label="Vista del editor">

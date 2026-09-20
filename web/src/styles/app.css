@@ -3758,7 +3758,10 @@ input[type="range"]::-moz-range-thumb {
 .fp-artwork-motion.ready {
   opacity: 1;
   transform: scale(1);
-  filter: blur(0) saturate(1);
+  /* `none`, not `blur(0) saturate(1)`: an identity filter still routes every
+     decoded video frame through a filter pass for as long as the cover plays.
+     The reveal still interpolates, since `none` blends as the identity list. */
+  filter: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

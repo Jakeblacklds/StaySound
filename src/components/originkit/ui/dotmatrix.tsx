@@ -186,26 +186,7 @@ void main() {
   float density = clamp(uAudio.w, 0.0, 1.0) * 0.030 * uReactivity;
   float bloom = 1.0 + swell * 0.035 + pulse * 0.030 + ring * 0.090;
 
-  float mark = 0.0;
-  if (uUseGlyphAtlas == 1 && uCharCount > 0 && uGlyphGrid.x > 0 && uGlyphGrid.y > 0) {
-    float g = clamp(gray + uPaletteBias, 0.0, 1.0);
-    int idx = int(clamp(floor(g * float(uCharCount - 1) + 0.5), 0.0, float(uCharCount - 1)));
-    vec2 cellUV = fract(pix / cell);
-    vec2 grid = vec2(uGlyphGrid);
-    vec2 tileSize = 1.0 / grid;
-    float colIdx = float(idx % uGlyphGrid.x);
-    float rowIdx = floor(float(idx) / float(uGlyphGrid.x));
-    vec2 atlasUV = (vec2(colIdx, rowIdx) + cellUV) * tileSize;
-    vec3 glyphSample = texture(uGlyphAtlas, atlasUV).rgb;
-    mark = dot(glyphSample, vec3(0.299, 0.587, 0.114));
-  } else {
-    vec2 cellUV = fract(pix / cell) - 0.5;
-    float dist = length(cellUV);
-    float radius = clamp(gray + uPaletteBias + density, 0.0, 1.0) * 0.5 * bloom;
-    float aa = fwidth(dist) + 1e-4;
-    mark = 1.0 - smoothstep(radius - aa, radius + aa, dist);
-  }
-
+  // Resolved before the mark so the dot's size can follow its opacity.
   float g2 = clamp(gray + uPaletteBias + density, 0.0, 1.0);
   int cnt = max(uPaletteCount, 1);
   vec3 dotCol;
@@ -222,6 +203,39 @@ void main() {
     dotOpacity = mix(uPaletteA[i0], uPaletteA[i0 + 1], f);
   }
   dotOpacity = min(1.0, dotOpacity * (1.0 + ring * 0.10 + swell * 0.03));
+
+  float mark = 0.0;
+  if (uUseGlyphAtlas == 1 && uCharCount > 0 && uGlyphGrid.x > 0 && uGlyphGrid.y > 0) {
+    float g = clamp(gray + uPaletteBias, 0.0, 1.0);
+    int idx = int(clamp(floor(g * float(uCharCount - 1) + 0.5), 0.0, float(uCharCount - 1)));
+    vec2 cellUV = fract(pix / cell);
+    vec2 grid = vec2(uGlyphGrid);
+    vec2 tileSize = 1.0 / grid;
+    float colIdx = float(idx % uGlyphGrid.x);
+    float rowIdx = floor(float(idx) / float(uGlyphGrid.x));
+    vec2 atlasUV = (vec2(colIdx, rowIdx) + cellUV) * tileSize;
+    vec3 glyphSample = texture(uGlyphAtlas, atlasUV).rgb;
+    mark = dot(glyphSample, vec3(0.299, 0.587, 0.114));
+  } else {
+    // Halftone falloff. Where the palette runs out toward its transparent
+    // stop, a full-size dot that only dimmed kept every cell the same size up
+    // to the edge, so the boundary of a dark region stepped cell by cell and
+    // read as pixelation. Shrinking the dot as it fades — the way printed
+    // halftone does — turns that stair into a gradient of smaller dots. Dots
+    // at or above 70% of the palette's strongest alpha keep their full size.
+    float peakA = 0.0;
+    for (int i = 0; i < 10; i++) {
+      if (i < cnt) peakA = max(peakA, uPaletteA[i]);
+    }
+    float fade = peakA > 0.0 ? clamp(dotOpacity / (peakA * 0.7), 0.0, 1.0) : 1.0;
+    vec2 cellUV = fract(pix / cell) - 0.5;
+    float dist = length(cellUV);
+    float radius = clamp(gray + uPaletteBias + density, 0.0, 1.0) * 0.5 * bloom
+                 * mix(0.3, 1.0, sqrt(fade));
+    float aa = fwidth(dist) + 1e-4;
+    mark = 1.0 - smoothstep(radius - aa, radius + aa, dist);
+  }
+
   fragColor = vec4(dotCol, mark * dotOpacity);
 }`;
 
@@ -439,7 +453,23 @@ interface DottedBackgroundProps {
     fps?: number;
     /** Device-pixel-ratio ceiling for the backing canvas. */
     maxDpr?: number;
+    /**
+     * Stops the render loop while keeping the GL context (and the last frame)
+     * alive. A field that is scrolled away, covered by a full-screen surface or
+     * on a hidden document still costs two full-screen fragment passes per
+     * frame, and on WKWebView those come out of the same budget the lyrics and
+     * the rest of the window are painting from.
+     */
+    paused?: boolean;
+    /**
+     * Called when submitting one frame's draw calls took longer than
+     * `SLOW_SUBMIT_MS`. WebGL calls only queue work, so a slow submit means the
+     * GPU is backed up and the driver made the page wait for it.
+     */
+    onSlowFrame?: (submitMs: number) => void;
 }
+
+const SLOW_SUBMIT_MS = 40;
 
 export default function DottedBackground({
     frequency = 1,
@@ -459,6 +489,8 @@ export default function DottedBackground({
     reactivity = 1,
     fps = 30,
     maxDpr = 2,
+    paused = false,
+    onSlowFrame,
 }: DottedBackgroundProps) {
     const useGlyphAtlasFlag = useGlyphAtlas === true;
     const paletteColors =
@@ -478,7 +510,7 @@ export default function DottedBackground({
         return sanitized.length > 0 ? sanitized : DEFAULT_CHARACTERS;
     })();
 
-    const effectivePlay = true;
+    const effectivePlay = !paused;
 
     // Bumped whenever the GL context has to be rebuilt after a loss.
     const [contextEpoch, setContextEpoch] = useState(0);
@@ -505,10 +537,15 @@ export default function DottedBackground({
     cellSizeRef.current = cellSize;
     const speedRef = useRef(speed);
     const fpsRef = useRef(fps);
+    const onSlowFrameRef = useRef(onSlowFrame);
+    onSlowFrameRef.current = onSlowFrame;
     reactivityRef.current = reactivity;
     speedRef.current = speed;
     fpsRef.current = fps;
     const isPlayingRef = useRef(effectivePlay);
+    // The frame body is built inside the mount effect (it closes over the
+    // programs and meshes), but pausing has to be able to restart it later.
+    const updateRef = useRef<((time: number) => void) | null>(null);
     const glyphTextureRef = useRef<any>(null);
     const glyphGridRef = useRef<any>(null);
     const dummyGlyphTextureRef = useRef<any>(null);
@@ -810,6 +847,7 @@ export default function DottedBackground({
             dotPulse[2] = pulseAge;
             dotProgram.uniforms.uReactivity.value = react;
 
+            const submitStart = performance.now();
             renderer.render({
                 scene: perlinMesh,
                 camera,
@@ -824,8 +862,11 @@ export default function DottedBackground({
                 gl.canvas.height,
             ];
             renderer.render({ scene: dotMesh, camera });
+            const submitMs = performance.now() - submitStart;
+            if (submitMs > SLOW_SUBMIT_MS) onSlowFrameRef.current?.(submitMs);
         };
 
+        updateRef.current = update;
         renderOnce();
         isPlayingRef.current = effectivePlay;
         if (effectivePlay && rafIdRef.current == null) {
@@ -834,6 +875,7 @@ export default function DottedBackground({
         }
 
         return () => {
+            updateRef.current = null;
             if (rafIdRef.current) cancelAnimationFrame(rafIdRef.current);
             if (resizeHandler)
                 window.removeEventListener("resize", resizeHandler);
@@ -893,6 +935,24 @@ export default function DottedBackground({
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [contextEpoch]);
+
+    // Pausing must not tear the context down — rebuilding one costs a shader
+    // compile, which is itself a visible stall. Only the rAF loop stops; the
+    // last frame stays on screen.
+    useEffect(() => {
+        isPlayingRef.current = effectivePlay;
+        if (!effectivePlay) {
+            if (rafIdRef.current != null) {
+                cancelAnimationFrame(rafIdRef.current);
+                rafIdRef.current = null;
+            }
+            return;
+        }
+        const update = updateRef.current;
+        if (!update || rafIdRef.current != null) return;
+        lastTimeRef.current = 0;
+        rafIdRef.current = requestAnimationFrame(update);
+    }, [effectivePlay, contextEpoch]);
 
     useEffect(() => {
         const perlin = perlinProgramRef.current;
@@ -1003,9 +1063,10 @@ export default function DottedBackground({
         reactivity,
     ]);
 
-    // `effectivePlay` is a constant here; the mount effect owns the single rAF
-    // loop. A second copy of it used to live at this spot with its own inlined
-    // (and, once the audio integration landed, divergent) frame body.
+    // The mount effect owns the single rAF loop and the pause effect above is
+    // the only other thing that touches it. A second copy of the loop used to
+    // live at this spot with its own inlined (and, once the audio integration
+    // landed, divergent) frame body.
     return (
         <div
             style={{

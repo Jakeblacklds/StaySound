@@ -108,6 +108,19 @@ const APPLY_SETTLE_MS = 2_000;
 const APPLY_TIMEOUT_MS = 20_000;
 
 /**
+ * Applying a candidate is not enough on its own: the element's own provider
+ * chain awaits up to five sequential requests with an 8s timeout each and only
+ * checks its abort signal once, right after metadata resolution. A chain that
+ * was already past that point when we applied keeps running and, when it
+ * finishes, overwrites `lyrics`/`availableSources` wholesale — which is how a
+ * locally generated word-by-word letter silently reverted to the line-synced
+ * or plain fallback the providers happened to return. Hold the selection for
+ * longer than that chain can possibly take.
+ */
+const SELECTION_HOLD_MS = 60_000;
+const SELECTION_HOLD_POLL_MS = 200;
+
+/**
  * A plain/line-only response is a fallback, not a durable answer. Providers can
  * be temporarily rate-limited, so retry it on the next session instead of
  * letting (for example) Genius permanently hide word-synchronised lyrics.
@@ -329,7 +342,7 @@ function ttmlTime(milliseconds: number): string {
   return (Math.max(0, milliseconds) / 1000).toFixed(3);
 }
 
-function generatedLyricsTtml(lyrics: GeneratedLyrics): string {
+export function generatedLyricsTtml(lyrics: GeneratedLyrics): string {
   const lines = lyrics.lines.filter(line => line.words.length > 0);
   const body = lines.map((line, lineIndex) => {
     const spans = line.words.flatMap((word, wordIndex) => {
@@ -344,6 +357,75 @@ function generatedLyricsTtml(lyrics: GeneratedLyrics): string {
   }).join('');
   const duration = lines.at(-1)?.endMs ?? 0;
   return `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="Word" xml:lang="${xmlEscape(lyrics.language)}"><body dur="${ttmlTime(duration)}"><div>${body}</div></body></tt>`;
+}
+
+export interface LocalGeneratedLyrics {
+  lyrics: GeneratedLyrics;
+  /** The same payload as TTML, ready to hand to `<am-lyrics ttml>`. */
+  ttml: string;
+}
+
+/**
+ * One lookup per audio file, shared by everyone who needs it.
+ *
+ * The lyrics view has to know whether a track carries a locally generated
+ * letter *before* it mounts `<am-lyrics>` — the element starts its provider
+ * chain from `connectedCallback()`, and that chain checks its abort signal
+ * only once, so anything it began before the local payload arrived still
+ * overwrites the rendered lyrics when it finishes. Mounting with the TTML
+ * already set makes the element take its local branch and never start the
+ * chain at all. The store asks for the same file a moment later; memoizing
+ * keeps that to a single IPC round trip.
+ */
+const localGeneratedByPath = new Map<string, Promise<LocalGeneratedLyrics | null>>();
+
+/** Keeps the memo to the handful of tracks a listener moves between. */
+const LOCAL_GENERATED_MEMO_LIMIT = 8;
+
+function memoizeLocalGenerated(
+  path: string,
+  request: Promise<LocalGeneratedLyrics | null>,
+): void {
+  localGeneratedByPath.set(path, request);
+  for (const key of localGeneratedByPath.keys()) {
+    if (localGeneratedByPath.size <= LOCAL_GENERATED_MEMO_LIMIT) break;
+    localGeneratedByPath.delete(key);
+  }
+}
+
+export function loadLocalGeneratedLyricsFor(track: Track): Promise<LocalGeneratedLyrics | null> {
+  const path = getKaraokeTrackPath(track);
+  if (!path) return Promise.resolve(null);
+
+  const pending = localGeneratedByPath.get(path);
+  if (pending) return pending;
+
+  const request: Promise<LocalGeneratedLyrics | null> = loadLocalGeneratedLyrics(path)
+    .then(lyrics => (lyrics?.lines?.length
+      ? { lyrics, ttml: generatedLyricsTtml(lyrics) }
+      : null))
+    .catch(() => null)
+    .then(result => {
+      // "No local letter" is also what a transient failure looks like — the
+      // desktop rejects the read until the music folder is authorized. Only a
+      // real letter is worth remembering; anything else is asked again.
+      if (!result && localGeneratedByPath.get(path) === request) {
+        localGeneratedByPath.delete(path);
+      }
+      return result;
+    });
+  memoizeLocalGenerated(path, request);
+  return request;
+}
+
+/** Replaces the memoized entry after the generator writes a new letter. */
+function rememberLocalGenerated(track: Track, lyrics: GeneratedLyrics): void {
+  const path = getKaraokeTrackPath(track);
+  if (!path) return;
+  memoizeLocalGenerated(
+    path,
+    Promise.resolve({ lyrics, ttml: generatedLyricsTtml(lyrics) }),
+  );
 }
 
 function toCandidates(sources: EngineSource[]): LyricsCandidate[] {
@@ -449,20 +531,25 @@ async function sweepProviders(
   return toCandidates(engine.mergeAndSortSources?.(collected) ?? collected);
 }
 
+/**
+ * Installs a candidate and returns the source list it installed, so the caller
+ * can later tell its own list apart from one the element replaced.
+ */
 function applyToElement(
   element: AmLyricsElement,
   candidates: LyricsCandidate[],
   index: number,
-): void {
+): EngineSource[] | null {
   const candidate = candidates[index];
-  if (!candidate) return;
+  if (!candidate) return null;
 
   const internal = element as AmLyricsInternals;
-  internal.availableSources = candidates.map(entry => ({
+  const sources: EngineSource[] = candidates.map(entry => ({
     lines: entry.lines,
     source: entry.source,
     songwriters: entry.songwriters,
   }));
+  internal.availableSources = sources;
   // We have already asked every provider; stop the element's own footer
   // switcher from running the whole discovery chain again.
   internal.hasFetchedAllProviders = true;
@@ -470,7 +557,7 @@ function applyToElement(
 
   if (typeof internal.applySourceAtIndex === 'function') {
     void internal.applySourceAtIndex(index);
-    return;
+    return sources;
   }
 
   // If upstream renames that method, assigning the reactive state still swaps
@@ -480,6 +567,7 @@ function applyToElement(
   internal.lyricsSource = candidate.source;
   if (candidate.songwriters) internal.songwriters = candidate.songwriters;
   internal.requestUpdate?.();
+  return sources;
 }
 
 const EMPTY_STATE: LyricsSourcesState = {
@@ -506,6 +594,15 @@ class LyricsSourcesStore {
 
   private applyTimer = 0;
 
+  private holdTimer = 0;
+
+  /** The selection currently defended against a late provider-chain write. */
+  private held: {
+    candidateId: string;
+    sources: EngineSource[];
+    lines: EngineLine[];
+  } | null = null;
+
   subscribe = (listener: () => void): (() => void) => {
     this.listeners.add(listener);
     return () => {
@@ -525,6 +622,72 @@ class LyricsSourcesStore {
       window.clearInterval(this.applyTimer);
       this.applyTimer = 0;
     }
+    this.releaseSelection();
+  }
+
+  private releaseSelection(): void {
+    if (this.holdTimer) {
+      window.clearInterval(this.holdTimer);
+      this.holdTimer = 0;
+    }
+    this.held = null;
+  }
+
+  /**
+   * Applies a candidate and keeps it applied for as long as the element's own
+   * provider chain could still finish and overwrite it.
+   *
+   * The element replaces `availableSources` with a brand new array whenever
+   * that chain lands, so a changed identity means the chain won, while our own
+   * array with a different index means the user cycled sources in the
+   * element's footer — and their choice is the one that must stand.
+   */
+  private applyAndHold(candidates: LyricsCandidate[], index: number, token: number): void {
+    const element = this.element;
+    if (!element) return;
+
+    const sources = applyToElement(element, candidates, index);
+    if (!sources) return;
+
+    this.releaseSelection();
+    this.held = { candidateId: candidates[index].id, sources, lines: candidates[index].lines };
+
+    // A locally generated letter is the user's own work and has no better
+    // answer to wait for, so it is defended for as long as this element lives
+    // rather than for the window a provider chain needs to unwind.
+    const deadline = candidates[index].id === LOCAL_GENERATED_CANDIDATE_ID
+      ? Number.POSITIVE_INFINITY
+      : Date.now() + SELECTION_HOLD_MS;
+    this.holdTimer = window.setInterval(() => {
+      const held = this.held;
+      if (!held || token !== this.token || !element.isConnected || Date.now() > deadline) {
+        this.releaseSelection();
+        return;
+      }
+
+      const internal = element as AmLyricsInternals;
+      if (internal.lyrics === held.lines) return;
+      if (internal.availableSources === held.sources) {
+        this.releaseSelection();
+        return;
+      }
+
+      const position = this.state.candidates.findIndex(entry => entry.id === held.candidateId);
+      if (position === -1) {
+        this.releaseSelection();
+        return;
+      }
+      const restored = applyToElement(element, this.state.candidates, position);
+      if (!restored) {
+        this.releaseSelection();
+        return;
+      }
+      this.held = {
+        candidateId: held.candidateId,
+        sources: restored,
+        lines: this.state.candidates[position].lines,
+      };
+    }, SELECTION_HOLD_POLL_MS);
   }
 
   attach(element: AmLyricsElement | null, track: Track | null): void {
@@ -541,29 +704,31 @@ class LyricsSourcesStore {
       return;
     }
 
-    // A reused <am-lyrics> element must not carry the previous track's local
-    // payload while this track's file is being resolved.
-    element.ttml = undefined;
-
     const trackKey = getLyricsTrackKey(track);
     this.state = { ...EMPTY_STATE, trackKey, canSearch: true };
     for (const listener of this.listeners) listener();
 
-    const nativePath = getKaraokeTrackPath(track);
-    const localLyrics = nativePath
-      ? loadLocalGeneratedLyrics(nativePath).catch(() => null)
-      : Promise.resolve(null);
-
-    void Promise.all([readCachedLyrics(trackKey), localLyrics]).then(([entry, generated]) => {
+    void Promise.all([
+      readCachedLyrics(trackKey),
+      loadLocalGeneratedLyricsFor(track),
+    ]).then(([entry, local]) => {
       if (token !== this.token) return;
       let candidates = entry?.candidates as unknown as LyricsCandidate[] | undefined;
       candidates = Array.isArray(candidates) ? candidates : [];
-      if (generated?.lines?.length) {
-        element.ttml = generatedLyricsTtml(generated);
+      const generated = local?.lyrics ?? null;
+      if (local) {
+        // The view mounts the element with this exact payload, so assigning it
+        // again would only restart the element's fetch cycle. Assign it solely
+        // when the element is carrying something else — a reused element, or a
+        // letter that was generated after this one mounted.
+        if (element.ttml !== local.ttml) element.ttml = local.ttml;
         candidates = [
-          generatedLyricsCandidate(generated),
+          generatedLyricsCandidate(local.lyrics),
           ...candidates.filter(candidate => candidate.id !== LOCAL_GENERATED_CANDIDATE_ID),
         ];
+      } else if (element.ttml) {
+        // A reused element must not keep the previous track's local payload.
+        element.ttml = undefined;
       }
       if (candidates.length === 0) return;
 
@@ -631,7 +796,7 @@ class LyricsSourcesStore {
 
       this.cancelPendingApply();
       const index = this.state.candidates.findIndex(entry => entry.id === candidateId);
-      if (index !== -1) applyToElement(element, this.state.candidates, index);
+      if (index !== -1) this.applyAndHold(this.state.candidates, index, token);
     }, APPLY_POLL_MS);
   }
 
@@ -688,7 +853,7 @@ class LyricsSourcesStore {
       fromCache: false,
     });
 
-    applyToElement(element, candidates, selectedIndex);
+    this.applyAndHold(candidates, selectedIndex, token);
     void writeCachedLyrics(this.toCacheEntry(trackKey, candidates, selected.id, fetchedAt));
   }
 
@@ -699,7 +864,7 @@ class LyricsSourcesStore {
 
     this.cancelPendingApply();
     this.setState({ selectedId: candidateId });
-    applyToElement(element, this.state.candidates, index);
+    this.applyAndHold(this.state.candidates, index, this.token);
     void writeCachedLyrics(
       this.toCacheEntry(
         this.state.trackKey,
@@ -739,27 +904,46 @@ class LyricsSourcesStore {
     return null;
   }
 
-  saveGenerated(lyrics: GeneratedLyrics): void {
-    const element = this.element;
-    if (!element || !this.track || !lyrics.lines.length) return;
+  saveGenerated(track: Track, lyrics: GeneratedLyrics): void {
+    if (!lyrics.lines.length) return;
 
+    const trackKey = getLyricsTrackKey(track);
     const generated = generatedLyricsCandidate(lyrics);
-    element.ttml = generatedLyricsTtml(lyrics);
-    const candidates = [
-      generated,
-      ...this.state.candidates.filter(candidate => candidate.id !== generated.id),
-    ];
     const fetchedAt = Date.now();
-    this.cancelPendingApply();
-    this.setState({
-      status: 'ready',
-      candidates,
-      selectedId: generated.id,
-      fetchedAt,
-      fromCache: false,
+    const element = this.element;
+    // The next mount must see this letter, not the one on disk when the player
+    // first asked for it.
+    rememberLocalGenerated(track, lyrics);
+
+    if (element && this.state.trackKey === trackKey) {
+      element.ttml = generatedLyricsTtml(lyrics);
+      const candidates = [
+        generated,
+        ...this.state.candidates.filter(candidate => candidate.id !== generated.id),
+      ];
+      this.cancelPendingApply();
+      this.setState({
+        status: 'ready',
+        candidates,
+        selectedId: generated.id,
+        fetchedAt,
+        fromCache: false,
+      });
+      this.applyAndHold(candidates, 0, this.token);
+      void writeCachedLyrics(this.toCacheEntry(trackKey, candidates, generated.id, fetchedAt));
+      return;
+    }
+
+    // The generator can be opened with the lyrics panel closed, so there may be
+    // no element to drive. The choice still has to be recorded, or the next
+    // play would silently fall back to whatever the providers return.
+    void readCachedLyrics(trackKey).then(entry => {
+      const previous = ((entry?.candidates ?? []) as unknown as LyricsCandidate[])
+        .filter(candidate => candidate.id !== generated.id);
+      void writeCachedLyrics(
+        this.toCacheEntry(trackKey, [generated, ...previous], generated.id, fetchedAt),
+      );
     });
-    applyToElement(element, candidates, 0);
-    void writeCachedLyrics(this.toCacheEntry(this.state.trackKey, candidates, generated.id, fetchedAt));
   }
 
   private toCacheEntry(

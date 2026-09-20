@@ -92,10 +92,39 @@ export function PlayerBarCirculo({
   const availablePlaylists = playlists.filter(
     playlist => !playlist.readonly && !playlist.trackIds.includes(currentTrack.id),
   );
+  const hasPlaylistAction = playlists.length > 0 && Boolean(onAddToPlaylist);
+
+  const volumeControl = (
+    <div className="circ-pb-volume">
+      <button
+        type="button"
+        aria-label={volume > 0 ? 'Silenciar' : 'Activar sonido'}
+        onClick={() => onVolume(volume > 0 ? 0 : 0.9)}
+      >
+        <VolumeIcon size={20} />
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={volumePercent}
+        onChange={event => onVolume(event.currentTarget.valueAsNumber / 100)}
+        aria-label="Volumen"
+        style={{ '--val': `${volumePercent}%` } as CSSProperties}
+      />
+    </div>
+  );
 
   return (
     <footer className={`circ-player-bar ${fullPlayerOpen ? 'is-immersive' : ''}`}>
-      {fullPlayerOpen ? null : (
+      {/* With the full player open the disc and copy are on screen above, so
+          this zone holds the volume instead: it balances Radio and Playlist on
+          the right, which is what lets the transport sit on the window's
+          centre rather than on the centre of what the utilities leave over. */}
+      {fullPlayerOpen ? (
+        <div className="circ-pb-lado">{volumeControl}</div>
+      ) : (
         <div className="circ-pb-obra" onClick={onOpenFullPlayer} role="button" tabIndex={0}
           onKeyDown={event => { if (event.key === 'Enter') onOpenFullPlayer(); }}>
           <CircleArt size={64} src={currentTrack.artwork} hue={hue} className="circ-pb-art" />
@@ -153,7 +182,9 @@ export function PlayerBarCirculo({
           <SyncIcon size={22} />
           <span className="circ-pb-utility-label">Radio</span>
         </button>
-        <span className="circ-pb-divider" />
+        {/* A divider separates two things; in the immersive bar volume has moved
+            left, so nothing may follow the last utility. */}
+        {hasPlaylistAction || !fullPlayerOpen ? <span className="circ-pb-divider" /> : null}
         {playlists.length > 0 && onAddToPlaylist ? (
           <>
             {/* A native <select> under an invisible overlay: the chrome matches the
@@ -178,7 +209,7 @@ export function PlayerBarCirculo({
                 ))}
               </select>
             </label>
-            <span className="circ-pb-divider" />
+            {fullPlayerOpen ? null : <span className="circ-pb-divider" />}
           </>
         ) : null}
         {fullPlayerOpen ? null : (
@@ -190,25 +221,7 @@ export function PlayerBarCirculo({
             <span className="circ-pb-divider" />
           </>
         )}
-        <div className="circ-pb-volume">
-          <button
-            type="button"
-            aria-label={volume > 0 ? 'Silenciar' : 'Activar sonido'}
-            onClick={() => onVolume(volume > 0 ? 0 : 0.9)}
-          >
-            <VolumeIcon size={20} />
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={volumePercent}
-            onChange={event => onVolume(event.currentTarget.valueAsNumber / 100)}
-            aria-label="Volumen"
-            style={{ '--val': `${volumePercent}%` } as CSSProperties}
-          />
-        </div>
+        {fullPlayerOpen ? null : volumeControl}
       </div>
     </footer>
   );

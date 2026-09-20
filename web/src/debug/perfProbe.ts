@@ -17,6 +17,10 @@
  */
 
 const HITCH_MS = 250;
+/** Timer heartbeat. Runs only when the main thread is free, independent of paint. */
+const HEARTBEAT_MS = 50;
+/** How close before a stall a marked event must be to be blamed for it. */
+const MARK_WINDOW_MS = 400;
 const SEVERE_MS = 1_000;
 const MAX_EVENTS = 40;
 const STORAGE_KEY = 'staysound_perf';
@@ -43,6 +47,10 @@ class PerfProbe {
   private observer: PerformanceObserver | null = null;
   private worstMs = 0;
   private startedAt = 0;
+  private heartbeatId = 0;
+  private lastTick = 0;
+  private worstTickGap = 0;
+  private readonly marks = new Map<string, number>();
 
   get isRunning(): boolean {
     return this.running;
@@ -63,6 +71,11 @@ class PerfProbe {
     this.worstMs = 0;
     this.events.length = 0;
 
+    this.lastTick = performance.now();
+    this.worstTickGap = 0;
+    this.marks.clear();
+    this.heartbeatId = window.setInterval(this.tick, HEARTBEAT_MS);
+
     this.mountOverlay();
     this.observeLongTasks();
     window.addEventListener('webglcontextlost', this.handleGlLost, true);
@@ -81,6 +94,7 @@ class PerfProbe {
     if (!this.running) return;
     this.running = false;
     cancelAnimationFrame(this.rafId);
+    window.clearInterval(this.heartbeatId);
     this.observer?.disconnect();
     this.observer = null;
     window.removeEventListener('webglcontextlost', this.handleGlLost, true);
@@ -105,6 +119,15 @@ class PerfProbe {
       `long-task soportado: ${PerfProbe.supportsLongTasks() ? 'sí' : 'no (WKWebView)'}`,
       ...lines,
     ].join('\n');
+  }
+
+  /**
+   * Timestamps a named app event — a lyric line change, say — so a stall that
+   * lands right after it says so. Free when the probe is off.
+   */
+  mark(name: string): void {
+    if (!this.running) return;
+    this.marks.set(name, performance.now());
   }
 
   /** Lets the app itself put a line in the log — errors it would otherwise swallow. */
@@ -197,18 +220,52 @@ class PerfProbe {
     return ` · red: ${heaviest.initiatorType} ${name} ${kb}kB`;
   }
 
+  private tick = () => {
+    const now = performance.now();
+    this.worstTickGap = Math.max(this.worstTickGap, now - this.lastTick);
+    this.lastTick = now;
+  };
+
+  /**
+   * Which half of the pipeline held the frame.
+   *
+   * Timers run whenever the main thread is free and do not wait on painting.
+   * So a frame gap that the heartbeat shared means the thread itself was
+   * occupied — JS, style, layout, or a synchronous wait on the GPU process.
+   * A frame gap while the heartbeat kept ticking means the thread was idle and
+   * the frame was held further down, in compositing or on the GPU.
+   */
+  private classify(gap: number, tickGap: number): string {
+    return tickGap >= gap * 0.6
+      ? ` · HILO bloqueado (timers ${Math.round(tickGap)}ms)`
+      : ` · RENDER/GPU (hilo libre, timers ${Math.round(tickGap)}ms)`;
+  }
+
+  private describeMarks(gapStart: number): string {
+    const hits: string[] = [];
+    for (const [name, at] of this.marks) {
+      if (at >= gapStart - MARK_WINDOW_MS) hits.push(name);
+    }
+    return hits.length ? ` · tras: ${hits.join(', ')}` : '';
+  }
+
   private frame = () => {
     this.rafId = requestAnimationFrame(this.frame);
     const now = performance.now();
     const gap = now - this.lastFrame;
     this.lastFrame = now;
+    const tickGap = Math.max(this.worstTickGap, now - this.lastTick);
+    this.worstTickGap = 0;
 
     if (gap >= HITCH_MS) {
       this.worstMs = Math.max(this.worstMs, gap);
       // A gap while the tab is hidden is the browser throttling us, not a bug.
       const detail = document.hidden
         ? 'ventana oculta'
-        : this.describeScene() + this.attributeToNetwork(now - gap, now);
+        : this.describeScene() +
+          this.classify(gap, tickGap) +
+          this.describeMarks(now - gap) +
+          this.attributeToNetwork(now - gap, now);
       this.record('frame-gap', gap, detail);
     }
 

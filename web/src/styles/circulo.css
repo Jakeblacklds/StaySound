@@ -147,7 +147,7 @@
   }
 
   .circ-top-nav-items button.active {
-    color: var(--accent);
+    color: var(--text-primary);
     font-weight: 600;
   }
 
@@ -163,7 +163,7 @@
   }
 
   .circ-top-nav-items button.active::after {
-    background: var(--accent);
+    background: currentColor;
   }
 
   .circ-top-nav-trailing {
@@ -219,15 +219,46 @@
     border-radius: 50%;
     box-sizing: border-box;
     border: var(--circ-ring) solid transparent;
-    transition: border-color var(--circ-dur-fast) var(--circ-ease-standard), padding var(--circ-dur-fast) var(--circ-ease-standard);
+    transition:
+      border-color var(--circ-dur-fast) var(--circ-ease-standard),
+      padding var(--circ-dur-fast) var(--circ-ease-standard),
+      transform var(--circ-dur-base) var(--circ-ease-enter),
+      box-shadow var(--circ-dur-base) var(--circ-ease-enter);
   }
 
   .circ-art.fill {
     display: grid;
   }
 
-  .circ-art.ringed {
+  .circ-art.interactive {
+    cursor: pointer;
+  }
+
+  /* Ring = "this one is playing". Hover borrows the same ring so the pointer
+     previews the state it is about to create, and adds a lift the ring alone
+     could never carry: 1.5px of accent is invisible against a busy cover, which
+     is why every tile used to feel dead under the cursor. */
+  .circ-art.ringed,
+  .circ-art.interactive:hover,
+  .circ-art.interactive:focus-visible {
     border-color: var(--accent);
+    padding: var(--circ-ring-gap, 5px);
+  }
+
+  .circ-art.interactive:hover,
+  .circ-art.interactive:focus-visible {
+    transform: translateY(-4px);
+    box-shadow: 0 9px 20px -10px rgba(0, 0, 0, 0.9);
+  }
+
+  .circ-art.interactive:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px var(--bg-root), 0 0 0 4px var(--accent);
+  }
+
+  .circ-art.interactive:active {
+    transform: translateY(-1px) scale(0.985);
+    transition-duration: 90ms;
   }
 
   .circ-art-disc {
@@ -350,7 +381,12 @@
        showing, and a fraction that came out narrower than that made the zone spill
        leftwards over the scrubber's remaining-time. With `auto` the waveform gives
        up room instead, which is the part that can afford to. */
-    grid-template-columns: minmax(180px, 1fr) minmax(300px, 2.2fr) auto;
+    /* `minmax(max-content, 1fr)` keeps that guarantee — the zone is never narrower
+       than its content — while letting it grow as a fraction like the first
+       column. With `auto` the two sides could never match, so the transport's
+       centre drifted ~100px off the window's centre on a 2560px screen, away from
+       the header title and every other centred element above it. */
+    grid-template-columns: minmax(180px, 1fr) minmax(300px, 2.2fr) minmax(max-content, 1fr);
     align-items: center;
     gap: clamp(12px, 1.7vw, 28px);
     height: var(--circ-player-height);
@@ -409,6 +445,13 @@
     .circ-player-bar > * {
       animation: none;
     }
+
+    /* Keep the hover ring — it is the affordance — and drop only the travel. */
+    .circ-art.interactive:hover,
+    .circ-art.interactive:focus-visible,
+    .circ-art.interactive:active {
+      transform: none;
+    }
   }
 
   /* With the full player open, the bar keeps only what that screen does not
@@ -416,13 +459,37 @@
      button pointing at the open screen, no second "Cola". Two columns instead
      of three, with the transport centred so the zone that remains still reads
      as the composition's spine. */
+  /* Centred means centred on the window, not on whatever the utilities leave
+     over: with two columns the play button sat ~130px left of the header title
+     at 2560px. Volume moves to the left zone so the two sides carry similar
+     weight, and both share a minimum so the transport stays on the axis even
+     when the window is too narrow for the fractions to even them out. The top
+     rule goes too — the full player's field fades into this bar instead. */
   .circ-player-bar.is-immersive {
-    grid-template-columns: minmax(0, 1fr) auto;
+    --circ-pb-side-min: 180px;
+    grid-template-columns: minmax(max-content, 1fr) minmax(0, 880px) minmax(max-content, 1fr);
+    border-top-color: transparent;
+  }
+
+  .circ-player-bar.is-immersive .circ-pb-lado {
+    grid-column: 1;
+    display: flex;
+    align-items: center;
+    min-width: var(--circ-pb-side-min);
   }
 
   .circ-player-bar.is-immersive .circ-pb-transporte {
-    width: min(100%, 880px);
-    justify-self: center;
+    grid-column: 2;
+    width: 100%;
+  }
+
+  .circ-player-bar.is-immersive .circ-pb-utilidades {
+    grid-column: 3;
+    min-width: var(--circ-pb-side-min);
+  }
+
+  .circ-player-bar.is-immersive .circ-pb-lado .circ-pb-volume {
+    padding-left: 0;
   }
 
   .circ-pb-obra {
@@ -647,43 +714,43 @@
     gap: 4px;
     justify-items: center;
     text-align: center;
+    /* Rows align on the top edge (see .circ-home-rail-row); the caption owns a
+       fixed two-line slot so a title that wraps can never push its own disc out
+       of line with its neighbours' — the defect that made every rail read as a
+       slightly crooked row. */
+    align-content: start;
   }
 
   .circ-tile strong {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
     margin-top: 10px;
+    min-height: calc(2 * 1.25em);
     font-family: var(--circ-font);
     font-size: 1rem;
     font-weight: 700;
+    line-height: 1.25;
     color: var(--text-primary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
   }
 
   .circ-tile small {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 1;
+    line-clamp: 1;
+    overflow: hidden;
     color: var(--text-secondary);
     font-size: 0.88rem;
   }
 
-  /* ---------- carousel chevron ---------- */
-  .circ-carousel-chevron {
-    width: 40px;
-    height: 40px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
-    border: 1px solid var(--border-strong);
-    background: var(--bg-elevated);
-    color: var(--text-secondary);
-    flex: 0 0 auto;
-    transition: color var(--circ-dur-fast) var(--circ-ease-standard), border-color var(--circ-dur-fast) var(--circ-ease-standard);
-  }
-
-  .circ-carousel-chevron:hover {
+  /* The caption belongs to the disc: hovering either lights both. */
+  .circ-tile:has(.circ-art.interactive:hover) strong,
+  .circ-tile:has(.circ-art.interactive:focus-visible) strong {
     color: var(--accent);
-    border-color: var(--accent);
-  }
-
-  .circ-carousel-chevron span {
-    display: grid;
-    transform: rotate(180deg);
   }
 
   /* ---------- home ---------- */
@@ -693,14 +760,11 @@
     overflow: hidden;
     padding: 26px var(--circ-pad-x) 40px;
 
-    /* El disco del hero se mide con UNA curva continua, no con escalones por tier.
-       Antes saltaba de 520px a min(58vw, 760px) en cuanto la ventana pasaba de
-       1279.98px, y esa es justo la anchura con la que Tauri abre la ventana
-       (1280 en tauri.conf.json): al arrancar caía siempre del lado ancho y solo
-       se encogía cuando el usuario movía el borde un pixel. Con clamp() el
-       tamaño ya no depende de en qué lado de un breakpoint aterrice la ventana.
-         960px  -> 400px    1280px -> 512px    1900px+ -> 760px (tope del mock) */
-    --circ-hero-disc: clamp(400px, 40vw, 760px);
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) clamp(220px, 27vw, 360px);
+    column-gap: clamp(32px, 6vw, 96px);
+    align-items: center;
+    --circ-hero-disc: clamp(220px, 27vw, 360px);
   }
 
   .circ-home-empty {
@@ -721,37 +785,40 @@
   }
 
   .circ-home-hero-art {
-    position: absolute;
-    /* El sangrado superior escala con el disco para que la composición se vea
-       igual a cualquier anchura (-40px cuando el disco está a tope de 760px). */
-    top: calc(var(--circ-hero-disc) * -0.052);
-    right: -16%;
+    grid-column: 2;
+    grid-row: 1;
     width: var(--circ-hero-disc);
     aspect-ratio: 1;
+    justify-self: end;
     pointer-events: none;
   }
 
   .circ-home-welcome {
+    grid-column: 1;
+    grid-row: 1;
     position: relative;
-    max-width: 46%;
+    max-width: 640px;
+    padding-block: 24px;
+  }
+
+  /* The greeting is the least load-bearing line on the screen, so it stops
+     competing for the headline slot: one hero-sized title per view, and it is
+     the thing you can actually press play on. */
+  .circ-home-greeting {
+    margin: 0;
+    font-family: var(--circ-font);
+    font-size: 1.05rem;
+    font-weight: 500;
+    color: var(--text-secondary);
   }
 
   .circ-home-welcome h1 {
-    margin: 2px 0 0;
-    font-family: var(--circ-font);
-    font-size: var(--circ-type-hero);
-    font-weight: 800;
-    letter-spacing: -0.02em;
-    line-height: 1;
-    color: var(--text-primary);
-  }
-
-  .circ-home-pick-eyebrow {
-    margin-top: 44px;
-  }
-
-  .circ-home-welcome h2 {
-    margin: 4px 0 0;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+    overflow: hidden;
+    margin: 18px 0 0;
     font-family: var(--circ-font);
     font-size: var(--circ-type-pick);
     font-weight: 800;
@@ -760,12 +827,19 @@
     color: var(--text-primary);
   }
 
+  /* No album to feature yet — the greeting inherits the headline slot rather
+     than leaving the view without one. */
+  .circ-home-welcome h1.circ-home-greeting-solo {
+    font-size: var(--circ-type-hero);
+    line-height: 1;
+  }
+
   .circ-home-pick-artist {
     margin: 8px 0 0;
     font-family: var(--circ-font);
-    font-size: var(--circ-type-artist);
-    font-weight: 600;
-    color: var(--accent);
+    font-size: 1.15rem;
+    font-weight: 400;
+    color: var(--text-secondary);
   }
 
   .circ-home-welcome .circ-quality-chip {
@@ -775,16 +849,18 @@
   .circ-home-pick-actions {
     display: flex;
     align-items: center;
-    gap: 18px;
+    gap: 14px;
     margin-top: 26px;
   }
 
   .circ-home-play {
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    display: grid;
-    place-items: center;
+    min-height: 44px;
+    padding: 0 20px;
+    border-radius: 999px;
+    display: inline-flex;
+    align-items: center;
+    gap: 9px;
+    font-weight: 600;
     background: var(--accent);
     color: var(--text-on-accent);
     transition: background-color var(--circ-dur-fast) var(--circ-ease-standard), transform 90ms var(--circ-ease-standard);
@@ -798,36 +874,116 @@
     transform: scale(0.96);
   }
 
+  /* Was accent text sitting next to an accent-filled play button: two controls
+     in the same colour, neither reading as the secondary one. Now it is a ghost
+     button — same footprint language as the primary, a rank below it. */
   .circ-home-pick-link {
-    color: var(--accent);
+    height: 44px;
+    padding: 0 22px;
+    border: 1px solid var(--border-strong);
+    border-radius: 999px;
+    color: var(--text-primary);
     font-family: var(--circ-font);
-    font-size: 1rem;
+    font-size: 0.98rem;
     font-weight: 600;
+    transition:
+      border-color var(--circ-dur-fast) var(--circ-ease-standard),
+      background-color var(--circ-dur-fast) var(--circ-ease-standard),
+      transform 90ms var(--circ-ease-standard);
   }
 
   .circ-home-pick-link:hover {
-    color: var(--accent-hover);
+    border-color: var(--text-secondary);
+    background: var(--bg-hover);
+  }
+
+  .circ-home-pick-link:active {
+    transform: scale(0.97);
   }
 
   .circ-home-rail {
     position: relative;
     margin-top: 52px;
-    /* Tied to the hero disc's own math (right: -16%, width: var(--circ-hero-disc)) so
-       the rail's right edge can never land under the disc, at any viewport width — a
-       fixed percentage here drifted out of sync with the disc and let them overlap. */
-    max-width: calc(116vw - var(--circ-hero-disc) - var(--circ-pad-x) - 32px);
+    grid-column: 1 / -1;
+    min-width: 0;
+    max-width: 100%;
   }
 
   .circ-home-history-rail {
     margin-top: 38px;
   }
 
+  /* Section header. The rails used to be labelled with the same .ss-eyebrow the
+     hero uses for its kicker, so a section title read as a caption; and "see
+     more" was a lone grey circle parked after the last tile, which looked like a
+     tile whose artwork had failed to load. Title left, action right — the header
+     is the affordance, the row is just the row. */
+  .circ-section-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 16px;
+  }
+
+  .circ-section-title {
+    margin: 0;
+    font-family: var(--circ-font);
+    font-size: 1.32rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+    color: var(--text-primary);
+  }
+
+  .circ-section-more {
+    flex: 0 0 auto;
+    font-family: var(--circ-font);
+    font-size: 0.9rem;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: var(--text-secondary);
+    transition: color var(--circ-dur-fast) var(--circ-ease-standard);
+  }
+
+  .circ-section-more:hover {
+    color: var(--accent);
+  }
+
   .circ-home-rail-row {
     display: flex;
-    align-items: center;
+    /* Tops aligned, not centres: with `center`, a caption that wrapped to two
+       lines lifted its own disc a few pixels above its neighbours' and the row
+       stopped being a row. */
+    align-items: flex-start;
     gap: 26px;
-    margin-top: 18px;
+    margin-top: 10px;
+    /* Room for the tiles' hover lift — `overflow-x: auto` computes overflow-y to
+       `auto` as well, so without this the raised disc would be clipped. The
+       negative inline margin cancels the side padding so the first tile still
+       lines up with the section title above it. */
+    padding: 10px 6px 20px;
+    margin-inline: -6px;
     overflow-x: auto;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scroll-padding-inline: 6px;
+  }
+
+  .circ-home-rail-row > * {
+    scroll-snap-align: start;
+  }
+
+  .circ-home-rail-row::-webkit-scrollbar {
+    height: 4px;
+  }
+
+  .circ-home-rail-row::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: transparent;
+    transition: background-color var(--circ-dur-base) var(--circ-ease-standard);
+  }
+
+  .circ-home-rail:hover .circ-home-rail-row::-webkit-scrollbar-thumb {
+    background: var(--border-strong);
   }
 
   /* ---------- segmented sub-nav (Biblioteca: Álbumes/Canciones/Artistas/Radio) ---------- */
@@ -1442,23 +1598,34 @@
 
   /* Restrained, not flashy: against pure black the cells read louder, so keep
      enough opacity to show the pattern while leaving artwork and controls dominant. */
+  /* No `filter` on either layer. Any filter — even one this close to identity —
+     sends a full-screen layer through an extra offscreen pass on every frame
+     it changes, and these two change on every frame: the WebGL field redraws
+     at 60 fps and the glow follows the bass. A 2–4% grade is not visible;
+     that pass is, as dropped frames, once the lyrics are competing for it. */
   .full-player-overlay.circ .atmosphere-canvas,
   .full-player-overlay.circ .origin-kit-dot-matrix {
     opacity: 0.72;
-    filter: saturate(1.02) contrast(1.04);
+    filter: none;
   }
 
   .full-player-overlay.circ .fp-bg-edge-glow {
     opacity: calc(0.05 + var(--atmo-bass-smooth, 0) * 0.2 + var(--atmo-beat, 0) * 0.05);
-    filter: saturate(1);
+    filter: none;
     box-shadow: none;
   }
 
   /* The stock scrim is a blue-black (#03060a) that greys out Círculo's true black;
      re-tint it to neutral and lighten it, since there's no bright wash left to
      darken — only the orbs, which the copy already sits clear of. */
+  /* The first two layers are the edges. The header is transparent now, so the
+     field runs up behind it and needs darkening only where the header's type
+     sits; at the bottom the field ends in the bar's own black, so the seam
+     between the stage and the bar disappears instead of reading as a cut. */
   .full-player-overlay.circ .fp-bg-scrim {
     background:
+      linear-gradient(180deg, rgba(0, 0, 0, 0.72) 0, rgba(0, 0, 0, 0) 150px),
+      linear-gradient(0deg, var(--bg-root) 0, rgba(0, 0, 0, 0) 200px),
       linear-gradient(90deg, rgba(0, 0, 0, 0.42) 0%, rgba(0, 0, 0, 0.12) 46%, rgba(0, 0, 0, 0.5) 100%),
       linear-gradient(180deg, rgba(0, 0, 0, 0.18) 0%, rgba(0, 0, 0, 0.1) 55%, rgba(0, 0, 0, 0.55) 100%);
   }
@@ -1484,6 +1651,98 @@
     border-radius: 50%;
     background: var(--bg-elevated);
     box-shadow: 0 24px 64px rgba(0, 0, 0, 0.6);
+  }
+
+  /* The circle crops every cover; a hairline ring makes that crop read as the
+     frame rather than as type that happened to fall off the edge. Above the
+     motion video (z 3) so it holds while a live cover plays. */
+  .full-player-overlay.circ .fp-artwork::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    z-index: 4;
+    border-radius: inherit;
+    box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.1);
+    pointer-events: none;
+  }
+
+  /* ---------- full player layout: one spine, the whole window ----------
+     On a 2560×1440 fullscreen window the editorial skin capped .fp-body at
+     1360px: the composition sat in the middle half of the screen, the lyric
+     column came out ~630px wide, and one lyric line broke into four. Two equal
+     halves now meet on the window's centre line — the axis the header title and
+     the transport below already use — and the disc scales with the stage's
+     height instead of stopping at a laptop size. */
+  .full-player-overlay.circ {
+    --fp-stage-h: calc(100vh - 64px - var(--circ-player-height));
+    --fp-disc: clamp(200px, calc(var(--fp-stage-h) * 0.5), 640px);
+  }
+
+  .full-player-overlay.circ .fp-body {
+    width: 100%;
+    max-width: 2240px;
+    margin-inline: auto;
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    column-gap: clamp(40px, 5vw, 128px);
+    padding: clamp(20px, 3vh, 44px) clamp(28px, 5vw, 128px) clamp(12px, 2vh, 28px);
+  }
+
+  /* Disc and copy centre as one block in the stage. Top-aligned, they left the
+     lower half of the column empty; centred, the disc's middle lands level with
+     the active lyric, which am-lyrics holds just above the stage's centre. */
+  .full-player-overlay.circ .fp-left-scene {
+    align-content: center;
+    justify-items: center;
+  }
+
+  .full-player-overlay.circ .fp-artwork-stage,
+  .full-player-overlay.circ .fp-performance {
+    width: min(100%, var(--fp-disc));
+    margin-inline: auto;
+  }
+
+  .full-player-overlay.circ .fp-info h2,
+  .full-player-overlay.circ .fp-info h2.medium,
+  .full-player-overlay.circ .fp-info h2.long {
+    font-size: clamp(2rem, min(2.6vw, 4.4vh), 3.6rem);
+  }
+
+  /* Transparent header over the field. Its rule and its own black band were
+     one of the two hard edges that boxed the stage in like a letterboxed video.
+     On macOS the webview runs under the native titlebar, so the row starts
+     clear of the traffic lights (the same 88px the drag region uses). */
+  .full-player-overlay.circ .fp-header {
+    background: transparent;
+    border-bottom-color: transparent;
+  }
+
+  html.tauri-shell.platform-macos .full-player-overlay.circ .fp-header {
+    padding-left: 88px;
+  }
+
+  .full-player-overlay.circ .fp-chip-btn {
+    font-size: 0.8rem;
+  }
+
+  /* The lyric viewport used to end on a hard edge, slicing the verse leaving at
+     the top in half and letting the next one run into the bar. Fade both ends.
+     The active line sits at 38% of the viewport, far from either fade. */
+  .full-player-overlay.circ .fp-lyrics-wrapper {
+    --fp-lyrics-fade: clamp(40px, 9%, 128px);
+    -webkit-mask-image: linear-gradient(
+      180deg,
+      transparent 0,
+      #000 var(--fp-lyrics-fade),
+      #000 calc(100% - var(--fp-lyrics-fade)),
+      transparent 100%
+    );
+    mask-image: linear-gradient(
+      180deg,
+      transparent 0,
+      #000 var(--fp-lyrics-fade),
+      #000 calc(100% - var(--fp-lyrics-fade)),
+      transparent 100%
+    );
   }
 
   .full-player-overlay.circ .fp-artwork-canvasui {
@@ -1578,6 +1837,11 @@
     padding: 0 clamp(8px, 1.1vw, 14px);
   }
 
+  /* Icon-only utilities and the shorter volume slider are both under 100px. */
+  .circ-player-bar.is-immersive {
+    --circ-pb-side-min: 96px;
+  }
+
   /* The bar's own dividers are the first thing to go: at this width they read as
      clutter rather than structure. */
   .circ-pb-divider {
@@ -1615,11 +1879,9 @@
     gap: clamp(16px, 2.4vw, 34px);
   }
 
-  /* The welcome column and the bleeding hero disc compete for the same room once
-     the window is under ~1280; give the copy priority. The disc no longer needs a
-     step here — --circ-hero-disc shrinks with the viewport on its own. */
+  /* The grid owns the reading width at compact desktop sizes. */
   .circ-home-welcome {
-    max-width: 58%;
+    max-width: 100%;
   }
 }
 
@@ -1645,13 +1907,9 @@
   }
 
   .circ-home-welcome {
-    max-width: 66%;
+    max-width: 100%;
   }
 
-  /* Only the fade survives at this size; the width comes from --circ-hero-disc. */
-  .circ-home-hero-art {
-    opacity: 0.75;
-  }
 
   .circ-segmented-tabs {
     gap: 20px;
@@ -1674,4 +1932,49 @@
   .circ-search {
     max-width: 1100px;
   }
+}
+
+/* The listening field belongs to the window. Only route content is captured. */
+@media (min-width: 821px) {
+  html:has(.circ-app-shell) { view-transition-name: none; }
+  .circ-content { view-transition-name: circ-route; }
+  .circ-top-nav {
+    background: rgb(0 0 0 / 70%);
+    border-bottom: 1px solid rgb(255 255 255 / 7%);
+  }
+  .global-listening-atmosphere .origin-kit-dot-matrix.ambient {
+    opacity: .2;
+    mask-image: linear-gradient(90deg, rgb(0 0 0 / 25%), #000);
+    -webkit-mask-image: linear-gradient(90deg, rgb(0 0 0 / 25%), #000);
+  }
+  .global-listening-atmosphere.player-is-open { opacity: 0; }
+  .circ-content { background: rgb(0 0 0 / 35%); }
+  .circ-home-rail { margin-top: 36px; }
+  .circ-section-title { font-size: 1.12rem; }
+  .circ-home-rail-row { gap: 18px; }
+  .circ-app-shell .track-row,
+  .circ-app-shell .library-card,
+  .circ-app-shell .detail-header > .detail-meta > *,
+  .circ-app-shell .artist-mural-copy > *,
+  .circ-app-shell .detail-view .track-list { animation: none; }
+  html[data-motion-engine='fallback'] .circ-app-shell .view {
+    animation: circRouteEnter 240ms var(--circ-ease-enter) both;
+  }
+  html[data-motion-engine='fallback'] .circ-app-shell .detail-view { animation: none; }
+  ::view-transition { pointer-events: none; }
+  ::view-transition-group(circ-route) { animation-duration: 260ms; }
+  ::view-transition-old(circ-route) { animation: circRouteLeave 160ms ease-out both; }
+  ::view-transition-new(circ-route) { animation: circRouteEnter 260ms var(--circ-ease-enter) both; }
+  @keyframes circRouteEnter {
+    from { opacity: 0; transform: translateX(var(--motion-route-x, 12px)); }
+    to { opacity: 1; transform: none; }
+  }
+  @keyframes circRouteLeave {
+    to { opacity: 0; transform: translateX(var(--motion-old-x, -8px)); }
+  }
+}
+@media (min-width: 821px) and (prefers-reduced-motion: reduce) {
+  html[data-motion-engine] .circ-app-shell .view,
+  ::view-transition-old(circ-route),
+  ::view-transition-new(circ-route) { animation: none !important; }
 }

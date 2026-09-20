@@ -2,19 +2,7 @@ import type { TidalTrack, Track } from '@staysound/types/audio';
 import type { DownloadSearchResult } from '../downloads/downloadProvider';
 
 const TIDAL_API_BASES = [
-  'https://hifi.geeked.wtf',
-  'https://eu-central.monochrome.tf',
-  'https://us-west.monochrome.tf',
-  'https://arran.monochrome.tf',
-  'https://api.monochrome.tf',
-  'https://monochrome-api.samidy.com',
-  'https://triton.squid.wtf',
-  'https://wolf.qqdl.site',
-  'https://maus.qqdl.site',
-  'https://vogel.qqdl.site',
-  'https://katze.qqdl.site',
-  'https://hund.qqdl.site',
-  'https://tidal.kinoplus.online',
+  'https://lol.samidy.workers.dev',
 ];
 
 const REQUEST_TIMEOUT_MS = 12000;
@@ -115,12 +103,18 @@ async function fetchJson<T>(url: string): Promise<T> {
 
 export async function fetchFromTidalMirrors<T>(path: string): Promise<T> {
   let lastError: unknown;
-  for (const base of TIDAL_API_BASES) {
-    try {
-      return await fetchJson<T>(`${base.replace(/\/+$/, '')}${path}`);
-    } catch (error) {
-      lastError = error;
+  // The currently maintained Monochrome worker can occasionally return a
+  // transient Cloudflare 523. Retry the catalog once before surfacing a
+  // failure or caching a partial search result.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (const base of TIDAL_API_BASES) {
+      try {
+        return await fetchJson<T>(`${base.replace(/\/+$/, '')}${path}`);
+      } catch (error) {
+        lastError = error;
+      }
     }
+    if (attempt === 0) await new Promise(resolve => window.setTimeout(resolve, 180));
   }
   throw lastError instanceof Error ? lastError : new Error('Todos los mirrors TIDAL fallaron.');
 }

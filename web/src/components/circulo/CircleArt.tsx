@@ -1,4 +1,4 @@
-import { useState, type KeyboardEvent } from 'react';
+import type { CSSProperties, KeyboardEvent } from 'react';
 
 /** Deterministic 0-360 hue from an id string, used as the abstract-disc fallback color and
     as a stable seed so the same album always gets the same fallback look. */
@@ -26,11 +26,13 @@ interface CircleArtProps {
     abstract hue-seeded disc (via CSS custom properties consumed by .circ-art-fallback in
     circulo.css) when there's no real artwork — the same fallback treatment
     `.artist-card .card-artwork` already uses elsewhere in the app, just circular everywhere
-    here instead of only for artists. */
+    here instead of only for artists.
+
+    Hover is pure CSS (`.circ-art.interactive:hover`), not React state: a rail is a dozen of
+    these side by side, and tracking the pointer in state re-rendered the whole row on every
+    crossing to paint a border the stylesheet can paint on its own. */
 export function CircleArt({ size = 118, src, hue = 30, ring = false, ringGap = 5, label, onClick, className }: CircleArtProps) {
-  const [hover, setHover] = useState(false);
   const fill = typeof size === 'string';
-  const showRing = ring || (hover && Boolean(onClick));
 
   function handleKeyDown(event: KeyboardEvent<HTMLSpanElement>) {
     if (!onClick) return;
@@ -46,15 +48,12 @@ export function CircleArt({ size = 118, src, hue = 30, ring = false, ringGap = 5
       tabIndex={onClick ? 0 : undefined}
       onClick={onClick}
       onKeyDown={handleKeyDown}
-      onMouseEnter={() => setHover(true)}
-      onMouseLeave={() => setHover(false)}
-      className={`circ-art ${showRing ? 'ringed' : ''} ${fill ? 'fill' : ''} ${className ?? ''}`}
+      className={`circ-art ${ring ? 'ringed' : ''} ${onClick ? 'interactive' : ''} ${fill ? 'fill' : ''} ${className ?? ''}`}
       style={{
         width: fill ? '100%' : size,
         height: fill ? '100%' : size,
-        padding: showRing ? ringGap : 0,
-        cursor: onClick ? 'pointer' : 'default',
-      }}
+        '--circ-ring-gap': `${ringGap}px`,
+      } as CSSProperties}
     >
       <span aria-label={label} className="circ-art-disc" style={!src ? { background: artGradient(hue) } : undefined}>
         {src ? <img src={src} alt="" loading="lazy" /> : null}

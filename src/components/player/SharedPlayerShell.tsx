@@ -6,7 +6,7 @@ import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme'
 import * as Haptics from 'expo-haptics';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, Platform, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
     Easing,
@@ -25,6 +25,9 @@ import {
     DETAIL_HEIGHT,
     MINI_HEIGHT,
     TAB_BAR_HEIGHT,
+    ANDROID_DOCK_INSET,
+    ANDROID_MINI_RADIUS,
+    ANDROID_MINI_OFFSET,
     isPlayerDetailRoute,
 } from './playerLayout';
 
@@ -120,7 +123,10 @@ function SharedPlayerShellInner() {
     const routeProgress = useSharedValue(0);
     const isVertical = useSharedValue(false);
     const playPress = useSharedValue(0);
-    const collapsedBottom = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom;
+    const floatingDock = Platform.OS === 'android' && config.style === 'material3';
+    const dockLeft = floatingDock ? Math.max(ANDROID_DOCK_INSET, insets.left + 8) : 0;
+    const dockRight = floatingDock ? Math.max(ANDROID_DOCK_INSET, insets.right + 8) : 0;
+    const collapsedBottom = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom + (floatingDock ? ANDROID_MINI_OFFSET : 0);
     const isDetailRoute = isPlayerDetailRoute(pathname);
 
     useEffect(() => {
@@ -162,17 +168,18 @@ function SharedPlayerShellInner() {
     const shellContainerStyle = useAnimatedStyle(() => {
         const routeP = routeProgress.value;
         const detailBottom = Math.max(insets.bottom + DETAIL_EXTRA_BOTTOM, DETAIL_EXTRA_BOTTOM);
-        const collapseBtm = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom;
+        const collapseBtm = collapsedBottom;
+        const radius = floatingDock ? ANDROID_MINI_RADIUS * (1 - routeP) : 0;
 
         return {
             bottom: interpolate(routeP, [0, 1], [collapseBtm, detailBottom], Extrapolation.CLAMP),
-            left: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
-            right: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
+            left: interpolate(routeP, [0, 1], [dockLeft, 0], Extrapolation.CLAMP),
+            right: interpolate(routeP, [0, 1], [dockRight, 0], Extrapolation.CLAMP),
             height: interpolate(routeP, [0, 1], [MINI_HEIGHT, DETAIL_HEIGHT], Extrapolation.CLAMP),
-            borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
-            borderBottomLeftRadius: 0,
-            borderBottomRightRadius: 0,
+            borderTopLeftRadius: radius,
+            borderTopRightRadius: radius,
+            borderBottomLeftRadius: radius,
+            borderBottomRightRadius: radius,
         };
     });
 

@@ -66,6 +66,9 @@ import {
   MINI_ARTWORK_SIZE,
   MINI_HEIGHT,
   TAB_BAR_HEIGHT,
+  ANDROID_DOCK_INSET,
+  ANDROID_MINI_RADIUS,
+  ANDROID_MINI_OFFSET,
   isPlayerDetailRoute,
 } from "./playerLayout";
 import { playerStyles as styles } from "./playerStyles";
@@ -237,13 +240,15 @@ export function FullPlayer() {
   const miniCollapsedBottom =
     (config.style === "material3" ? TAB_BAR_HEIGHT : 85) + insets.bottom;
 
-  const miniLeft = 0;
+  const floatingMini = Platform.OS === "android" && config.style === "material3" && !isDetailRoute;
+  const miniLeft = floatingMini ? Math.max(ANDROID_DOCK_INSET, insets.left + 8) : 0;
+  const miniRight = floatingMini ? Math.max(ANDROID_DOCK_INSET, insets.right + 8) : 0;
   const miniBottom = isDetailRoute
     ? Math.max(insets.bottom + DETAIL_EXTRA_BOTTOM, DETAIL_EXTRA_BOTTOM)
-    : miniCollapsedBottom;
+    : miniCollapsedBottom + (floatingMini ? ANDROID_MINI_OFFSET : 0);
   const miniHeight = isDetailRoute ? DETAIL_HEIGHT : MINI_HEIGHT;
-  const miniWidth = SCREEN_WIDTH - miniLeft * 2;
-  const miniRadius = 0;
+  const miniWidth = SCREEN_WIDTH - miniLeft - miniRight;
+  const miniRadius = floatingMini ? ANDROID_MINI_RADIUS : 0;
 
   // Expansion & Breathing
   const expansion = useSharedValue(0);
@@ -588,8 +593,8 @@ export function FullPlayer() {
       left: interpolate(p, [0, 1], [miniLeft, 0], Extrapolation.CLAMP),
       borderTopLeftRadius: radius,
       borderTopRightRadius: radius,
-      borderBottomLeftRadius: 0,
-      borderBottomRightRadius: 0,
+      borderBottomLeftRadius: radius,
+      borderBottomRightRadius: radius,
       opacity: 1,
       pointerEvents: isVisible && p > 0.18 ? "auto" : "none",
       elevation: 0,
@@ -1011,9 +1016,9 @@ export function FullPlayer() {
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  borderTopWidth: StyleSheet.hairlineWidth,
-                  borderLeftWidth: StyleSheet.hairlineWidth,
-                  borderRightWidth: StyleSheet.hairlineWidth,
+                  borderTopWidth: floatingMini ? 0 : StyleSheet.hairlineWidth,
+                  borderLeftWidth: floatingMini ? 0 : StyleSheet.hairlineWidth,
+                  borderRightWidth: floatingMini ? 0 : StyleSheet.hairlineWidth,
                   borderBottomWidth: 0,
                   borderTopLeftRadius: miniRadius,
                   borderTopRightRadius: miniRadius,

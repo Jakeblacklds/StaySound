@@ -25,6 +25,7 @@
  */
 import type { Track } from '@staysound/types/audio';
 import { webAudioEngine } from './webAudioEngine';
+import { perfProbe } from '../debug/perfProbe';
 import { isTauriDesktop, readDesktopMusicFile } from '../desktop/tauriMusicLibrary';
 
 /** Envelope resolution. Downsampled to the bar count actually on screen. */
@@ -253,7 +254,28 @@ function spreadTone(raw: Float32Array): Float32Array {
   return out;
 }
 
-function envelopeFromBuffer(buffer: AudioBuffer): TrackWaveform {
+/**
+ * Hands the main thread back between chunks of a long pass.
+ *
+ * `requestIdleCallback` is the right primitive — it waits for a frame that has
+ * room to spare — but WKWebView only got it recently, so a task-queue yield is
+ * the fallback. Either way the point is the same: never occupy the thread for
+ * longer than a frame while a song is playing and the lyrics are wiping.
+ */
+function yieldToBrowser(): Promise<void> {
+  return new Promise(resolve => {
+    const idle = (window as Window & {
+      requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number;
+    }).requestIdleCallback;
+    if (idle) idle(() => resolve(), { timeout: 200 });
+    else window.setTimeout(resolve, 0);
+  });
+}
+
+/** Longest the analysis may hold the thread before yielding, in milliseconds. */
+const SLICE_BUDGET_MS = 6;
+
+async function envelopeFromBuffer(buffer: AudioBuffer): Promise<TrackWaveform> {
   const left = buffer.getChannelData(0);
   const right = buffer.numberOfChannels > 1 ? buffer.getChannelData(1) : null;
   const frames = left.length;
@@ -270,7 +292,15 @@ function envelopeFromBuffer(buffer: AudioBuffer): TrackWaveform {
   let stageTwo = 0;
 
   const step = frames / WAVEFORM_SAMPLES;
+  // A five-minute track is ~4.8M frames even after the 16 kHz resample. Run
+  // that in short bursts: as one pass it is a single task long enough to drop
+  // frames from everything else on screen.
+  let budgetStart = performance.now();
   for (let slice = 0; slice < WAVEFORM_SAMPLES; slice += 1) {
+    if (performance.now() - budgetStart > SLICE_BUDGET_MS) {
+      await yieldToBrowser();
+      budgetStart = performance.now();
+    }
     const start = Math.floor(slice * step);
     const end = Math.max(start + 1, Math.min(frames, Math.floor((slice + 1) * step)));
 
@@ -340,7 +370,7 @@ async function analyse(track: Track): Promise<TrackWaveform | null> {
   const context = new OfflineCtor(1, 1, DECODE_SAMPLE_RATE);
   const buffer = await decodeAudio(context, bytes);
 
-  return envelopeFromBuffer(buffer);
+  return await envelopeFromBuffer(buffer);
 }
 
 /* ------------------------------------------------------------------- public */
@@ -372,6 +402,11 @@ export async function getTrackWaveform(track: Track): Promise<TrackWaveform | nu
   if (pending) return pending;
 
   const run = (async () => {
+    // This is the longest piece of work a track change starts, and it is the
+    // one the user has no way of connecting to what they are looking at. Put
+    // its real cost in the probe's log so a hitch here has a name.
+    const startedAt = performance.now();
+    perfProbe.note(`waveform: analizando "${track.title}"`);
     try {
       const waveform = await analyse(track);
       if (!waveform) {
@@ -380,7 +415,13 @@ export async function getTrackWaveform(track: Track): Promise<TrackWaveform | nu
       }
 
       memoryCache.set(track.id, waveform);
-      persist(track.id, waveform);
+      perfProbe.note(
+        `waveform: listo en ${Math.round(performance.now() - startedAt)}ms`,
+      );
+      // Writing the store means re-serialising every cached envelope and
+      // handing localStorage ~90 KB, synchronously. The scrubber does not wait
+      // on it, so neither should the frame this resolves in.
+      void yieldToBrowser().then(() => persist(track.id, waveform));
       return waveform;
     } catch (error) {
       console.warn('Waveform analysis failed:', error);

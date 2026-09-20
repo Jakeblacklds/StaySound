@@ -3,6 +3,7 @@ import DottedBackground, {
 } from '@staysound/components/originkit/ui/dotmatrix';
 import { type RefObject, useEffect, useMemo, useRef } from 'react';
 import { dotMatrixReactor, type DotMatrixHandle } from '../audio/dotMatrixReactor';
+import { perfProbe } from '../debug/perfProbe';
 import type { WebDynamicPalette } from '../library/dynamicColors';
 
 export type DotMatrixVariant = 'player' | 'ambient';
@@ -18,6 +19,13 @@ interface OriginKitDotMatrixBackgroundProps {
    * scenery while you are reading a track list.
    */
   variant?: DotMatrixVariant;
+  /**
+   * Freezes the field on its last frame. The ambient instance runs behind the
+   * whole app, so it keeps drawing two full-screen passes per frame even when
+   * the full player is covering it — on WKWebView that budget comes straight
+   * out of the lyrics and of the player's own field.
+   */
+  paused?: boolean;
 }
 
 interface VariantTuning {
@@ -61,6 +69,12 @@ const TUNING: Record<DotMatrixVariant, VariantTuning> = {
   },
 };
 
+/** Stable across renders so the field's frame loop never sees a new callback. */
+const reportSlowSubmit = {
+  player: (ms: number) => perfProbe.note(`dotmatrix player: GPU tardó ${Math.round(ms)}ms en aceptar un frame`),
+  ambient: (ms: number) => perfProbe.note(`dotmatrix ambient: GPU tardó ${Math.round(ms)}ms en aceptar un frame`),
+} satisfies Record<DotMatrixVariant, (ms: number) => void>;
+
 function withAlpha(color: string, alpha: string): string {
   const normalized = color.trim();
   return /^#[0-9a-f]{6}$/i.test(normalized) ? `${normalized}${alpha}` : normalized;
@@ -78,6 +92,7 @@ export function OriginKitDotMatrixBackground({
   motionKey,
   reactiveTarget,
   variant = 'player',
+  paused = false,
 }: OriginKitDotMatrixBackgroundProps) {
   const tuning = TUNING[variant];
   const handleRef = useRef<DotMatrixHandle | null>(null);
@@ -115,7 +130,7 @@ export function OriginKitDotMatrixBackground({
 
   useEffect(() => {
     const target = reactiveTarget?.current;
-    if (!target) return;
+    if (!target || paused) return;
     const signal = dotMatrixReactor.current;
 
     let rafId = 0;
@@ -142,7 +157,7 @@ export function OriginKitDotMatrixBackground({
     };
     rafId = requestAnimationFrame(frame);
     return () => cancelAnimationFrame(rafId);
-  }, [reactiveTarget]);
+  }, [reactiveTarget, paused]);
 
   return (
     <div className={`origin-kit-dot-matrix ${variant}`} aria-hidden="true">
@@ -159,6 +174,8 @@ export function OriginKitDotMatrixBackground({
         reactivity={tuning.reactivity}
         fps={tuning.fps}
         maxDpr={tuning.maxDpr}
+        paused={paused}
+        onSlowFrame={reportSlowSubmit[variant]}
       />
     </div>
   );
