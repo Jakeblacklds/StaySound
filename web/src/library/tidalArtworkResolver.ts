@@ -40,7 +40,7 @@ const TIDAL_ARTWORK_API_BASES = [
 function coverUuidToUrl(coverUuid?: string | null): string | undefined {
   if (!coverUuid || coverUuid === '00000000-0000-0000-0000-000000000000' || coverUuid === 'null') return undefined;
   if (coverUuid.startsWith('http')) return coverUuid;
-  return `https://resources.tidal.com/images/${coverUuid.replace(/-/g, '/')}/640x640.jpg`;
+  return `https://resources.tidal.com/images/${coverUuid.replace(/-/g, '/')}/750x750.jpg`;
 }
 
 function comparable(value?: string): string {

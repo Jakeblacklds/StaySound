@@ -59,7 +59,10 @@ export const TIDAL_DISCOVERY_MOODS: TidalDiscoveryMood[] = [
 export function getTidalArtworkUrl(coverUuid?: string | null): string | undefined {
   if (!coverUuid || coverUuid === '00000000-0000-0000-0000-000000000000' || coverUuid === 'null') return undefined;
   if (coverUuid.startsWith('http')) return coverUuid;
-  return `https://resources.tidal.com/images/${coverUuid.replace(/-/g, '/')}/640x640.jpg`;
+  // TIDAL currently serves several legacy sizes inconsistently: artist image
+  // UUIDs return 403 at 640px in the desktop webview, while 750px is served
+  // for both artist portraits and album covers.
+  return `https://resources.tidal.com/images/${coverUuid.replace(/-/g, '/')}/750x750.jpg`;
 }
 
 export function normalizeTidalTrack(item: TidalTrackApiResponse): TidalTrack | null {
