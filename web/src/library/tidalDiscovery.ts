@@ -1,5 +1,6 @@
 import type { TidalTrack, Track } from '@staysound/types/audio';
 import type { DownloadSearchResult } from '../downloads/downloadProvider';
+import { isTauriDesktop, searchDesktopTidalCatalog } from '../desktop/tauriMusicLibrary';
 
 const TIDAL_API_BASES = [
   'https://lol.samidy.workers.dev',
@@ -102,6 +103,28 @@ async function fetchJson<T>(url: string): Promise<T> {
 }
 
 export async function fetchFromTidalMirrors<T>(path: string): Promise<T> {
+  // The public Monochrome worker is currently unavailable. Desktop sends
+  // catalog searches through Tauri so the native HTTP client can call TIDAL
+  // directly without the webview's CORS restriction.
+  if (isTauriDesktop()) {
+    const url = new URL(path, 'https://staysound.invalid');
+    const mappings = [
+      ['s', 'tracks'],
+      ['a', 'artists'],
+      ['al', 'albums'],
+      ['p', 'playlists'],
+    ] as const;
+    const match = mappings.find(([parameter]) => url.searchParams.has(parameter));
+    if (url.pathname === '/search/' && match) {
+      const [parameter, kind] = match;
+      const catalog = await searchDesktopTidalCatalog(kind, url.searchParams.get(parameter) ?? '');
+      const items = catalog.items ?? [];
+      if (kind === 'artists') return { data: { artists: { items } } } as T;
+      if (kind === 'albums') return { data: { albums: { items } } } as T;
+      if (kind === 'playlists') return { data: { playlists: { items } } } as T;
+      return { data: { items } } as T;
+    }
+  }
   let lastError: unknown;
   // The currently maintained Monochrome worker can occasionally return a
   // transient Cloudflare 523. Retry the catalog once before surfacing a

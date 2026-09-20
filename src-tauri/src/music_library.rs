@@ -270,6 +270,65 @@ pub async fn fetch_tidal_artwork(url: String) -> Result<Response, String> {
     Ok(Response::new(bytes.to_vec()))
 }
 
+#[tauri::command]
+pub async fn search_tidal_catalog(
+    kind: String,
+    query: String,
+) -> Result<serde_json::Value, String> {
+    const CLIENT_ID: &str = "txNoH4kkV41MfH25";
+    const CLIENT_SECRET: &str = "dQjy0MinCEvxi1O4UmxvxWnDjt4cgHBPw8ll6nYBk98=";
+    let endpoint = match kind.as_str() {
+        "tracks" | "artists" | "albums" | "playlists" => kind,
+        _ => return Err("El tipo de búsqueda TIDAL no está permitido.".into()),
+    };
+    let query = query.trim();
+    if query.is_empty() {
+        return Ok(serde_json::json!({ "items": [] }));
+    }
+
+    let client = reqwest::Client::new();
+    let token_response = client
+        .post("https://auth.tidal.com/v1/oauth2/token")
+        .basic_auth(CLIENT_ID, Some(CLIENT_SECRET))
+        .form(&[
+            ("client_id", CLIENT_ID),
+            ("client_secret", CLIENT_SECRET),
+            ("grant_type", "client_credentials"),
+        ])
+        .send()
+        .await
+        .map_err(|error| format!("No se pudo autenticar el catálogo TIDAL: {error}"))?;
+    if !token_response.status().is_success() {
+        return Err(format!(
+            "La autenticación TIDAL falló ({})",
+            token_response.status()
+        ));
+    }
+    let token = token_response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| error.to_string())?
+        .get("access_token")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "TIDAL no devolvió un token de catálogo.".to_string())?
+        .to_owned();
+
+    let response = client
+        .get(format!("https://api.tidal.com/v1/search/{endpoint}"))
+        .bearer_auth(token)
+        .query(&[("countryCode", "US"), ("query", query), ("limit", "50")])
+        .send()
+        .await
+        .map_err(|error| format!("No se pudo consultar el catálogo TIDAL: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("La búsqueda TIDAL falló ({})", response.status()));
+    }
+    response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| error.to_string())
+}
+
 /// Downloads an Apple motion cover once and keeps it in the app cache.
 ///
 /// Streaming these covers straight from Apple's CDN is what makes the full
@@ -340,7 +399,9 @@ pub async fn cache_animated_artwork(app: AppHandle, url: String) -> Result<Strin
         // (application/vnd.apple.mpegurl) means the cover is not one file at
         // all but a playlist of segments, and no amount of retrying this
         // download would fix it.
-        return Err(format!("La respuesta no es un vídeo (content-type: {content_type})."));
+        return Err(format!(
+            "La respuesta no es un vídeo (content-type: {content_type})."
+        ));
     }
 
     let bytes = response.bytes().await.map_err(|error| error.to_string())?;

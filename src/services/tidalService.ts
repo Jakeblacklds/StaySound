@@ -37,6 +37,13 @@ import type {
 export { isValidAudioFile };
 type MirrorProvider = "tidal";
 
+// Monochrome no longer maintains its old HiFi mirror roster. Its current
+// client uses this public TIDAL application identity to obtain a short-lived
+// catalog token, so use the same catalog route for searches.
+const TIDAL_CATALOG_CLIENT_ID = "txNoH4kkV41MfH25";
+const TIDAL_CATALOG_CLIENT_SECRET = "dQjy0MinCEvxi1O4UmxvxWnDjt4cgHBPw8ll6nYBk98=";
+let tidalCatalogToken: { value: string; expiresAt: number } | null = null;
+
 export const TIDAL_API_BASES = [
   "https://hifi.geeked.wtf",
   "https://eu-central.monochrome.tf",
@@ -163,6 +170,32 @@ import { resolveAmazonMusicStreamFromTrack } from "./amazonMusicService";
 import { resolveDeezerStreamFromTrack } from "./deezerFallbackService";
 import { resolveQobuzStreamFromTrack } from "./qobuzKennyService";
 import { resolveSaavnStreamFromTrack } from "./saavnFallbackService";
+
+async function getTidalCatalogToken(): Promise<string> {
+  if (tidalCatalogToken && tidalCatalogToken.expiresAt > Date.now()) return tidalCatalogToken.value;
+  const credentials = btoa(`${TIDAL_CATALOG_CLIENT_ID}:${TIDAL_CATALOG_CLIENT_SECRET}`);
+  const response = await fetch("https://auth.tidal.com/v1/oauth2/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: `Basic ${credentials}` },
+    body: `client_id=${encodeURIComponent(TIDAL_CATALOG_CLIENT_ID)}&client_secret=${encodeURIComponent(TIDAL_CATALOG_CLIENT_SECRET)}&grant_type=client_credentials`,
+  });
+  if (!response.ok) throw new Error(`TIDAL catalog authentication failed (${response.status})`);
+  const payload = await response.json() as { access_token?: string; expires_in?: number };
+  if (!payload.access_token) throw new Error("TIDAL catalog authentication returned no token");
+  tidalCatalogToken = { value: payload.access_token, expiresAt: Date.now() + Math.max(60, (payload.expires_in ?? 3600) - 60) * 1000 };
+  return tidalCatalogToken.value;
+}
+
+async function searchTidalCatalog<T>(kind: "tracks" | "artists" | "albums" | "playlists", query: string): Promise<{ items?: T[] }> {
+  const token = await getTidalCatalogToken();
+  const url = new URL(`https://api.tidal.com/v1/search/${kind}`);
+  url.searchParams.set("countryCode", "US");
+  url.searchParams.set("query", query);
+  url.searchParams.set("limit", "50");
+  const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+  if (!response.ok) throw new Error(`TIDAL catalog search failed (${response.status})`);
+  return response.json() as Promise<{ items?: T[] }>;
+}
 
 function sanitizeFilename(input: string): string {
   return utilsSanitizeFilename(input);
@@ -1641,9 +1674,13 @@ export async function searchTidal(query: string): Promise<TidalSearchResult[]> {
   if (!trimmed) return [];
   const cacheKey = `tracks:${getTidalCacheScope()}:${trimmed.toLowerCase()}`;
   return withTidalCache(cacheKey, SEARCH_CACHE_TTL_MS, async () => {
-    const response = await fetchJson<TidalSearchApiResponse>(
-      `/search/?s=${encodeURIComponent(trimmed)}`,
-    );
+    let response: TidalSearchApiResponse;
+    try {
+      const catalog = await searchTidalCatalog<TidalTrackApiResponse>("tracks", trimmed);
+      response = { data: { items: catalog.items ?? [] } };
+    } catch {
+      response = await fetchJson<TidalSearchApiResponse>(`/search/?s=${encodeURIComponent(trimmed)}`);
+    }
 
     return (response.data?.items ?? []).map(normalizeSearchItem);
   });
@@ -1656,9 +1693,13 @@ export async function searchTidalArtists(
   if (!trimmed) return [];
   const cacheKey = `artists:${getTidalCacheScope()}:${trimmed.toLowerCase()}`;
   return withTidalCache(cacheKey, SEARCH_CACHE_TTL_MS, async () => {
-    const response = await fetchJson<TidalArtistSearchApiResponse>(
-      `/search/?a=${encodeURIComponent(trimmed)}`,
-    );
+    let response: TidalArtistSearchApiResponse;
+    try {
+      const catalog = await searchTidalCatalog<TidalArtistApiResponse>("artists", trimmed);
+      response = { data: { artists: { items: catalog.items ?? [] } } };
+    } catch {
+      response = await fetchJson<TidalArtistSearchApiResponse>(`/search/?a=${encodeURIComponent(trimmed)}`);
+    }
 
     const artistItems =
       response.data?.artists?.items ?? response.data?.items ?? [];
@@ -1673,9 +1714,13 @@ export async function searchTidalPlaylists(
   if (!trimmed) return [];
   const cacheKey = `playlists:${getTidalCacheScope()}:${trimmed.toLowerCase()}`;
   return withTidalCache(cacheKey, SEARCH_CACHE_TTL_MS, async () => {
-    const response = await fetchJson<TidalPlaylistSearchApiResponse>(
-      `/search/?p=${encodeURIComponent(trimmed)}`,
-    );
+    let response: TidalPlaylistSearchApiResponse;
+    try {
+      const catalog = await searchTidalCatalog<TidalPlaylistApiResponse>("playlists", trimmed);
+      response = { data: { playlists: { items: catalog.items ?? [] } } };
+    } catch {
+      response = await fetchJson<TidalPlaylistSearchApiResponse>(`/search/?p=${encodeURIComponent(trimmed)}`);
+    }
 
     const playlistItems =
       response.data?.playlists?.items ?? response.data?.items ?? [];
@@ -1688,9 +1733,13 @@ export async function searchTidalAlbums(query: string): Promise<TidalAlbum[]> {
   if (!trimmed) return [];
   const cacheKey = `albums:${getTidalCacheScope()}:${trimmed.toLowerCase()}`;
   return withTidalCache(cacheKey, SEARCH_CACHE_TTL_MS, async () => {
-    const response = await fetchJson<TidalAlbumSearchApiResponse>(
-      `/search/?al=${encodeURIComponent(trimmed)}`,
-    );
+    let response: TidalAlbumSearchApiResponse;
+    try {
+      const catalog = await searchTidalCatalog<TidalAlbumApiResponse>("albums", trimmed);
+      response = { data: { albums: { items: catalog.items ?? [] } } };
+    } catch {
+      response = await fetchJson<TidalAlbumSearchApiResponse>(`/search/?al=${encodeURIComponent(trimmed)}`);
+    }
 
     const albumItems =
       response.data?.albums?.items ?? response.data?.items ?? [];

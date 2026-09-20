@@ -50,6 +50,10 @@ export async function fetchDesktopTidalArtwork(url: string): Promise<Uint8Array>
   return new Uint8Array(response);
 }
 
+export async function searchDesktopTidalCatalog(kind: 'tracks' | 'artists' | 'albums' | 'playlists', query: string): Promise<{ items?: unknown[] }> {
+  return invoke<{ items?: unknown[] }>('search_tidal_catalog', { kind, query });
+}
+
 export async function ensureDesktopSoulseekBridge(): Promise<boolean> {
   if (!isTauriDesktop()) return false;
   return invoke<boolean>('ensure_soulseek_bridge');

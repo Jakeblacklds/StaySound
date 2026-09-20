@@ -98,6 +98,7 @@ pub fn run() {
             music_library::scan_music_folder,
             music_library::read_music_file,
             music_library::fetch_tidal_artwork,
+            music_library::search_tidal_catalog,
             music_library::cache_animated_artwork,
             ensure_soulseek_bridge,
         ])
