@@ -1123,6 +1123,46 @@ def transcription_kwargs(language=None):
         options["language"] = language
     return options
 
+def detect_song_language(audio):
+    """Vote over the loudest vocal windows, not Whisper's first 30 seconds.
+
+    An instrumental or whispered intro used to decide the language for the
+    whole song; a Spanish song detected as English is translated, not heard.
+    """
+    import mlx.core as mx
+    import numpy as np
+    from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
+    from mlx_whisper.transcribe import ModelHolder
+
+    whisper = ModelHolder.get_model(model, mx.float16)
+    audio = np.array(audio, dtype=np.float32)
+    starts = list(range(0, max(1, len(audio) - N_SAMPLES + 1), N_SAMPLES // 2))
+    energy = [float(np.sqrt(np.mean(np.square(audio[start:start + N_SAMPLES])))) for start in starts]
+    totals = {}
+    for index in sorted(range(len(starts)), key=energy.__getitem__, reverse=True)[:4]:
+        window = audio[starts[index]:starts[index] + N_SAMPLES]
+        mel = log_mel_spectrogram(window, n_mels=whisper.dims.n_mels, padding=N_SAMPLES)
+        _, probabilities = whisper.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
+        for code, probability in probabilities.items():
+            totals[code] = totals.get(code, 0.0) + probability
+    return max(totals, key=totals.get) if totals else None
+
+def without_repeated_decodes(words):
+    """Drop words a looping decode emitted again over the same audio."""
+    kept = []
+    for word in sorted(words, key=lambda item: (item["startMs"], item["endMs"])):
+        if kept:
+            previous = kept[-1]
+            overlap = min(previous["endMs"], word["endMs"]) - max(previous["startMs"], word["startMs"])
+            shortest = min(previous["endMs"] - previous["startMs"], word["endMs"] - word["startMs"])
+            # Loops often emit zero-length copies stacked on one instant.
+            if overlap >= 0 and (overlap > 0.5 * shortest or shortest == 0):
+                if word["confidence"] > previous["confidence"]:
+                    kept[-1] = word
+                continue
+        kept.append(word)
+    return kept
+
 raw_words = []
 result_language = requested_language
 segment_serial = 0
@@ -1156,8 +1196,9 @@ def append_result(result, offset_seconds=0.0, core_start=None, core_end=None, la
             })
 
 if requested_language != "en-es":
-    forced_language = requested_language if requested_language in ("en", "es") else None
-    result = mlx_whisper.transcribe(audio_path, **transcription_kwargs(forced_language))
+    audio = load_audio(audio_path)
+    forced_language = requested_language if requested_language in ("en", "es") else detect_song_language(audio)
+    result = mlx_whisper.transcribe(audio, **transcription_kwargs(forced_language))
     result_language = str(result.get("language") or requested_language)
     append_result(result, language=result_language)
 else:
@@ -1251,6 +1292,7 @@ else:
     raw_words.sort(key=lambda word: (word["startMs"], word["endMs"]))
     result_language = "en-es"
 
+raw_words = without_repeated_decodes(raw_words)
 lines = []
 current = []
 current_chars = 0
@@ -1380,11 +1422,21 @@ with open(output_path, "w", encoding="utf-8") as handle:
     Ok(lyrics)
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum MfaPass {
+    /// Retime words and phones, then measure sustained vowels.
+    AlignAndMeasure,
+    /// Retime words and phones for a later aligner to build on.
+    Align,
+    /// Keep the given word edges; add MFA phones only where MFA agrees.
+    PhonesOnly,
+}
+
 fn align_generated_lyrics(
     app: &AppHandle,
     source: &Path,
     lyrics: &GeneratedLyrics,
-    refine_acoustic: bool,
+    pass: MfaPass,
 ) -> Result<GeneratedLyrics, String> {
     if !mfa_is_ready(app) || !matches!(lyrics.language.as_str(), "es" | "en" | "en-es") {
         return Ok(lyrics.clone());
@@ -1418,7 +1470,8 @@ import shutil
 import subprocess
 import sys
 
-vocals_path, input_path, output_path, job_root, language = sys.argv[1:6]
+vocals_path, input_path, output_path, job_root, language, mode = sys.argv[1:7]
+keep_word_edges = mode == "phones-only"
 job = pathlib.Path(job_root)
 corpora = job / "corpora"
 aligned = job / "aligned"
@@ -1484,6 +1537,7 @@ for index in range(len(detected_languages) - 1, -1, -1):
         detected_languages[index] = following_language or "en"
 
 offsets = {}
+clip_ends = {}
 line_languages = {}
 for index, line in enumerate(lyrics_lines):
     words = line.get("words") or []
@@ -1496,7 +1550,10 @@ for index, line in enumerate(lyrics_lines):
     # Including a previous held vowel can attach it to this line's first phone.
     previous_words = (lyrics_lines[index - 1].get("words") or []) if index else []
     previous_end = int(previous_words[-1]["endMs"]) if previous_words else 0
-    start_ms = min(start_ms, max(0, start_ms - 180, previous_end))
+    # A first word Whisper never heard is placed from a provider cue, and
+    # crowd-sourced cues often trail the singer; give MFA room to find it.
+    onset_margin = 180 if float(words[0].get("confidence", 0) or 0) > 0 else 900
+    start_ms = min(start_ms, max(0, start_ms - onset_margin, previous_end))
     end_ms = int(words[-1].get("endMs", line.get("endMs", start_ms + 500)))
     if index + 1 < len(lyrics["lines"]):
         following = lyrics["lines"][index + 1].get("words") or []
@@ -1519,6 +1576,7 @@ for index, line in enumerate(lyrics_lines):
         "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", str(wav), "-y",
     ], check=True)
     offsets[stem] = start_ms
+    clip_ends[stem] = end_ms
     line_languages[stem] = line_language
 
 languages_used = sorted(set(line_languages.values()))
@@ -1575,34 +1633,41 @@ for index, line in enumerate(lyrics.get("lines", [])):
     offset = offsets[stem] / 1000
     line_window_start = min(offsets[stem], int(line.get("startMs", target_words[0].get("startMs", 0))))
     line_window_end = int(line.get("endMs", target_words[-1].get("endMs", line_window_start + 500)))
-    for target_index, (target, entry) in enumerate(zip(target_words, word_entries)):
+    clip_start, clip_end = offsets[stem], clip_ends[stem]
+    # Decide every word before writing any: MFA's own intervals never overlap,
+    # so a neighbour's stale Whisper time must not veto a measured edge.
+    measured = []
+    for target, entry in zip(target_words, word_entries):
         begin, end, _ = entry
         word_phones = [(p[0], p[1], p[2]) for p in phone_entries if (p[0] + p[1]) / 2 >= begin and (p[0] + p[1]) / 2 <= end]
         mfa_start = round((begin + offset) * 1000)
         mfa_end = round((end + offset) * 1000)
-        original_start = int(target.get("startMs", mfa_start))
-        original_end = int(target.get("endMs", mfa_end))
-        confidence = float(target.get("confidence", 0) or 0)
-        next_start = int(target_words[target_index + 1].get("startMs", line_window_end)) if target_index + 1 < len(target_words) else line_window_end
-        previous_end = int(target_words[target_index - 1]["endMs"]) if target_index else line_window_start
+        original = (int(target.get("startMs", mfa_start)), int(target.get("endMs", mfa_end)))
         interval = trusted_word_interval(
-            original_start, original_end, mfa_start, mfa_end,
-            previous_end, min(line_window_end, next_start), confidence,
-            word_phones, word_language,
+            *original, mfa_start, mfa_end, clip_start, clip_end, word_phones, word_language,
         ) if clean_token(entry[2]) == clean_token(target.get("text", "")) else None
+        if keep_word_edges and interval is not None:
+            # Word edges were already chosen by a stronger aligner; MFA only
+            # contributes phones where it independently agrees with them.
+            agrees = abs(interval[0] - original[0]) <= 180 and abs(interval[1] - original[1]) <= 350
+            interval = original if agrees else None
+        measured.append((interval, word_phones))
+    # An unmeasured word yields to measured neighbours; it never pushes a
+    # measured edge, and is never squeezed to a flash between two of them.
+    intervals = [list(interval) if interval is not None else None for interval, _ in measured]
+    fill_gaps(intervals, target_words)
+    widen_short_words(intervals)
+    for target, span, (interval, word_phones) in zip(target_words, intervals, measured):
+        target["startMs"], target["endMs"] = span
+        begin = target["startMs"] / 1000 - offset
+        end = target["endMs"] / 1000 - offset
         if interval is not None:
-            target["startMs"], target["endMs"] = interval
-            begin = target["startMs"] / 1000 - offset
-            end = target["endMs"] / 1000 - offset
+            target["measured"] = True
             # Keep measured phone times. Stretching rejected MFA intervals into
             # Whisper slots invents syllable timing even when the words agree.
             word_phones = [(max(begin, a), min(end, b), label)
                            for a, b, label in word_phones if b > begin and a < end]
         else:
-            target["startMs"] = max(line_window_start, original_start)
-            target["endMs"] = max(target["startMs"] + 1, min(line_window_end, next_start, original_end))
-            begin = target["startMs"] / 1000 - offset
-            end = target["endMs"] / 1000 - offset
             word_phones = []
         local_syllables = make_syllables(target.get("text", ""), begin, end, word_phones, word_language)
         for syllable in local_syllables:
@@ -1618,11 +1683,9 @@ for index, line in enumerate(lyrics.get("lines", [])):
             safe_low = current_word["startMs"] + 30
             safe_high = next_word["endMs"] - 30
             if safe_low <= safe_high:
-                current_confidence = float(current_word.get("confidence", 0) or 0)
-                next_confidence = float(next_word.get("confidence", 0) or 0)
-                if next_confidence > 0.15:
+                if next_word.get("measured"):
                     preferred = next_word["startMs"]
-                elif current_confidence > 0.15:
+                elif current_word.get("measured"):
                     preferred = current_word["endMs"]
                 else:
                     preferred = round((current_word["endMs"] + next_word["startMs"]) / 2)
@@ -1631,6 +1694,8 @@ for index, line in enumerate(lyrics.get("lines", [])):
                 next_word["startMs"] = boundary
                 warp_syllables_to_word(current_word, current_old_start, current_old_end)
                 warp_syllables_to_word(next_word, next_old_start, next_old_end)
+    for word in target_words:
+        word.pop("measured", None)
     line["startMs"] = min(line_window_start, target_words[0]["startMs"])
     line["endMs"] = max(line_window_end, target_words[-1]["endMs"])
 
@@ -1660,7 +1725,7 @@ for line_index in range(len(lyrics.get("lines", [])) - 1):
         last_word["syllables"][-1]["endMs"] = boundary
     if first_word.get("syllables"):
         first_word["syllables"][0]["startMs"] = boundary + 1
-lyrics["alignment"] = "mfa-bilingual-phoneme-v2" if len(languages_used) > 1 else "mfa-phoneme-v2"
+lyrics["alignment"] = "mfa-bilingual-phoneme-v3" if len(languages_used) > 1 else "mfa-phoneme-v3"
 with open(output_path, "w", encoding="utf-8") as handle:
     json.dump(lyrics, handle, ensure_ascii=False)
 "#;
@@ -1677,6 +1742,7 @@ with open(output_path, "w", encoding="utf-8") as handle:
         .arg(&output_path)
         .arg(&job_root)
         .arg(&lyrics.language)
+        .arg(if pass == MfaPass::PhonesOnly { "phones-only" } else { "align" })
         .env("PATH", command_path)
         .env("MFA_ROOT_DIR", &mfa_root)
         .output()
@@ -1688,7 +1754,7 @@ with open(output_path, "w", encoding="utf-8") as handle:
             error.lines().rev().take(8).collect::<Vec<_>>().join(" ")
         ));
     }
-    if !refine_acoustic {
+    if pass != MfaPass::AlignAndMeasure {
         let aligned = fs::read_to_string(&output_path).map_err(|error| error.to_string())?;
         return serde_json::from_str(&aligned).map_err(|error| error.to_string());
     }
@@ -1711,10 +1777,13 @@ with open(output_path, "w", encoding="utf-8") as handle:
     serde_json::from_str(&aligned).map_err(|error| error.to_string())
 }
 
+/// `lyrics` carries the MFA word edges; `draft` is the same text before MFA,
+/// whose Whisper/provider clock breaks ties between disagreeing aligners.
 fn align_experimental_lyrics(
     app: &AppHandle,
     source: &Path,
     lyrics: &GeneratedLyrics,
+    draft: &GeneratedLyrics,
 ) -> Result<GeneratedLyrics, String> {
     if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
         return Err("El motor experimental requiere un Mac con Apple Silicon.".into());
@@ -1745,14 +1814,16 @@ fn align_experimental_lyrics(
     fs::create_dir_all(&job).map_err(|e| e.to_string())?;
     let input = job.join("lyrics-input.json");
     let output = job.join("lyrics-aligned.json");
+    let draft_path = job.join("lyrics-draft.json");
     fs::write(&input, serde_json::to_vec(lyrics).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::write(&draft_path, serde_json::to_vec(draft).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
     fs::write(job.join("phoneme_timing.py"), PHONEME_TIMING_SCRIPT).map_err(|e| e.to_string())?;
     fs::write(job.join("refine_sustains.py"), ACOUSTIC_REFINER_SCRIPT).map_err(|e| e.to_string())?;
     fs::write(job.join("align.py"), EXPERIMENTAL_ALIGNER).map_err(|e| e.to_string())?;
-    emit_progress(app, "alignment", 0.45, "Alineando palabras con Qwen…");
+    emit_progress(app, "alignment", 0.45, "Contrastando alineadores palabra por palabra…");
     let mut child = Command::new(root.join("runtime/bin/python"))
         .arg(job.join("align.py")).arg(vocals).arg(input).arg(&output).arg(root.join("assets"))
-        .arg("defer-refinement")
+        .arg("defer-refinement").arg(&draft_path)
         .env("HF_HUB_OFFLINE", "1").env("PYTHONUNBUFFERED", "1")
         .stdout(Stdio::piped()).stderr(Stdio::piped())
         .spawn().map_err(|e| e.to_string())?;
@@ -1789,7 +1860,7 @@ fn align_experimental_lyrics(
         let mut spanish = aligned.clone();
         spanish.language = "es".into();
         spanish.lines = spanish_indices.iter().map(|&index| aligned.lines[index].clone()).collect();
-        match align_generated_lyrics(app, source, &spanish, false) {
+        match align_generated_lyrics(app, source, &spanish, MfaPass::PhonesOnly) {
             Ok(refined) if validate_generated_lyrics(&refined).is_ok()
                 && refined.lines.len() == spanish_indices.len() => {
                 for (&index, line) in spanish_indices.iter().zip(refined.lines) {
@@ -1841,11 +1912,12 @@ pub async fn save_local_generated_lyrics(
         tauri::async_runtime::spawn_blocking(move || -> Result<GeneratedLyrics, String> {
             let _guard = ALIGNMENT_LOCK.lock().map_err(|_| "El alineador no está disponible.")?;
             let mut fallback = lyrics.clone();
-            let baseline = align_generated_lyrics(&app_for_task, &source_for_task, &lyrics, !experimental);
+            let pass = if experimental { MfaPass::Align } else { MfaPass::AlignAndMeasure };
+            let baseline = align_generated_lyrics(&app_for_task, &source_for_task, &lyrics, pass);
             if let Ok(mut aligned) = baseline {
                 if validate_generated_lyrics(&aligned).is_ok() {
                     if experimental {
-                        match align_experimental_lyrics(&app_for_task, &source_for_task, &aligned) {
+                        match align_experimental_lyrics(&app_for_task, &source_for_task, &aligned, &lyrics) {
                             Ok(result) => return Ok(result),
                             Err(error) => aligned.alignment_notes.push(format!("Se usó el respaldo MFA. {error}")),
                         }
@@ -1866,7 +1938,7 @@ pub async fn save_local_generated_lyrics(
             }
             validate_generated_lyrics(&fallback)?;
             if experimental {
-                match align_experimental_lyrics(&app_for_task, &source_for_task, &fallback) {
+                match align_experimental_lyrics(&app_for_task, &source_for_task, &fallback, &fallback) {
                     Ok(result) => return Ok(result),
                     Err(error) => fallback.alignment_notes.push(format!("Se conservaron los tiempos originales. {error}")),
                 }

@@ -13,6 +13,8 @@ import sys
 import time
 import unicodedata
 
+from phoneme_timing import fill_gaps, widen_short_words
+
 SOFA_REV = "9549c6a86d16019c817eefe4bb8183405da524cc"
 
 
@@ -66,28 +68,60 @@ def matched_intervals(words, items, offset, lower, upper, partial=False):
     return spans
 
 
-def select_intervals(words, spans, lower, upper):
-    """Keep valid proposals only if they fit alongside unchanged fallback words.
+AGREEMENT_MS = 150
+MAX_VOTE_SHIFT_MS = 1500
 
-    Reject conflicting proposals, never stretch a zero-duration word or move a
-    fallback to make room. Recheck after each rejection because its old interval
-    may conflict with another proposal.
+
+def vote_word(draft_start, measured, phrase, context):
+    """Pick one word interval from independent acoustic witnesses.
+
+    Each aligner alone fails differently: MFA jumps to a repeated word, Qwen
+    drifts when its window is wrong. Two witnesses agreeing on the onset are
+    trusted; otherwise the acoustic witness nearest the draft clock (Whisper or
+    the provider cue) wins, since a lone outlier is usually far from it.
+    Measured against Apple word timings this halves the Spanish error tail.
     """
-    selected = [span if span and lower <= span[0] < span[1] <= upper else None
-                for span in spans]
-    while True:
-        resolved = [span or (word["startMs"], word["endMs"])
-                    for word, span in zip(words, selected)]
-        rejected = set()
-        for index in range(1, len(resolved)):
-            if resolved[index - 1][1] > resolved[index][0]:
-                for neighbour in (index - 1, index):
-                    if selected[neighbour] is not None:
-                        rejected.add(neighbour)
-        if not rejected:
-            return selected
-        for index in rejected:
-            selected[index] = None
+    witnesses = (("phrase", phrase), ("context", context), ("mfa", measured))
+    for (name, first), (_, second) in ((witnesses[0], witnesses[2]), (witnesses[0], witnesses[1]),
+                                       (witnesses[1], witnesses[2])):
+        if first and second and abs(first[0] - second[0]) <= AGREEMENT_MS:
+            return first, name
+    present = [(name, span) for name, span in witnesses if span]
+    if not present:
+        return None, "baseline"
+    name, span = min(present, key=lambda item: abs(item[1][0] - draft_start))
+    return (span, name) if abs(span[0] - draft_start) <= MAX_VOTE_SHIFT_MS else (None, "baseline")
+
+
+def resolve_line(words, voted, lower, upper):
+    """Make a line monotonic, letting voted words anchor unvoted ones.
+
+    Keep the longest in-order run of voted intervals, then fit every other
+    word into the gap between its anchors: unchanged when its old intervals
+    already fit, squeezed with their rhythm intact when not. A word no aligner
+    agreed on must never veto one they did. Returns (intervals, kinds) where
+    kind is "voted", "kept" or "spread".
+    """
+    anchors = [i for i, span in enumerate(voted) if span and lower <= span[0] < span[1] <= upper]
+    # Longest chain of anchors whose starts increase (O(n^2) is fine per line).
+    best = {}
+    for position, i in enumerate(anchors):
+        chain = [i]
+        for j in anchors[:position]:
+            if voted[j][0] < voted[i][0] and len(best[j]) + 1 > len(chain):
+                chain = best[j] + [i]
+        best[i] = chain
+    keep = set(max(best.values(), key=len)) if best else set()
+    intervals = [list(voted[i]) if i in keep else None for i in range(len(words))]
+    kinds = ["voted" if i in keep else "kept" for i in range(len(words))]
+    ordered = sorted(keep)
+    for a, b in zip(ordered, ordered[1:]):
+        # Trim small overlaps between consecutive anchors at the later onset.
+        intervals[a][1] = min(intervals[a][1], intervals[b][0])
+    for index, kind in fill_gaps(intervals, words).items():
+        kinds[index] = kind
+    widen_short_words(intervals)
+    return [tuple(span) for span in intervals], kinds
 
 
 def context_window(lines, index, language, duration_ms, default_language=None):
@@ -109,7 +143,7 @@ def context_window(lines, index, language, duration_ms, default_language=None):
     return first, last, lower, upper
 
 
-def run(vocals, input_path, output_path, assets, defer_refinement=""):
+def run(vocals, input_path, output_path, assets, defer_refinement="", draft_path=""):
     import numpy as np
     import soundfile as sf
     from mlx_audio.stt import load
@@ -121,6 +155,12 @@ def run(vocals, input_path, output_path, assets, defer_refinement=""):
     job = pathlib.Path(output_path).parent
     lyrics = json.loads(pathlib.Path(input_path).read_text())
     baseline = copy.deepcopy(lyrics)
+    # The pre-MFA draft keeps the Whisper/provider clock that breaks ties.
+    draft_lines = None
+    if draft_path and pathlib.Path(draft_path).is_file():
+        draft = json.loads(pathlib.Path(draft_path).read_text())
+        if [len(l["words"]) for l in draft["lines"]] == [len(l["words"]) for l in lyrics["lines"]]:
+            draft_lines = [l["words"] for l in draft["lines"]]
     audio, sr = sf.read(vocals, dtype="float32", always_2d=True)
     audio = audio.mean(axis=1)
     duration = len(audio) / sr
@@ -145,65 +185,64 @@ def run(vocals, input_path, output_path, assets, defer_refinement=""):
             clip = job / f"phrase-{index:04d}.wav"
             sf.write(clip, audio[round(lower * sr / 1000):round(upper * sr / 1000)], sr)
             candidates.append((index, clip, lower / 1000, lang))
+            words = line["words"]
             try:
-                result = model.generate(audio=str(clip), text=" ".join(w["text"] for w in line["words"]),
+                result = model.generate(audio=str(clip), text=" ".join(w["text"] for w in words),
                                         language="English" if lang == "en" else "Spanish")
-                spans = matched_intervals(line["words"], list(result), lower / 1000, lower, upper, partial=True)
-                spans = select_intervals(line["words"], spans, lower, upper)
+                phrase = matched_intervals(words, list(result), lower / 1000, lower, upper, partial=True)
             except Exception as error:
-                spans = [None] * len(line["words"])
+                phrase = [None] * len(words)
                 decision["primaryReason"] = str(error)[:300]
-            sources = ["phrase" if span else "baseline" for span in spans]
-            if any(span is None for span in spans):
-                try:
-                    first, last, context_lower, context_upper = context_window(
-                        baseline["lines"], index, lang, round(duration * 1000), baseline["language"])
-                    if first == last or not 200 <= context_upper - context_lower <= 28000:
-                        raise ValueError("no additional bounded context")
-                    key = (first, last, lang)
-                    if key not in context_cache:
-                        surrounding = [w for l in baseline["lines"][first:last + 1] for w in l["words"]]
-                        context_clip = job / f"context-{first:04d}-{last:04d}.wav"
-                        sf.write(context_clip, audio[round(context_lower * sr / 1000):round(context_upper * sr / 1000)], sr)
-                        # Cache failures too: neighbouring phrases must not repeat a failed job.
-                        context_cache[key] = None
-                        result = model.generate(audio=str(context_clip), text=" ".join(w["text"] for w in surrounding),
-                                                language="English" if lang == "en" else "Spanish")
-                        context_cache[key] = matched_intervals(surrounding, list(result), context_lower / 1000,
-                                                                context_lower, context_upper, partial=True)
-                    context_spans = context_cache[key]
-                    if context_spans is None:
-                        raise ValueError("context alignment failed")
-                    start = sum(len(l["words"]) for l in baseline["lines"][first:index])
-                    retry = context_spans[start:start + len(spans)]
-                    for word_index, span in enumerate(retry):
-                        if spans[word_index] is None and span is not None:
-                            # A retry cannot displace an already accepted word.
-                            if any(other is not None and (
-                                (other_index < word_index and other[1] > span[0]) or
-                                (other_index > word_index and span[1] > other[0]))
-                                for other_index, other in enumerate(spans)):
-                                continue
-                            spans[word_index] = span
-                            sources[word_index] = "context"
-                    spans = select_intervals(line["words"], spans, lower, upper)
-                except Exception as error:
-                    decision["contextReason"] = str(error)[:300]
-            for word_index, (word, span) in enumerate(zip(line["words"], spans)):
-                if span is not None:
-                    begin, end = span
-                    if (begin, end) != (word["startMs"], word["endMs"]):
-                        word.update(startMs=begin, endMs=end, syllables=[])
-                else:
-                    sources[word_index] = "baseline"
-            count = sum(span is not None for span in spans)
-            decision.update(words="qwen3" if count == len(spans) else "mixed" if count else "baseline",
+            context = [None] * len(words)
+            try:
+                first, last, context_lower, context_upper = context_window(
+                    baseline["lines"], index, lang, round(duration * 1000), baseline["language"])
+                if first == last or not 200 <= context_upper - context_lower <= 28000:
+                    raise ValueError("no additional bounded context")
+                key = (first, last, lang)
+                if key not in context_cache:
+                    surrounding = [w for l in baseline["lines"][first:last + 1] for w in l["words"]]
+                    context_clip = job / f"context-{first:04d}-{last:04d}.wav"
+                    sf.write(context_clip, audio[round(context_lower * sr / 1000):round(context_upper * sr / 1000)], sr)
+                    # Cache failures too: neighbouring phrases must not repeat a failed job.
+                    context_cache[key] = None
+                    result = model.generate(audio=str(context_clip), text=" ".join(w["text"] for w in surrounding),
+                                            language="English" if lang == "en" else "Spanish")
+                    context_cache[key] = matched_intervals(surrounding, list(result), context_lower / 1000,
+                                                            context_lower, context_upper, partial=True)
+                if context_cache[key] is None:
+                    raise ValueError("context alignment failed")
+                start = sum(len(l["words"]) for l in baseline["lines"][first:index])
+                context = context_cache[key][start:start + len(words)]
+            except Exception as error:
+                decision["contextReason"] = str(error)[:300]
+            # MFA's measured words carry phones; its fallbacks do not.
+            measured = [(w["startMs"], w["endMs"]) if any(p.get("phones") for p in w.get("syllables") or []) else None
+                        for w in words]
+            draft_words = draft_lines[index] if draft_lines else words
+            votes = [vote_word(clock["startMs"], mfa, primary, retry)
+                     for clock, mfa, primary, retry in zip(draft_words, measured, phrase, context)]
+            decision["witnesses"] = [{"draft": clock["startMs"], "mfa": mfa and mfa[0],
+                                      "phrase": primary and primary[0], "context": retry and retry[0]}
+                                     for clock, mfa, primary, retry in zip(draft_words, measured, phrase, context)]
+            spans, kinds = resolve_line(words, [span for span, _ in votes], lower, upper)
+            sources = [name if kind == "voted" else "baseline" if kind == "kept" else kind
+                       for kind, (_, name) in zip(kinds, votes)]
+            for word, (begin, end) in zip(words, spans):
+                if (begin, end) != (word["startMs"], word["endMs"]):
+                    word.update(startMs=begin, endMs=end, syllables=[])
+            count = sum(kind == "voted" for kind in kinds)
+            decision.update(words="voted" if count == len(spans) else "mixed" if count else "baseline",
                             acceptedWords=count, totalWords=len(spans), wordSources=sources,
                             contextWords=sources.count("context"))
             if count:
                 line.update(startMs=min(w["startMs"] for w in line["words"]),
                             endMs=max(w["endMs"] for w in line["words"]))
                 accepted.append((index, clip, lower / 1000, lang))
+            else:
+                # Unvoted words may still have been widened out of a flash.
+                line.update(startMs=min(line["startMs"], words[0]["startMs"]),
+                            endMs=max(line["endMs"], words[-1]["endMs"]))
         except Exception as error:
             decision["reason"] = str(error)[:300]
         print(json.dumps({"progress": 0.45 + 0.25 * (index + 1) / len(lyrics["lines"]),
@@ -271,12 +310,13 @@ def run(vocals, input_path, output_path, assets, defer_refinement=""):
                 if word["startMs"] == original["startMs"] and word["endMs"] == original["endMs"]:
                     word["syllables"] = original.get("syllables", [])
             report[index]["phones"] = "mfa-exact-edges-only"
-    lyrics["alignment"] = "qwen3-sofa-experimental-v2" if accepted or sofa_words else baseline.get("alignment")
+    lyrics["alignment"] = "qwen3-sofa-experimental-v3" if accepted or sofa_words else baseline.get("alignment")
     lyrics["acousticModel"] = None if accepted or sofa_words else baseline.get("acousticModel")
     word_count = sum(len(l["words"]) for l in lyrics["lines"])
-    accepted_words = sum(d.get("acceptedWords", 0) for d in report)
-    context_words = sum(d.get("contextWords", 0) for d in report)
-    lyrics["alignmentNotes"] = [f"Qwen: {accepted_words}/{word_count} palabras; {context_words} recuperadas con contexto; respaldo: {word_count - accepted_words}.",
+    sources = [source for d in report for source in d.get("wordSources", [])]
+    qwen_words = sources.count("phrase") + sources.count("context")
+    lyrics["alignmentNotes"] = [f"Palabras: {qwen_words} con Qwen, {sources.count('mfa')} con MFA "
+                                f"y {word_count - qwen_words - sources.count('mfa')} con el tiempo base.",
                                 f"SOFA: fonemas aceptados en {sofa_words} palabras en inglés."]
     pathlib.Path(output_path).write_text(json.dumps(lyrics, ensure_ascii=False))
     if (accepted or sofa_words) and defer_refinement != "defer-refinement":
@@ -289,4 +329,4 @@ def run(vocals, input_path, output_path, assets, defer_refinement=""):
 
 
 if __name__ == "__main__":
-    run(*sys.argv[1:6])
+    run(*sys.argv[1:7])

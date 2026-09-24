@@ -137,9 +137,9 @@ def main(vocals_path, lyrics_path):
     with open(lyrics_path, encoding="utf-8") as handle:
         lyrics = json.load(handle)
     bilingual = "bilingual" in str(lyrics.get("alignment", ""))
-    phoneme_alignment = "mfa-bilingual-phoneme-v2" if bilingual else "mfa-phoneme-v2"
+    phoneme_alignment = "mfa-bilingual-phoneme-v3" if bilingual else "mfa-phoneme-v3"
     acoustic_alignment = (
-        "mfa-bilingual-phoneme+acoustic-v3" if bilingual else "mfa-phoneme+acoustic-v3"
+        "mfa-bilingual-phoneme+acoustic-v4" if bilingual else "mfa-phoneme+acoustic-v4"
     )
     if str(lyrics.get("alignment", "")).startswith("qwen3-sofa-"):
         phoneme_alignment = lyrics["alignment"]

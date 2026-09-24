@@ -99,6 +99,24 @@ function detectLyricsRowsLanguages(rows: string[]): Array<'en' | 'es' | null> {
   });
 }
 
+/**
+ * The provider text already tells us what is sung. Whisper's own guess comes
+ * from a few seconds of audio, and a wrong guess translates the whole song
+ * instead of transcribing it.
+ */
+export function transcriptionLanguageFromText(rows: string[]): LocalLyricsLanguage {
+  // Vocalizations ("I-i-i, i-i-i", "oh, oh") carry no language.
+  const detected = rows
+    .filter(row => new Set(row.split(/[\s,-]+/).map(normalizeWord).filter(Boolean)).size >= 3)
+    .map(detectLyricsLineLanguage);
+  const spanish = detected.filter(language => language === 'es').length;
+  const english = detected.filter(language => language === 'en').length;
+  const known = spanish + english;
+  if (!known) return 'auto';
+  if (Math.min(spanish, english) >= 2 && Math.min(spanish, english) / known >= 0.1) return 'en-es';
+  return spanish > english ? 'es' : 'en';
+}
+
 function editDistance(left: string, right: string): number {
   if (!left.length) return right.length;
   if (!right.length) return left.length;
@@ -321,6 +339,21 @@ export function applyProviderPhraseWindows(
       cursor = fallbackEnd;
       return timed;
     });
+    // Words Whisper never heard at the head of a phrase were squeezed against
+    // the first heard word by the text matcher. Only the provider cue knows
+    // where they begin; without it the aligners never see their audio.
+    const firstHeard = words.findIndex(word => word.confidence > 0);
+    if (firstHeard > 0 && words[0].startMs - startMs > 300) {
+      const headWeight = weights.slice(0, firstHeard).reduce((sum, weight) => sum + weight, 0);
+      const span = Math.min(words[firstHeard].startMs - startMs, firstHeard * 600);
+      let headCursor = startMs;
+      for (let wordIndex = 0; wordIndex < firstHeard; wordIndex += 1) {
+        const wordEnd = Math.round(headCursor + span * weights[wordIndex] / headWeight);
+        words[wordIndex].startMs = headCursor;
+        words[wordIndex].endMs = Math.max(headCursor + 40, wordEnd);
+        headCursor = words[wordIndex].endMs;
+      }
+    }
     // Overlapping multilingual chunks can offer the right words in a slightly
     // different order. If the global token match creates a temporal inversion,
     // keep the canonical word order and redistribute only this phrase; MFA will
@@ -442,14 +475,17 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
       setProgress(0.58);
       setDetail('Transcribiendo…');
       const canonical = await canonicalLyrics;
-      const languageHints = language === 'en-es'
+      const transcriptionLanguage = language === 'auto' && canonical
+        ? transcriptionLanguageFromText(canonical.phrases.map(phrase => phrase.text))
+        : language;
+      const languageHints = transcriptionLanguage === 'en-es'
         ? canonical?.phrases.map(phrase => ({
             text: phrase.text,
             startMs: phrase.startMs,
             endMs: phrase.endMs,
           })) ?? []
         : [];
-      const result = await transcribeKaraokeVocals(nativePath, language, languageHints);
+      const result = await transcribeKaraokeVocals(nativePath, transcriptionLanguage, languageHints);
       let prepared = result;
       if (canonical) {
         const canonicalText = canonical.phrases.map(phrase => phrase.text).join('\n');

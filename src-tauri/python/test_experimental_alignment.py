@@ -1,11 +1,26 @@
 import unittest
 from types import SimpleNamespace
 
-from experimental_alignment import matched_intervals, select_intervals, context_window, token
+from experimental_alignment import matched_intervals, resolve_line, context_window, token, vote_word
 
 
 def item(text, start, end):
     return SimpleNamespace(text=text, start_time=start, end_time=end)
+
+
+class WitnessVoteTest(unittest.TestCase):
+    def test_two_agreeing_witnesses_beat_the_draft_clock(self):
+        # Whisper is 900 ms early; MFA and Qwen agree on the sung onset.
+        self.assertEqual(vote_word(14500, (15390, 15800), (15350, 15820), None), ((15350, 15820), "phrase"))
+        self.assertEqual(vote_word(14500, (15390, 15800), None, (15300, 15790)), ((15300, 15790), "context"))
+
+    def test_lone_outlier_loses_to_the_witness_near_the_draft(self):
+        # MFA jumped to a repeated "veces" a second later; Qwen stayed put.
+        self.assertEqual(vote_word(24060, (25130, 25600), (24100, 24500), None), ((24100, 24500), "phrase"))
+
+    def test_no_witness_near_the_draft_keeps_the_baseline(self):
+        self.assertEqual(vote_word(10000, None, (13000, 13400), None), (None, "baseline"))
+        self.assertEqual(vote_word(10000, None, None, None), (None, "baseline"))
 
 
 class AlignmentGuardsTest(unittest.TestCase):
@@ -28,21 +43,38 @@ class AlignmentGuardsTest(unittest.TestCase):
     def test_partial_alignment_preserves_good_word_after_collapsed_word(self):
         spans = matched_intervals(self.words, [item("don't", 0, 0), item("go", .6, 1.1)],
                                   1, 1000, 2500, partial=True)
-        self.assertEqual(select_intervals(self.words, spans, 1000, 2500), [None, (1600, 2100)])
+        self.assertEqual(spans, [None, (1600, 2100)])
 
     def test_partial_alignment_still_requires_exact_text(self):
         with self.assertRaises(ValueError):
             matched_intervals(self.words, [item("different", 0, .5), item("go", .6, 1.1)],
                               1, 1000, 2500, partial=True)
 
-    def test_proposals_cannot_overlap_unchanged_fallback(self):
-        self.assertEqual(select_intervals(self.words, [None, (1400, 2100)], 1000, 2500), [None, None])
+    def test_unvoted_word_yields_to_a_voted_neighbour(self):
+        # "Don't" kept a stale time that overlaps the voted "go".
+        spans, kinds = resolve_line(self.words, [None, (1400, 2100)], 1000, 2500)
+        self.assertEqual(spans, [(1000, 1400), (1400, 2100)])
+        self.assertEqual(kinds, ["spread", "voted"])
 
-    def test_conflicts_are_rechecked_after_restoring_baseline(self):
-        words = [{"startMs": 0, "endMs": 500}, {"startMs": 500, "endMs": 1000},
-                 {"startMs": 1000, "endMs": 1500}]
-        self.assertEqual(select_intervals(words, [(0, 400), (400, 800), (750, 1400)], 0, 1500),
-                         [(0, 400), None, None])
+    def test_unvoted_word_that_fits_is_kept(self):
+        spans, kinds = resolve_line(self.words, [None, (1700, 2100)], 1000, 2500)
+        self.assertEqual(spans, [(1000, 1500), (1700, 2100)])
+        self.assertEqual(kinds, ["kept", "voted"])
+
+    def test_word_between_touching_anchors_borrows_room(self):
+        # Shivers: Qwen collapsed "you" between "and" and "got".
+        words = [{"text": t, "startMs": s, "endMs": e} for t, s, e in
+                 (("and", 39500, 39700), ("you", 39700, 39780), ("got", 39780, 39940))]
+        spans, kinds = resolve_line(words, [(39500, 39780), None, (39780, 39940)], 39000, 41000)
+        self.assertEqual(kinds, ["voted", "spread", "voted"])
+        self.assertTrue(all(e - s >= 40 for s, e in spans))
+        self.assertTrue(all(a[1] <= b[0] for a, b in zip(spans, spans[1:])))
+
+    def test_out_of_order_vote_is_dropped_for_the_longest_chain(self):
+        words = [{"text": t, "startMs": 1000 * n, "endMs": 1000 * n + 500} for n, t in enumerate("abcd")]
+        spans, kinds = resolve_line(words, [(0, 400), (3500, 3900), (2000, 2400), (3000, 3400)], 0, 4000)
+        self.assertEqual(kinds, ["voted", "kept", "voted", "voted"])
+        self.assertTrue(all(a[1] <= b[0] and a[0] < a[1] for a, b in zip(spans, spans[1:])))
 
     def test_context_includes_neighbour_text_without_crossing_language(self):
         lines = [{"startMs": n * 4000, "endMs": n * 4000 + 3000,
