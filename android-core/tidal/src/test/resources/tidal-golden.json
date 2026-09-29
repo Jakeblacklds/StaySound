@@ -2143,6 +2143,387 @@
    "expected": null
   },
   {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "HI_RES_LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "HIGH"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOW"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "UNKNOWN"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "/rel/path/i.mp4",
+     "/rel/path/x-1.m4s",
+     "/rel/path/x-2.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 96000
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "HI_RES_LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "/rel/path/i.mp4",
+     "/rel/path/x-1.m4s",
+     "/rel/path/x-2.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 96000
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "HIGH"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/hi/i.mp4",
+     "https://cdn.example/hi/h-1.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "mp4a.40.2",
+    "sampleRate": 44100
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "LOW"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/lo/i.mp4",
+     "https://cdn.example/lo/l-00007.m4s",
+     "https://cdn.example/lo/l-00008.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "mp4a.40.5",
+    "sampleRate": 22050
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "MP3"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/lo/i.mp4",
+     "https://cdn.example/lo/l-00007.m4s",
+     "https://cdn.example/lo/l-00008.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "mp4a.40.5",
+    "sampleRate": 22050
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"audio/mp4\" codecs=\"flac\" audioSamplingRate=\"48000\"><SegmentTemplate initialization=\"i.mp4\" media=\"s$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate><Representation id=\"FLAC,48000,24\"/></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "i.mp4",
+     "s1.m4s",
+     "s2.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "",
+    "bitDepth": 24
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"A\" codecs=\"flac\"><SegmentTemplate initialization=\"only-init.mp4\"/></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "only-init.mp4"
+    ],
+    "mimeType": "",
+    "codecs": "flac"
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "error": "Error"
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "this is not xml",
+    "LOSSLESS"
+   ],
+   "error": "Error"
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "",
+    "LOSSLESS"
+   ],
+   "error": "TypeError"
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"A\"><SegmentTemplate initialization=\"\" media=\"\"/></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "error": "Error"
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/t/init.mp4",
+    "https://cdn.example/t/seg-1.m4s",
+    "https://cdn.example/t/seg-2.m4s",
+    "https://cdn.example/t/seg-3.m4s",
+    "https://cdn.example/t/seg-4.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/t/init.mp4",
+    "https://cdn.example/t/seg-1.m4s",
+    "https://cdn.example/t/seg-2.m4s",
+    "https://cdn.example/t/seg-3.m4s",
+    "https://cdn.example/t/seg-4.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/lo/i.mp4",
+    "https://cdn.example/lo/l-00007.m4s",
+    "https://cdn.example/lo/l-00008.m4s",
+    "https://cdn.example/lo/l-00009.m4s",
+    "https://cdn.example/lo/l-00010.m4s",
+    "https://cdn.example/lo/l-00011.m4s",
+    "https://cdn.example/lo/l-00012.m4s",
+    "https://cdn.example/lo/l-00013.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "this is not xml"
+   ],
+   "expected": []
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    ""
+   ],
+   "expected": []
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><BaseURL>https://cdn.example/x</BaseURL><SegmentList initialization=\"init.mp4\"><SegmentURL media=\"a.m4s\"/><SegmentURL media=\"/b.m4s\"/></SegmentList></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/x/init.mp4",
+    "https://cdn.example/x/a.m4s",
+    "https://cdn.example/x/b.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><SegmentList><SegmentURL media=\"https://abs.example/1.m4s\"/></SegmentList></MPD>"
+   ],
+   "expected": [
+    "https://abs.example/1.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><BaseURL>https://cdn.example/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"n-$Number%03d$.m4s\"><SegmentTimeline><S d=\"1\" r=\"2\"/><S d=\"1\"/></SegmentTimeline></SegmentTemplate></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/i.mp4",
+    "https://cdn.example/n-001.m4s",
+    "https://cdn.example/n-002.m4s",
+    "https://cdn.example/n-003.m4s",
+    "https://cdn.example/n-004.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><SegmentTemplate media=\"m$Number$.m4s\" startNumber=\"10\"><SegmentTimeline><S r=\"1\"/></SegmentTimeline></SegmentTemplate></MPD>"
+   ],
+   "expected": [
+    "m10.m4s",
+    "m11.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "#EXTM3U\nhttps://cdn.example/a.flac?token=1\n\"http://cdn.example/b.flac\""
+   ],
+   "expected": [
+    "https://cdn.example/a.flac?token=1",
+    "http://cdn.example/b.flac"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><BaseURL>  https://cdn.example/spaced/  </BaseURL><SegmentList><SegmentURL media=\"s.m4s\"/></SegmentList></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/spaced/s.m4s"
+   ]
+  },
+  {
    "fn": "baseFilename",
    "input": [
     {

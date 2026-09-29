@@ -6,9 +6,32 @@ import {
     extractAlbumsFromTracks, getArtworkUrl, getPlaylistArtworkUrl, normalizeAlbumItem, normalizeArtistItem,
     normalizePlaylistItem, normalizeSearchItem, normalizeTopHit, withVersion,
 } from '../../src/services/tidal/normalize';
+import { parseDashManifest, parseDashManifestForQuality } from '../../src/features/tidal/data/dashManifestParser';
 import {
     getDirectUrl, getPlayableUrl, getSafEntityName, getTrackBaseFilename, requiresFlacDownload, resolveDownloadExtension, toLibraryTrack,
 } from '../../src/services/tidal/files';
+
+
+const flac = (extra = '') => `<?xml version="1.0"?><MPD><Period><AdaptationSet mimeType="audio/mp4"><Representation id="FLAC,44100,16" codecs="flac" audioSamplingRate="44100"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization="init.mp4" media="seg-$Number$.m4s" startNumber="1"${extra}><SegmentTimeline><S d="100" r="2"/><S d="50"/></SegmentTimeline></SegmentTemplate></Representation></Representation></AdaptationSet></Period></MPD>`.replace('</Representation></Representation>', '</Representation>');
+const rich = `<MPD><Period>
+  <AdaptationSet mimeType="audio/mp4" codecs="mp4a.40.2">
+    <Representation id="HEAACV1" codecs="mp4a.40.5" audioSamplingRate="22050"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization="i.mp4" media="l-$Number%05d$.m4s" startNumber="7"><SegmentTimeline><S d="1" r="1"/></SegmentTimeline></SegmentTemplate></Representation>
+    <Representation id="AACLC" codecs="mp4a.40.2" audioSamplingRate="44100"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization="i.mp4" media="h-$Number$.m4s" startNumber="1"><SegmentTimeline><S d="1" r="-1"/></SegmentTimeline></SegmentTemplate></Representation>
+    <Representation id="FLAC,44100,16" codecs="flac" audioSamplingRate="44100"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization="i.mp4" media="f-$Number$.m4s" startNumber="1"><SegmentTimeline><S d="1"/></SegmentTimeline></SegmentTemplate></Representation>
+    <Representation id="FLAC_HIRES,96000,24" codecs="flac" audioSamplingRate="96000"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization="/i.mp4" media="x-$Number$.m4s" startNumber="1"><SegmentTimeline><S d="1" r="1"/></SegmentTimeline></SegmentTemplate></Representation>
+  </AdaptationSet>
+  <AdaptationSet mimeType="video/mp4"><Representation id="V" codecs="avc1"><SegmentTemplate media="v.m4s" startNumber="1"><SegmentTimeline><S d="1"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>
+</Period></MPD>`;
+const dashInputs = {
+    tidalFlac: flac(),
+    noStartNumber: flac().replace(' startNumber="1"', ''),
+    templateOnAdaptationSet: '<MPD><Period><AdaptationSet mimeType="audio/mp4" codecs="flac" audioSamplingRate="48000"><SegmentTemplate initialization="i.mp4" media="s$Number$.m4s" startNumber="1"><SegmentTimeline><S d="1" r="1"/></SegmentTimeline></SegmentTemplate><Representation id="FLAC,48000,24"/></AdaptationSet></Period></MPD>',
+    noAudio: '<MPD><Period><AdaptationSet mimeType="video/mp4"><Representation id="V"><SegmentTemplate media="v.m4s" startNumber="1"><SegmentTimeline><S d="1"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>',
+    notXml: 'this is not xml',
+    empty: '',
+    noSegments: '<MPD><Period><AdaptationSet mimeType="audio/mp4"><Representation id="A"><SegmentTemplate initialization="" media=""/></Representation></AdaptationSet></Period></MPD>',
+    initOnly: '<MPD><Period><AdaptationSet mimeType="audio/mp4"><Representation id="A" codecs="flac"><SegmentTemplate initialization="only-init.mp4"/></Representation></AdaptationSet></Period></MPD>',
+};
 
 /** Every function the Kotlin port (android-core/tidal) must reproduce, with the inputs to run it on. */
 const fixtures: Record<string, { run: (...args: any[]) => unknown; inputs: any[][] }> = {
@@ -84,6 +107,19 @@ const fixtures: Record<string, { run: (...args: any[]) => unknown; inputs: any[]
     playableUrl: { run: getPlayableUrl, inputs: [
         [{ urls: ['https://x/a', 'https://x/b'], isSegmented: false, manifestUrl: 'https://x/m.mpd' }],
         [{ urls: [], isSegmented: false, manifestUrl: 'data:application/dash+xml;base64,AAA' }], [{ urls: ['https://x/a.flac'], isSegmented: false, manifestUrl: 'https://x/m' }], [{ urls: [], isSegmented: false }]] },
+    dashForQuality: { run: parseDashManifestForQuality, inputs: [
+        [dashInputs.tidalFlac, 'LOSSLESS'], [dashInputs.tidalFlac, 'HI_RES_LOSSLESS'], [dashInputs.tidalFlac, 'HIGH'], [dashInputs.tidalFlac, 'LOW'], [dashInputs.tidalFlac, 'UNKNOWN'],
+        [rich, 'LOSSLESS'], [rich, 'HI_RES_LOSSLESS'], [rich, 'HIGH'], [rich, 'LOW'], [rich, 'MP3'],
+        [dashInputs.noStartNumber, 'LOSSLESS'], [dashInputs.templateOnAdaptationSet, 'LOSSLESS'], [dashInputs.initOnly, 'LOSSLESS'],
+        [dashInputs.noAudio, 'LOSSLESS'], [dashInputs.notXml, 'LOSSLESS'], [dashInputs.empty, 'LOSSLESS'], [dashInputs.noSegments, 'LOSSLESS']] },
+    dashUrls: { run: parseDashManifest, inputs: [
+        [dashInputs.tidalFlac], [dashInputs.noStartNumber], [rich], [dashInputs.notXml], [dashInputs.empty],
+        ['<MPD><BaseURL>https://cdn.example/x</BaseURL><SegmentList initialization="init.mp4"><SegmentURL media="a.m4s"/><SegmentURL media="/b.m4s"/></SegmentList></MPD>'],
+        ['<MPD><SegmentList><SegmentURL media="https://abs.example/1.m4s"/></SegmentList></MPD>'],
+        ['<MPD><BaseURL>https://cdn.example/</BaseURL><SegmentTemplate initialization="i.mp4" media="n-$Number%03d$.m4s"><SegmentTimeline><S d="1" r="2"/><S d="1"/></SegmentTimeline></SegmentTemplate></MPD>'],
+        ['<MPD><SegmentTemplate media="m$Number$.m4s" startNumber="10"><SegmentTimeline><S r="1"/></SegmentTimeline></SegmentTemplate></MPD>'],
+        ['#EXTM3U\nhttps://cdn.example/a.flac?token=1\n"http://cdn.example/b.flac"'],
+        ['<MPD><BaseURL>  https://cdn.example/spaced/  </BaseURL><SegmentList><SegmentURL media="s.m4s"/></SegmentList></MPD>']] },
     baseFilename: { run: getTrackBaseFilename, inputs: [
         [{ id: 1, title: 'Who?', artist: 'AC/DC', album: 'LP' }], [{ id: 5, title: '', artist: '', album: '' }], [{ id: 2, title: 'a'.repeat(200), artist: 'b', album: 'c' }],
         [{ id: 3, title: 'Tab\tand   spaces', artist: 'A|B', album: '<x>:"y"' }]] },

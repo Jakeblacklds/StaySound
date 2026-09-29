@@ -93,6 +93,10 @@ class TidalGoldenTest {
             "requiresFlac" -> DownloadFiles.requiresFlacDownload(a.getString(0))
             "directUrl" -> DownloadFiles.directUrl(manifestOf(a.getJSONObject(0)))
             "playableUrl" -> DownloadFiles.playableUrl(manifestOf(a.getJSONObject(0)))
+            "dashForQuality" -> DashManifest.parseForQuality(a.getString(0), a.getString(1)).let {
+                JSONObject().put("urls", JSONArray(it.urls)).put("mimeType", it.mimeType).put("codecs", it.codecs).put2("sampleRate", it.sampleRate).put2("bitDepth", it.bitDepth)
+            }
+            "dashUrls" -> JSONArray(DashManifest.parseUrls(a.getString(0)))
             "baseFilename" -> a.getJSONObject(0).let { DownloadFiles.trackBaseFilename(it.getLong("id"), it.getString("title"), it.getString("artist"), it.getString("album")) }
             "safEntityName" -> DownloadFiles.safEntityName(a.getString(0))
             "libraryTrack" -> DownloadFiles.toLibraryTrack(trackOf(a.getJSONObject(0)), a.getString(1), now = 0).json()
@@ -109,6 +113,12 @@ class TidalGoldenTest {
             val case = cases.getJSONObject(index)
             val fn = case.getString("fn")
             val input = case.getJSONArray("input")
+            if (case.has("error")) {
+                // The TypeScript threw (its error type is a JavaScript detail); the port must reject the input too.
+                val threw = try { run(fn, input); false } catch (_: Exception) { true }
+                if (!threw) failures += "$fn(${input.toString().take(140)}) should have thrown ${case.getString("error")}"
+                continue
+            }
             val expected = canon(case.opt("expected"))
             val actual = try { canon(run(fn, input)) } catch (error: Exception) { "threw ${error::class.simpleName}: ${error.message}" }
             if (expected != actual) failures += "$fn(${input.toString().take(140)})\n   expected: $expected\n   actual:   $actual"
