@@ -14,7 +14,20 @@
 - Importación de `files/storage/*.json` (incluidos subdirectorios) y de la tabla `artists` de `files/SQLite/staysound.db`. No se mueven archivos de audio ni se modifican sus URI.
 - Adaptador temporal Android `modules/core-storage` / `src/services/storage.android.ts`: sigue sirviendo los JSON al runtime existente, pero serializa accesos, hace escrituras atómicas y mantiene el bloqueo de almacenamiento. iOS/web siguen usando exactamente el adaptador anterior, trasladado a `storage.legacy.ts`.
 
-La UI aún **no usa** `LibraryViewModel`. Room/DataStore solo se activan en las pruebas o mediante la API explícita de arranque nativo; no hay llamada de activación desde la app actual ni método de migración exportado a JavaScript.
+La UI aún **no usa** `LibraryViewModel`. Room/DataStore se activan únicamente en builds con el flag de abajo; no hay método de migración exportado a JavaScript.
+
+## Modo de almacenamiento nativo (opt-in por build)
+
+`STAYSOUND_NATIVE_DATA=1` durante `expo prebuild` añade `<meta-data app.staysound.NATIVE_DATA=true>` (plugin `withAndroidCore`). Con el flag, `StorageBootstrap` (llamado por `core-storage`) recupera cualquier migración interrumpida, importa los JSON antiguos una sola vez y sirve `getItem/setItem/removeItem` desde Room/DataStore (`NativeStorageSession`). Los stores JS conservan su lógica, pero la autoridad de los datos ya es Kotlin:
+
+- Colecciones (`tracks`, `playlists`, `cloudPlaylistTracks`, historial) son filas; cada `setItem` se compara con lo guardado y solo escribe lo que cambió. Un documento malformado se rechaza sin tocar la biblioteca.
+- Ajustes, jugador y onboarding van a DataStore; el resto (auth, letras, credenciales…) son documentos opacos en Room.
+- Descargas y caché de artistas son de Kotlin: JS no puede escribir ni borrar `staysound-native-downloads-v1`.
+- Sin el flag, un build posterior exporta los datos nativos actuales de vuelta a los JSON antes de abrir el modo legacy, así que alternar el flag no pierde cambios.
+- `NativeStorageSession.data` es el `StaySoundData` único para futuros consumidores Kotlin (ViewModels de las vistas nativas).
+
+Limitación conocida: la caché de artistas de Expo SQLite sigue escribiéndola JS. Al volver a legacy, la exportación no reemplaza filas más nuevas que las de Room.
+Sin validar en dispositivo con datos reales; los tests (`NativeStorageTest`) cubren importación, diff de escritura, reinicio, rollback y rechazo de datos inválidos.
 
 ## Propiedad y recuperación
 
@@ -56,7 +69,7 @@ No se ha hecho validación en dispositivo ni con una copia real de los datos del
 
 | Capa | Estado real y siguiente integración |
 | --- | --- |
-| 1. Datos | Base anterior implementada. Falta conectar los consumidores Android reales a los repositorios/ViewModels, completar las operaciones de escaneo/enriquecimiento y las acciones de biblioteca que todavía viven en `libraryStore`, y cerrar la paridad antes de activar el propietario Kotlin. |
+| 1. Datos | Base anterior implementada. Falta conectar las vistas nativas a `NativeStorageSession.data`/ViewModels (los stores JS ya persisten en Room con el flag), completar las operaciones de escaneo/enriquecimiento y las acciones de biblioteca que todavía viven en `libraryStore`, y cerrar la paridad antes de activar el propietario Kotlin. |
 | 2. Tidal | Sin migrar. Portar catálogo/token, mirrors y capacidades/health, metadata, endpoints de detalle, resolución de streaming y manifests desde `tidalService.ts` y `features/tidal/data`; probar fixtures de todas las variantes/fallbacks. |
 | 3. Descargas | Sin migrar. Consumir directamente el cliente Kotlin Soulseek existente, portar ranking/fallback FLAC/MP3, progreso, cancelación, SAF/MediaStore, sidecars y publicación en el repositorio. No reemplazar su implementación por estilo. |
 | 4. Reproducción | Sin migrar. Un único `MediaLibraryService`/Media3 con cola/sesión/estado; cierre verificable de AudioEngine/RNTP antes de arrancarlo. Mantener cero instancias adicionales durante la transición. |

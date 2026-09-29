@@ -15,6 +15,7 @@ class StaySoundData private constructor(
     private val migration: DataMigration,
 ) {
     val library = LibraryRepository(db, ownership)
+    internal val documents = NativeDocuments(db, settings, ownership, migration)
     /** Called only by a native startup after all legacy consumers have been stopped. Not exported to JS. */
     suspend fun importLegacyAtStartup() = migration.activate()
     suspend fun recoverInterruptedMigration() = migration.recover()

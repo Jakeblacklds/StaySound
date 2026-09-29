@@ -14,6 +14,8 @@ class SettingsRepository internal constructor(
     internal suspend fun replace(documents: Map<String, String>) {
         store.edit { prefs -> prefs.clear(); documents.forEach { (key, value) -> prefs[stringPreferencesKey(key)] = value } }
     }
+    internal suspend fun put(name: String, value: String) { store.edit { it[stringPreferencesKey(name)] = value } }
+    internal suspend fun remove(name: String) { store.edit { it.remove(stringPreferencesKey(name)) } }
     internal suspend fun documents(): Map<String, String> = store.data.first().asMap().map { (key, value) -> key.name to (value as String) }.toMap()
     val settings: Flow<Settings> = store.data.map { prefs ->
         ownership.native { Settings.from(LegacyCodec.envelope(prefs[stringPreferencesKey(LegacyCodec.SETTINGS)]).getJSONObject("state")) }

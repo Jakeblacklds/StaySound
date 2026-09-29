@@ -111,7 +111,7 @@ internal class DataMigration(
         ownership.write(Ownership(Owner.LEGACY, generation))
         checkpoint(MigrationCheckpoint.LEGACY_COMMITTED)
     }
-    private suspend fun exportDocuments(): Map<String, String> = db.withTransaction {
+    internal suspend fun exportDocuments(): Map<String, String> = db.withTransaction {
         val dao = db.library()
         val result = settings.documents().toMutableMap()
         val storedDocuments = dao.documents()

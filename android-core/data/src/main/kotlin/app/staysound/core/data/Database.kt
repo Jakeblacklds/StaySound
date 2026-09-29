@@ -81,6 +81,7 @@ internal interface LibraryDao {
     @Query("DELETE FROM cloud_tracks") suspend fun clearCloudTracks()
     @Query("DELETE FROM downloads") suspend fun clearDownloads()
     @Query("DELETE FROM documents") suspend fun clearDocuments()
+    @Query("DELETE FROM documents WHERE name = :name") suspend fun deleteDocument(name: String)
 }
 
 @Database(entities = [TrackRow::class, PlaylistRow::class, PlaylistEntry::class, CloudTrackRow::class,

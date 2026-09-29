@@ -56,8 +56,23 @@ internal fun atomicWrite(file: File, bytes: ByteArray) {
     catch (error: Throwable) { target.failWrite(stream); throw error }
 }
 
+/** Read without taking the lease so bootstrap can choose a runtime. Callers re-check under the lease. */
+internal fun peekOwner(filesDir: File): Owner {
+    val marker = File(File(filesDir, "staysound-core"), "ownership.json")
+    if (!marker.exists() && !File(marker.path + ".bak").exists()) return Owner.LEGACY
+    return Owner.valueOf(JSONObject(AtomicFile(marker).readFully().toString(Charsets.UTF_8)).getString("owner"))
+}
+
+/** Key/value document store the JavaScript runtime persists through. Exactly one authority is open at a time. */
+interface StorageAuthority {
+    suspend fun getItem(name: String): String?
+    suspend fun setItem(name: String, value: String)
+    suspend fun removeItem(name: String)
+    suspend fun close()
+}
+
 /** Transitional Android adapter. No migration entry point is exposed to JavaScript. */
-class LegacyStorageSession private constructor(private val ownership: StorageOwnership) {
+class LegacyStorageSession private constructor(private val ownership: StorageOwnership) : StorageAuthority {
     private val storage = File(ownership.filesDir, "storage")
     private fun file(name: String): File {
         require(name.isNotEmpty() && !name.contains('\u0000')) { "Invalid storage key" }
@@ -67,19 +82,19 @@ class LegacyStorageSession private constructor(private val ownership: StorageOwn
         require(target.path.startsWith(storage.canonicalPath + File.separator)) { "Storage key escapes its directory" }
         return target
     }
-    suspend fun getItem(name: String): String? = ownership.exclusive {
+    override suspend fun getItem(name: String): String? = ownership.exclusive {
         check(ownership.read().owner == Owner.LEGACY) { "Kotlin owns user data; legacy runtime is disabled" }
         AtomicFile(file(name)).let { if (file(name).exists() || File(file(name).path + ".bak").exists()) it.readFully().toString(Charsets.UTF_8) else null }
     }
-    suspend fun setItem(name: String, value: String) = ownership.exclusive {
+    override suspend fun setItem(name: String, value: String) = ownership.exclusive {
         check(ownership.read().owner == Owner.LEGACY)
         atomicWrite(file(name), value.toByteArray())
     }
-    suspend fun removeItem(name: String) = ownership.exclusive {
+    override suspend fun removeItem(name: String) = ownership.exclusive {
         check(ownership.read().owner == Owner.LEGACY)
         AtomicFile(file(name)).delete()
     }
-    suspend fun close() = withContext(NonCancellable) { ownership.exclusive { ownership.close() } }
+    override suspend fun close() = withContext(NonCancellable) { ownership.exclusive { ownership.close() } }
     companion object {
         fun open(filesDir: File): LegacyStorageSession {
             val ownership = StorageOwnership(filesDir)

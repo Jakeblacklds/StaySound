@@ -53,8 +53,9 @@ internal object ArtistCache {
                     val values = ContentValues().apply {
                         put("name", row.name); put("photo_url", row.photoUrl); put("biography", row.biography); put("timestamp", row.timestamp)
                     }
-                    if (db.update("artists", values, "name = ?", arrayOf(row.name)) == 0) {
-                        db.insertOrThrow("artists", null, values)
+                    // JavaScript keeps writing this SQLite cache while Kotlin owns the rest: never replace a newer row.
+                    if (db.update("artists", values, "name = ? AND timestamp <= ?", arrayOf(row.name, row.timestamp.toString())) == 0) {
+                        db.insertWithOnConflict("artists", null, values, SQLiteDatabase.CONFLICT_IGNORE)
                     }
                 }
                 db.setTransactionSuccessful()
