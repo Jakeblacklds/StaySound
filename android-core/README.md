@@ -31,11 +31,17 @@ Los escaneos persisten `tracks: []` con `scanInProgress: true` (`libraryStore.pa
 
 ## Escaneo: reconciliación en Kotlin (sin conectar todavía)
 
-`ScanReconciler` (módulo `model`) es el port de `src/services/scanReconcile.ts`: filtro de basura, enriquecimiento del nombre de archivo y emparejamiento con lo ya conocido por nombre de archivo (conserva metadatos, arte y favoritos). `libraryStore.scanLibrary` ya usa ese módulo TS, y `LibraryRepository.applyScan` aplica el resultado en una transacción. La paridad no se afirma a mano: `scripts/generate-scan-golden.mjs` ejecuta el TypeScript real sobre 13 casos y `ScanReconcilerTest` exige el mismo resultado; `node scripts/test-android-core.mjs` falla si el golden quedó obsoleto (`--check`). Cambia ambos a la vez.
+`ScanReconciler` (módulo `model`) es el port de `src/services/scanReconcile.ts`: filtro de basura, enriquecimiento del nombre de archivo y emparejamiento con lo ya conocido por nombre de archivo (conserva metadatos, arte y favoritos). `libraryStore.scanLibrary` ya usa ese módulo TS, y `LibraryRepository.applyScan` aplica el resultado en una transacción. La paridad no se afirma a mano: `scripts/generate-goldens.mjs` ejecuta el TypeScript real sobre 13 casos y `ScanReconcilerTest` exige el mismo resultado; `node scripts/test-android-core.mjs` falla si el golden quedó obsoleto (`--check`). Cambia ambos a la vez.
 
 Diferencia deliberada: `decodeURIComponent` de JS lanza con escapes inválidos y aborta el escaneo entero; Kotlin usa el valor sin decodificar.
 Limitación heredada de JS: tras un escaneo el URI guardado pasa a ser el de MediaStore, así que en el siguiente escaneo solo se reconoce el archivo si su nombre coincide con `Artista - Álbum - Título` de los metadatos guardados.
 Falta: el recolector (`library-indexer`, sidecars y arte de Tidal en `nativeLibraryIndexer.ts`), que depende de la capa Tidal.
+
+## Tidal: partes puras portadas (módulo `tidal`)
+
+`src/services/tidalService.ts` (3,280 líneas) se dividió en `src/services/tidal/*` (constantes, política de mirrors, normalizadores, catálogo, archivos, almacenamiento, descarga, streaming; `tidalService.ts` quedó como fachada). Las piezas sin red ni plataforma ya existen en Kotlin (`android-core/tidal`): `TidalNormalizer`, `MirrorPolicy`, `TidalMirrors` y `DownloadFiles`. Igual que el escaneo, no se afirma la paridad: `scripts/generate-goldens.mjs` ejecuta el TypeScript real sobre 140 casos y `TidalGoldenTest` exige el mismo resultado (se comprobó por mutación que detecta cambios de redondeo, rosters y reglas). `JsText` y `Filenames` (módulo `model`) concentran la semántica JS compartida (trim/`\s` Unicode, `Math.round`, `decodeURIComponent`, sanitizado de nombres).
+Diferencias deliberadas: el año de `releaseDate` se toma como está escrito (JS lo leía en la zona horaria del dispositivo); un escape `%` inválido no lanza. Sigue en JS: cliente HTTP con fallback entre mirrors, salud de mirrors, caché, token de catálogo, manifiesto/DASH, descarga y SAF.
+Comandos: `node scripts/test-android-core.mjs` (Kotlin + goldens), `node scripts/test-tidal.mjs` (módulos puros TS), `node scripts/generate-goldens.mjs [--check]`.
 
 **Antes de que las vistas nativas lean de Room** (en vez de recibir el catálogo por props desde JS) hay que mover a Kotlin: el escaneo y el enriquecimiento (`scanLibrary`, `repairMissingMetadata`, `hydrateMetadataFromTidalForLibrary`), las fotos de artistas (hoy `refreshArtistPhotos` las guarda en memoria y en Expo SQLite, y `catalogOf` no las ve) y las mutaciones de biblioteca (`deleteTrack`, playlists, favoritos). Si no, las vistas mostrarían un catálogo distinto del que ve JS.
 
