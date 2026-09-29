@@ -79,6 +79,22 @@ class LibraryRepository internal constructor(private val db: LibraryDatabase, pr
         val next = (listOf(track) + dao.history().map { it.track }.filterNot { it.id == track.id }).take(50)
         dao.clearHistory(); dao.putHistory(next.mapIndexed { index, item -> HistoryRow(index, item) })
     } }
+    data class ScanSummary(val added: Int, val updated: Int, val removed: Int)
+    /**
+     * A finished scan replaces the local catalog with what the device reports, keeping the metadata, artwork and
+     * favorites of files the library already knew (see [ScanReconciler]). Playlists are left alone: they may
+     * reference files that are temporarily unavailable. One transaction, so a crash never leaves a partial scan.
+     */
+    suspend fun applyScan(scanned: List<ScannedTrack>): ScanSummary = ownership.native { db.withTransaction {
+        val current = dao.tracks().associateBy { it.key }
+        val result = ScanReconciler.reconcileAll(current.values.map { it.track }, scanned)
+        val kept = result.mapTo(HashSet()) { it.id }
+        val removed = current.keys.filterNot { it in kept }
+        removed.forEach { dao.deleteTrack(it) }
+        val rows = result.mapIndexed { index, track -> TrackRow(track.id, track, index) }
+        dao.putTracks(rows.filter { current[it.key] != it })
+        ScanSummary(added = result.count { it.id !in current }, updated = rows.count { current[it.key]?.let { old -> old != it } == true }, removed = removed.size)
+    } }
     /** Download completion and publication become visible in the same Room transaction. */
     suspend fun completeDownload(download: Download, track: Track) = ownership.native { db.withTransaction {
         require(download.status == DownloadStatus.COMPLETED && download.uri == track.uri && download.trackId == track.id)

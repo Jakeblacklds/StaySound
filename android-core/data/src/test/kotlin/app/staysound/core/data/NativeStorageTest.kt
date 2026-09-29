@@ -99,6 +99,31 @@ class NativeStorageTest {
         assertTrue(data().library.snapshot().tracks.isEmpty())
     }
 
+    @Test fun aFinishedScanKeepsKnownMetadataAndReplacesTheRest() = runBlocking {
+        val known = Track("saf_1", "content://saf/Artist%20-%20Album%20-%20Real%20Title.flac", "Real Title", "Artist", "Album", 1000, 5,
+            favorite = true, artwork = "https://img/a.jpg", artworkThumb = "file:///t.jpg")
+        val gone = Track("gone", "content://media/9", "Gone", "Nobody", "Nothing", 1000, 6)
+        seed(LegacyCodec.LIBRARY, library(listOf(known, gone), listOf(Playlist("p", "Mix", listOf(known.id, gone.id), 1, 2))))
+        open(true)
+        val scan = listOf(
+            ScannedTrack(Track("ms_1", "content://media/1", "Unknown", "Unknown Artist", "Unknown Album", 2000, 7, artwork = "content://media/external/audio/albumart/1"),
+                "Artist - Album - Real Title.flac"),
+            ScannedTrack(Track("ms_2", "content://media/2", "Unknown", "Unknown Artist", "Unknown Album", 3000, 8), "Other - Disc - Fresh.mp3"),
+            ScannedTrack(Track("junk", "file:///cache/staysound/downloads/x.flac", "x", "y", "z", 10, 9), null),
+        )
+        val summary = data().library.applyScan(scan)
+        assertEquals(LibraryRepository.ScanSummary(added = 2, updated = 0, removed = 2), summary)
+        val catalog = data().library.snapshot()
+        assertEquals(listOf("ms_1", "ms_2"), catalog.tracks.map { it.id })
+        val first = catalog.tracks.first()
+        assertEquals(listOf("Real Title", "Artist", "Album", true, "https://img/a.jpg", "file:///t.jpg"),
+            listOf(first.title, first.artist, first.album, first.favorite, first.artwork, first.artworkThumb))
+        assertEquals("Fresh", catalog.tracks.last().title)
+        assertEquals(listOf(known.id, gone.id), catalog.playlists.single().trackIds)   // playlists are untouched
+        // Repeating the same scan changes nothing.
+        assertEquals(LibraryRepository.ScanSummary(added = 0, updated = 0, removed = 0), data().library.applyScan(scan))
+    }
+
     @Test fun malformedWritesAreRejectedWithoutTouchingTheLibrary() = runBlocking {
         seed(LegacyCodec.LIBRARY, library(listOf(a)))
         val session = open(true)

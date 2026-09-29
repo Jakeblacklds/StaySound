@@ -29,6 +29,14 @@ La UI aún **no usa** `LibraryViewModel`. Room/DataStore se activan únicamente 
 Limitación conocida: la caché de artistas de Expo SQLite sigue escribiéndola JS. Al volver a legacy, la exportación no reemplaza filas más nuevas que las de Room.
 Los escaneos persisten `tracks: []` con `scanInProgress: true` (`libraryStore.partialize`); Kotlin conserva sus filas mientras dura el escaneo en lugar de tratarlo como un borrado.
 
+## Escaneo: reconciliación en Kotlin (sin conectar todavía)
+
+`ScanReconciler` (módulo `model`) es el port de `src/services/scanReconcile.ts`: filtro de basura, enriquecimiento del nombre de archivo y emparejamiento con lo ya conocido por nombre de archivo (conserva metadatos, arte y favoritos). `libraryStore.scanLibrary` ya usa ese módulo TS, y `LibraryRepository.applyScan` aplica el resultado en una transacción. La paridad no se afirma a mano: `scripts/generate-scan-golden.mjs` ejecuta el TypeScript real sobre 13 casos y `ScanReconcilerTest` exige el mismo resultado; `node scripts/test-android-core.mjs` falla si el golden quedó obsoleto (`--check`). Cambia ambos a la vez.
+
+Diferencia deliberada: `decodeURIComponent` de JS lanza con escapes inválidos y aborta el escaneo entero; Kotlin usa el valor sin decodificar.
+Limitación heredada de JS: tras un escaneo el URI guardado pasa a ser el de MediaStore, así que en el siguiente escaneo solo se reconoce el archivo si su nombre coincide con `Artista - Álbum - Título` de los metadatos guardados.
+Falta: el recolector (`library-indexer`, sidecars y arte de Tidal en `nativeLibraryIndexer.ts`), que depende de la capa Tidal.
+
 **Antes de que las vistas nativas lean de Room** (en vez de recibir el catálogo por props desde JS) hay que mover a Kotlin: el escaneo y el enriquecimiento (`scanLibrary`, `repairMissingMetadata`, `hydrateMetadataFromTidalForLibrary`), las fotos de artistas (hoy `refreshArtistPhotos` las guarda en memoria y en Expo SQLite, y `catalogOf` no las ve) y las mutaciones de biblioteca (`deleteTrack`, playlists, favoritos). Si no, las vistas mostrarían un catálogo distinto del que ve JS.
 
 Sin validar en dispositivo con datos reales; los tests (`NativeStorageTest`) cubren importación, diff de escritura, reinicio, rollback y rechazo de datos inválidos.
