@@ -11,7 +11,7 @@ import android.os.Build
  * - HALO: album-as-lens, a circular luminous field breathing from the cover.
  * - SILK: slow illuminated fabric, broad folds without rigid lines.
  * - LIQUID: softened refracted lens caustics.
- * - DOT MATRIX: an OriginKit-inspired field whose cells are steered by smoothed audio.
+ * - DOT MATRIX: the Tauri OriginKit field; the beat fuses cells into blobs.
  *
  * Output is premultiplied for PorterDuff.ADD. On API < 33 [get] returns null.
  */
@@ -37,6 +37,10 @@ internal object KaraokeAuroraShader {
         uniform float style;
         uniform float4 tint;
         uniform float4 hot;
+        // Dot matrix only: integrated noise phase, loudness, and (pulse, swell, pulseAge).
+        uniform float phase;
+        uniform float level;
+        uniform float3 beat;
 
         float hash(float2 p) {
             p = fract(p * float2(123.34, 456.21));
@@ -192,52 +196,66 @@ internal object KaraokeAuroraShader {
             return softWeb + glint;
         }
 
-        half4 dotMatrixColor(
-            float2 uv,
-            float t,
-            float bassE,
-            float midE,
-            float treE,
-            float2 audioFlow,
-            float opacity
-        ) {
+        // Port of the Tauri OriginKit field (src/components/originkit/ui/dotmatrix.tsx).
+        // Audio never moves geometry directly: the beat tightens the surface tension so
+        // neighbouring cells agree and fuse into blobs, one soft wavefront leaves the
+        // cover per onset, and the brightest cores are allowed past radius 0.5 so
+        // touching dots merge. Everything is continuous in time — nothing can jump.
+        half4 dotMatrixColor(float2 uv, float opacity) {
             float cell = 16.363636;
             float2 pixel = uv * res;
             float2 cellIndex = floor(pixel / cell);
             float2 centerPixel = (cellIndex + 0.5) * cell;
             float2 centerUv = centerPixel / res;
             float aspect = res.x / max(res.y, 1.0);
-            float2 noiseUv = (centerUv - 0.5) * float2(aspect, 1.0) + 0.5;
 
-            // Exact OriginKit field: frequency=1 maps to 0.3, speed=2.4 maps
-            // to 0.12, gamma=4 maps to 1.6842105 and paletteBias=10 to 0.5.
-            // Audio only nudges the continuous volume; it never defines geometry.
-            float level = clamp((bassE + midE + treE) / 3.0, 0.0, 1.0);
-            float spatialBreath = 1.0 + midE * 0.045 + treE * 0.018;
-            float temporalBreath = 1.0 + level * 0.075;
-            float noiseTime = t * 0.12 * temporalBreath + bassE * 0.018;
-            float hue = abs(snoise(float3(
-                (noiseUv + audioFlow * 0.035) * 0.3 * spatialBreath,
-                noiseTime
-            )));
+            float pulse = clamp(beat.x, 0.0, 1.0);
+            float swell = clamp(beat.y, 0.0, 1.0);
+            float age = beat.z;
+
+            // Inhale on the downbeat, about the centre of the screen.
+            float2 p = (centerUv - 0.5) * float2(aspect, 1.0);
+            float zoom = 1.0 - swell * 0.030 - pulse * 0.026;
+            p = p * zoom + flow;
+
+            // frequency=1 -> 0.3. At rest the fine lobe keeps the field grainy; on a
+            // transient it is pulled into the coarse body so blobs coalesce, then they
+            // slowly separate again on the decay.
+            float coarse = snoise(float3(p * 0.3, phase));
+            float fine = snoise(float3(p * 0.81 + float2(19.3, 7.1), phase * 1.31 + 5.0));
+            float cohesion = clamp(pulse * 1.15 + swell * 0.30, 0.0, 1.0);
+            float grain = mix(0.22, 0.06, cohesion);
+            float hue = abs(coarse * (1.0 - grain) + fine * grain);
+
             float3 rainbow = hsv2rgb(float3(hue, 1.0, 1.0));
             float gray = dot(rainbow, float3(0.3, 0.59, 0.11));
             gray = pow(clamp(gray, 0.0001, 1.0), 1.6842105);
-            float palettePosition = clamp(gray + 0.5, 0.0, 1.0);
 
+            // One wavefront per onset, leaving the cover and fading before the corners.
+            float2 rq = (centerUv - float2(0.5, focusY)) * float2(aspect, 1.0);
+            float travel = age * 0.72;
+            float front = (length(rq) - travel) / 0.30;
+            float ring = exp(-front * front) * pulse * (1.0 - smoothstep(0.30, 1.20, travel));
+
+            float density = clamp(level, 0.0, 1.0) * 0.030;
+            float bloom = 1.0 + swell * 0.035 + pulse * 0.030 + ring * 0.090;
+            float g2 = clamp(gray + 0.5 + density, 0.0, 1.0);
+
+            // Palette [primary @0.72 -> transparent], identical to OriginKit's upper half.
+            float paletteFade = clamp((g2 - 0.5) * 2.0, 0.0, 1.0);
+            float3 dotColor = mix(tint.rgb, tint.rgb * 0.025, paletteFade);
+            float dotOpacity = mix(0.72, 0.0, paletteFade);
+            dotOpacity = min(1.0, dotOpacity * (1.0 + ring * 0.10 + swell * 0.03));
+
+            // Halftone falloff: dots shrink as they fade instead of stepping cell by
+            // cell, so blob edges read as a gradient rather than pixelation.
+            float fade = clamp(dotOpacity / 0.637, 0.0, 1.0);
+            float radius = g2 * 0.5 * bloom * mix(0.3, 1.0, sqrt(fade));
             float2 local = fract(pixel / cell) - 0.5;
-            float radius = palettePosition * 0.5;
             float dist = length(local);
             float aa = 1.0 / cell + 0.0001;
             float mark = 1.0 - smoothstep(radius - aa, radius + aa, dist);
 
-            // OriginKit's three-stop palette is [secondary, primary,
-            // transparent background]. Because bias starts at 0.5, this branch
-            // interpolates primary -> transparent and reveals organic noise blobs.
-            float paletteFade = clamp((palettePosition - 0.5) * 2.0, 0.0, 1.0);
-            float3 darkStop = tint.rgb * 0.025;
-            float3 dotColor = mix(tint.rgb, darkStop, paletteFade);
-            float dotOpacity = mix(0.72, 0.0, paletteFade);
             float a = mark * dotOpacity * clamp(opacity, 0.0, 1.0);
             return half4(dotColor * a, a);
         }
@@ -247,7 +265,7 @@ internal object KaraokeAuroraShader {
             float2 p = float2(uv.x * (res.x / res.y), uv.y) * 2.0;
 
             if (style >= 2.5) {
-                return dotMatrixColor(uv, time, bass, mid, treble, flow, master);
+                return dotMatrixColor(uv, master);
             }
 
             float hotMix = 0.0;
@@ -301,6 +319,11 @@ internal object KaraokeAuroraShader {
         treble: Float,
         flowX: Float,
         flowY: Float,
+        phase: Float,
+        level: Float,
+        pulse: Float,
+        swell: Float,
+        pulseAge: Float,
         master: Float,
         topFrac: Float,
         focusY: Float,
@@ -317,6 +340,9 @@ internal object KaraokeAuroraShader {
             s.setFloatUniform("mid", mid)
             s.setFloatUniform("treble", treble)
             s.setFloatUniform("flow", flowX, flowY)
+            s.setFloatUniform("phase", phase)
+            s.setFloatUniform("level", level)
+            s.setFloatUniform("beat", pulse, swell, pulseAge)
             s.setFloatUniform("master", master)
             s.setFloatUniform("topFrac", topFrac)
             s.setFloatUniform("focusY", focusY)

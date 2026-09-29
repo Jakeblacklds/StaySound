@@ -3,6 +3,11 @@ package expo.modules.karaokeview
 import android.content.Context
 import android.graphics.Canvas
 import android.graphics.Color
+import android.media.AudioDeviceCallback
+import android.media.AudioDeviceInfo
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.views.ExpoView
 
@@ -32,6 +37,12 @@ class KaraokeSpectrumView(context: Context, appContext: AppContext) : ExpoView(c
     private var isPlaying = false
     private var audioSessionId = 0
     private var renderDelayMs = DEFAULT_RENDER_DELAY_MS
+    private val audioManager = context.getSystemService(Context.AUDIO_SERVICE) as AudioManager
+    private var bluetoothOutput = false
+    private val deviceCallback = object : AudioDeviceCallback() {
+        override fun onAudioDevicesAdded(addedDevices: Array<out AudioDeviceInfo>) = refreshAudioRoute()
+        override fun onAudioDevicesRemoved(removedDevices: Array<out AudioDeviceInfo>) = refreshAudioRoute()
+    }
     private val startNanos = System.nanoTime()
 
     // Frame throttle: the spectrum doesn't need the lyrics' 120fps. We cap it so it
@@ -156,7 +167,8 @@ class KaraokeSpectrumView(context: Context, appContext: AppContext) : ExpoView(c
         val nowMs = (System.nanoTime() - startNanos) / 1_000_000L
         renderer.draw(
             canvas = canvas,
-            bands = capture.snapshot(renderDelayMs),
+            bands = capture.snapshot((renderDelayMs + if (bluetoothOutput) BLUETOOTH_EXTRA_DELAY_MS else 0L)
+                .coerceAtMost(MAX_TOTAL_DELAY_MS)),
             width = width,
             height = height,
             currentTimeMs = nowMs,
@@ -167,11 +179,14 @@ class KaraokeSpectrumView(context: Context, appContext: AppContext) : ExpoView(c
 
     override fun onAttachedToWindow() {
         super.onAttachedToWindow()
+        audioManager.registerAudioDeviceCallback(deviceCallback, Handler(Looper.getMainLooper()))
+        refreshAudioRoute()
         updateState()
     }
 
     override fun onDetachedFromWindow() {
         super.onDetachedFromWindow()
+        audioManager.unregisterAudioDeviceCallback(deviceCallback)
         animator?.stop()
         animator = null
         capture.release()
@@ -181,7 +196,24 @@ class KaraokeSpectrumView(context: Context, appContext: AppContext) : ExpoView(c
         private const val BANDS = 28
         private const val DEFAULT_RENDER_DELAY_MS = 380L
         private const val MAX_RENDER_DELAY_MS = 650L
+        // Bluetooth transport buffering varies by headset. The existing user adjustment
+        // remains the baseline; add a conservative route-specific offset automatically.
+        private const val BLUETOOTH_EXTRA_DELAY_MS = 200L
+        private const val MAX_TOTAL_DELAY_MS = MAX_RENDER_DELAY_MS + BLUETOOTH_EXTRA_DELAY_MS
         private const val PLAYING_FRAME_NS = 16_000_000L // ~60fps
         private const val IDLE_FRAME_NS = 33_000_000L    // ~30fps
+    }
+
+    private fun refreshAudioRoute() {
+        // AudioManager exposes connected outputs, not an exact per-player presentation
+        // timestamp. A2DP/SCO flags identify active classic routes where available;
+        // the device list also covers modern BLE audio outputs.
+        bluetoothOutput = audioManager.isBluetoothA2dpOn || audioManager.isBluetoothScoOn ||
+            audioManager.getDevices(AudioManager.GET_DEVICES_OUTPUTS).any {
+                it.type == AudioDeviceInfo.TYPE_BLUETOOTH_A2DP ||
+                    it.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO ||
+                    (android.os.Build.VERSION.SDK_INT >= 31 &&
+                        it.type == AudioDeviceInfo.TYPE_BLE_HEADSET)
+            }
     }
 }

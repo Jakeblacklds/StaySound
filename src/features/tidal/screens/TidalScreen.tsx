@@ -19,7 +19,7 @@ import { TidalSettingsSheets } from '@/src/features/tidal/ui/TidalSettingsSheets
 import { CatalogTrackRow, SoulseekTrackRow } from '@/src/features/tidal/ui/TidalResultTrackRows';
 import { TidalVirtualListItemView } from '@/src/features/tidal/ui/TidalVirtualListItemView';
 import { TidalSearchHeader } from '@/src/features/tidal/ui/TidalSearchHeader';
-import { prefetchSoulseekTrack, type SoulseekSearchResult } from '@/src/services/soulseekDownloadService';
+import { type SoulseekSearchResult } from '@/src/services/soulseekDownloadService';
 import {
     getTidalArtistInfo,
     getTidalSimilarArtists,
@@ -598,19 +598,6 @@ export default function TidalScreen() {
         () => rankByRelevance(tracks, committedQuery, t => `${t.artist} ${t.title}`).slice(0, activeTab === 'all' ? 12 : tracks.length),
         [activeTab, tracks, committedQuery],
     );
-
-    useEffect(() => {
-        if (
-            activeSourceTab !== 'soulseek'
-            || !hasSoulseekCredentials
-            || visibleTrackResults.length === 0
-        ) return;
-
-        // The native engine is intentionally single-session. Priming the first
-        // result hides search latency without queueing many logins ahead of a
-        // download the user explicitly requests.
-        prefetchSoulseekTrack(visibleTrackResults[0], tidalDownloadQuality);
-    }, [activeSourceTab, hasSoulseekCredentials, tidalDownloadQuality, visibleTrackResults]);
 
     const virtualListData = useMemo<TidalVirtualListItem[]>(() => {
         if (isLoading) {

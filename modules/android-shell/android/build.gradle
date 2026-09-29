@@ -1,0 +1,27 @@
+apply plugin: 'com.android.library'
+apply plugin: 'expo-module-gradle-plugin'
+
+group = 'expo.modules.androidshell'
+version = '1.0.0'
+
+android {
+    namespace 'expo.modules.androidshell'
+    testOptions { unitTests.includeAndroidResources = true }
+    defaultConfig {
+        versionCode 1
+        versionName '1.0.0'
+    }
+}
+
+dependencies {
+    implementation 'com.facebook.react:react-android'
+    implementation project(':karaoke-view')
+    implementation project(':player-chrome')
+    implementation 'androidx.activity:activity-ktx:1.10.1'
+    implementation 'androidx.lifecycle:lifecycle-viewmodel-ktx:2.9.2'
+    implementation 'com.google.android.material:material:1.12.0'
+    implementation 'com.github.bumptech.glide:glide:4.16.0'
+    testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
+    testImplementation 'org.robolectric:robolectric:4.16'
+}

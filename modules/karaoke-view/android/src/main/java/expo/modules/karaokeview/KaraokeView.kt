@@ -322,6 +322,8 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     // --- Event dispatchers (Expo Modules pattern) ---
     private val onSeek by EventDispatcher<Map<String, Any>>()
+    // Native containers can own this view without registering a second Expo event target.
+    var nativeSeekListener: ((Double) -> Unit)? = null
 
     // --- Feather width for liquid effect ---
     private val FEATHER_PX: Float
@@ -523,7 +525,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
     }
 
     private fun updateSpectrumCaptureState() {
-        if (enableBottomSpectrum) {
+        if (enableBottomSpectrum && renderingActive && isAttachedToWindow) {
             // Prefer an explicit session id from JS; otherwise read the ExoPlayer
             // session id that the track-player MusicService persisted to prefs so we
             // capture the player's OWN session (no RECORD_AUDIO prompt). Falling back
@@ -675,7 +677,18 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
     private fun getInterpolatedTime(): Long = liveTimeMs().toLong()
 
+    private var renderingActive = true
+    /** Native hosts can retain parsed lyrics while suspending a hidden scene. */
+    fun setRenderingActive(value: Boolean) {
+        if (renderingActive == value) return
+        renderingActive = value
+        if (value && isAttachedToWindow && lines.isNotEmpty()) startAnimator()
+        else { animator?.stop(); animator = null }
+        updateSpectrumCaptureState()
+    }
+
     private fun startAnimator() {
+        if (!renderingActive || !isAttachedToWindow) return
         animator?.stop()
         animator = LyricsAnimator {
             touchController.onFrame(System.nanoTime())
@@ -719,7 +732,10 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
                 density = density,
             ),
             invalidate = ::invalidate,
-            onSeek = { timeMs -> onSeek(mapOf("timeMs" to timeMs)) },
+            onSeek = { timeMs ->
+                val listener = nativeSeekListener
+                if (listener != null) listener(timeMs.toDouble()) else onSeek(mapOf("timeMs" to timeMs))
+            },
         )
         return handled || super.onTouchEvent(event)
     }
@@ -805,7 +821,7 @@ class KaraokeView(context: Context, appContext: AppContext) : ExpoView(context, 
 
         // Bottom spectrum is drawn on the raw view canvas (outside the lyrics fade
         // layer) so the live audio "aurora ridge" sits cleanly along the bottom edge.
-        if (enableBottomSpectrum) {
+        if (enableBottomSpectrum && renderingActive && isAttachedToWindow) {
             spectrumRenderer.draw(
                 canvas = canvas,
                 bands = spectrumCapture.snapshot(),

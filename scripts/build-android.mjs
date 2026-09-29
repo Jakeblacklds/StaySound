@@ -80,6 +80,11 @@ function copyReleaseArtifact() {
 
   const outputDir = path.join(ROOT, "out", "android");
   fs.mkdirSync(outputDir, { recursive: true });
+  // Keep one installable artifact per build. Older named APK copies only make
+  // it unclear which binary is current and quickly consume disk space.
+  for (const entry of fs.readdirSync(outputDir)) {
+    if (entry.endsWith(".apk")) fs.rmSync(path.join(outputDir, entry), { force: true });
+  }
   const targetName =
     args.variant === "development" || args.task.toLowerCase().includes("debug")
       ? "app-dev-debug.apk"

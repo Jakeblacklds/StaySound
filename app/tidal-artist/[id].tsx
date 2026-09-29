@@ -1,3 +1,4 @@
+import { hasNativeTidalDetails, NativeTidalDetail } from '@/src/features/tidal/details/NativeTidalDetail';
 import { EmptyState, Skeleton, TidalTrackRow } from '@/src/components/ui';
 import {
     DetailActionBar,
@@ -19,7 +20,7 @@ import { radius, typeScale, useTheme, withAlpha } from '@/src/theme';
 import { TidalArtist, TidalArtistDetail, TidalTrack, Track } from '@/src/types';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from '@/src/navigation/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Dimensions, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
@@ -55,7 +56,7 @@ function deriveQualityLabel(tracks: TidalTrack[]): string | null {
     return lossless ? 'Lossless' : null;
 }
 
-export default function TidalArtistScreen() {
+function TidalArtistController() {
     const { id, name, source } = useLocalSearchParams<{ id: string; name?: string; source?: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
@@ -290,6 +291,10 @@ export default function TidalArtistScreen() {
         if (!artistDetail || !artistDetail.albums) return [];
         return [...artistDetail.albums].sort((a, b) => (b.year ?? 0) - (a.year ?? 0));
     }, [artistDetail]);
+    // Sencillos y EP llegan aparte desde la API de catálogo; los mirrors no los separan.
+    const sortedSingles = useMemo(() => (
+        [...(artistDetail?.singles ?? [])].sort((a, b) => (b.year ?? 0) - (a.year ?? 0))
+    ), [artistDetail]);
 
     const visibleTopTracks = useMemo(() => {
         const tracks = artistDetail?.topTracks ?? [];
@@ -299,7 +304,7 @@ export default function TidalArtistScreen() {
     const qualityLabel = useMemo(() => deriveQualityLabel(artistDetail?.topTracks ?? []), [artistDetail?.topTracks]);
 
     const discographyItems = useMemo<MediaRailItem[]>(() => (
-        sortedAlbums.map(album => ({
+        [...sortedAlbums, ...sortedSingles].map(album => ({
             key: String(album.id),
             imageUri: album.artworkUrl,
             title: album.title,
@@ -307,7 +312,7 @@ export default function TidalArtistScreen() {
             fallbackIcon: 'disc' as const,
             onPress: () => openAlbum(album.id),
         }))
-    ), [sortedAlbums, openAlbum]);
+    ), [sortedAlbums, sortedSingles, openAlbum]);
 
     const openArtist = useCallback((artist: TidalArtist) => {
         router.push({
@@ -359,6 +364,32 @@ export default function TidalArtistScreen() {
             setIsPreparing(null);
         }
     }, [artistDetail?.topTracks, isPreparing, isQobuzSource, play, setPendingTrackPreview, showNotification]);
+
+    if (hasNativeTidalDetails) return <NativeTidalDetail
+        kind="artist" id={id} source={source} loading={isLoading} error={error}
+        title={artistDetail?.artist.name || name || 'Artista'} kicker="ARTISTA"
+        artwork={artistDetail?.artist.artworkUrl} quality={qualityLabel}
+        meta={[
+            sortedAlbums.length ? `${sortedAlbums.length} ${sortedAlbums.length === 1 ? 'álbum' : 'álbumes'}` : '',
+            sortedSingles.length ? `${sortedSingles.length} ${sortedSingles.length === 1 ? 'sencillo o EP' : 'sencillos y EP'}` : '',
+        ].filter(Boolean).join(' · ') || `${artistDetail?.topTracks.length ?? 0} canciones`}
+        tracks={artistDetail?.topTracks} downloads={downloads} isDownloaded={isDownloaded}
+        activeId={isPlayerPlaying || pendingTrackPreview ? activeTidalTrackId : null} playing={isPlayerPlaying}
+        preparing={isPreparing} onPlay={handleTidalPlay} onPlayAll={handlePlayAll}
+        onDownload={handleTrackDownload} onCancelDownload={cancelDownload}
+        sections={[
+            { title: 'Álbumes', kicker: 'Discografía', size: 158, items: sortedAlbums.map(album => ({
+                kind: 'album', id: String(album.id), title: album.title, artwork: album.artworkUrl,
+                subtitle: `${album.year ?? 'Sin fecha'} · ${album.numberOfTracks ?? 0} pistas`,
+            })) },
+            { title: 'Sencillos y EP', kicker: 'Lanzamientos', size: 140, items: sortedSingles.map(album => ({
+                kind: 'album', id: String(album.id), title: album.title, artwork: album.artworkUrl,
+                subtitle: `${album.year ?? 'Sin fecha'} · ${album.type === 'EP' ? 'EP' : 'Sencillo'}`,
+            })) },
+            { title: 'Fans también escuchan', kicker: 'También te puede gustar', size: 108, circle: true,
+                items: similarArtists.map(artist => ({ kind: 'artist', id: String(artist.id), title: artist.name, artwork: artist.artworkUrl })) },
+        ]}
+    />;
 
     if (isLoading) {
         return (
@@ -591,3 +622,9 @@ const styles = StyleSheet.create({
         fontWeight: '700',
     },
 });
+
+export function TidalArtistScreen() {
+    const { id, name, source } = useLocalSearchParams<{ id: string; name?: string; source?: string }>();
+    return <TidalArtistController key={`${id}:${name ?? ''}:${source ?? ''}`} />;
+}
+export default TidalArtistScreen;

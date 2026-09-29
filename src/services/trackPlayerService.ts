@@ -10,6 +10,7 @@
  * - Android Auto support
  */
 
+import { getNativeLibraryPlayback } from "./nativeLibraryPlayback";
 import TrackPlayer, {
   TrackType,
   AppKilledPlaybackBehavior,
@@ -476,6 +477,13 @@ export function isTrackPlayerReady(): boolean {
  * BUG FIX: Uses reset()+add() instead of load() for absolute queue reliability.
  */
 export async function playTrack(track: Track): Promise<void> {
+  const native = getNativeLibraryPlayback();
+  if (native?.playQueue) {
+    const requestedAt = Date.now();
+    if (!isInitialized && !(await initializeTrackPlayer())) throw new Error("Track Player initialization failed");
+    if (!isTrackPlayable(track)) throw new Error("Track is not playable");
+    return native.playQueue(JSON.stringify([track]), 0, requestedAt);
+  }
   if (!isInitialized) {
     const initialized = await initializeTrackPlayer();
     if (!initialized) {
@@ -514,6 +522,17 @@ export async function playQueue(
   tracks: Track[],
   startIndex: number = 0,
 ): Promise<void> {
+  const native = getNativeLibraryPlayback();
+  if (native?.playQueue) {
+    const requestedAt = Date.now();
+    if (tracks.length === 0) return;
+    if (!isInitialized && !(await initializeTrackPlayer())) throw new Error("Track Player initialization failed");
+    const selected = tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
+    const playable = tracks.filter(isTrackPlayable);
+    const index = playable.findIndex(track => track.id === selected.id);
+    if (index < 0) throw new Error("Selected track is not playable");
+    return native.playQueue(JSON.stringify(playable), index, requestedAt);
+  }
   if (!isInitialized) {
     const initialized = await initializeTrackPlayer();
     if (!initialized) {
@@ -598,6 +617,7 @@ export async function playQueue(
  * Pause playback
  */
 export async function pause(): Promise<void> {
+  await getNativeLibraryPlayback()?.cancelPendingPlayback?.();
   if (!isInitialized) return;
   await TrackPlayer.pause();
   console.log("[TrackPlayer] Paused");
@@ -630,6 +650,7 @@ export async function togglePlayPause(): Promise<void> {
  * Stop playback
  */
 export async function stop(): Promise<void> {
+  await getNativeLibraryPlayback()?.cancelPendingPlayback?.();
   if (!isInitialized) return;
   await TrackPlayer.stop();
   await TrackPlayer.reset();

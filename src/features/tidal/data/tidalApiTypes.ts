@@ -19,6 +19,9 @@ export interface TidalTrackApiResponse {
   artist?: { id?: number; name?: string; picture?: string | null };
   artists?: Array<{ id?: number; name?: string; picture?: string | null }>;
   popularity?: number;
+  /** "Live", "Remix", "Sped Up"… — TIDAL lo manda aparte del título. */
+  version?: string | null;
+  volumeNumber?: number;
 }
 
 export interface TidalSearchApiResponse {
@@ -80,6 +83,10 @@ export interface TidalArtistDetailApiResponse {
 export interface TidalAlbumApiResponse {
   id: number;
   title: string;
+  version?: string | null;
+  /** ALBUM, EP, SINGLE o COMPILATION en la API oficial de catálogo. */
+  type?: string;
+  popularity?: number;
   releaseDate?: string;
   explicit?: boolean;
   numberOfTracks?: number;

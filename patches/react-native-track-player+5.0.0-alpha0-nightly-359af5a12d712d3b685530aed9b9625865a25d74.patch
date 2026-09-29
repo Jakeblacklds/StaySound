@@ -32,6 +32,35 @@ index a0f995c..49fcc24 100644
          renderer.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
          exoPlayer = ExoPlayer
              .Builder(context)
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/QueuedAudioPlayer.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/QueuedAudioPlayer.kt
+index dd4bd40..6e24bb6 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/QueuedAudioPlayer.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/QueuedAudioPlayer.kt
+@@ -82,6 +82,24 @@ class QueuedAudioPlayer(
+     val previousItem: AudioItem?
+         get() = items.getOrNull(currentIndex - 1)
+ 
++    /** One native transaction: select the requested item before preparing any audio. */
++    fun replaceForPlayback(items: List<AudioItem>, startIndex: Int) {
++        require(items.isNotEmpty() && startIndex in items.indices)
++        val mediaItems = items.map { it.toMediaItem() }
++        val sameQueue = queue.size == mediaItems.size && queue.zip(mediaItems).all { (a, b) ->
++            a.mediaId == b.mediaId && a.localConfiguration?.uri == b.localConfiguration?.uri
++        }
++        if (sameQueue) {
++            exoPlayer.seekTo(startIndex, 0L)
++        } else {
++            queue.clear()
++            queue.addAll(mediaItems)
++            exoPlayer.setMediaItems(mediaItems, startIndex, 0L)
++        }
++        exoPlayer.prepare()
++        exoPlayer.play()
++    }
++
+     override fun load(item: AudioItem, playWhenReady: Boolean) {
+         load(item)
+         exoPlayer.playWhenReady = playWhenReady
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/StaySoundPcmSpectrumProcessor.kt
 new file mode 100644
 index 0000000..0c96784
@@ -297,7 +326,7 @@ index 0000000..0c96784
 +    }
 +}
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index b495b5a..06aba26 100644
+index b495b5a..022ba6f 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -3,6 +3,7 @@ package com.doublesymmetry.trackplayer.service
@@ -413,7 +442,51 @@ index b495b5a..06aba26 100644
          fakePlayer.release()
          mediaSession.player = player.forwardingPlayer
          observeEvents()
-@@ -857,6 +927,288 @@ class MusicService : HeadlessJsMediaService() {
+@@ -343,6 +413,43 @@ class MusicService : HeadlessJsMediaService() {
+         }
+     }
+ 
++    /** Shared by the native Library and the JS adapter; owns the existing MediaSession. */
++    @MainThread
++    fun prepareNativeLibraryPlayback() {
++        setupPlayer(Bundle().apply {
++            putDouble(MIN_BUFFER_KEY, 5.0)
++            putDouble(MAX_BUFFER_KEY, 15.0)
++            putDouble(PLAY_BUFFER_KEY, 0.1)
++            putDouble(MAX_CACHE_SIZE_KEY, 102400.0)
++            putBoolean(AUTO_HANDLE_INTERRUPTIONS, true)
++        })
++    }
++
++    private var libraryStartupListener: Player.Listener? = null
++
++    @MainThread
++    fun playNativeLibraryQueue(tracks: List<Track>, startIndex: Int, requestedAt: Long) {
++        prepareNativeLibraryPlayback()
++        libraryStartupListener?.let { player.exoPlayer.removeListener(it) }
++        val listener = object : Player.Listener {
++            override fun onIsPlayingChanged(isPlaying: Boolean) {
++                if (isPlaying) {
++                    android.util.Log.i("LibraryPlayback", "audible_ready_ms=" +
++                        (android.os.SystemClock.elapsedRealtime() - requestedAt))
++                    player.exoPlayer.removeListener(this)
++                    libraryStartupListener = null
++                }
++            }
++            override fun onPlayerError(error: androidx.media3.common.PlaybackException) {
++                player.exoPlayer.removeListener(this)
++                libraryStartupListener = null
++            }
++        }
++        libraryStartupListener = listener
++        player.exoPlayer.addListener(listener)
++        player.replaceForPlayback(tracks.map { it.toAudioItem() }, startIndex)
++    }
++
+     @MainThread
+     fun add(track: Track) {
+         add(listOf(track))
+@@ -857,6 +964,288 @@ class MusicService : HeadlessJsMediaService() {
          return null
      }
  
@@ -702,7 +775,7 @@ index b495b5a..06aba26 100644
      @MainThread
      inner class MusicBinder : Binder() {
          val service = this@MusicService
-@@ -900,10 +1252,13 @@ class MusicService : HeadlessJsMediaService() {
+@@ -900,10 +1289,13 @@ class MusicService : HeadlessJsMediaService() {
                      "com.google.android.projection.gearhead"
                  )
              ) {
@@ -720,7 +793,7 @@ index b495b5a..06aba26 100644
              }
              return if (
                  isMediaNotificationController ||
-@@ -965,6 +1320,57 @@ class MusicService : HeadlessJsMediaService() {
+@@ -965,6 +1357,57 @@ class MusicService : HeadlessJsMediaService() {
              return super.onPlaybackResumption(mediaSession, controller)
          }
  
@@ -778,7 +851,7 @@ index b495b5a..06aba26 100644
          override fun onSetRating(
              session: MediaSession,
              controller: MediaSession.ControllerInfo,
-@@ -976,6 +1382,52 @@ class MusicService : HeadlessJsMediaService() {
+@@ -976,6 +1419,52 @@ class MusicService : HeadlessJsMediaService() {
              }
              return super.onSetRating(session, controller, rating)
          }
@@ -831,7 +904,7 @@ index b495b5a..06aba26 100644
      }
  
      private fun getPendingIntentFlags(): Int {
-@@ -1029,5 +1481,17 @@ class MusicService : HeadlessJsMediaService() {
+@@ -1029,5 +1518,17 @@ class MusicService : HeadlessJsMediaService() {
  
          const val DEFAULT_JUMP_INTERVAL = 15.0
          const val DEFAULT_STOP_FOREGROUND_GRACE_PERIOD = 5

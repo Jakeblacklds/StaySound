@@ -20,6 +20,8 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MiniPlayerShell } from './parts/MiniPlayerShell';
+import { AndroidMiniPlayer } from './parts/AndroidMiniPlayer';
+import { hasNativePlayerChrome } from '@/modules/player-chrome/src';
 import {
     DETAIL_EXTRA_BOTTOM,
     DETAIL_HEIGHT,
@@ -311,7 +313,22 @@ function SharedPlayerShellInner() {
                 pointerEvents={playerVisible ? 'none' : 'auto'}
                 style={[styles.container, shellContainerStyle]}
             >
-                <MiniPlayerShell
+                {hasNativePlayerChrome ? (
+                    <AndroidMiniPlayer
+                        track={displayTrack}
+                        expansion={expansion}
+                        titleColor={playerAnimColors.text}
+                        playInk={playPillIcon}
+                        controlInk={skipIconColor}
+                        playFill={playPillFill}
+                        loading={shouldShowTidalLoading}
+                        showPause={shouldHoldPauseAffordance}
+                        onOpen={handleTap}
+                        onToggle={handleToggle}
+                        onPrevious={previous}
+                        onNext={next}
+                    />
+                ) : <MiniPlayerShell
                     variant="row"
                     track={displayTrack}
                     showArtwork={false}
@@ -332,7 +349,7 @@ function SharedPlayerShellInner() {
                     titleStyle={titleAnimatedStyle}
                     artistStyle={artistAnimatedStyle}
                     playButtonStyle={playFadeStyle}
-                />
+                />}
             </Animated.View>
         </GestureDetector>
     );

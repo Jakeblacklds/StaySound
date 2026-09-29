@@ -6,6 +6,7 @@ import {
   TidalAlbumDetail,
   TidalArtist,
   TidalArtistDetail,
+  TidalCatalogSearch,
   TidalPlaylist,
   TidalPlaylistDetail,
   TidalQuality,
@@ -14,6 +15,7 @@ import {
   Track,
 } from "../types/audio";
 import { FileSystemStorage } from "./storage";
+import { dedupeAlbumVariants, rankCatalogSearch } from "./catalogRanking";
 import { isValidAudioFile } from "../features/tidal/data/audioFileValidation";
 import { parseDashManifestForQuality } from "../features/tidal/data/dashManifestParser";
 import type {
@@ -195,6 +197,27 @@ async function searchTidalCatalog<T>(kind: "tracks" | "artists" | "albums" | "pl
   const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
   if (!response.ok) throw new Error(`TIDAL catalog search failed (${response.status})`);
   return response.json() as Promise<{ items?: T[] }>;
+}
+
+/**
+ * GET de solo lectura a la API oficial de catálogo de TIDAL con el token de
+ * cliente ya cacheado. Es la fuente principal para búsqueda, artista y álbum:
+ * los mirrors de Monochrome quedan solo como respaldo.
+ */
+async function tidalCatalogGet<T>(path: string, params: Record<string, string | number> = {}): Promise<T> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    if (attempt > 0) tidalCatalogToken = null;
+    const token = await getTidalCatalogToken();
+    const url = new URL(`https://api.tidal.com/v1/${path}`);
+    url.searchParams.set("countryCode", "US");
+    for (const [key, value] of Object.entries(params)) url.searchParams.set(key, String(value));
+    const response = await fetch(url.toString(), { headers: { Authorization: `Bearer ${token}` } });
+    // Un token revocado responde 401: se pide uno nuevo una sola vez.
+    if (response.status === 401 && attempt === 0) continue;
+    if (!response.ok) throw new Error(`TIDAL catalog request failed (${response.status})`);
+    return response.json() as Promise<T>;
+  }
+  throw new Error("TIDAL rejected the catalog token");
 }
 
 function sanitizeFilename(input: string): string {
@@ -1313,6 +1336,12 @@ async function fetchJsonWithMirror<T>(
 }
 
 
+function withVersion(title: string, version?: string | null): string {
+  const trimmed = version?.trim();
+  if (!title || !trimmed || title.toLowerCase().includes(trimmed.toLowerCase())) return title;
+  return `${title} (${trimmed})`;
+}
+
 function normalizeSearchItem(item: TidalTrackApiResponse): TidalSearchResult {
   const quality = item.audioQuality ?? "LOSSLESS";
   const tags = item.mediaMetadata?.tags ?? [];
@@ -1325,7 +1354,8 @@ function normalizeSearchItem(item: TidalTrackApiResponse): TidalSearchResult {
 
   return {
     id: item.id,
-    title: item.title,
+    // "DtMF" y "DtMF (Live)" son canciones distintas, y Soulseek busca por título.
+    title: withVersion(item.title, item.version),
     artist: primaryArtist,
     album: albumTitle,
     durationMs: Math.max(0, Math.round((item.duration ?? 0) * 1000)),
@@ -1446,7 +1476,9 @@ async function getSearchBackedArtistDetail(
 function normalizeAlbumItem(item: TidalAlbumApiResponse): TidalAlbum {
   return {
     id: item.id,
-    title: item.title,
+    title: withVersion(item.title, item.version),
+    type: item.type,
+    popularity: item.popularity,
     artistId: item.artist?.id ?? item.artists?.[0]?.id,
     artistName:
       item.artist?.name ?? item.artists?.[0]?.name ?? "Artista Desconocido",
@@ -1747,6 +1779,136 @@ export async function searchTidalAlbums(query: string): Promise<TidalAlbum[]> {
   });
 }
 
+type TidalPagedApiResponse<T> = { items?: T[]; totalNumberOfItems?: number };
+type TidalUnifiedSearchApiResponse = {
+  artists?: { items?: TidalArtistApiResponse[] };
+  albums?: { items?: TidalAlbumApiResponse[] };
+  tracks?: { items?: TidalTrackApiResponse[] };
+  topHit?: { type?: string; value?: TidalArtistApiResponse & TidalAlbumApiResponse & TidalTrackApiResponse };
+};
+
+function normalizeTopHit(hit: TidalUnifiedSearchApiResponse["topHit"]): TidalCatalogSearch["top"] {
+  if (!hit?.value?.id) return null;
+  if (hit.type === "ARTISTS" && hit.value.name) return { kind: "artist", artist: normalizeArtistItem(hit.value) };
+  if (hit.type === "TRACKS" && hit.value.title) return { kind: "track", track: normalizeSearchItem(hit.value) };
+  if (hit.type === "ALBUMS" && hit.value.title) return { kind: "album", album: normalizeAlbumItem(hit.value) };
+  return null;
+}
+
+/**
+ * Búsqueda estilo Spotify: canciones, artistas y álbumes en una sola petición,
+ * ordenados por relevancia (catalogRanking.ts, el mismo ranking de escritorio)
+ * y con un "mejor resultado" que puede ser de cualquiera de los tres tipos.
+ * Si la API oficial falla se cae a los mirrors, con el mismo ranking.
+ */
+export async function searchTidalCatalogAll(query: string): Promise<TidalCatalogSearch> {
+  const trimmed = query.trim();
+  if (!trimmed) return { tracks: [], albums: [], artists: [], top: null };
+  const cacheKey = `all:${getTidalCacheScope()}:${trimmed.toLowerCase()}`;
+  return withTidalCache(cacheKey, SEARCH_CACHE_TTL_MS, async () => {
+    let ranked: TidalCatalogSearch;
+    try {
+      const payload = await tidalCatalogGet<TidalUnifiedSearchApiResponse>("search", {
+        query: trimmed, types: "ARTISTS,ALBUMS,TRACKS", limit: 30,
+      });
+      ranked = rankCatalogSearch(trimmed, {
+        tracks: uniqueById((payload.tracks?.items ?? []).map(normalizeSearchItem)),
+        albums: (payload.albums?.items ?? []).map(normalizeAlbumItem),
+        artists: (payload.artists?.items ?? []).map(normalizeArtistItem),
+      }, normalizeTopHit(payload.topHit));
+    } catch {
+      const [tracks, albums, artists] = await Promise.allSettled([
+        searchTidal(trimmed), searchTidalAlbums(trimmed), searchTidalArtists(trimmed),
+      ]);
+      if (tracks.status === "rejected" && albums.status === "rejected" && artists.status === "rejected") {
+        throw tracks.reason instanceof Error ? tracks.reason : new Error("No se pudo consultar el catálogo.");
+      }
+      const trackList = tracks.status === "fulfilled" ? tracks.value : [];
+      ranked = rankCatalogSearch(trimmed, {
+        tracks: trackList,
+        albums: albums.status === "fulfilled" ? albums.value : extractAlbumsFromTracks(trackList),
+        artists: artists.status === "fulfilled" ? artists.value : [],
+      });
+    }
+
+    // Si lo buscado es un artista, "Canciones" debe ser lo suyo más escuchado
+    // y no las colaboraciones donde solo aparece.
+    const top = ranked.top;
+    if (top?.kind === "artist") {
+      const own = ranked.tracks.slice(0, 4).filter(track => track.artistId === top.artist.id).length;
+      if (own < 4) {
+        const topTracks = await tidalCatalogGet<TidalPagedApiResponse<TidalTrackApiResponse>>(
+          `artists/${top.artist.id}/toptracks`, { limit: 6 },
+        ).then(result => (result.items ?? []).map(normalizeSearchItem)).catch(() => [] as TidalTrack[]);
+        const ids = new Set(topTracks.map(track => track.id));
+        ranked = { ...ranked, tracks: [...topTracks, ...ranked.tracks.filter(track => !ids.has(track.id))] };
+      }
+    }
+    return ranked;
+  });
+}
+
+function uniqueById<T extends { id: number }>(items: T[]): T[] {
+  const seen = new Set<number>();
+  return items.filter(item => (seen.has(item.id) ? false : (seen.add(item.id), true)));
+}
+
+function byReleaseDesc(a: TidalAlbum, b: TidalAlbum): number {
+  const aDate = a.releaseDate ? Date.parse(a.releaseDate) : 0;
+  const bDate = b.releaseDate ? Date.parse(b.releaseDate) : 0;
+  return bDate - aDate || (b.year ?? 0) - (a.year ?? 0);
+}
+
+async function getCatalogArtistDetail(artistId: number): Promise<TidalArtistDetail> {
+  const [artistResult, topResult, albumResult, singleResult] = await Promise.allSettled([
+    tidalCatalogGet<TidalArtistApiResponse>(`artists/${artistId}`),
+    tidalCatalogGet<TidalPagedApiResponse<TidalTrackApiResponse>>(`artists/${artistId}/toptracks`, { limit: 25 }),
+    tidalCatalogGet<TidalPagedApiResponse<TidalAlbumApiResponse>>(`artists/${artistId}/albums`, { limit: 50 }),
+    tidalCatalogGet<TidalPagedApiResponse<TidalAlbumApiResponse>>(`artists/${artistId}/albums`, { filter: "EPSANDSINGLES", limit: 50 }),
+  ]);
+  if (artistResult.status === "rejected" || !artistResult.value?.name) {
+    throw artistResult.status === "rejected" ? artistResult.reason : new Error("Artista no encontrado");
+  }
+  const artist = normalizeArtistItem(artistResult.value);
+  const items = <T,>(result: PromiseSettledResult<TidalPagedApiResponse<T>>): T[] =>
+    result.status === "fulfilled" ? result.value.items ?? [] : [];
+  const releases = dedupeAlbumVariants([...items(albumResult), ...items(singleResult)].map(normalizeAlbumItem))
+    .sort(byReleaseDesc);
+  return {
+    artist,
+    topTracks: uniqueById(items(topResult).map(item => normalizeArtistTrack(item, artist))),
+    albums: releases.filter(album => album.type !== "SINGLE" && album.type !== "EP"),
+    singles: releases.filter(album => album.type === "SINGLE" || album.type === "EP"),
+  };
+}
+
+async function getCatalogAlbumDetail(albumId: number): Promise<TidalAlbumDetail> {
+  const [albumPayload, itemsPayload] = await Promise.all([
+    tidalCatalogGet<TidalAlbumApiResponse>(`albums/${albumId}`),
+    tidalCatalogGet<TidalPagedApiResponse<{ item?: TidalTrackApiResponse; type?: string }>>(`albums/${albumId}/items`, { limit: 100 }),
+  ]);
+  const album = normalizeAlbumItem(albumPayload);
+  const fallbackArtist = album.artistId ? { id: album.artistId, name: album.artistName } : undefined;
+  const entries = (itemsPayload.items ?? [])
+    // Los álbumes pueden traer videoclips intercalados.
+    .filter(entry => !entry.type || entry.type === "track")
+    .map(entry => entry.item)
+    .filter((item): item is TidalTrackApiResponse => !!item)
+    .sort((a, b) => ((a.volumeNumber ?? 1) - (b.volumeNumber ?? 1)) || ((a.trackNumber ?? 9999) - (b.trackNumber ?? 9999)));
+  const tracks = entries.map(item => {
+    const track = normalizeArtistTrack(item, fallbackArtist);
+    // El endpoint de álbum no siempre repite portada ni álbum en cada pista.
+    return {
+      ...track,
+      album: track.album && track.album !== "Unknown Album" ? track.album : album.title,
+      albumId: track.albumId ?? album.id,
+      artworkUrl: track.artworkUrl ?? album.artworkUrl,
+      coverUuid: track.coverUuid ?? albumPayload.cover ?? null,
+    };
+  });
+  return { album: { ...album, numberOfTracks: album.numberOfTracks ?? tracks.length }, tracks };
+}
+
 export function extractAlbumsFromTracks(tracks: TidalTrack[]): TidalAlbum[] {
   const albumsMap = new Map<number, TidalAlbum>();
 
@@ -1771,6 +1933,11 @@ export async function getTidalAlbumDetail(
 ): Promise<TidalAlbumDetail> {
   const cacheKey = `album-detail:${getTidalCacheScope()}:${albumId}`;
   return withTidalCache(cacheKey, DETAIL_CACHE_TTL_MS, async () => {
+    try {
+      return await getCatalogAlbumDetail(albumId);
+    } catch (error) {
+      console.warn(`[TidalService] Catalog album ${albumId} failed; trying mirrors.`, error);
+    }
     const response = await fetchJson<TidalAlbumDetailApiResponse>(
       `/album/?id=${albumId}`,
     );
@@ -1854,6 +2021,12 @@ export async function getTidalArtistInfo(
   const cacheKey = `artist-info:${getTidalCacheScope()}:${artistId}:${hintKey}`;
   return withTidalCache(cacheKey, DETAIL_CACHE_TTL_MS, async () => {
     try {
+      const catalogArtist = await tidalCatalogGet<TidalArtistApiResponse>(`artists/${artistId}`);
+      if (catalogArtist?.name) return normalizeArtistItem(catalogArtist);
+    } catch {
+      // Los mirrors siguen como respaldo.
+    }
+    try {
       const response = await fetchJson<TidalArtistDetailApiResponse>(
         `/artist/?id=${artistId}`,
       );
@@ -1901,6 +2074,13 @@ export async function getTidalArtistDetail(
   const hintKey = artistNameHint?.trim().toLowerCase() || "none";
   const cacheKey = `artist-detail:${getTidalCacheScope()}:${artistId}:${hintKey}`;
   return withTidalCache(cacheKey, DETAIL_CACHE_TTL_MS, async () => {
+    try {
+      // Top tracks y discografía reales (álbumes y sencillos por separado); la
+      // reconstrucción por nombre de abajo queda como respaldo.
+      return await getCatalogArtistDetail(artistId);
+    } catch (error) {
+      console.warn(`[TidalService] Catalog artist ${artistId} failed; trying mirrors.`, error);
+    }
     try {
       const artistResponse = await fetchJson<TidalArtistDetailApiResponse>(
         `/artist/?id=${artistId}`,
@@ -3033,6 +3213,15 @@ export async function getTidalSimilarArtists(
   artistId: number,
 ): Promise<TidalArtist[]> {
   try {
+    const catalog = await tidalCatalogGet<TidalPagedApiResponse<TidalArtistApiResponse>>(
+      `artists/${artistId}/similar`, { limit: 12 },
+    );
+    const similar = (catalog.items ?? []).filter(item => item.id !== artistId).map(normalizeArtistItem);
+    if (similar.length) return similar;
+  } catch {
+    // Los mirrors siguen como respaldo.
+  }
+  try {
     const response = await fetchJson<TidalSimilarArtistsApiResponse>(
       `/artist/similar/?id=${artistId}`,
     );
@@ -3052,6 +3241,27 @@ export async function getTidalSimilarArtists(
 export async function getTidalSimilarAlbums(
   albumId: number,
 ): Promise<TidalAlbum[]> {
+  // "Más de este artista": el resto de su discografía desde la API de catálogo
+  // (el endpoint de álbumes similares solo existe en los mirrors).
+  try {
+    const album = await tidalCatalogGet<TidalAlbumApiResponse>(`albums/${albumId}`);
+    const artistId = album.artist?.id ?? album.artists?.[0]?.id;
+    if (artistId) {
+      const own = normalizeAlbumItem(album);
+      const [albums, singles] = await Promise.allSettled([
+        tidalCatalogGet<TidalPagedApiResponse<TidalAlbumApiResponse>>(`artists/${artistId}/albums`, { limit: 50 }),
+        tidalCatalogGet<TidalPagedApiResponse<TidalAlbumApiResponse>>(`artists/${artistId}/albums`, { filter: "EPSANDSINGLES", limit: 20 }),
+      ]);
+      const releases = [albums, singles]
+        .flatMap(result => (result.status === "fulfilled" ? result.value.items ?? [] : []))
+        .map(normalizeAlbumItem);
+      const others = dedupeAlbumVariants([own, ...releases])
+        .filter(candidate => candidate.id !== albumId && candidate.title !== own.title);
+      if (others.length) return others;
+    }
+  } catch {
+    // Los mirrors siguen como respaldo.
+  }
   try {
     const response = await fetchJson<TidalSimilarAlbumsApiResponse>(
       `/album/similar/?id=${albumId}`,

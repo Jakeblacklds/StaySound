@@ -1,3 +1,4 @@
+import { hasNativeTidalDetails, NativeTidalDetail } from '@/src/features/tidal/details/NativeTidalDetail';
 import { EmptyState, Skeleton, TidalTrackRow } from '@/src/components/ui';
 import {
     DetailActionBar,
@@ -18,7 +19,7 @@ import { useLibraryStore, useNotificationStore, usePlayerStore } from '@/src/sto
 import { radius, typeScale, useTheme, withAlpha } from '@/src/theme';
 import { TidalAlbum, TidalAlbumDetail, TidalTrack, Track } from '@/src/types';
 import { Image } from 'expo-image';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from '@/src/navigation/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, Pressable, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
@@ -56,7 +57,7 @@ function formatTotalDuration(ms: number): string {
     return `${hours} h ${minutes} min`;
 }
 
-export default function TidalAlbumScreen() {
+function TidalAlbumController() {
     const { id, source } = useLocalSearchParams<{ id: string; source?: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
@@ -366,6 +367,25 @@ export default function TidalAlbumScreen() {
         }))
     ), [similarAlbums, openAlbum]);
 
+    if (hasNativeTidalDetails) return <NativeTidalDetail
+        kind="album" id={id} source={source} loading={isLoading} error={error}
+        title={albumDetail?.album.title || 'Álbum'} kicker={`ÁLBUM${albumDetail?.album.year ? ` · ${albumDetail.album.year}` : ''}`}
+        artwork={albumDetail?.album.artworkUrl} subtitle={albumDetail?.album.artistName}
+        meta={`${albumDetail?.tracks.length ?? 0} canciones${albumMeta.durationLabel ? ` · ${albumMeta.durationLabel}` : ''}`}
+        quality={albumMeta.qualityLabel} explicit={albumMeta.explicit}
+        artistLink={albumDetail?.album.artistId ? { kind: 'artist', id: String(albumDetail.album.artistId), title: albumDetail.album.artistName } : undefined}
+        tracks={albumDetail?.tracks} downloads={downloads} isDownloaded={isDownloaded}
+        activeId={isPlayerPlaying || pendingTrackPreview ? activeTidalTrackId : null} playing={isPlayerPlaying}
+        preparing={isPreparing} downloadingAll={isDownloadingAll}
+        onPlay={handleTidalPlay} onPlayAll={handlePlayAll} onDownload={handleTrackDownload}
+        onCancelDownload={cancelDownload} onDownloadAll={handleDownloadAll}
+        sections={[{ title: albumDetail?.album.artistName ? `Más de ${albumDetail.album.artistName}` : 'Más álbumes',
+            kicker: 'Discografía', size: 150, items: similarAlbums.map(album => ({
+            kind: 'album', id: String(album.id), title: album.title, artwork: album.artworkUrl,
+            subtitle: [album.year, album.type === 'SINGLE' ? 'Sencillo' : album.type === 'EP' ? 'EP' : 'Álbum'].filter(Boolean).join(' · '),
+        })) }]}
+    />;
+
     if (isLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
@@ -617,3 +637,9 @@ const styles = StyleSheet.create({
         paddingHorizontal: 4,
     },
 });
+
+export function TidalAlbumScreen() {
+    const { id, name, source } = useLocalSearchParams<{ id: string; name?: string; source?: string }>();
+    return <TidalAlbumController key={`${id}:${name ?? ''}:${source ?? ''}`} />;
+}
+export default TidalAlbumScreen;

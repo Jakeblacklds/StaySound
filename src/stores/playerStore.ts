@@ -560,6 +560,7 @@ async function hydrateAlbumArtworkOnDemand(track: Track): Promise<void> {
 interface PlayerActions {
     // Playback control
     play: (track: Track, queue?: Track[]) => Promise<void>;
+    adoptNativeLibraryPlayback: (snapshot: import('../services/nativeLibraryPlayback').NativeLibraryPlaybackSnapshot) => void;
     pause: () => Promise<void>;
     resume: () => Promise<void>;
     togglePlayPause: () => Promise<void>;
@@ -657,6 +658,25 @@ const initialState: PlayerStoreState = {
 
 export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     ...initialState,
+
+    // Kotlin has already selected and started audio. Adopt its exact order without
+    // calling playQueue again or doing file/metadata work in the tap path.
+    adoptNativeLibraryPlayback: (snapshot) => {
+        const library = useLibraryStore.getState().tracks;
+        const resolve = (ids: string[]) => ids.map(id => library.get(id)).filter((track): track is Track => !!track);
+        const queue = resolve(snapshot.queueIds);
+        const track = library.get(snapshot.trackId);
+        if (!track) return;
+        linearPlaybackContextQueue = resolve(snapshot.linearIds);
+        armExpectedEngineTrack(track.id);
+        get().positionShared.value = 0;
+        set(state => ({
+            currentTrack: track, queue, queueIndex: queue.findIndex(item => item.id === track.id),
+            position: 0, duration: track.duration, pendingTrackPreview: null,
+            isPlaying: true, isLoading: true,
+            recentlyPlayed: [track, ...state.recentlyPlayed.filter(item => item.id !== track.id)].slice(0, MAX_RECENT),
+        }));
+    },
 
     play: async (track, queue) => {
         const effectiveTrack = mergeWithLibraryTrack(track);

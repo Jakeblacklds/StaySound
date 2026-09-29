@@ -138,12 +138,30 @@ export interface TidalAlbum {
     year?: number;
     numberOfTracks?: number;
     explicit?: boolean;
+    /** ALBUM, EP, SINGLE o COMPILATION cuando la fuente lo informa. */
+    type?: string;
+    popularity?: number;
 }
 
 export interface TidalArtistDetail {
     artist: TidalArtist;
     topTracks: TidalTrack[];
     albums: TidalAlbum[];
+    /** Sencillos y EP, separados de los álbumes cuando la fuente lo permite. */
+    singles?: TidalAlbum[];
+}
+
+/** Búsqueda unificada y ordenada por relevancia, con su "mejor resultado". */
+export type TidalTopResult =
+    | { kind: 'artist'; artist: TidalArtist }
+    | { kind: 'track'; track: TidalTrack }
+    | { kind: 'album'; album: TidalAlbum };
+
+export interface TidalCatalogSearch {
+    tracks: TidalTrack[];
+    albums: TidalAlbum[];
+    artists: TidalArtist[];
+    top: TidalTopResult | null;
 }
 
 export interface TidalAlbumDetail {

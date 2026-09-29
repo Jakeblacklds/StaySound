@@ -27,6 +27,8 @@ export type UsePlayerLyricsArgs = {
   currentTrack: Track | null;
   /** Bump this to force a fresh network search (clears the track's lyrics cache first). */
   refreshNonce?: number;
+  /** Kotlin consumes the shared timeline directly; skip JS position snapshots. */
+  nativeTimeline?: boolean;
 };
 
 function normalizeLyricsOffsetKeyPart(value?: string | null) {
@@ -61,7 +63,7 @@ function getLyricsOffsetCacheKeys(track: {
   return keys;
 }
 
-export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: UsePlayerLyricsArgs) {
+export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0, nativeTimeline = false }: UsePlayerLyricsArgs) {
   const performanceProfile = usePerformanceProfile();
   const lyricsSources = useSettingsStore(state => state.lyricsSources);
   const currentTrackId = currentTrack?.id ?? null;
@@ -160,7 +162,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
 
   useAnimatedReaction(
     () => {
-      if (!visible) return -1;
+      if (!visible || nativeTimeline) return -1;
       const stepMs = lyricsMode === 'lrc' ? 32 : 48;
       return Math.floor(positionShared.value / stepMs) * stepMs;
     },
@@ -169,7 +171,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
         runOnJS(updateNativePosition)(current);
       }
     },
-    [lyricsMode, positionShared, visible]
+    [lyricsMode, positionShared, visible, nativeTimeline]
   );
 
   const applyLyricsOffsetStep = useCallback((deltaMs: number) => {

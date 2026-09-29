@@ -1,3 +1,4 @@
+import NativeEqualizerScreen, { hasNativeEqualizerView } from '@/src/features/settings/NativeEqualizerScreen';
 import { useNotificationStore, useSettingsStore } from '@/src/stores';
 import { typeScale, useTheme } from '@/src/theme';
 import { EqualizerBand, EqualizerPresetDefinition } from '@/src/types';
@@ -35,6 +36,10 @@ const HANDLE_SIZE = 24;
 const GRAPH_SIDE_PADDING = 26;
 
 export function EqualizerEditor() {
+    return hasNativeEqualizerView ? <NativeEqualizerScreen /> : <ReactEqualizerEditor />;
+}
+
+function ReactEqualizerEditor() {
     const { theme } = useTheme();
     const { t } = useI18n();
     const showNotification = useNotificationStore(s => s.showNotification);

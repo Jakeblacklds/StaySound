@@ -1,7 +1,7 @@
 const IS_DEV = process.env.APP_VARIANT === 'development';
 const APP_VERSION = '1.0.2';
 const ANDROID_VERSION_CODE = 3;
-const EAS_PROJECT_ID = 'f9cff190-672e-4832-add3-4a9cb3e68343';
+const EAS_PROJECT_ID = '14ef09db-f61a-4de2-a6be-b58717ac2494';
 const OTA_CHANNEL = IS_DEV ? 'development' : 'production';
 const RUNTIME_VERSION = `staysound-${IS_DEV ? 'dev' : 'prod'}-${APP_VERSION}-${ANDROID_VERSION_CODE}`;
 const OTA_URL = `https://u.expo.dev/${EAS_PROJECT_ID}`;
@@ -138,6 +138,8 @@ module.exports = {
             ],
             './plugins/withAndroidAutoCatalogModule',
             './plugins/withKaraokeFonts',
+            './plugins/withAndroidNavigation',
+            './plugins/withAndroidCore',
             'expo-sqlite',
             [
                 'expo-media-library',

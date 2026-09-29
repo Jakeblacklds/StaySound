@@ -1,3 +1,5 @@
+import { hasNativeAndroidShell } from '@/modules/android-shell/src';
+import { NativeGlobalOverlays } from '@/src/features/shell/NativeGlobalOverlays';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
@@ -59,7 +61,8 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
   const pathname = usePathname();
   const rootNavigationState = useRootNavigationState();
   const canNavigate = isAppReady && !!rootNavigationState?.key;
-  const shouldMountFullPlayer = isPlayerVisible || currentTrack != null;
+  const shouldMountFullPlayer = (isPlayerVisible || currentTrack != null)
+    && !(hasNativeAndroidShell && (pathname === '/lyrics' || pathname === '/modal'));
 
   useEffect(() => {
     if (!canNavigate) {
@@ -176,11 +179,14 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
               />
               <Stack.Screen name="equalizer" options={{ animation: 'slide_from_right' }} />
             </Stack>
-            <ActionSheet />
-            <ConfirmationModal />
-            <GlobalNotification />
+            {!hasNativeAndroidShell ? <>
+              <ActionSheet />
+              <ConfirmationModal />
+              <GlobalNotification />
+            </> : null}
 
             {shouldMountFullPlayer ? <FullPlayer /> : null}
+            {hasNativeAndroidShell ? <NativeGlobalOverlays /> : null}
           </View>
         </GestureHandlerRootView>
       </NavigationThemeProvider>

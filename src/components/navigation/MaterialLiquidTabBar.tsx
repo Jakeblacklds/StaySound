@@ -30,6 +30,8 @@ import Svg, { Circle, Defs, RadialGradient, Stop } from 'react-native-svg';
 import { TabBarIcon, TabIconName } from './TabBarIcons';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { TAB_BAR_HEIGHT as BAR_HEIGHT, ANDROID_DOCK_INSET } from '../player/playerLayout';
+import { hasNativePlayerChrome } from '@/modules/player-chrome/src';
+import { AndroidNavigationBar } from './AndroidNavigationBar';
 
 // Above this expansion the dock is sliding away under the player — drop the
 // costly live blur and use an opaque album surface instead.
@@ -205,7 +207,11 @@ const TabItem = memo(function TabItem({
   );
 });
 
-export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar({
+export const MaterialLiquidTabBar = memo(function MaterialLiquidTabBar(props: BottomTabBarProps) {
+  return hasNativePlayerChrome ? <AndroidNavigationBar {...props} /> : <LegacyMaterialLiquidTabBar {...props} />;
+});
+
+const LegacyMaterialLiquidTabBar = memo(function LegacyMaterialLiquidTabBar({
   state,
   descriptors,
   navigation,

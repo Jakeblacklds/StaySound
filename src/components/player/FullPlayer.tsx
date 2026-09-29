@@ -78,6 +78,8 @@ import {
   getTrackTechLabel,
 } from "./playerUtils";
 import { ImmersiveVariant } from "./variants/ImmersiveVariant";
+import { hasNativeFullPlayer } from '@/modules/player-chrome/src';
+import { AndroidFullPlayer } from './AndroidFullPlayer';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -112,6 +114,10 @@ function normalizeArtistSearchValue(value?: string | null) {
 }
 
 export function FullPlayer() {
+  return hasNativeFullPlayer ? <AndroidFullPlayer /> : <LegacyFullPlayer />;
+}
+
+function LegacyFullPlayer() {
   const { theme, config, isDark } = useTheme();
   const performanceProfile = usePerformanceProfile();
   const themeAnimatedColors = useAnimatedColors();
