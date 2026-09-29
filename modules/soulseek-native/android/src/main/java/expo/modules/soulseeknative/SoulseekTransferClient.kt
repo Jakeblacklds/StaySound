@@ -44,7 +44,11 @@ internal class SoulseekTransferClient(
       username = match.username,
       address = address,
       filename = match.filename,
-      timeoutMs = 90_000,
+      // A peer that advertised a free slot offers the file within seconds;
+      // when it doesn't, the next candidate is a better bet than waiting.
+      // Queued peers get longer, but Seeker's experience is that peers with
+      // no free slot rarely start at all, so they are ranked last anyway.
+      timeoutMs = if (match.slotsFree == true) 25_000 else 60_000,
     )
     val expectedSize = listOf(
       queuedTransfer.expectedSize,
@@ -314,6 +318,9 @@ internal class SoulseekTransferClient(
   ) {
     val errors = ArrayList<String>()
     val secondChanceAt = System.currentTimeMillis() + 3_000L
+    // True once the uploader answered on an F channel with our token: from
+    // then on a stall is the peer's doing, and dialing it again won't help.
+    var engaged = false
 
     // Tauri first lets the uploader create the F connection. This may arrive
     // directly on our listen socket or as a server-assisted ConnectToPeer F.
@@ -332,10 +339,13 @@ internal class SoulseekTransferClient(
             fileSocket.close()
             continue
           }
+          engaged = true
           val startOffset = sendFileOffset(fileSocket, targetFile)
+          android.util.Log.i(LOG_TAG, "F entrante de $username listo, offset=$startOffset")
           receiveFilePayload(fileSocket, targetFile, expectedSize, startOffset)
           return
         } catch (error: Exception) {
+          android.util.Log.w(LOG_TAG, "incoming-f $username: ${error.message}")
           errors.add("incoming-f: ${error.message ?: error::class.java.simpleName}")
           runCatching { socket.close() }
         }
@@ -358,15 +368,24 @@ internal class SoulseekTransferClient(
             fileSocket.close()
             continue
           }
+          engaged = true
           val startOffset = sendFileOffset(fileSocket, targetFile)
+          android.util.Log.i(LOG_TAG, "F indirecto con $username listo, offset=$startOffset")
           receiveFilePayload(fileSocket, targetFile, expectedSize, startOffset)
           return
         } catch (error: Exception) {
+          android.util.Log.w(LOG_TAG, "connect-to-peer-f $username: ${error.message}")
           errors.add("connect-to-peer-f: ${error.message ?: error::class.java.simpleName}")
         }
       }
 
       Thread.sleep(20)
+    }
+
+    if (engaged) {
+      // The peer took the transfer and then stopped sending: move on to the
+      // next source now instead of spending another stall timeout here.
+      throw EOFException("El peer dejo de enviar datos (${errors.joinToString(" | ")})")
     }
 
     // Same second chance as Tauri: if the uploader could not reach our phone,
@@ -446,6 +465,7 @@ internal class SoulseekTransferClient(
     val startOffset = if (targetFile.exists()) targetFile.length() else 0L
     if (expectedSize in 1..startOffset) return 0L
 
+    if (port <= 0 || host.isBlank()) throw IllegalStateException("sin direccion directa del peer")
     val fileSocket = SlskSocket.connect(host, port)
     closeables.add(fileSocket)
 
@@ -507,7 +527,8 @@ internal class SoulseekTransferClient(
           input.read(buffer)
         } catch (_: SocketTimeoutException) {
           if (expectedSize > 0L && totalBytes >= expectedSize) break
-          if (System.currentTimeMillis() - lastDataAtMs > 45_000L) {
+          if (System.currentTimeMillis() - lastDataAtMs > 30_000L) {
+            android.util.Log.w(LOG_TAG, "Transferencia estancada tras ${totalBytes - startOffset} bytes nuevos")
             throw SocketTimeoutException("Transferencia estancada")
           }
           continue
@@ -554,15 +575,22 @@ internal class SoulseekTransferClient(
         .toPacket(),
     )
 
-    val deadline = System.currentTimeMillis() + 12000L
+    val deadline = System.currentTimeMillis() + 8_000L
+    val seenCodes = ArrayList<Int>()
+    android.util.Log.i(LOG_TAG, "GetPeerAddress($username) enviado; socket abierto=${serverSocket.isOpen()}")
     while (System.currentTimeMillis() < deadline) {
       ensureNotCancelled(cancelled)
 
       pumpIncomingPeerSocket()
+      // Another pump (search, uploads) may already have stored the answer.
+      peerAddresses[username]?.let { return it }
 
-      val packet = serverSocket.readPacket(600) ?: continue
+      // Drain quickly: the answer may be queued behind a flood of
+      // ConnectToPeer requests from the search that just finished.
+      val packet = serverSocket.readPacket(if (seenCodes.isEmpty()) 600 else 20) ?: continue
       val parser = SlskMessageParser(packet)
       val code = parser.readUInt32().toInt()
+      if (seenCodes.size < 40) seenCodes.add(code)
 
       if (code == 3) {
         val user = parser.readStringSafe()
@@ -579,6 +607,7 @@ internal class SoulseekTransferClient(
         val address = PeerAddress(host, port)
         peerAddresses[user] = address
 
+        android.util.Log.i(LOG_TAG, "PeerAddress($user) = $host:$port")
         if (user == username) {
           return address
         }
@@ -587,7 +616,16 @@ internal class SoulseekTransferClient(
       }
     }
 
-    throw IllegalStateException("No se pudo resolver la direccion del peer en Soulseek.")
+    android.util.Log.w(LOG_TAG, "GetPeerAddress($username) sin respuesta en 8 s; codigos recibidos=$seenCodes")
+    // Not fatal: without an address the direct attempts simply fail fast and
+    // the transfer continues over the server-brokered (indirect) connections,
+    // which is also what works for most peers behind NAT.
+    return UNKNOWN_ADDRESS
+  }
+
+  private companion object {
+    val UNKNOWN_ADDRESS = PeerAddress("", 0)
+    const val LOG_TAG = "StaySoundSoulseek"
   }
 
   private fun waitForTransferResponse(peerSocket: SlskSocket): TransferResponse {

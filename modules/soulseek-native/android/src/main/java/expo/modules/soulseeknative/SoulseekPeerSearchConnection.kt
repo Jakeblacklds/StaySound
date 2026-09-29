@@ -11,11 +11,21 @@ import kotlin.math.min
 internal class PeerSearchConnection(
   private val socket: Socket,
   private val onMatch: (SoulseekMatch) -> Unit,
+  private val acceptSearchToken: (ByteArray) -> Boolean = { true },
   private val onTransferRequest: ((IncomingTransferRequest) -> Unit)? = null,
   private val onTransferFailure: ((String) -> Unit)? = null,
   private val onIdentity: ((String, PeerSearchConnection) -> Unit)? = null,
   private val onFileConnection: ((Socket) -> Unit)? = null,
+  private val requestHandler: SoulseekPeerRequestHandler? = null,
 ) : Closeable {
+  /** Who is on the other end, once known (PeerInit or the dialer's info). */
+  @Volatile
+  var peerUsername: String? = null
+
+  /** Kept open across operations while an upload for this peer is queued. */
+  @Volatile
+  var pinned = false
+
   private val reader = SlskPacketReader(socket, socket.getInputStream())
   private val output = socket.getOutputStream()
   private val running = AtomicBoolean(true)
@@ -34,7 +44,7 @@ internal class PeerSearchConnection(
     worker = Thread {
       while (running.get()) {
         val packet = try {
-          reader.readPacket(socket.soTimeout)
+          reader.readPacket(socket.soTimeout.takeIf { it > 0 } ?: 4_000)
         } catch (_: SocketTimeoutException) {
           continue
         } catch (_: Exception) {
@@ -53,12 +63,24 @@ internal class PeerSearchConnection(
           continue
         }
         if (first == 0) {
-          // pierce firewall handshake message
+          // PierceFirewall: may be a peer answering our indirect F request
+          // for an upload, in which case the socket now belongs to it.
+          val token = packet.copyOfRange(1, minOf(packet.size, 5))
+          if (token.size == 4 && requestHandler?.claimPierceFirewall(token, socket) == true) {
+            running.set(false)
+            return@Thread
+          }
           continue
         }
 
         val parser = SlskMessageParser(packet)
         val code = parser.readUInt32Safe()?.toInt() ?: continue
+
+        val handler = requestHandler
+        if (handler != null && code in PEER_REQUEST_CODES) {
+          runCatching { handler.handlePeerMessage(code, parser, this@PeerSearchConnection) }
+          continue
+        }
 
         if (code == 40) {
           handleTransferRequestPacket(parser)
@@ -104,6 +126,7 @@ internal class PeerSearchConnection(
     val username = parser.readStringSafe()
     val type = parser.readStringSafe()
     if (username.isNotBlank() && type.equals("P", ignoreCase = true)) {
+      peerUsername = username
       onIdentity?.invoke(username, this)
     }
     return type
@@ -137,10 +160,15 @@ internal class PeerSearchConnection(
     )
   }
 
+  private companion object {
+    /** GetShareFileList, UserInfoRequest, TransferResponse, QueueUpload, PlaceInQueueRequest. */
+    val PEER_REQUEST_CODES = setOf(4, 15, 41, 43, 51)
+  }
+
   private fun parseSearchReply(data: ByteArray): List<SoulseekMatch> {
     val parser = SlskMessageParser(data)
     val username = parser.readStringSafe().ifBlank { return emptyList() }
-    parser.readBytes(4) // token
+    if (!parser.canRead(4) || !acceptSearchToken(parser.readBytes(4))) return emptyList()
 
     val fileCount = parser.readUInt32Safe()?.toInt()?.coerceAtLeast(0) ?: return emptyList()
     val output = ArrayList<SoulseekMatch>(min(fileCount, 120))

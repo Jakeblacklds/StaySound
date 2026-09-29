@@ -8,4 +8,5 @@ export {
 export type {
   SoulseekNativeConfig,
   SoulseekNativeMatch,
+  SoulseekSearchIdentity,
 } from './SoulseekNativeModule';

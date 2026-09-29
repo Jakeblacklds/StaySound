@@ -3,8 +3,9 @@
 import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
+import java.util.concurrent.ScheduledExecutorService
+import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicInteger
 import java.util.concurrent.atomic.AtomicReference
@@ -13,11 +14,21 @@ class SoulseekNativeModule : Module() {
   private val activeCancellation = AtomicReference<AtomicBoolean?>(null)
   private val nextOperationId = AtomicInteger(0)
   private val cancelledThroughOperationId = AtomicInteger(0)
-  private val worker: ExecutorService = Executors.newSingleThreadExecutor { runnable ->
+  private val worker: ScheduledExecutorService = Executors.newSingleThreadScheduledExecutor { runnable ->
     Thread(runnable, "StaySoundSoulseekWorker").apply {
       isDaemon = true
       priority = Thread.NORM_PRIORITY - 1
     }
+  }
+
+  // Touched only from `worker`, which serialises operations and upkeep.
+  private val sessions = SoulseekSessionManager().also { manager ->
+    worker.scheduleWithFixedDelay(
+      { runCatching { manager.maintain() } },
+      MAINTENANCE_INTERVAL_SECONDS,
+      MAINTENANCE_INTERVAL_SECONDS,
+      TimeUnit.SECONDS,
+    )
   }
 
   private fun rejectOperationError(
@@ -63,8 +74,8 @@ class SoulseekNativeModule : Module() {
 
         activeCancellation.set(operationCancelled)
         try {
-          val results = SoulseekClient(operationCancelled)
-            .search(parsedConfig, normalizedQuery, normalizedTimeout, normalizedMax)
+          val results = sessions
+            .search(parsedConfig, operationCancelled, normalizedQuery, normalizedTimeout, normalizedMax, SoulseekSearchIdentity.from(config["searchIdentity"]))
             .map { it.toMap() }
 
           promise.resolve(results)
@@ -90,7 +101,7 @@ class SoulseekNativeModule : Module() {
 
         activeCancellation.set(operationCancelled)
         try {
-          val result = SoulseekClient(operationCancelled).download(parsedConfig, parsedMatch, outputPath)
+          val result = sessions.download(parsedConfig, operationCancelled, parsedMatch, outputPath)
 
           promise.resolve(
             mapOf(
@@ -111,5 +122,15 @@ class SoulseekNativeModule : Module() {
       activeCancellation.get()?.set(true)
       null
     }
+
+    OnDestroy {
+      worker.execute { sessions.closeSession() }
+      worker.shutdown()
+    }
+  }
+
+  private companion object {
+    // Short enough to answer peers' connection requests while sharing.
+    const val MAINTENANCE_INTERVAL_SECONDS = 2L
   }
 }

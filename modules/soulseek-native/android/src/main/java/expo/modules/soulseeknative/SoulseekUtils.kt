@@ -51,6 +51,12 @@ internal fun inflateBytes(data: ByteArray): ByteArray {
   }
 }
 
+internal fun deflateBytes(data: ByteArray): ByteArray {
+  val output = ByteArrayOutputStream()
+  java.util.zip.DeflaterOutputStream(output).use { it.write(data) }
+  return output.toByteArray()
+}
+
 internal fun normalizeOutputPath(raw: String): String {
   val trimmed = raw.trim()
   if (trimmed.startsWith("file://")) {

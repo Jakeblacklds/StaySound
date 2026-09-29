@@ -28,9 +28,9 @@ export function useSoulseekCredentials() {
         };
     }, []);
 
-    const save = useCallback(async (): Promise<boolean> => {
-        const normalizedUsername = username.trim();
-        const normalizedPassword = password.trim();
+    const save = useCallback(async (credentials?: { username: string; password: string }): Promise<boolean> => {
+        const normalizedUsername = (credentials?.username ?? username).trim();
+        const normalizedPassword = (credentials?.password ?? password).trim();
 
         if (!normalizedUsername || !normalizedPassword) {
             showNotification('Usuario y password son obligatorios.', 'error');
@@ -40,6 +40,8 @@ export function useSoulseekCredentials() {
         setIsSaving(true);
         try {
             await setSoulseekCredentials(normalizedUsername, normalizedPassword);
+            setUsername(normalizedUsername);
+            setPassword(normalizedPassword);
             setHasCredentials(true);
             showNotification('Sesion de Soulseek guardada.', 'success');
             return true;
