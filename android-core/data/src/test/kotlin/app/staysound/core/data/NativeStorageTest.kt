@@ -79,6 +79,26 @@ class NativeStorageTest {
         assertTrue(data().library.snapshot().playlists.isEmpty())
     }
 
+    @Test fun aScanInProgressNeverWipesTheLibrary() = runBlocking {
+        seed(LegacyCodec.LIBRARY, library(listOf(a, b)))
+        val session = open(true)
+        // The JS store persists an empty track list plus a marker while a scan is running.
+        val scanning = JSONObject(library(emptyList(), listOf(Playlist("p", "Mix", listOf(a.id), 1, 2)))).apply {
+            getJSONObject("state").put("scanInProgress", true)
+        }.toString()
+        session.setItem(LegacyCodec.LIBRARY, scanning)
+        assertEquals(listOf(a, b), data().library.snapshot().tracks)
+        assertEquals(listOf(a.id), data().library.snapshot().playlists.single().trackIds)
+        assertFalse(state(session.getItem(LegacyCodec.LIBRARY)).has("scanInProgress"))
+        assertEquals(listOf(a, b), tracksOf(session.getItem(LegacyCodec.LIBRARY)))
+        // The finished scan persists the real result, which is now applied (b was deleted from disk).
+        session.setItem(LegacyCodec.LIBRARY, library(listOf(a)))
+        assertEquals(listOf(a), data().library.snapshot().tracks)
+        // Outside a scan an empty library is a deliberate clear.
+        session.setItem(LegacyCodec.LIBRARY, library(emptyList()))
+        assertTrue(data().library.snapshot().tracks.isEmpty())
+    }
+
     @Test fun malformedWritesAreRejectedWithoutTouchingTheLibrary() = runBlocking {
         seed(LegacyCodec.LIBRARY, library(listOf(a)))
         val session = open(true)

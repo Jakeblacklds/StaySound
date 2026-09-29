@@ -74,6 +74,8 @@ internal data class LegacyImport(
     val tracks: List<TrackRow>, val playlists: List<Playlist>, val cloud: List<CloudTrackRow>,
     val history: List<HistoryRow>, val downloads: List<DownloadRow>,
     val artistInfo: List<ArtistInfoRow>, val documents: List<DocumentRow>, val preferences: Map<String, String>,
+    /** JS persists an empty track list while scanning; that is not a request to delete the library. */
+    val scanInProgress: Boolean = false,
 ) {
     companion object {
         fun parse(files: Map<String, String>): LegacyImport = with(LegacyCodec) {
@@ -96,7 +98,8 @@ internal data class LegacyImport(
             val playerState = player.getJSONObject("state")
             val history = objects(array(playerState, "recentlyPlayed")).mapIndexed { index, o -> HistoryRow(index, track(o)) }
             val cloudOrder = JSONArray(pairs(array(state, "cloudPlaylistTracks")).map { it.first }).toString()
-            listOf("tracks", "playlists", "cloudPlaylistTracks").forEach(state::remove)
+            val scanning = state.optBoolean("scanInProgress")
+            listOf("tracks", "playlists", "cloudPlaylistTracks", "scanInProgress").forEach(state::remove)
             playerState.remove("recentlyPlayed")
             // Original client persists neither albums/artists nor in-flight downloads. Do not prune media here.
             val nativeDownloads = files[DOWNLOADS]?.let { raw ->
@@ -121,7 +124,7 @@ internal data class LegacyImport(
                 listOf(DocumentRow(LIBRARY, library.toString()), DocumentRow("cloud-order", cloudOrder)) +
                     files.filterKeys { it !in setOf(LIBRARY, PLAYER, SETTINGS, DOWNLOADS, ArtistCache.DOCUMENT, "staysound-onboarding") }
                         .map { (name, raw) -> DocumentRow("opaque:$name", raw) }.sortedBy { it.name },
-                files.filterKeys { it == SETTINGS || it == "staysound-onboarding" } + (PLAYER to player.toString()))
+                files.filterKeys { it == SETTINGS || it == "staysound-onboarding" } + (PLAYER to player.toString()), scanning)
         }
     }
 }

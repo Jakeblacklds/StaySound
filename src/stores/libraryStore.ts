@@ -1410,6 +1410,8 @@ export const useLibraryStore = create<LibraryStore>()(
             // Custom serialization for Maps
             partialize: (state: LibraryStore) => ({
                 tracks: state.isScanning ? [] : Array.from(state.tracks.entries()),
+                // Kotlin storage keeps its rows while a scan runs instead of reading the empty list as a wipe.
+                ...(state.isScanning ? { scanInProgress: true } : {}),
                 playlists: Array.from(state.playlists.entries()),
                 cloudPlaylistTracks: Array.from(state.cloudPlaylistTracks.entries()).map(([playlistId, tracks]) => [playlistId, Array.from(tracks.entries())]),
                 recentSearches: state.recentSearches,

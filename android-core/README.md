@@ -27,6 +27,10 @@ La UI aún **no usa** `LibraryViewModel`. Room/DataStore se activan únicamente 
 - `NativeStorageSession.data` es el `StaySoundData` único para futuros consumidores Kotlin (ViewModels de las vistas nativas).
 
 Limitación conocida: la caché de artistas de Expo SQLite sigue escribiéndola JS. Al volver a legacy, la exportación no reemplaza filas más nuevas que las de Room.
+Los escaneos persisten `tracks: []` con `scanInProgress: true` (`libraryStore.partialize`); Kotlin conserva sus filas mientras dura el escaneo en lugar de tratarlo como un borrado.
+
+**Antes de que las vistas nativas lean de Room** (en vez de recibir el catálogo por props desde JS) hay que mover a Kotlin: el escaneo y el enriquecimiento (`scanLibrary`, `repairMissingMetadata`, `hydrateMetadataFromTidalForLibrary`), las fotos de artistas (hoy `refreshArtistPhotos` las guarda en memoria y en Expo SQLite, y `catalogOf` no las ve) y las mutaciones de biblioteca (`deleteTrack`, playlists, favoritos). Si no, las vistas mostrarían un catálogo distinto del que ve JS.
+
 Sin validar en dispositivo con datos reales; los tests (`NativeStorageTest`) cubren importación, diff de escritura, reinicio, rollback y rechazo de datos inválidos.
 
 ## Propiedad y recuperación

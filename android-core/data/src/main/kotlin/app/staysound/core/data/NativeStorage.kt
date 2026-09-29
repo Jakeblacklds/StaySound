@@ -49,10 +49,12 @@ internal class NativeDocuments(
         val incoming = LegacyImport.parse(mapOf(LegacyCodec.LIBRARY to value))
         db.withTransaction {
             val dao = db.library()
-            val tracks = dao.tracks().associateBy { it.key }
-            val keep = incoming.tracks.mapTo(HashSet()) { it.key }
-            tracks.keys.filterNot { it in keep }.forEach { dao.deleteTrack(it) }
-            dao.putTracks(incoming.tracks.filter { tracks[it.key] != it })
+            if (!incoming.scanInProgress) {
+                val tracks = dao.tracks().associateBy { it.key }
+                val keep = incoming.tracks.mapTo(HashSet()) { it.key }
+                tracks.keys.filterNot { it in keep }.forEach { dao.deleteTrack(it) }
+                dao.putTracks(incoming.tracks.filter { tracks[it.key] != it })
+            }
 
             val playlists = dao.playlists().associateBy { it.row.id }
             val kept = incoming.playlists.mapTo(HashSet()) { it.id }
