@@ -11,8 +11,11 @@ import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modu
 import * as ImagePicker from 'expo-image-picker';
 import { router } from '@/src/navigation/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
-import { Alert, Platform, StyleSheet, type NativeSyntheticEvent, type ViewProps } from 'react-native';
+import { Alert, Linking, Platform, StyleSheet, type NativeSyntheticEvent, type ViewProps } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+
+/** The public repo (releases); the source repo is private. */
+const GITHUB_REPO_URL = 'https://github.com/Jakeblacklds/staysound-releases';
 
 type SettingsAction = { action: string; value: string; id: string };
 type NativeProps = ViewProps & {
@@ -91,6 +94,7 @@ export default function NativeSettingsScreen() {
                 case 'lyricsSource': settings.setLyricsSourceEnabled(id as LyricsSourceId, value === 'true'); break;
                 case 'lyricsFont': if (LYRICS_FONT_OPTIONS.some(option => option.id === value)) settings.setLyricsFont(value as LyricsFontId); break;
                 case 'equalizer': router.push('/equalizer'); break;
+                case 'github': await Linking.openURL(GITHUB_REPO_URL); break;
                 case 'name': onboarding.setUserName(value.trim()); break;
                 case 'avatar': {
                     const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ['images'], allowsEditing: true, aspect: [1, 1], quality: 0.8 });

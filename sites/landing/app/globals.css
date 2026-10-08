@@ -141,6 +141,30 @@ main > section {
   color: var(--text);
 }
 
+.site-head nav {
+  align-items: center;
+}
+
+.site-head .star {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  height: 40px;
+  padding: 0 16px 0 12px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  font-weight: 600;
+  color: var(--text);
+  transition:
+    border-color 160ms var(--ease-standard),
+    background-color 160ms var(--ease-standard);
+}
+
+.site-head .star:hover {
+  border-color: var(--text-2);
+  background: rgba(255, 255, 255, 0.05);
+}
+
 /* ── the karaoke wipe ─────────────────────────────────────────────────────── */
 /* A word is lit up to --p, with a short soft edge leading the fill. */
 .word {

@@ -33,6 +33,7 @@ export const PlusIcon = (props: IconProps) => <StayIcon name="add" {...props} />
 export const KeyboardIcon = (props: IconProps) => <StayIcon name="keyboard" {...props} />;
 export const TrashIcon = (props: IconProps) => <StayIcon name="trash" {...props} />;
 export const GearIcon = (props: IconProps) => <StayIcon name="settings" {...props} />;
+export const GitHubIcon = (props: IconProps) => <StayIcon name="github" {...props} />;
 export const SlidersIcon = (props: IconProps) => <StayIcon name="equalizer" {...props} />;
 export const DownloadIcon = (props: IconProps) => <StayIcon name="download" {...props} />;
 export const PhoneIcon = (props: IconProps) => <StayIcon name="phone" {...props} />;

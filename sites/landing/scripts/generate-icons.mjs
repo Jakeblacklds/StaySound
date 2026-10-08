@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const ROOT = process.cwd();
-const KINDS = ['play', 'pause', 'next', 'previous', 'download', 'forward'];
+const KINDS = ['download', 'github'];
 const tmp = path.join(ROOT, 'node_modules/.cache/landing-icons.mjs');
 
 fs.mkdirSync(path.dirname(tmp), { recursive: true });

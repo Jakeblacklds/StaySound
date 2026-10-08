@@ -9163,3 +9163,51 @@ close
 solid 1.6 1
 restore
 restore
+# github 0 1 0
+save
+scale 1 1 12 12
+scale 0.9 0.9 12 12
+begin
+svgPath 712
+fill 1
+restore
+# github 1 1 0
+save
+scale 0.9 0.9 12 12
+scale 0.9 0.9 12 12
+begin
+svgPath 712
+fill 1
+restore
+# github -0.35 1 1
+save
+scale 1.035 1.035 12 12
+scale 0.9 0.9 12 12
+begin
+svgPath 712
+fill 1
+restore
+# github 0 0.1 1
+save
+scale 1 1 12 12
+scale 0.9 0.9 12 12
+begin
+svgPath 712
+fill 1
+restore
+# github 0 0.3 0.5
+save
+scale 1 1 12 12
+scale 0.9 0.9 12 12
+begin
+svgPath 712
+fill 1
+restore
+# github 0 0.6 1
+save
+scale 1 1 12 12
+scale 0.9 0.9 12 12
+begin
+svgPath 712
+fill 1
+restore

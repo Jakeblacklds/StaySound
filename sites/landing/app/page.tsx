@@ -1,7 +1,7 @@
 import Image from 'next/image';
 import type { CSSProperties } from 'react';
 import { LyricDemo } from './LyricDemo';
-import { fetchRelease, formatDate, formatSize, RELEASES_URL } from './release';
+import { fetchRelease, formatDate, formatSize, RELEASES_URL, REPO_URL } from './release';
 import { StayIcon, StayMark } from './StayIcon';
 
 const HEADLINE = ['Tu', 'música,', 'sin', 'nube.'];
@@ -55,6 +55,10 @@ export default async function HomePage() {
           <a href="#letra">Letra</a>
           <a href="#funciones">Funciones</a>
           <a href="#instalar">Instalar</a>
+          <a className="star" href={REPO_URL} target="_blank" rel="noreferrer noopener">
+            <StayIcon kind="github" size={18} />
+            Estrella
+          </a>
         </nav>
       </header>
 

@@ -172,6 +172,7 @@
     gap: 12px;
   }
 
+  .circ-top-nav-trailing a,
   .circ-top-nav-trailing button {
     width: 40px;
     height: 40px;
@@ -182,6 +183,7 @@
     transition: color var(--circ-dur-fast) var(--circ-ease-standard), background-color var(--circ-dur-fast) var(--circ-ease-standard);
   }
 
+  .circ-top-nav-trailing a:hover,
   .circ-top-nav-trailing button:hover {
     color: var(--text-primary);
     background: var(--bg-pressed);

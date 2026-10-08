@@ -212,6 +212,7 @@ class SettingsView(context: Context, appContext: AppContext) : ExpoView(context,
             else -> label("Instalada ${update.optString("installedVersion")}", "Installed ${update.optString("installedVersion")}")
         }
         row(label("Actualización APK", "APK update"), updateDetail, state !in listOf("release-only", "checking", "downloading", "installing")) { emit("update") }
+        row(label("Dale una estrella en GitHub", "Star StaySound on GitHub"), label("Ayuda a que más gente lo encuentre", "Helps more people find it")) { emit("github") }
         body.addView(text("StaySound ${update.optString("installedVersion")}", 12f).apply { setTextColor(muted); gravity = Gravity.CENTER; setPadding(0, dp(20), 0, 0) })
         scroll.post { scroll.scrollTo(0, previousScrollY) }
     }

@@ -83,6 +83,8 @@ object StayIcons {
         "tab-home", "tab-library", "tab-search", "tab-playlists", "play-pause", "repeat", "repeat-one",
         "volume", "volume-mute", "mic", "seek-back", "seek-forward", "keyboard", "phone", "folder",
         "sync", "spinner", "undo", "redo",
+        // The one mark that is not ours: it has to be recognised, so it keeps its own shape.
+        "github",
     )
     /** Kinds that play a bespoke beat on release; the rest only squash under the finger. */
     val ANIMATED = setOf(
@@ -358,6 +360,10 @@ object StayIcons {
                 }
                 pen.restore()
             }
+            "github" -> {
+                pen.scale(.9f, .9f, 12f, 12f)
+                pen.begin(); pen.svgPath(GITHUB_MARK); pen.fill()
+            }
             "undo", "redo" -> {
                 if (kind == "redo") pen.scale(-1f, 1f, 12f, 12f)
                 italic(pen) {
@@ -542,6 +548,8 @@ object StayIcons {
     private val PLAY_QUADS = floatArrayOf(6.5f, 4.5f, 13.25f, 8.25f, 13.25f, 15.75f, 6.5f, 19.5f, 13.25f, 8.25f, 20f, 12f, 20f, 12f, 13.25f, 15.75f)
     private val PAUSE_QUADS = floatArrayOf(5f, 4.6f, 10.2f, 4.6f, 10.2f, 19.4f, 5f, 19.4f, 13.8f, 4.6f, 19f, 4.6f, 19f, 19.4f, 13.8f, 19.4f)
     /** assets/images/icon.png traced in its 1024 space, centred on (503, 511). */
+    /** GitHub's mark, in its own 24-unit box. */
+    const val GITHUB_MARK = "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"
     const val S_MARK = "M198 510C250 508 280 500 300 490C380 440 430 340 580 320L808 320L715 400C700 412 680 418 660 418" +
         "L515 418C470 418 452 448 458 470C462 486 478 493 495 493L690 493C715 495 722 515 715 535" +
         "C700 570 650 640 560 680C520 698 470 702 430 702L232 702L365 592L490 592C540 592 568 565 572 540" +

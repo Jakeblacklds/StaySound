@@ -6,6 +6,8 @@
 const RELEASES_REPO = process.env.NEXT_PUBLIC_RELEASES_REPO || 'Jakeblacklds/staysound-releases';
 
 export const RELEASES_URL = `https://github.com/${RELEASES_REPO}/releases`;
+/** Where "star us" points: the public repo. The source repo is private. */
+export const REPO_URL = `https://github.com/${RELEASES_REPO}`;
 
 export interface Download {
   fileName: string;

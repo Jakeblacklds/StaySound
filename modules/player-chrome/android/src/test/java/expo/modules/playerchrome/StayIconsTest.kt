@@ -119,8 +119,9 @@ private class SvgPen(private val ink: String = "#fff") : IconPen {
     }
     override fun svgPath(d: String) {
         this.d.append("$d ")
-        // The S mark's bounding box in its 1024 space, for the bounds check.
-        points += 198f to 320f; points += 808f to 702f
+        // Each mark's bounding box in its own space, for the bounds check.
+        if (d == StayIcons.GITHUB_MARK) { points += 0f to 0.297f; points += 24f to 23.7f }
+        else { points += 198f to 320f; points += 808f to 702f }
     }
     override fun close() { d.append("Z ") }
     private fun emit(attrs: String, pad: Float) {

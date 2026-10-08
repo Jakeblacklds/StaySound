@@ -1,4 +1,5 @@
 import type { Album, Artist, Playlist, TidalTrack, Track } from '@staysound/types/audio';
+import { GITHUB_REPO_URL } from './appDownload';
 import { ChangeEvent, Children, type CSSProperties, isValidElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { formatDuration } from '@staysound/services/metadataService';
@@ -74,6 +75,7 @@ import {
   DownloadIcon,
   FolderIcon,
   GearIcon,
+  GitHubIcon,
   HomeIcon,
   MusicNoteIcon,
   PlaylistIcon,
@@ -1173,6 +1175,15 @@ export function App() {
                   Instalar app
                 </button>
               )}
+              <a
+                href={GITHUB_REPO_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                aria-label="Dale una estrella a StaySound en GitHub"
+                title="Dale una estrella en GitHub"
+              >
+                <GitHubIcon size={18} />
+              </a>
               <button
                 onClick={() => setShowLibrarySettings(true)}
                 aria-label="Ajustes de biblioteca"
