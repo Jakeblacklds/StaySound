@@ -3,104 +3,123 @@ package expo.modules.onboardingview
 import org.json.JSONArray
 import org.json.JSONObject
 
-internal fun String.jsTrim() = trim { it.isWhitespace() || it == '\uFEFF' || it == '\u00A0' }
-internal data class Artist(val id: Long?, val name: String, val artworkUrl: String = "", val seed: String = "") {
-    fun json() = JSONObject().put("id", id).put("name", name).put("artworkUrl", artworkUrl).put("seed", seed)
+internal fun String.jsTrim() = trim { it.isWhitespace() || it == '﻿' || it == ' ' }
+
+/** One Soulseek result offered in the trial download. [id] is opaque; JS keeps the real match. */
+internal data class Found(val id: String, val title: String, val artist: String, val detail: String) {
+    fun json(): JSONObject = JSONObject().put("id", id).put("title", title).put("artist", artist).put("detail", detail)
     companion object {
-        fun parse(value: JSONObject) = Artist(if (value.has("id") && !value.isNull("id")) value.optLong("id") else null,
-            value.optString("name"), value.optString("artworkUrl"), value.optString("seed"))
-        fun list(value: JSONArray?) = (0 until (value?.length() ?: 0)).map { parse(value!!.getJSONObject(it)) }
+        fun list(value: JSONArray?) = (0 until (value?.length() ?: 0)).mapNotNull { value?.optJSONObject(it) }
+            .map { Found(it.optString("id"), it.optString("title"), it.optString("artist"), it.optString("detail")) }
     }
 }
 internal data class Effect(val action: String, val id: Long, val payload: JSONObject = JSONObject())
 
-/** Pure UI state machine. Storage, permission dialogs, scanning and network work are effects. */
+/**
+ * Pure UI state machine for the first run: welcome, your music, Soulseek account, a trial
+ * download, done. Permissions, credentials, searching and downloading are effects answered by
+ * the JS adapter. Nothing here can trap the user: every step past the first has a way forward.
+ */
 internal class OnboardingMachine {
-    enum class Step { welcome, profile, tasteArtists, permissions, ready, building }
+    enum class Step { welcome, music, account, tryIt, ready }
+    enum class Transfer { idle, running, done, failed }
+
     var step = Step.welcome; private set
     var name = ""
-    var avatarUri = ""; private set
-    var artists = emptyList<Artist>(); private set
-    var query = ""; private set
-    var search = emptyList<Artist>(); private set
-    var quick = emptyList<Artist>(); private set
-    var artistLoading = false; private set
-    var searchQueued = false; private set
-    var quickLoading = false; private set
-    var error = ""; private set
     var granted = false; private set
+    var username = ""
+    /** Never part of a checkpoint; it only lives until it is handed to the adapter. */
+    var password = ""
+    var connected = false; private set
+    var saving = false; private set
+    var accountError = ""; private set
+    var query = ""
+    var searching = false; private set
+    var searched = false; private set
+    var results = emptyList<Found>(); private set
+    var searchError = ""; private set
+    var transfer = Transfer.idle; private set
+    var transferId = ""; private set
+    var progress = 0; private set
+    var transferError = ""; private set
     var finishing = false; private set
     var completed = false; private set
     var lastReply = 0L; private set
     private var serial = 0L
+    private var saveId = -1L
     private var searchId = -1L
+    private var downloadId = -1L
     private var finishId = -1L
-    private var quickAttempted = false
-    private val artworkAttempted = mutableSetOf<Long>()
-    val artwork = mutableMapOf<Long, String>()
     private val effects = mutableListOf<Effect>()
-    val canContinue get() = !finishing && !completed && when (step) {
-        Step.profile -> name.jsTrim().isNotEmpty()
-        Step.tasteArtists -> artists.size >= 3
-        Step.building -> false
-        else -> true
-    }
-    val searching get() = query.jsTrim().length >= 2
+
+    val canSearch get() = !searching && transfer != Transfer.running && query.jsTrim().length >= 2
+    val canSave get() = !saving && username.jsTrim().isNotEmpty() && password.jsTrim().isNotEmpty()
+
     private fun emit(action: String, payload: JSONObject = JSONObject()): Long {
         val id = ++serial
         effects.add(Effect(action, id, payload)); return id
     }
     fun drainEffects(): List<Effect> = effects.toList().also { effects.clear() }
-    fun advance(skip: Boolean = false) {
+
+    /** The primary button. On the account step it only moves on once an account is saved. */
+    fun advance() {
         if (finishing || completed) return
-        if (skip && step != Step.profile && step != Step.tasteArtists) return
-        if (!skip && !canContinue) return
         step = when (step) {
-            Step.welcome -> Step.profile
-            Step.profile -> Step.tasteArtists
-            Step.tasteArtists -> Step.permissions
-            Step.permissions -> Step.ready
+            Step.welcome -> Step.music
+            Step.music -> Step.account
+            Step.account -> if (connected) Step.tryIt else return
+            Step.tryIt -> if (transfer == Transfer.running) return else Step.ready
+            Step.ready -> return
+        }
+        enter()
+    }
+    /** "Ahora no". Without an account there is nothing to try, so that skip lands on the end. */
+    fun skip() {
+        if (finishing || completed || saving) return
+        step = when (step) {
+            Step.account -> Step.ready
+            Step.tryIt -> if (transfer == Transfer.running) return else Step.ready
             else -> return
         }
         enter()
     }
+    fun back() {
+        if (finishing || completed || saving || transfer == Transfer.running) return
+        step = when (step) {
+            Step.music -> Step.welcome
+            Step.account -> Step.music
+            Step.tryIt -> Step.account
+            Step.ready -> if (connected) Step.tryIt else Step.account
+            Step.welcome -> return
+        }
+        enter()
+    }
     fun enter() {
-        if (step == Step.tasteArtists && !quickAttempted) {
-            quickAttempted = true; quickLoading = true
-            emit("quick", JSONObject().put("artists", JSONArray(artists.map { it.json() })))
-        }
-        if (step == Step.permissions) emit("checkPermission")
-        resolveArtwork()
+        if (step == Step.music) emit("checkPermission")
+        if (step == Step.account) emit("account")
     }
-    fun toggle(artist: Artist) {
-        if (step != Step.tasteArtists || finishing) return
-        if (artist.id == null) {
-            if (artists.size < 8) emit("seed", JSONObject().put("name", artist.name))
-            return
-        }
-        artists = if (artists.any { it.id == artist.id }) artists.filter { it.id != artist.id }
-            else if (artists.size < 8) artists + artist else artists
-        resolveArtwork()
+    fun requestPermission() { emit("permission") }
+    fun saveAccount() {
+        if (!canSave) return
+        saving = true; accountError = ""
+        saveId = emit("credentials", JSONObject().put("username", username.jsTrim()).put("password", password.jsTrim()))
     }
-    fun setQuery(value: String) {
-        query = value; searchId = -1; searchQueued = searching
-        if (!searching) { search = emptyList(); error = ""; artistLoading = false }
-    }
-    fun searchNow() {
-        if (!searching || !searchQueued) return
-        searchQueued = false
-        artistLoading = true; error = ""
+    fun search() {
+        if (!canSearch) return
+        searching = true; searchError = ""
         searchId = emit("search", JSONObject().put("query", query.jsTrim()))
     }
-    fun pickAvatar(camera: Boolean) { emit("avatar", JSONObject().put("camera", camera)) }
-    fun requestPermission() { emit("permission") }
+    fun download(found: Found) {
+        if (step != Step.tryIt || transfer == Transfer.running) return
+        transfer = Transfer.running; transferId = found.id; progress = 1; transferError = ""
+        downloadId = emit("download", JSONObject().put("id", found.id))
+    }
     fun finish() {
         if (step != Step.ready || finishing || completed) return
         finishing = true
-        if (artists.size >= 3) step = Step.building
-        finishId = emit("finish", JSONObject().put("name", name).put("avatarUri", avatarUri)
-            .put("artists", JSONArray(artists.map { it.json() })))
+        finishId = emit("finish", JSONObject().put("name", name))
     }
+
     fun reply(reply: JSONObject) {
         val sequence = reply.optLong("sequence")
         if (sequence <= lastReply) return
@@ -108,66 +127,59 @@ internal class OnboardingMachine {
         val id = reply.optLong("id")
         val data = reply.optJSONObject("data") ?: JSONObject()
         when (reply.optString("action")) {
-            "search" -> if (id == searchId) {
-                if (data.has("artists")) search = Artist.list(data.optJSONArray("artists"))
-                error = data.optString("error"); artistLoading = false
-            }
-            "quick" -> {
-                if (data.has("artists")) quick = Artist.list(data.optJSONArray("artists"))
-                quickLoading = data.optBoolean("loading")
-                if (data.has("error") && error.isEmpty()) error = data.optString("error")
-            }
-            "seed" -> {
-                data.optJSONObject("artist")?.let {
-                    val artist = Artist.parse(it)
-                    // Original async seed action can settle after advancing; selection still applies.
-                    artists = if (artists.any { a -> a.id == artist.id }) artists.filter { a -> a.id != artist.id }
-                        else if (artists.size < 8) artists + artist else artists
-                    search = search.filter { a -> a.id != artist.id }
-                }
-                if (data.has("error")) error = data.optString("error")
-            }
-            "artwork" -> if (data.optString("artworkUrl").isNotEmpty()) artwork[data.optLong("id")] = data.getString("artworkUrl")
-            "avatar" -> if (data.optString("uri").isNotEmpty()) avatarUri = data.getString("uri")
             "permission", "checkPermission" -> if (data.has("granted")) granted = data.getBoolean("granted")
+            "account" -> if (!saving && data.has("connected")) {
+                connected = data.optBoolean("connected")
+                if (connected && username.isEmpty()) username = data.optString("username")
+            }
+            "credentials" -> if (id == saveId && saving) {
+                saving = false
+                if (data.optBoolean("saved")) {
+                    connected = true; password = ""
+                    if (step == Step.account) { step = Step.tryIt; enter() }
+                } else accountError = data.optString("error").ifEmpty { "No se pudo guardar la cuenta." }
+            }
+            "search" -> if (id == searchId && searching) {
+                searching = false; searched = true
+                results = Found.list(data.optJSONArray("results"))
+                searchError = data.optString("error")
+            }
+            "download" -> if (id == downloadId && transfer == Transfer.running) when {
+                data.optBoolean("done") -> { transfer = Transfer.done; progress = 100 }
+                data.has("error") -> { transfer = Transfer.failed; transferError = data.optString("error") }
+                data.has("progress") -> progress = data.optInt("progress").coerceIn(progress, 99)
+            }
             "finish" -> if (id == finishId && finishing && !completed) {
                 finishing = false
                 if (data.optBoolean("success")) { completed = true; emit("completed") }
             }
         }
-        resolveArtwork()
     }
-    private fun resolveArtwork() {
-        (artists + search + quick).forEach { artist ->
-            val id = artist.id ?: return@forEach
-            val url = artwork[id] ?: artist.artworkUrl
-            if ((url.isEmpty() || url.contains("resources.tidal.com/images/")) && artworkAttempted.add(id)) {
-                emit("artwork", artist.json())
-            }
-        }
-    }
-    fun snapshot(): String = JSONObject().put("step", step.name).put("name", name).put("avatarUri", avatarUri)
-        .put("artists", JSONArray(artists.map { it.json() })).put("query", query)
-        .put("search", JSONArray(search.map { it.json() })).put("quick", JSONArray(quick.map { it.json() }))
-        .put("artistLoading", artistLoading).put("searchQueued", searchQueued).put("quickLoading", quickLoading).put("error", error)
-        .put("granted", granted).put("finishing", finishing).put("completed", completed)
-        .put("serial", serial).put("searchId", searchId).put("finishId", finishId).put("lastReply", lastReply)
-        .put("quickAttempted", quickAttempted).put("artworkAttempted", JSONArray(artworkAttempted.toList()))
-        .put("artwork", JSONObject(artwork.mapKeys { it.key.toString() })).toString()
+
+    fun snapshot(): String = JSONObject().put("step", step.name).put("name", name).put("granted", granted)
+        .put("username", username).put("connected", connected).put("saving", saving).put("accountError", accountError)
+        .put("query", query).put("searching", searching).put("searched", searched)
+        .put("results", JSONArray(results.map { it.json() })).put("searchError", searchError)
+        .put("transfer", transfer.name).put("transferId", transferId).put("progress", progress).put("transferError", transferError)
+        .put("finishing", finishing).put("completed", completed).put("lastReply", lastReply).put("serial", serial)
+        .put("saveId", saveId).put("searchId", searchId).put("downloadId", downloadId).put("finishId", finishId).toString()
+
     fun restore(raw: String) {
         val data = runCatching { JSONObject(raw) }.getOrDefault(JSONObject())
         step = runCatching { Step.valueOf(data.optString("step", "welcome")) }.getOrDefault(Step.welcome)
-        name = data.optString("name"); avatarUri = data.optString("avatarUri")
-        artists = Artist.list(data.optJSONArray("artists")); query = data.optString("query")
-        search = Artist.list(data.optJSONArray("search")); quick = Artist.list(data.optJSONArray("quick"))
-        searchQueued = data.optBoolean("searchQueued")
-        artistLoading = data.optBoolean("artistLoading"); quickLoading = data.optBoolean("quickLoading")
-        error = data.optString("error"); granted = data.optBoolean("granted")
+        name = data.optString("name"); granted = data.optBoolean("granted")
+        username = data.optString("username"); password = ""
+        connected = data.optBoolean("connected"); accountError = data.optString("accountError")
+        // A save in flight cannot be resumed without the password, so it is offered again.
+        saving = false
+        query = data.optString("query"); searching = data.optBoolean("searching"); searched = data.optBoolean("searched")
+        results = Found.list(data.optJSONArray("results")); searchError = data.optString("searchError")
+        transfer = runCatching { Transfer.valueOf(data.optString("transfer", "idle")) }.getOrDefault(Transfer.idle)
+        transferId = data.optString("transferId"); progress = data.optInt("progress"); transferError = data.optString("transferError")
         finishing = data.optBoolean("finishing"); completed = data.optBoolean("completed")
-        serial = data.optLong("serial"); searchId = data.optLong("searchId", -1); finishId = data.optLong("finishId", -1)
-        lastReply = data.optLong("lastReply"); quickAttempted = data.optBoolean("quickAttempted")
-        artworkAttempted.clear(); artwork.clear(); effects.clear()
-        data.optJSONArray("artworkAttempted")?.let { list -> (0 until list.length()).forEach { artworkAttempted.add(list.getLong(it)) } }
-        data.optJSONObject("artwork")?.let { values -> values.keys().forEach { key -> key.toLongOrNull()?.let { artwork[it] = values.getString(key) } } }
+        lastReply = data.optLong("lastReply"); serial = data.optLong("serial")
+        saveId = -1; searchId = data.optLong("searchId", -1); downloadId = data.optLong("downloadId", -1)
+        finishId = data.optLong("finishId", -1)
+        effects.clear()
     }
 }
