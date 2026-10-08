@@ -1,5 +1,6 @@
 package expo.modules.searchview
 
+import expo.modules.playerchrome.stayIcon
 import android.content.Context
 import android.content.res.ColorStateList
 import android.text.InputType
@@ -82,7 +83,7 @@ internal class SearchSheets(private val context: Context, private val style: Sea
         setPadding(style.dp(12), style.dp(10), style.dp(12), style.dp(10))
         setTextColor(style.ink(if (selected) "primary" else "onSurface", "surface"))
         if (selected) {
-            setIconResource(R.drawable.search_check)
+            icon = context.stayIcon("check")
             iconTint = ColorStateList.valueOf(style.ink("primary", "surface"))
         }
         setOnClickListener { action() }
@@ -114,6 +115,14 @@ internal class SearchSheets(private val context: Context, private val style: Sea
                 option("Calidad de audio", "Formato de los archivos descargados") { show("quality") }
                 option("Catálogo de búsqueda", "Automático es lo recomendado") { show("mirrors") }
                 option("Sesión Soulseek", "Cambia tus credenciales") { show("auth") }
+                container.addView(style.text(13f).apply {
+                    text = "StaySound no es infalible. Las descargas llegan de otras personas conectadas a Soulseek: " +
+                        "puede que una canción no aparezca, que tarde o que falle a medias. Si pasa, prueba otra " +
+                        "versión o inténtalo más tarde."
+                    setTextColor(style.ink("onSurfaceVariant", "surface"))
+                    setLineSpacing(0f, 1.25f)
+                    setPadding(style.dp(12), style.dp(16), style.dp(12), style.dp(4))
+                }, params())
             }
             "quality" -> {
                 listOf(
@@ -151,7 +160,8 @@ internal class SearchSheets(private val context: Context, private val style: Sea
             }
             "auth" -> {
                 val note = style.text(14f).apply {
-                    text = "Configura tu cuenta para descargar música."
+                    text = "Usa tu cuenta de Soulseek. Si no tienes una, escribe un usuario y una contraseña nuevos: " +
+                        "Soulseek la crea la primera vez que entras."
                     setTextColor(style.ink("onSurfaceVariant", "surface"))
                     setPadding(style.dp(12), style.dp(4), style.dp(12), style.dp(16))
                 }

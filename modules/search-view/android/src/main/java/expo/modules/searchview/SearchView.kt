@@ -1,5 +1,6 @@
 package expo.modules.searchview
 
+import expo.modules.playerchrome.stayIcon
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -42,15 +43,11 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
     private val session = SearchSession()
     private val title = style.text(30f, 900)
     private val toolbar = LinearLayout(ui)
-    private val settingsButton = icon(R.drawable.search_settings, "Ajustes de descarga") { hideKeyboard(); sheets.show("settings") }
+    private val settingsButton = icon("settings", "Ajustes de descarga") { hideKeyboard(); sheets.show("settings") }
     private val searchDock = LinearLayout(ui)
     private val search = EditText(ui)
     private val searchIcon = ImageView(ui)
-    private val clear = icon(R.drawable.search_close, "Borrar búsqueda") { search.setText("") }
-    private val banner = style.text(13f, 600)
-    private val bannerDot = PulseDot(ui)
-    private val bannerPill = LinearLayout(ui)
-    private var bannerShown = false
+    private val clear = icon("close", "Borrar búsqueda") { search.setText("") }
     private var entranceUntil = 0L
     private val list = RecyclerView(ui)
     private val adapter = SearchAdapter()
@@ -69,7 +66,6 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
     private var error = ""
     private var recommending = true
     private var recommendationError = ""
-    private var health = ""
     private var bottomInset = 180
     private var topInset = 0
     private var authRequest = 0
@@ -85,7 +81,7 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
         toolbar.addView(settingsButton, LayoutParams(style.dp(48), style.dp(48)))
         addView(toolbar, LayoutParams(-1, -2))
         searchDock.gravity = Gravity.CENTER_VERTICAL
-        searchIcon.setImageResource(R.drawable.search_magnify)
+        searchIcon.setImageDrawable(ui.stayIcon("search", interactive = false))
         searchIcon.importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
         searchDock.addView(searchIcon, LayoutParams(style.dp(24), style.dp(24)).apply { marginStart = style.dp(14) })
         search.apply {
@@ -129,15 +125,6 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
         addView(searchDock, LayoutParams(-1, -2).apply {
             leftMargin = style.dp(20); rightMargin = style.dp(20); bottomMargin = style.dp(12)
         })
-        bannerPill.gravity = Gravity.CENTER_VERTICAL
-        bannerPill.setPadding(style.dp(10), style.dp(7), style.dp(14), style.dp(7))
-        bannerPill.addView(bannerDot, LayoutParams(style.dp(16), style.dp(16)).apply { marginEnd = style.dp(6) })
-        bannerPill.addView(banner, LayoutParams(-2, -2))
-        banner.accessibilityLiveRegion = ACCESSIBILITY_LIVE_REGION_POLITE
-        bannerPill.visibility = GONE
-        addView(bannerPill, LayoutParams(-2, -2).apply {
-            marginStart = style.dp(20); bottomMargin = style.dp(12)
-        })
         list.layoutManager = LinearLayoutManager(ui)
         list.adapter = adapter
         list.itemAnimator = null
@@ -150,8 +137,8 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
     private fun emit(action: String, id: String = "", value: String = "") {
         onAction(mapOf("action" to action, "id" to id, "value" to value, "requestId" to session.revision))
     }
-    private fun icon(resource: Int, label: String, click: () -> Unit) = ImageButton(ui).apply {
-        setImageResource(resource); contentDescription = label
+    private fun icon(name: String, label: String, click: () -> Unit) = ImageButton(ui).apply {
+        setImageDrawable(ui.stayIcon(name)); contentDescription = label
         setPadding(style.dp(13), style.dp(13), style.dp(13), style.dp(13))
         setOnClickListener { click() }
     }
@@ -194,8 +181,8 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
     private fun raised() = ColorUtils.blendARGB(style.color("surface"), style.color("onSurface"), .06f)
     private fun loadArt(view: ImageView, entity: SearchEntity, radius: Int = 12) {
         val placeholder = when (entity.kind) {
-            "artist" -> R.drawable.search_person; "album" -> R.drawable.search_disc; else -> R.drawable.search_music
-        }
+            "artist" -> "artist"; "album" -> "disc"; else -> "music"
+        }.let { ui.stayIcon(it, interactive = false) }
         val request = Glide.with(this).load(entity.artwork.ifBlank { null })
             .placeholder(placeholder).error(placeholder)
         if (entity.round) request.transform(CircleCrop()).into(view)
@@ -222,32 +209,6 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
             button.background = style.ripple()
             button.imageTintList = ColorStateList.valueOf(style.ink())
         }
-        val tone = if (health == "error") style.ink("error") else style.ink("onSurfaceVariant")
-        banner.text = if (health == "error") "Servicio no disponible" else "Servicio inestable"
-        banner.setTextColor(tone)
-        bannerDot.color = tone
-        bannerPill.background = style.shape(ColorUtils.blendARGB(style.color("surface"), tone, 0.12f), 999).apply {
-            setStroke(style.dp(1).coerceAtLeast(1), ColorUtils.setAlphaComponent(tone, 70))
-        }
-        showBanner(session.query.isNotEmpty() && health.isNotBlank())
-    }
-    /** The health pill drops in and fades out instead of popping. */
-    private fun showBanner(show: Boolean) {
-        if (show == bannerShown) return
-        bannerShown = show
-        bannerPill.animate().cancel()
-        if (!SearchMotion.enabled()) { bannerPill.visibility = if (show) VISIBLE else GONE; return }
-        if (show) {
-            bannerPill.visibility = VISIBLE
-            bannerPill.alpha = 0f; bannerPill.translationY = -style.dp(8).toFloat()
-            bannerPill.scaleX = .96f; bannerPill.scaleY = .96f
-            bannerPill.animate().alpha(1f).translationY(0f).scaleX(1f).scaleY(1f)
-                .setDuration(380L).setInterpolator(SearchMotion.SETTLE).start()
-        } else {
-            bannerPill.animate().alpha(0f).translationY(-style.dp(6).toFloat())
-                .setDuration(180L).setInterpolator(SearchMotion.EXIT)
-                .withEndAction { if (!bannerShown) bannerPill.visibility = GONE }.start()
-        }
     }
     /** Rows bound in the next moment slide in, staggered, instead of appearing at once. */
     private fun armEntrance() { entranceUntil = SystemClock.uptimeMillis() + 650L }
@@ -273,7 +234,7 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
     }
     fun setSettings(value: String) {
         val data = runCatching { JSONObject(value) }.getOrNull() ?: return
-        health = data.optString("health"); updateChrome(); sheets.setSettings(data)
+        updateChrome(); sheets.setSettings(data)
     }
     fun setResult(value: String) {
         val data = runCatching { JSONObject(value) }.getOrNull() ?: return
@@ -367,7 +328,8 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
                         add(SearchRow("recommendation-error", SearchRow.MESSAGE, "No se pudieron cargar las sugerencias",
                             "Comprueba tu conexión e inténtalo de nuevo.", action = "refresh"))
                     else if (recommendations.isEmpty())
-                        add(SearchRow("welcome", SearchRow.MESSAGE, "Encuentra tu próxima canción", "Busca un título, artista o álbum."))
+                        add(SearchRow("welcome", SearchRow.MESSAGE, "Encuentra tu próxima canción",
+                            "Busca un título, artista o álbum. Las descargas vienen de otras personas en Soulseek, así que no siempre hay una copia disponible."))
                     recommendations.forEach { add(SearchRow("track:${it.id}", SearchRow.TRACK, track = it)) }
                 }
             }
@@ -427,7 +389,7 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
             }
             copy.addView(name, LayoutParams(-1, -2))
             copy.addView(sub, LayoutParams(-1, -2).apply { topMargin = style.dp(4) })
-            val button = icon(R.drawable.search_download, "Descargar") {}
+            val button = icon("download", "Descargar") {}
             val progress = ProgressBar(ui, null, android.R.attr.progressBarStyleHorizontal).apply { max = 100 }
             // Track rows show progress in the download ring; only messages keep a bar.
             if (type != SearchRow.TRACK) copy.addView(progress, LayoutParams(-1, style.dp(3)).apply { topMargin = style.dp(6) })
@@ -466,7 +428,7 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
             val sub = oneLine(style.text(14f, 600))
             val state = DownloadStateButton(ui, style)
             val go = ImageView(ui).apply {
-                setImageResource(R.drawable.search_chevron); scaleType = ImageView.ScaleType.CENTER
+                setImageDrawable(ui.stayIcon("forward", 20f)); scaleType = ImageView.ScaleType.CENTER
                 importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
             bottom.addView(pill, LayoutParams(-2, -2))
@@ -509,9 +471,9 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
             copy.addView(sub, LayoutParams(-1, -2).apply { topMargin = style.dp(4) })
             root.addView(art, LayoutParams(style.dp(56), style.dp(56)).apply { marginEnd = style.dp(14) })
             root.addView(copy, LayoutParams(0, -2, 1f))
-            val forget = icon(R.drawable.search_close, "Quitar de recientes") {}
+            val forget = icon("close", "Quitar de recientes") {}
             val go = ImageView(ui).apply {
-                setImageResource(R.drawable.search_chevron); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+                setImageDrawable(ui.stayIcon("forward", 20f)); importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
             }
             if (type == SearchRow.RECENT) root.addView(forget, LayoutParams(style.dp(48), style.dp(48)))
             else root.addView(go, LayoutParams(style.dp(22), style.dp(22)))
@@ -596,7 +558,7 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
                     h.title.text = track.title; h.subtitle.text = track.subtitle
                     h.title.setTextColor(style.ink(if (active) "primary" else "onSurface"))
                     if (loadImage) Glide.with(this@SearchView).load(track.artwork.ifBlank { null })
-                        .placeholder(R.drawable.search_music).error(R.drawable.search_music)
+                        .placeholder(ui.stayIcon("music", interactive = false)).error(ui.stayIcon("music", interactive = false))
                         .centerCrop().transform(RoundedCorners(style.dp(12))).into(h.artwork)
                     h.artwork.background = style.shape(style.color("surfaceVariant"))
                     h.copy.contentDescription = "${track.title}, ${track.subtitle}" + if (active) {
@@ -633,7 +595,7 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
                     if (row.action == "refresh") {
                         h.button.visibility = VISIBLE; h.button.isEnabled = !recommending
                         h.button.alpha = if (recommending) 0.4f else 1f
-                        h.button.setImageResource(R.drawable.search_refresh)
+                        h.button.setImageDrawable(ui.stayIcon("refresh"))
                         h.button.contentDescription = "Actualizar sugerencias"
                         h.button.setOnClickListener { emit("refresh") }
                     }
@@ -762,7 +724,7 @@ class SearchView(context: Context, appContext: AppContext) : ExpoView(context, a
             h.root.contentDescription = "${entity.title}, ${entity.subtitle}"
             if (entity.kind == "query") {
                 Glide.with(this@SearchView).clear(h.artwork)
-                h.artwork.setImageResource(R.drawable.search_magnify)
+                h.artwork.setImageDrawable(ui.stayIcon("search", interactive = false))
                 h.artwork.scaleType = ImageView.ScaleType.CENTER
                 h.artwork.imageTintList = ColorStateList.valueOf(style.ink("onSurfaceVariant", "surfaceVariant"))
                 h.artwork.background = style.shape(style.color("surfaceVariant"), 999)

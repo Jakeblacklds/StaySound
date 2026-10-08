@@ -190,14 +190,14 @@ export default function NativeTidalScreen() {
     const recommendationSnapshot = useMemo(() => JSON.stringify({ loading: recommending,
         error: recommendationError, tracks: recommendations.map(displayTrack) }), [recommending, recommendationError, recommendations]);
     const settingsSnapshot = useMemo(() => JSON.stringify({ quality, mirror, authRevision,
-        saving: credentials.isSaving, health: health.searchHealth?.tone ?? '',
+        saving: credentials.isSaving,
         mirrors: [...health.recommendedMirrors, ...health.legacyMirrors].map(server => ({
             id: server, title: TIDAL_MIRROR_NAMES[server] || server.replace('https://', ''),
             description: `${formatMirrorStatus(health.availability[server])} · ${formatMirrorCapabilities(health.availability[server])}`,
             enabled: health.availability[server]?.status !== 'unavailable',
             legacy: health.legacyMirrors.includes(server),
         })),
-    }), [quality, mirror, authRevision, credentials.isSaving, health.searchHealth, health.recommendedMirrors,
+    }), [quality, mirror, authRevision, credentials.isSaving, health.recommendedMirrors,
         health.legacyMirrors, health.availability]);
 
     const onAction = useCallback(({ nativeEvent: event }: NativeSyntheticEvent<SearchAction>) => {

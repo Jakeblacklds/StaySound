@@ -354,24 +354,3 @@ internal class SkeletonRowView(context: Context, private val style: SearchStyle)
         if (isShown) postInvalidateOnAnimation()
     }
 }
-
-/** A dot that breathes, for the service-health pill. */
-internal class PulseDot(context: Context) : View(context) {
-    private val density = resources.displayMetrics.density
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    var color = 0
-        set(value) { field = value; invalidate() }
-
-    override fun onDraw(canvas: Canvas) {
-        val cx = width / 2f; val cy = height / 2f
-        val core = 3.5f * density
-        if (SearchMotion.enabled()) {
-            val t = (SystemClock.uptimeMillis() % 1600L) / 1600f
-            paint.color = ColorUtils.setAlphaComponent(color, (110 * (1f - t)).toInt())
-            canvas.drawCircle(cx, cy, core + 5f * density * t, paint)
-            if (isShown) postInvalidateOnAnimation()
-        }
-        paint.color = color
-        canvas.drawCircle(cx, cy, core, paint)
-    }
-}
