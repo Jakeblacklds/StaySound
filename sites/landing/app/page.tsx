@@ -1,156 +1,200 @@
 import Image from 'next/image';
+import type { CSSProperties } from 'react';
+import { LyricDemo } from './LyricDemo';
+import { fetchRelease, formatDate, formatSize, RELEASES_URL } from './release';
+import { StayIcon, StayMark } from './StayIcon';
 
-const whatsappHref =
-  'https://wa.me/525564732834?text=' +
-  encodeURIComponent('Hola, me interesa StaySound. Mi correo es: ');
+const HEADLINE = ['Tu', 'música,', 'sin', 'nube.'];
 
-const notes = [
+const FEATURES = [
   {
-    title: 'Biblioteca propia',
-    copy: 'Tu musica, albums y playlists en una interfaz pensada para escuchar, no para estorbar.',
-    icon: 'library',
+    title: 'Tu biblioteca, desde tu disco',
+    copy: 'Apunta a tu carpeta de música. FLAC, MP3, carátulas y metadatos quedan en orden, en tu equipo.',
   },
   {
-    title: 'Letras y detalle',
-    copy: 'Artwork, letras y ajustes dentro de una app privada, sin depender de una tienda publica.',
-    icon: 'lyrics',
+    title: 'Sin conexión',
+    copy: 'Lo que guardas se queda contigo. Sin red, tu biblioteca y sus letras siguen ahí.',
   },
   {
-    title: 'Acceso manual',
-    copy: 'La activacion se hace contigo por WhatsApp. Sin suscripcion y sin vueltas.',
-    icon: 'signal',
+    title: 'Búsqueda en Soulseek',
+    copy: 'Lo que te falta lo buscas en la red Soulseek, sin salir de la app.',
+  },
+  {
+    title: 'Ecualizador',
+    copy: 'Graves, medios y agudos a tu gusto, para tus audífonos o para la sala.',
+  },
+  {
+    title: 'Android Auto',
+    copy: 'Sube al coche: tu biblioteca aparece en la pantalla del tablero. Solo en Android.',
   },
 ];
 
-function LandingIcon({ kind }: { kind: 'library' | 'lyrics' | 'signal' }) {
-  if (kind === 'library') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M5 5.5a1.5 1.5 0 0 1 1.5-1.5h9A1.5 1.5 0 0 1 17 5.5v13A1.5 1.5 0 0 1 15.5 20h-9A1.5 1.5 0 0 1 5 18.5z" />
-        <path d="M8 8h6" />
-        <path d="M8 11.5h6" />
-        <path d="M8 15h4" />
-        <path d="M19 6.5v11" />
-      </svg>
-    );
-  }
-
-  if (kind === 'lyrics') {
-    return (
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <path d="M6 6.5A2.5 2.5 0 0 1 8.5 4H18v13.5A2.5 2.5 0 0 0 15.5 15H6z" />
-        <path d="M8.5 8h6" />
-        <path d="M8.5 11h5" />
-        <path d="M8.5 14h4" />
-        <path d="M6 6.5v11A2.5 2.5 0 0 0 8.5 20H18" />
-      </svg>
-    );
-  }
+export default async function HomePage() {
+  const release = await fetchRelease();
+  const published = formatDate(release.publishedAt);
+  const android = {
+    href: release.android?.url ?? RELEASES_URL,
+    size: release.android ? formatSize(release.android.sizeBytes) : '',
+    fileName: release.android?.fileName ?? '',
+  };
+  const macos = {
+    href: release.macos?.url ?? RELEASES_URL,
+    size: release.macos ? formatSize(release.macos.sizeBytes) : '',
+    fileName: release.macos?.fileName ?? '',
+  };
+  const webAppUrl = process.env.NEXT_PUBLIC_WEB_APP_URL ?? '';
 
   return (
-    <svg viewBox="0 0 24 24" aria-hidden="true">
-      <path d="M5 17.5h2.5" />
-      <path d="M5 13h5" />
-      <path d="M5 8.5h7.5" />
-      <path d="M15 17.5h4" />
-      <path d="M17 6v12" />
-    </svg>
-  );
-}
+    <div className="page">
+      <header className="site-head">
+        <a className="brand" href="#top">
+          <StayMark className="brand-mark" />
+          StaySound
+        </a>
+        <nav aria-label="Secciones">
+          <a href="#letra">Letra</a>
+          <a href="#funciones">Funciones</a>
+          <a href="#instalar">Instalar</a>
+        </nav>
+      </header>
 
-export default function HomePage() {
-  return (
-    <main className="page-shell">
-      <section className="hero">
-        <div className="hero-copy">
-          <div className="brand-mark">
+      <main id="top">
+        <section className="hero" aria-labelledby="titulo">
+          <div className="hero-copy">
+            <p className="kicker">
+              Versión {release.version} · Gratis
+            </p>
+            <h1 id="titulo">
+              {HEADLINE.map((word, index) => (
+                <span key={word}>
+                  <span className="word" style={{ '--i': index } as CSSProperties}>
+                    {word}
+                  </span>{' '}
+                </span>
+              ))}
+            </h1>
+            <p className="hero-line">
+              Un reproductor para Android y macOS. Tu biblioteca vive en tu equipo y la letra se enciende palabra
+              por palabra.
+            </p>
+            <div className="actions">
+              <a className="pill" href={android.href}>
+                <StayIcon kind="download" />
+                Descargar para Android
+              </a>
+              <a className="pill" href={macos.href}>
+                <StayIcon kind="download" />
+                Descargar para macOS
+              </a>
+            </div>
+            <p className="chips">
+              <span>
+                <strong>APK</strong> {android.size}
+              </span>
+              <span>
+                <strong>DMG</strong> {[macos.size, 'Apple Silicon'].filter(Boolean).join(' · ')}
+              </span>
+              {published ? <span>{published}</span> : null}
+            </p>
+            {webAppUrl ? (
+              <a className="more-link" href={webAppUrl}>
+                O ábrelo en el navegador
+              </a>
+            ) : null}
+          </div>
+          <div className="hero-visual">
+            <span className="ring" aria-hidden="true" />
+            <div className="phone">
+              <Image
+                src="/screens/home.png"
+                alt="Inicio de StaySound en Android: el disco destacado y la fila «Para esta noche»."
+                width={496}
+                height={1100}
+                priority
+              />
+            </div>
+          </div>
+        </section>
+
+        <section className="band lyrics" id="letra" aria-labelledby="letra-titulo">
+          <div className="phone">
             <Image
-              src="/appicon.png"
-              alt="Icono de StaySound"
-              width={68}
-              height={68}
-              className="brand-icon"
-              priority
+              src="/screens/player.png"
+              alt="Reproductor de StaySound en Android con la carátula en disco y la letra sincronizada debajo."
+              width={814}
+              height={1807}
             />
-            <p className="eyebrow">StaySound</p>
           </div>
-          <h1>Tu biblioteca, bien puesta.</h1>
-          <p className="lede">
-            Un reproductor privado para quien cuida su musica y quiere tenerla cerca,
-            ordenada y con acceso propio.
-          </p>
-
-          <div className="hero-actions">
-            <a className="primary-link" href={whatsappHref} target="_blank" rel="noreferrer">
-              Escribirme por WhatsApp
-            </a>
-            <p className="action-note">Venta local. Activacion manual.</p>
+          <div className="lyrics-copy">
+            <h2 id="letra-titulo">La letra, palabra por palabra</h2>
+            <p className="band-line">
+              StaySound sincroniza la letra con la canción y la va llenando mientras suena, en el teléfono y en el
+              escritorio.
+            </p>
+            <LyricDemo />
           </div>
-        </div>
+        </section>
 
-        <aside className="hero-panel" aria-label="Disponibilidad">
-          <p className="panel-kicker">Acceso</p>
-          <div className="panel-rule" />
-          <div className="panel-stack">
-            <div className="panel-badge">
-              <span className="panel-dot" />
-              Pago unico
-            </div>
-            <div className="panel-badge">
-              <span className="panel-dot" />
-              Cuenta privada
-            </div>
-            <div className="panel-badge">
-              <span className="panel-dot" />
-              Actualizaciones por mensaje
-            </div>
-          </div>
-          <div className="hero-glance" aria-hidden="true">
-            <span />
-            <span />
-            <span />
-          </div>
-          <a className="secondary-link" href={whatsappHref} target="_blank" rel="noreferrer">
-            Abrir chat
-          </a>
-        </aside>
-      </section>
+        <section className="band" id="funciones" aria-labelledby="funciones-titulo">
+          <h2 id="funciones-titulo">Y todo lo demás</h2>
+          <ul className="features">
+            {FEATURES.map(feature => (
+              <li key={feature.title}>
+                <h3>{feature.title}</h3>
+                <p>{feature.copy}</p>
+              </li>
+            ))}
+          </ul>
+        </section>
 
-      <section className="notes" aria-labelledby="notes-title">
-        <div className="section-heading">
-          <p className="eyebrow">Hecho para escuchar</p>
-          <h2 id="notes-title">Lo esencial, sin adornos de sobra.</h2>
-        </div>
-
-        <div className="notes-grid">
-          {notes.map((note) => (
-            <article className="note" key={note.title}>
-              <div className="note-icon">
-                <LandingIcon kind={note.icon as 'library' | 'lyrics' | 'signal'} />
-              </div>
-              <h3>{note.title}</h3>
-              <p>{note.copy}</p>
+        <section className="band" id="instalar" aria-labelledby="instalar-titulo">
+          <h2 id="instalar-titulo">Instalar</h2>
+          <div className="install-grid">
+            <article>
+              <h3>Android</h3>
+              <p className="install-req">Android 7 o posterior</p>
+              <ol className="steps">
+                <li>Descarga el APK y ábrelo desde la notificación o desde Archivos.</li>
+                <li>Android te pedirá permiso para instalar apps de este origen. Acéptalo.</li>
+                <li>Abre StaySound, entra con tu cuenta de Soulseek y prueba a descargar una canción.</li>
+              </ol>
+              <a className="pill" href={android.href}>
+                <StayIcon kind="download" />
+                Descargar APK
+              </a>
+              <p className="install-file">{android.fileName}</p>
             </article>
-          ))}
-        </div>
-      </section>
+            <article>
+              <h3>macOS</h3>
+              <p className="install-req">Mac con Apple Silicon (M1 o posterior)</p>
+              <ol className="steps">
+                <li>Abre el DMG y arrastra StaySound a Aplicaciones.</li>
+                <li>
+                  La app no está firmada con Apple. Si macOS la bloquea al abrirla, ve a Ajustes del Sistema,
+                  Privacidad y seguridad, y pulsa «Abrir igualmente».
+                </li>
+                <li>Las siguientes versiones se instalan desde el botón Actualizar, dentro de la app.</li>
+              </ol>
+              <a className="pill" href={macos.href}>
+                <StayIcon kind="download" />
+                Descargar DMG
+              </a>
+              <p className="install-file">{macos.fileName}</p>
+            </article>
+          </div>
+        </section>
+      </main>
 
-      <section className="closing">
-        <div>
-          <p className="eyebrow">Venta local</p>
-          <h2>No hay checkout. Hay trato directo.</h2>
-        </div>
-
-        <div className="closing-copy">
-          <p>
-            Si te interesa, me mandas mensaje. Yo llevo el alta, el acceso y las
-            actualizaciones.
-          </p>
-          <a className="primary-link" href={whatsappHref} target="_blank" rel="noreferrer">
-            Hablar por WhatsApp
-          </a>
-        </div>
-      </section>
-    </main>
+      <footer className="colophon">
+        <StayMark className="colophon-mark" />
+        <p>
+          StaySound es un proyecto personal y gratuito. No aloja ni distribuye música: la búsqueda usa la red
+          Soulseek, y lo que descargues o compartas ahí es tu responsabilidad.
+        </p>
+        <a className="more-link" href={RELEASES_URL}>
+          Todas las versiones
+        </a>
+      </footer>
+    </div>
   );
 }

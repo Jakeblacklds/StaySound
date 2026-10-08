@@ -13,7 +13,7 @@ Two audiences, both real, and the interface has to serve both at once:
 - **The developer (Jake)** — expert user, knows every feature, uses the Android app daily. Wants accelerators: keyboard shortcuts, queue control, direct downloads.
 - **Family (his wife and relatives)** — genuine first-time users of this kind of app. They need obvious next actions, labeled controls, plain-language errors, and no assumed knowledge.
 
-Still non-commercial and not for sale, but "only I use it" is no longer true — design decisions that trade clarity for density hurt the second group.
+Still non-commercial and not for sale, but "only I use it" is no longer true — design decisions that trade clarity for density hurt the second group. Since October 2026 the Android APK and macOS DMG are also offered openly on the public landing (`sites/landing`), so strangers arriving with no context are a third, smaller audience.
 
 ## Product Purpose
 
@@ -41,7 +41,7 @@ Not applicable. StaySound is explicitly non-commercial and not built to differen
 - Desktop build wraps the same `web/` UI in Tauri; it must feel like a desktop app, not a browser tab.
 - Mobile web is a fallback for people who do not have the APK installed; the primary phone experience is the native Android app.
 - Lyrics are effectively always present for the music being played — an empty lyrics state is an edge case, not a normal condition to design around.
-- Personal use only: no monetization, no multi-user accounts, no plans for public distribution.
+- No monetization and no multi-user accounts. Distribution is open but informal: free APK and DMG from the public `staysound-releases` repo, linked from `sites/landing`; no app stores.
 
 ## Brand Commitments
 

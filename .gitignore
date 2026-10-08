@@ -78,3 +78,6 @@ design-qa.md
 .impeccable/
 .env*
 .originkit/
+
+# Next.js build output
+sites/**/.next/

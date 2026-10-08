@@ -1,13 +1,43 @@
+/*
+  THESIS: a web page about StaySound, written in StaySound's hand. It scrolls like a site and
+  shows the app as screenshots instead of imitating its chrome; what it borrows is the
+  language. Refuses both the hero + three feature cards + CTA page and the app-in-a-browser.
+  OWN-WORLD: "Círculo" (web/src/styles/circulo.css, Android Home). Pure black, one face
+  (Hanken Grotesk) with weight 800 doing the hierarchy, the circle as the only ornament,
+  hairlines instead of cards, pill controls, one amber accent, and the karaoke wipe as the
+  page's single moving idea.
+  STORY: a music player that keeps your library on your device and lights the lyric word by
+  word; here is what it looks like; take the APK or the DMG.
+  FIRST VIEWPORT: the headline at poster scale, filling in word by word once, with both
+  downloads under it at equal weight; at right the Android Home inside a phone, sitting on an
+  oversized accent ring that runs off the window edge.
+  FORM: a long-scroll product page (re-pinned by the brief, replacing the app's Home view).
+*/
+
+@property --p {
+  syntax: '<percentage>';
+  inherits: false;
+  initial-value: 0%;
+}
+
 :root {
-  color-scheme: light;
-  --paper: oklch(0.97 0.01 95);
-  --paper-strong: oklch(0.93 0.014 92);
-  --ink: oklch(0.22 0.02 55);
-  --muted: oklch(0.48 0.02 60);
-  --line: color-mix(in srgb, var(--ink) 14%, transparent);
-  --accent: oklch(0.39 0.05 55);
-  --accent-soft: oklch(0.89 0.02 86);
-  --shadow: 0 26px 60px color-mix(in srgb, var(--ink) 10%, transparent);
+  color-scheme: dark;
+  --bg: #000000;
+  --panel: #0e0e0e;
+  --hairline: #1f1f1f;
+  --border: #262626;
+  --text: #ffffff;
+  --text-2: #9a9a9a;
+  /* The app's #6e6e6e is 4.0:1 on black; this page sets body-size copy in it. */
+  --text-3: #7d7d7d;
+  --unlit: #4a4a4a;
+  --accent: #ffa31a;
+  --accent-hover: color-mix(in oklch, var(--accent) 82%, white);
+  --on-accent: #0a0600;
+
+  --pad-x: clamp(20px, 5vw, 72px);
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 * {
@@ -15,17 +45,19 @@
 }
 
 html {
-  background:
-    radial-gradient(circle at top left, color-mix(in srgb, var(--accent-soft) 68%, transparent), transparent 40%),
-    linear-gradient(180deg, color-mix(in srgb, var(--paper-strong) 70%, transparent), var(--paper));
-  min-height: 100%;
+  background: var(--bg);
+  scroll-behavior: smooth;
+  scroll-padding-top: 16px;
 }
 
 body {
   margin: 0;
-  color: var(--ink);
-  font-family: var(--font-sans), sans-serif;
-  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-circ), ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 17px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
 }
 
 a {
@@ -33,312 +65,513 @@ a {
   text-decoration: none;
 }
 
-.page-shell {
-  width: min(1100px, calc(100% - 2rem));
-  margin: 0 auto;
-  padding: clamp(1.25rem, 2vw, 1.75rem) 0 clamp(4rem, 8vw, 6rem);
-}
-
-.eyebrow {
+h1,
+h2,
+h3,
+p,
+ol,
+ul {
   margin: 0;
-  font-size: 0.8rem;
-  font-weight: 700;
-  letter-spacing: 0.18em;
-  text-transform: uppercase;
-  color: var(--muted);
 }
 
-.hero {
-  display: grid;
-  grid-template-columns: minmax(0, 1.6fr) minmax(18rem, 0.9fr);
-  gap: clamp(2rem, 6vw, 5rem);
-  align-items: end;
-  min-height: calc(100vh - 8rem);
-  padding: clamp(3rem, 9vw, 7rem) 0 clamp(2rem, 6vw, 4rem);
+ol,
+ul {
+  padding: 0;
+  list-style: none;
 }
 
-.hero-copy {
-  display: grid;
-  gap: 1.25rem;
-  max-width: 42rem;
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+}
+
+.page {
+  overflow-x: clip;
+}
+
+.site-head,
+.colophon,
+main > section {
+  max-width: 1320px;
+  margin-inline: auto;
+  padding-inline: var(--pad-x);
+}
+
+/* ── header ───────────────────────────────────────────────────────────────── */
+.site-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding-block: 22px;
+}
+
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 1.3rem;
+  font-weight: 800;
+  letter-spacing: -0.01em;
 }
 
 .brand-mark {
+  width: 34px;
+}
+
+.site-head nav {
   display: flex;
+  gap: clamp(18px, 3vw, 34px);
+  font-size: 0.95rem;
+  color: var(--text-2);
+}
+
+.site-head nav a {
+  padding: 8px 0;
+  transition: color 160ms var(--ease-standard);
+}
+
+.site-head nav a:hover {
+  color: var(--text);
+}
+
+/* ── the karaoke wipe ─────────────────────────────────────────────────────── */
+/* A word is lit up to --p, with a short soft edge leading the fill. */
+.word {
+  background: linear-gradient(90deg, var(--lit, var(--text)) var(--p), var(--unlit) calc(var(--p) + 16%));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  /* Descenders and accents would be clipped by the text box otherwise. */
+  padding: 0.14em 0;
+}
+
+@media (forced-colors: active) {
+  .word {
+    background: none;
+    color: CanvasText;
+  }
+}
+
+/* ── hero ─────────────────────────────────────────────────────────────────── */
+.hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr);
+  gap: clamp(24px, 4vw, 64px);
   align-items: center;
-  gap: 0.9rem;
+  padding-block: clamp(32px, 6vw, 88px) clamp(64px, 9vw, 128px);
 }
 
-.brand-icon {
-  width: clamp(3.4rem, 6vw, 4.3rem);
-  height: clamp(3.4rem, 6vw, 4.3rem);
-  border-radius: 1.2rem;
-  box-shadow: var(--shadow);
+.kicker {
+  position: relative;
+  padding-left: 14px;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--accent);
 }
 
-.hero-copy h1,
-.section-heading h2,
-.closing h2 {
-  margin: 0;
-  font-family: var(--font-display), serif;
-  font-size: clamp(3.4rem, 8vw, 6.9rem);
-  line-height: 0.9;
-  letter-spacing: -0.05em;
+.kicker::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 50%;
+  width: 6px;
+  height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.hero h1 {
+  margin-top: 18px;
+  font-size: clamp(3.4rem, 9.2vw, 6rem);
+  font-weight: 800;
+  letter-spacing: -0.035em;
+  line-height: 0.98;
+}
+
+/* The headline sings itself once: each word fills in turn, then stays lit. */
+.hero h1 .word {
+  --p: 100%;
+  animation: sing 480ms linear both;
+  animation-delay: calc(350ms + var(--i) * 430ms);
+}
+
+@keyframes sing {
+  from {
+    --p: 0%;
+  }
+}
+
+.hero-line {
+  max-width: 36ch;
+  margin-top: 22px;
+  font-size: clamp(1.1rem, 1.7vw, 1.35rem);
+  line-height: 1.45;
+  color: var(--text-2);
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 32px;
+}
+
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 0 26px 0 20px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 700;
+  white-space: nowrap;
+  transition:
+    background-color 160ms var(--ease-standard),
+    transform 90ms var(--ease-standard);
+}
+
+.pill:hover {
+  background: var(--accent-hover);
+}
+
+.pill:active {
+  transform: scale(0.96);
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 22px;
+  margin-top: 18px;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+}
+
+.chips strong {
+  margin-right: 4px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--accent);
+}
+
+.more-link {
+  display: inline-block;
+  margin-top: 16px;
+  padding: 6px 0;
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-2);
+  transition: color 160ms var(--ease-standard);
+}
+
+.more-link:hover {
+  color: var(--accent);
+}
+
+.hero-visual {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+
+/* The app's "this one is playing" ring, at the scale of the page. */
+.ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: clamp(420px, 56vw, 760px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  transform: translate(-34%, -50%);
+  animation: ring-in 1100ms var(--ease-enter) both;
+}
+
+.ring::after {
+  content: '';
+  position: absolute;
+  inset: 9%;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+}
+
+@keyframes ring-in {
+  from {
+    opacity: 0;
+    transform: translate(-34%, -50%) rotate(-38deg) scale(0.9);
+  }
+}
+
+.phone {
+  position: relative;
+  width: min(100%, 300px);
+  padding: 7px;
+  border-radius: 38px;
+  background: var(--panel);
+  border: 1px solid var(--border);
+  box-shadow: 0 40px 80px -30px rgba(0, 0, 0, 0.9);
+}
+
+.phone img {
+  width: 100%;
+  border-radius: 31px;
+}
+
+.hero .phone {
+  animation: rise 900ms var(--ease-enter) 120ms both;
+}
+
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translate3d(0, 28px, 0);
+  }
+}
+
+/* ── bands ────────────────────────────────────────────────────────────────── */
+.band {
+  padding-block: clamp(56px, 8vw, 112px);
+  border-top: 1px solid var(--hairline);
+}
+
+.band h2 {
+  font-size: clamp(2.2rem, 5vw, 4rem);
+  font-weight: 800;
+  letter-spacing: -0.03em;
+  line-height: 1.02;
   text-wrap: balance;
 }
 
-.hero-copy .lede {
-  margin: 0;
-  max-width: 34rem;
-  font-size: clamp(1rem, 1.3vw, 1.2rem);
-  line-height: 1.7;
-  color: var(--muted);
+.band-line {
+  max-width: 44ch;
+  margin-top: 16px;
+  font-size: clamp(1.05rem, 1.5vw, 1.2rem);
+  color: var(--text-2);
 }
 
-.hero-actions {
-  display: flex;
-  flex-wrap: wrap;
+/* ── lyric band ───────────────────────────────────────────────────────────── */
+.lyrics {
+  display: grid;
+  grid-template-columns: minmax(0, 300px) minmax(0, 1fr);
+  gap: clamp(32px, 7vw, 112px);
   align-items: center;
-  gap: 1rem 1.25rem;
-  padding-top: 1.2rem;
 }
 
-.primary-link,
-.secondary-link {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-height: 3.3rem;
-  padding: 0 1.4rem;
-  border-radius: 999px;
-  font-weight: 700;
-  transition:
-    transform 220ms ease,
-    background-color 220ms ease,
-    color 220ms ease,
-    border-color 220ms ease;
+.lyric {
+  margin-top: clamp(32px, 5vw, 56px);
 }
 
-.primary-link {
-  background: var(--ink);
-  color: var(--paper);
-  box-shadow: var(--shadow);
+.lyric p {
+  --lit: var(--text-2);
+  font-size: clamp(1.9rem, 4.6vw, 3.6rem);
+  font-weight: 800;
+  line-height: 1.1;
+  letter-spacing: -0.03em;
+  transform-origin: left center;
+  transform: scale(0.94);
+  transition: transform 520ms var(--ease-enter);
 }
 
-.secondary-link {
-  border: 1px solid var(--line);
-  color: var(--ink);
+.lyric p[data-state='active'] {
+  --lit: var(--accent);
+  transform: none;
 }
 
-.primary-link:hover,
-.secondary-link:hover {
-  transform: translateY(-1px);
+/* Before the demo runs, and with motion reduced, the verse is simply lit copy. */
+.lyric[data-running='false'] p {
+  --lit: var(--text);
+  transform: none;
 }
 
-.action-note {
-  margin: 0;
-  font-size: 0.95rem;
-  color: var(--muted);
+.lyric[data-running='false'] .word {
+  --p: 100%;
 }
 
-.hero-panel {
+/* ── features ─────────────────────────────────────────────────────────────── */
+.features {
+  margin-top: clamp(28px, 4vw, 48px);
+}
+
+.features li {
+  display: grid;
+  grid-template-columns: minmax(0, 5fr) minmax(0, 6fr);
+  gap: 8px clamp(24px, 5vw, 80px);
+  align-items: baseline;
+  padding: clamp(20px, 2.6vw, 30px) 0;
+  border-top: 1px solid var(--hairline);
+}
+
+.features h3 {
   position: relative;
-  display: grid;
-  gap: 0.9rem;
-  align-self: stretch;
-  padding: clamp(1.4rem, 3vw, 2rem);
-  border: 1px solid var(--line);
-  border-radius: 2rem;
-  background:
-    linear-gradient(160deg, color-mix(in srgb, var(--paper) 94%, transparent), color-mix(in srgb, var(--accent-soft) 44%, transparent));
-  box-shadow: var(--shadow);
+  padding-left: 30px;
+  font-size: clamp(1.4rem, 2.6vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.15;
 }
 
-.panel-kicker {
-  margin: 0;
+/* Each entry is marked the way the app marks a record: a small ringed disc. */
+.features h3::before {
+  content: '';
+  position: absolute;
+  left: 0;
+  top: 0.32em;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  border: 1.5px solid var(--accent);
+  box-shadow: inset 0 0 0 3px var(--bg), inset 0 0 0 7px var(--accent);
+}
+
+.features p {
+  max-width: 48ch;
+  color: var(--text-2);
+}
+
+/* ── install ──────────────────────────────────────────────────────────────── */
+.install-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(32px, 6vw, 96px);
+  margin-top: clamp(28px, 4vw, 48px);
+}
+
+.install-grid h3 {
+  font-size: clamp(1.6rem, 2.8vw, 2.2rem);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.1;
+}
+
+.install-req {
+  margin-top: 6px;
+  color: var(--text-2);
+}
+
+.steps {
+  margin: 20px 0 28px;
+  counter-reset: step;
+  border-top: 1px solid var(--hairline);
+}
+
+.steps li {
+  display: grid;
+  grid-template-columns: 30px minmax(0, 1fr);
+  gap: 6px;
+  max-width: 54ch;
+  padding: 15px 0;
+  color: var(--text-2);
+  border-bottom: 1px solid var(--hairline);
+  counter-increment: step;
+}
+
+.steps li::before {
+  content: counter(step);
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  color: var(--accent);
+}
+
+.install-file {
+  margin-top: 12px;
+  font-size: 0.82rem;
+  color: var(--text-3);
+  overflow-wrap: anywhere;
+}
+
+/* ── colophon ─────────────────────────────────────────────────────────────── */
+.colophon {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px 28px;
+  padding-block: 32px 48px;
+  border-top: 1px solid var(--hairline);
   font-size: 0.9rem;
-  font-weight: 700;
-  color: var(--muted);
-  text-transform: uppercase;
-  letter-spacing: 0.14em;
+  color: var(--text-3);
 }
 
-.panel-rule {
-  width: 100%;
-  height: 1px;
-  background: var(--line);
+.colophon-mark {
+  width: 46px;
+  color: var(--text);
 }
 
-.panel-line {
-  margin: 0;
-  font-size: 1.05rem;
-  line-height: 1.4;
+.colophon p {
+  max-width: 70ch;
 }
 
-.panel-stack {
-  display: grid;
-  gap: 0.6rem;
+.colophon .more-link {
+  margin-top: 0;
 }
 
-.panel-badge {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.65rem;
-  width: fit-content;
-  min-height: 2.35rem;
-  padding: 0 0.9rem;
-  border-radius: 999px;
-  border: 1px solid var(--line);
-  background: color-mix(in srgb, var(--paper) 88%, transparent);
-}
-
-.panel-dot {
-  width: 0.45rem;
-  height: 0.45rem;
-  border-radius: 999px;
-  background: var(--accent);
-  box-shadow: 0 0 0 0.35rem color-mix(in srgb, var(--accent-soft) 72%, transparent);
-}
-
-.hero-glance {
-  display: flex;
-  gap: 0.55rem;
-  padding: 0.5rem 0 0.2rem;
-}
-
-.hero-glance span {
-  display: block;
-  width: 100%;
-  border-radius: 999px;
-  background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 56%, transparent), color-mix(in srgb, var(--ink) 18%, transparent));
-}
-
-.hero-glance span:nth-child(1) {
-  height: 0.55rem;
-  max-width: 4.2rem;
-}
-
-.hero-glance span:nth-child(2) {
-  height: 0.8rem;
-  max-width: 7rem;
-}
-
-.hero-glance span:nth-child(3) {
-  height: 0.42rem;
-  max-width: 3rem;
-}
-
-.notes,
-.closing {
-  display: grid;
-  gap: clamp(1.5rem, 4vw, 2.25rem);
-  padding: clamp(2rem, 5vw, 3rem) 0;
-  border-top: 1px solid var(--line);
-}
-
-.section-heading {
-  display: grid;
-  gap: 0.8rem;
-  max-width: 40rem;
-}
-
-.section-heading h2,
-.closing h2 {
-  font-size: clamp(2.2rem, 4vw, 3.6rem);
-}
-
-.notes-grid {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 1.2rem;
-}
-
-.note {
-  display: grid;
-  gap: 0.75rem;
-  padding: 1.4rem 0 0;
-  border-top: 1px solid var(--line);
-}
-
-.note-icon {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  width: 2.8rem;
-  height: 2.8rem;
-  border-radius: 0.95rem;
-  border: 1px solid var(--line);
-  background: linear-gradient(180deg, color-mix(in srgb, var(--paper) 84%, transparent), color-mix(in srgb, var(--accent-soft) 40%, transparent));
-}
-
-.note-icon svg {
-  width: 1.25rem;
-  height: 1.25rem;
-  stroke: var(--ink);
-  fill: none;
-  stroke-width: 1.7;
-  stroke-linecap: round;
-  stroke-linejoin: round;
-}
-
-.note h3 {
-  margin: 0;
-  font-size: 1rem;
-  font-weight: 700;
-}
-
-.note p,
-.closing-copy p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.7;
-}
-
-.closing {
-  grid-template-columns: minmax(0, 1.2fr) minmax(18rem, 0.9fr);
-  align-items: start;
-}
-
-.closing-copy {
-  display: grid;
-  gap: 1.2rem;
-}
-
-@media (max-width: 900px) {
+/* ── narrow ───────────────────────────────────────────────────────────────── */
+@media (max-width: 820px) {
   .hero,
-  .closing,
-  .notes-grid {
-    grid-template-columns: 1fr;
+  .lyrics,
+  .install-grid,
+  .features li,
+  .colophon {
+    grid-template-columns: minmax(0, 1fr);
   }
 
-  .hero {
-    min-height: auto;
-    padding-top: 2rem;
+  .hero-visual {
+    margin-top: 24px;
   }
 
-  .hero-panel {
-    max-width: 28rem;
+  .ring {
+    width: 118vw;
+    transform: translate(-50%, -50%);
+    animation: none;
+  }
+
+  /* Copy first on a phone; the screenshot follows what it illustrates. */
+  .lyrics .phone {
+    order: 1;
+    justify-self: center;
+  }
+
+  .install-grid {
+    gap: 56px;
   }
 }
 
-@media (max-width: 640px) {
-  .page-shell {
-    width: min(100% - 1.25rem, 44rem);
+@media (max-width: 480px) {
+  .site-head nav a:first-child {
+    display: none;
   }
 
-  .hero-copy h1,
-  .section-heading h2,
-  .closing h2 {
-    line-height: 0.95;
-  }
-
-  .hero-actions {
-    align-items: stretch;
-    flex-direction: column;
-  }
-
-  .primary-link,
-  .secondary-link {
+  .pill {
     width: 100%;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  html {
+    scroll-behavior: auto;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+  }
+
+  .lyric p {
+    transition: none;
   }
 }
