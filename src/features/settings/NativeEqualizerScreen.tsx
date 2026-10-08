@@ -1,4 +1,4 @@
-import { DEFAULT_EQUALIZER_PRESETS } from '@/src/services/equalizerPresets';
+import { DEFAULT_EQUALIZER_PRESETS, getEqualizerBandKey } from '@/src/services/equalizerPresets';
 import {
     applyAndroidEqualizerPreset, isAndroidEqualizerAvailable, openAndroidSystemEqualizerPanel,
     refreshAndroidEqualizerCapabilities, resetAndroidEqualizerToFlat,
@@ -41,7 +41,8 @@ export default function NativeEqualizerScreen() {
         language, mode: equalizer.mode, presetId: equalizer.presetId,
         available: isAndroidEqualizerAvailable() && !!capabilities?.available,
         attached: !!capabilities?.attached, canOpenSystemPanel: !!capabilities?.canOpenSystemPanel,
-        bands: capabilities?.bands ?? [],
+        // The stored level leads: the engine may not be attached yet, and its echo of a change lags the store.
+        bands: (capabilities?.bands ?? []).map(band => ({ ...band, level: equalizer.bandLevels[getEqualizerBandKey(band.centerHz)] ?? band.level })),
         presets: [
             ...DEFAULT_EQUALIZER_PRESETS.map(p => ({ id: p.id, label: t(p.labelKey as any) })),
             ...(capabilities?.nativePresets ?? []).map(p => ({ id: `native:${p.index}`, label: p.name })),

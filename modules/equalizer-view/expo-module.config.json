@@ -1,1 +1,1 @@
-{ "platforms": ["android"], "android": { "modules": ["expo.modules.equalizerview.EqualizerViewModule"] } }
+{ "platforms": ["android"], "android": { "modules": ["expo.modules.equalizerview.EqualizerViewModule", "expo.modules.equalizerview.EqualizerModule"] } }
