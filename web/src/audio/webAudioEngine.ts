@@ -44,6 +44,105 @@ class WebAudioEngine {
     this.resolveTrackUri = resolver;
   }
 
+  /**
+   * Some files cannot be seeked exactly by the platform's media stack — FLAC
+   * in WKWebView lands seconds away from the requested time while
+   * `currentTime` reports the request, and every lyric view follows
+   * `currentTime`. The resolver returns a copy that seeks exactly (or null).
+   * It is prepared while the track plays and swapped in on the first seek:
+   * the listener asked for a jump there anyway, so the switch is not heard.
+   */
+  private resolvePreciseUri?: (track: Track) => Promise<string | null>;
+  private precise: { trackId: string; settled: boolean; uri: string | null; request: Promise<string | null> } | null = null;
+  /** The track whose precise copy is now the element's source. */
+  private preciseActiveFor: string | null = null;
+  /** Latest seek asked for while the precise copy was still being prepared. */
+  private pendingPreciseSeek: number | null = null;
+
+  /**
+   * Some tracks' files were replaced (the library moved from FLAC to ALAC).
+   * Queue entries get the new file; the song playing right now is reopened
+   * from its new file at the same point, since the old one is gone.
+   */
+  replaceTrackSources(updated: Track[]): void {
+    if (!updated.length) return;
+    const byId = new Map(updated.map(track => [track.id, track]));
+    const swap = (track: Track) => byId.get(track.id) ?? track;
+    this.lastLinearQueue = this.lastLinearQueue.map(swap);
+    const current = this.state.currentTrack;
+    const replacement = current ? byId.get(current.id) : undefined;
+    this.patch({ queue: this.state.queue.map(swap), currentTrack: replacement ?? current });
+    if (!replacement || !replacement.uri) return;
+    const positionMs = this.audio.currentTime * 1000;
+    const resume = !this.audio.paused;
+    this.audio.addEventListener('loadedmetadata', () => {
+      this.audio.currentTime = positionMs / 1000;
+      if (resume) void this.audio.play().catch(() => undefined);
+    }, { once: true });
+    this.audio.src = replacement.uri;
+    this.audio.load();
+    this.preparePreciseSource(replacement);
+  }
+
+  setPreciseSourceResolver(resolver: (track: Track) => Promise<string | null>): void {
+    this.resolvePreciseUri = resolver;
+  }
+
+  private preparePreciseSource(track: Track): void {
+    this.preciseActiveFor = null;
+    this.pendingPreciseSeek = null;
+    if (!this.resolvePreciseUri) {
+      this.precise = null;
+      return;
+    }
+    const request = this.resolvePreciseUri(track).catch(() => null);
+    const entry = { trackId: track.id, settled: false, uri: null as string | null, request };
+    this.precise = entry;
+    void request.then(uri => {
+      entry.settled = true;
+      entry.uri = uri;
+      if (this.precise !== entry || this.state.currentTrack?.id !== track.id) return;
+      const target = this.pendingPreciseSeek;
+      this.pendingPreciseSeek = null;
+      if (target == null) return;
+      if (uri) this.swapToPreciseSource(uri, target);
+      else this.audio.currentTime = target / 1000;
+    });
+  }
+
+  private swapToPreciseSource(uri: string, positionMs: number): void {
+    const track = this.state.currentTrack;
+    if (!track) return;
+    const resume = this.state.isPlaying || !this.audio.paused;
+    const fallback = this.audio.currentSrc || this.audio.src;
+    this.preciseActiveFor = track.id;
+    const cleanup = () => {
+      this.audio.removeEventListener('loadedmetadata', handleReady);
+      this.audio.removeEventListener('error', handleError);
+    };
+    const handleReady = () => {
+      cleanup();
+      this.audio.currentTime = positionMs / 1000;
+      if (resume) void this.audio.play().catch(() => undefined);
+    };
+    // A copy that will not load must not cost the listener the song.
+    const handleError = () => {
+      cleanup();
+      this.preciseActiveFor = null;
+      if (this.precise?.trackId === track.id) this.precise = null;
+      this.audio.src = fallback;
+      this.audio.load();
+      this.audio.addEventListener('loadedmetadata', () => {
+        this.audio.currentTime = positionMs / 1000;
+        if (resume) void this.audio.play().catch(() => undefined);
+      }, { once: true });
+    };
+    this.audio.addEventListener('loadedmetadata', handleReady);
+    this.audio.addEventListener('error', handleError);
+    this.audio.src = uri;
+    this.audio.load();
+  }
+
   constructor() {
     this.audio.preload = 'metadata';
     this.audio.addEventListener('loadstart', () => this.patch({ isLoading: true, error: null }));
@@ -171,8 +270,22 @@ class WebAudioEngine {
   }
 
   seek(positionMs: number): void {
-    this.audio.currentTime = Math.max(0, positionMs / 1000);
-    this.patch({ position: Math.max(0, positionMs) });
+    const target = Math.max(0, positionMs);
+    this.patch({ position: target });
+    const precise = this.precise;
+    const trackId = this.state.currentTrack?.id;
+    // Seeking to the very start is exact in any file.
+    if (precise && trackId === precise.trackId && this.preciseActiveFor !== trackId && target > 0) {
+      if (!precise.settled) {
+        this.pendingPreciseSeek = target;
+        return;
+      }
+      if (precise.uri) {
+        this.swapToPreciseSource(precise.uri, target);
+        return;
+      }
+    }
+    this.audio.currentTime = target / 1000;
   }
 
   setVolume(volume: number): void {
@@ -310,6 +423,7 @@ class WebAudioEngine {
 
     this.audio.src = uri;
     this.audio.load();
+    this.preparePreciseSource(track);
     this.updateMediaSession({ ...track, uri });
 
     if (autoPlay) {

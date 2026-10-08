@@ -1,5 +1,6 @@
 package expo.modules.detailview
 
+import expo.modules.playerchrome.StayIconView
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.*
@@ -71,27 +72,14 @@ internal class DetailArtwork(private val style: DetailStyle, private val radius:
     override fun onDetachedFromWindow() { Glide.with(context.applicationContext).clear(image); super.onDetachedFromWindow() }
 }
 
-internal class DetailGlyph(style: DetailStyle, var kind: String) : View(style.context) {
-    var tint = style.ink
-        set(value) { field = value; invalidate() }
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    override fun onDraw(canvas: Canvas) {
-        canvas.save(); canvas.scale(width / 24f, height / 24f)
-        paint.color = tint; paint.strokeWidth = 1.8f; paint.strokeCap = Paint.Cap.ROUND
-        paint.style = Paint.Style.STROKE
-        when (kind) {
-            "back" -> { canvas.drawLine(15f, 5f, 8f, 12f, paint); canvas.drawLine(8f, 12f, 15f, 19f, paint) }
-            "queue" -> {
-                for (y in listOf(6f, 11f, 16f)) canvas.drawLine(3f, y, 13f, y, paint)
-                canvas.drawLine(18f, 12f, 18f, 20f, paint); canvas.drawLine(14f, 16f, 22f, 16f, paint)
-            }
-            "play" -> { paint.style = Paint.Style.FILL; canvas.drawPath(Path().apply { moveTo(7f, 4f); lineTo(20f, 12f); lineTo(7f, 20f); close() }, paint) }
-            "artist" -> {
-                canvas.drawCircle(12f, 7f, 4f, paint)
-                canvas.drawArc(4f, 13f, 20f, 29f, 180f, 180f, false, paint)
-            }
-            else -> { canvas.drawCircle(12f, 12f, 9f, paint); canvas.drawCircle(12f, 12f, 3f, paint) }
-        }
-        canvas.restore()
+/** Catalogue icon (StayIcons); "album" is the disc. */
+internal class DetailGlyph(style: DetailStyle, kind: String) : StayIconView(style.context, glyphName(kind)) {
+    var kind = kind
+        set(value) { field = value; name = glyphName(value); interactive = value !in PLACEHOLDERS }
+    var tint by this::ink
+    init { ink = style.ink; interactive = kind !in PLACEHOLDERS }
+    private companion object {
+        val PLACEHOLDERS = setOf("album", "artist")
+        fun glyphName(kind: String) = if (kind == "album") "disc" else kind
     }
 }

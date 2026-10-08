@@ -3,6 +3,7 @@ package expo.modules.playerchrome
 import android.animation.ValueAnimator
 import android.os.Build
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.view.animation.PathInterpolator
 import android.content.Context
 import android.content.res.ColorStateList
@@ -26,22 +27,21 @@ class MiniPlayerView(context: Context, appContext: AppContext) : ExpoView(contex
     private val artist = context.chromeText(12.5f, 500).apply { alpha = 0.82f }
     private val metadata = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL; gravity = Gravity.CENTER_VERTICAL }
     private val open = ChromeButton(context) {}
-    private val previousGlyph = ChromeGlyph(context, "previous")
-    private val nextGlyph = ChromeGlyph(context, "next")
-    private val playGlyph = ChromeGlyph(context, "play")
+    private val previousGlyph = TransportGlyph(context, "previous")
+    private val nextGlyph = TransportGlyph(context, "next")
+    private val playGlyph = TransportGlyph(context, "play")
     private val pill = FrameLayout(context)
     private val loadingIndicator = ProgressBar(context).apply { visibility = GONE }
     private var lightweight = false
     private val motionEnabled get() = !lightweight && (Build.VERSION.SDK_INT < 26 || ValueAnimator.areAnimatorsEnabled())
-    private val skipMotions = mutableListOf<ChromeMotion>()
+    private val skipPresses = mutableListOf<ChromeMotion>()
+    private val skipDashes = mutableListOf<ChromeMotion>()
     private val trackMotion = ChromeMotion(1f) { updateExpansion() }
-    private val glyphMotion = ChromeMotion(1f) { updateExpansion() }
+    private val morphMotion = ChromeMotion(0f) { playGlyph.morph = it }
     private val pressMotion = ChromeMotion(0f) { updateExpansion() }
+    private val playFlourish = ChromeMotion(1f) { playGlyph.flourish = it }
     private val previous = skip("previous", previousGlyph)
-    private val play = ChromeButton(context) { held ->
-        if (motionEnabled) pressMotion.curve(if (held) 1f else 0f, if (held) 100L else 240L, SETTLE)
-        else pressMotion.snap(0f)
-    }
+    private val play = ChromeButton(context) { held -> pressGlyph(pressMotion, held) }
     private val next = skip("next", nextGlyph)
     private var progress = 0f
     private var loading = false
@@ -68,24 +68,30 @@ class MiniPlayerView(context: Context, appContext: AppContext) : ExpoView(contex
         pill.addView(playGlyph, FrameLayout.LayoutParams(px(20), px(20), Gravity.CENTER))
         pill.addView(loadingIndicator, FrameLayout.LayoutParams(px(18), px(18), Gravity.CENTER))
         play.addView(pill, FrameLayout.LayoutParams(px(40), px(40), Gravity.CENTER))
-        play.setOnClickListener { if (!loading) emit("toggle") }
+        play.setOnClickListener { if (!loading) { flourish(playFlourish); emit("toggle") } }
         content.addView(play, LinearLayout.LayoutParams(px(48), px(48)))
         content.addView(next, LinearLayout.LayoutParams(px(48), px(48)))
         // Every transport control retains its own 48dp touch target.
         minimumHeight = px(48)
     }
-    private fun skip(action: String, glyph: ChromeGlyph): ChromeButton {
-        val motion = ChromeMotion(0f) { amount ->
-            glyph.alpha = 1f - .18f * amount
-            glyph.scaleX = 1f - .12f * amount; glyph.scaleY = glyph.scaleX
-        }.also { skipMotions.add(it) }
-        return ChromeButton(context) { held ->
-            if (motionEnabled) motion.curve(if (held) 1f else 0f, if (held) 100L else 240L, SETTLE)
-            else motion.snap(0f)
-        }.apply {
-            addView(glyph, FrameLayout.LayoutParams(px(22), px(22), Gravity.CENTER))
+    /** Wind back while held; an underdamped spring (ζ≈.38) pops the glyph past rest on release. */
+    private fun pressGlyph(motion: ChromeMotion, held: Boolean) = when {
+        !motionEnabled -> motion.snap(0f)
+        held -> motion.curve(1f, 110L, PathInterpolator(.33f, 1f, .68f, 1f))
+        else -> motion.spring(0f, 15.6f, 420f, 1f)
+    }
+    private fun flourish(motion: ChromeMotion) {
+        if (!motionEnabled) return
+        motion.snap(0f); motion.curve(1f, 720L, LinearInterpolator())
+    }
+    private fun skip(action: String, glyph: TransportGlyph): ChromeButton {
+        val motion = ChromeMotion(0f) { glyph.press = it }.also { skipPresses.add(it) }
+        val dash = ChromeMotion(1f) { glyph.flourish = it }.also { skipDashes.add(it) }
+        return ChromeButton(context) { held -> pressGlyph(motion, held) }.apply {
+            addView(glyph, FrameLayout.LayoutParams(px(24), px(24), Gravity.CENTER))
             setOnClickListener {
                 performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                flourish(dash)
                 skipDirection = if (action == "previous") -1f else 1f
                 emit(action)
             }
@@ -113,8 +119,7 @@ class MiniPlayerView(context: Context, appContext: AppContext) : ExpoView(contex
     fun setLightweight(value: Boolean) {
         lightweight = value
         if (!motionEnabled) {
-            settleTrack(); glyphMotion.snap(1f); pressMotion.snap(0f)
-            skipMotions.forEach { it.snap(0f) }
+            settleTrack(); settleGlyphs()
         }
     }
     override fun onMeasure(widthMeasureSpec: Int, heightMeasureSpec: Int) {
@@ -154,10 +159,14 @@ class MiniPlayerView(context: Context, appContext: AppContext) : ExpoView(contex
     fun setPaused(value: Boolean) {
         if (paused == value) return
         val changed = paused != value
-        paused = value; playGlyph.kind = if (value) "play" else "pause"; playGlyph.invalidate(); updateLabels()
-        if (changed && !loading && isAttachedToWindow && motionEnabled) {
-            glyphMotion.snap(0f); glyphMotion.curve(1f, 180L, SETTLE)
-        } else glyphMotion.snap(1f)
+        paused = value; updateLabels()
+        // The wedge splits into slabs (and back) on a lightly bouncy spring.
+        if (changed && !loading && isAttachedToWindow && motionEnabled) morphMotion.spring(if (value) 0f else 1f, 17.3f, 300f, 1f)
+        else morphMotion.snap(if (value) 0f else 1f)
+    }
+    private fun settleGlyphs() {
+        pressMotion.snap(0f); playFlourish.snap(1f); morphMotion.snap(if (paused) 0f else 1f)
+        skipPresses.forEach { it.snap(0f) }; skipDashes.forEach { it.snap(1f) }
     }
     fun setExpansion(value: Float) { progress = value.coerceIn(0f, 1f); updateExpansion() }
     private fun updateExpansion() {
@@ -171,15 +180,13 @@ class MiniPlayerView(context: Context, appContext: AppContext) : ExpoView(contex
         metadata.translationX = trackShift * dp(14f) * (1f - trackMotion.value)
         pill.alpha = ChromeProgress.controlsAlpha(progress)
         pill.translationY = -dp(1f) * controlsP
-        playGlyph.alpha = .55f + .45f * glyphMotion.value
-        playGlyph.scaleX = .88f + .12f * glyphMotion.value; playGlyph.scaleY = playGlyph.scaleX
+        playGlyph.press = pressMotion.value
         pill.scaleX = (1f - controlsP * 0.04f) * (1f - pressMotion.value * 0.06f)
         pill.scaleY = pill.scaleX
         importantForAccessibility = if (progress > 0.18f) IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS else IMPORTANT_FOR_ACCESSIBILITY_AUTO
     }
     override fun onDetachedFromWindow() {
-        settleTrack(); glyphMotion.snap(1f); pressMotion.snap(0f)
-        skipMotions.forEach { it.snap(0f) }
+        settleTrack(); settleGlyphs()
         super.onDetachedFromWindow()
     }
     private companion object {

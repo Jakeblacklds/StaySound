@@ -26,7 +26,8 @@ internal class NativeDocuments(
         when (name) {
             LegacyCodec.LIBRARY -> writeLibrary(value)
             LegacyCodec.PLAYER -> writePlayer(value)
-            LegacyCodec.SETTINGS, ONBOARDING -> { LegacyCodec.envelope(value); settings.put(name, value) }
+            LegacyCodec.SETTINGS -> { LegacyCodec.settingsEnvelope(value); settings.put(name, value) }
+            ONBOARDING -> { LegacyCodec.envelope(value); settings.put(name, value) }
             LegacyCodec.DOWNLOADS -> error("Downloads are owned by Kotlin and cannot be written by JavaScript")
             ArtistCache.DOCUMENT -> writeArtists(value)
             else -> db.library().putDocuments(listOf(DocumentRow("opaque:$name", value)))

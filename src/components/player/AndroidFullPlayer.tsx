@@ -75,14 +75,14 @@ export function AndroidFullPlayer() {
     });
     const onPrimary = pickReadableColor(colors.primary, [colors.onPrimary, theme.colors.onPrimary, '#05070D', '#FFFFFF']);
     const lyricsState = usePlayerLyrics({ visible, currentTrack: track, refreshNonce, nativeTimeline: true });
-    const previewLines = useMemo(() => buildPhraseLyricsLines(lyricsState.lrcLyrics ?? lyricsState.selectedTrackLyrics),
-        [lyricsState.lrcLyrics, lyricsState.selectedTrackLyrics]);
+    const previewLines = useMemo(() => buildPhraseLyricsLines(lyricsState.displayLyrics),
+        [lyricsState.displayLyrics]);
     const lyricsDocument = useMemo(() => JSON.stringify({
-        lines: lyricsState.selectedTrackLyrics?.lyrics ?? [], previewLines,
-    }), [lyricsState.selectedTrackLyrics, previewLines]);
+        lines: lyricsState.displayLyrics?.lyrics ?? [], previewLines,
+    }), [lyricsState.displayLyrics, previewLines]);
     const lyricsConfig = useMemo(() => ({
         loading: lyricsState.isLyricsLoading || lyricsState.isDownloadingLrc,
-        resolved: lyricsState.hasResolvedLyricsAttempt, hasLyrics: !!lyricsState.selectedTrackLyrics,
+        resolved: lyricsState.hasResolvedLyricsAttempt, hasLyrics: !!lyricsState.displayLyrics?.lyrics.length,
         controlsExpanded: lyricsState.lyricsControlsExpanded, offset: lyricsState.lyricsTimingOffsetMs,
         profile: lyricsState.appliedMotionProfile, motionId: lyricsState.selectedMotionOptionId,
         motionIcon: lyricsState.activeMotionOption?.icon ?? 'water',
@@ -96,7 +96,7 @@ export function AndroidFullPlayer() {
             duration: option.durationSec, provider: option.providerLabel, wordLevel: option.wordLevel,
         })),
     }), [lyricsState.isLyricsLoading, lyricsState.isDownloadingLrc, lyricsState.hasResolvedLyricsAttempt,
-        lyricsState.selectedTrackLyrics, lyricsState.lyricsControlsExpanded, lyricsState.lyricsTimingOffsetMs,
+        lyricsState.displayLyrics, lyricsState.lyricsControlsExpanded, lyricsState.lyricsTimingOffsetMs,
         lyricsState.appliedMotionProfile, lyricsState.selectedMotionOptionId, lyricsState.activeMotionOption,
         lyricsFont, lyricsState.selectedTrackLyricsOptionIndex, lyricsState.hasMultipleSyncedLyricsOptions,
         lyricsState.trackLyricsOptions.length, lyricsState.activeSyncedLyricsOption,
@@ -134,9 +134,10 @@ export function AndroidFullPlayer() {
     const queueSnapshot = useMemo(() => {
         const index = queueIndex >= 0 && queueIndex < queue.length ? queueIndex : Math.max(0, queue.findIndex(t => t.id === track?.id));
         const revision = JSON.stringify([queueIndex, queue.map(t => t.id)]);
-        const item = (i: number) => ({ index: i, id: queue[i].id, title: queue[i].title, artist: queue[i].artist });
+        const item = (i: number) => ({ index: i, id: queue[i].id, title: queue[i].title, artist: queue[i].artist,
+            artwork: queue[i].artworkThumb || (queue[i].artwork?.startsWith('data:') ? '' : queue[i].artwork) || '' });
         return { revision, base: index + 1, current: queue[index] ? item(index) : null,
-            upcoming: queue.slice(index + 1, index + 51).map((_, offset) => item(index + offset + 1)) };
+            upcoming: queue.slice(index + 1).map((_, offset) => item(index + offset + 1)) };
     }, [queue, queueIndex, track?.id]);
     const queueJson = useMemo(() => JSON.stringify(queueSnapshot), [queueSnapshot]);
     const detail = isPlayerDetailRoute(pathname);

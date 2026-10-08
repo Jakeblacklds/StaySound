@@ -1,0 +1,9165 @@
+# back 0 1 0
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 9 5
+lineTo 16 12
+lineTo 9 19
+stroke 2.4 1
+restore
+restore
+# back 1 1 0
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.8 5
+lineTo 14.8 12
+lineTo 7.8 19
+stroke 2.4 1
+restore
+restore
+# back -0.35 1 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 9.42 5
+lineTo 16.42 12
+lineTo 9.42 19
+stroke 2.4 1
+restore
+restore
+# back 0 0.1 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5858 12.2275
+lineTo 9.1056 11.35
+arc 9.1056 12 0.65 -90 180
+close
+fill 0.4243
+begin
+moveTo 10.5556 5
+lineTo 17.5556 12
+lineTo 10.5556 19
+stroke 2.4 1
+restore
+restore
+# back 0 0.3 0.5
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5858 12.2275
+lineTo 9.1056 11.35
+arc 9.1056 12 0.65 -90 180
+close
+fill 0.4243
+begin
+moveTo 10.5556 5
+lineTo 17.5556 12
+lineTo 10.5556 19
+stroke 2.4 1
+restore
+restore
+# back 0 0.6 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 9 5
+lineTo 16 12
+lineTo 9 19
+stroke 2.4 1
+restore
+restore
+# forward 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 9 5
+lineTo 16 12
+lineTo 9 19
+stroke 2.3 1
+restore
+restore
+# forward 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.8 5
+lineTo 14.8 12
+lineTo 7.8 19
+stroke 2.3 1
+restore
+restore
+# forward -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 9.42 5
+lineTo 16.42 12
+lineTo 9.42 19
+stroke 2.3 1
+restore
+restore
+# forward 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5858 12.2275
+lineTo 9.1056 11.35
+arc 9.1056 12 0.65 -90 180
+close
+fill 0.4243
+begin
+moveTo 10.5556 5
+lineTo 17.5556 12
+lineTo 10.5556 19
+stroke 2.3 1
+restore
+restore
+# forward 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5858 12.2275
+lineTo 9.1056 11.35
+arc 9.1056 12 0.65 -90 180
+close
+fill 0.4243
+begin
+moveTo 10.5556 5
+lineTo 17.5556 12
+lineTo 10.5556 19
+stroke 2.3 1
+restore
+restore
+# forward 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 9 5
+lineTo 16 12
+lineTo 9 19
+stroke 2.3 1
+restore
+restore
+# down 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 9
+lineTo 12 16
+lineTo 19 9
+stroke 2.4 1
+restore
+restore
+# down 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 10.2
+lineTo 12 17.2
+lineTo 19 10.2
+stroke 2.4 1
+restore
+restore
+# down -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 8.58
+lineTo 12 15.58
+lineTo 19 8.58
+stroke 2.4 1
+restore
+restore
+# down 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 10.5556
+lineTo 12 17.5556
+lineTo 19 10.5556
+stroke 2.4 1
+restore
+restore
+# down 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 10.5556
+lineTo 12 17.5556
+lineTo 19 10.5556
+stroke 2.4 1
+restore
+restore
+# down 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 8.6473
+lineTo 12 15.6473
+lineTo 19 8.6473
+stroke 2.4 1
+restore
+restore
+# close 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 6.2 6.2
+lineTo 17.8 17.8
+moveTo 17.8 6.2
+lineTo 6.2 17.8
+stroke 2.4 1
+restore
+restore
+# close 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 6.2 6.2
+lineTo 17.8 17.8
+moveTo 17.8 6.2
+lineTo 6.2 17.8
+stroke 2.4 1
+restore
+restore
+# close -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 6.2 6.2
+lineTo 17.8 17.8
+moveTo 17.8 6.2
+lineTo 6.2 17.8
+stroke 2.4 1
+restore
+restore
+# close 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -30.6717 12 12
+begin
+moveTo 6.2 6.2
+lineTo 17.8 17.8
+moveTo 17.8 6.2
+lineTo 6.2 17.8
+stroke 2.4 1
+restore
+restore
+# close 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 8.7904 12 12
+begin
+moveTo 6.2 6.2
+lineTo 17.8 17.8
+moveTo 17.8 6.2
+lineTo 6.2 17.8
+stroke 2.4 1
+restore
+restore
+# close 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 6.2 6.2
+lineTo 17.8 17.8
+moveTo 17.8 6.2
+lineTo 6.2 17.8
+stroke 2.4 1
+restore
+restore
+# add 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 12 4.5
+lineTo 12 19.5
+moveTo 4.5 12
+lineTo 19.5 12
+stroke 2.4 1
+restore
+restore
+# add 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 12 4.5
+lineTo 12 19.5
+moveTo 4.5 12
+lineTo 19.5 12
+stroke 2.4 1
+restore
+restore
+# add -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 12 4.5
+lineTo 12 19.5
+moveTo 4.5 12
+lineTo 19.5 12
+stroke 2.4 1
+restore
+restore
+# add 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -30.6717 12 12
+begin
+moveTo 12 4.5
+lineTo 12 19.5
+moveTo 4.5 12
+lineTo 19.5 12
+stroke 2.4 1
+restore
+restore
+# add 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 8.7904 12 12
+begin
+moveTo 12 4.5
+lineTo 12 19.5
+moveTo 4.5 12
+lineTo 19.5 12
+stroke 2.4 1
+restore
+restore
+# add 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 12 4.5
+lineTo 12 19.5
+moveTo 4.5 12
+lineTo 19.5 12
+stroke 2.4 1
+restore
+restore
+# more 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 8.8927 7.2 12.2927 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 9.519 7.2 12.919 1.2
+fill 1
+begin
+roundRect 10 8.5451 13.6 11.9451 1.2
+fill 1
+begin
+roundRect 16.4 8.8927 20 12.2927 1.2
+fill 1
+restore
+restore
+# more 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more-vertical 0 1 0
+save
+scale 1 1 12 12
+rotate 90 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more-vertical 1 1 0
+save
+scale 0.9 0.9 12 12
+rotate 90 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more-vertical -0.35 1 1
+save
+scale 1.035 1.035 12 12
+rotate 90 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more-vertical 0 0.1 1
+save
+scale 1 1 12 12
+rotate 90 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 8.8927 7.2 12.2927 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# more-vertical 0 0.3 0.5
+save
+scale 1 1 12 12
+rotate 90 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 9.519 7.2 12.919 1.2
+fill 1
+begin
+roundRect 10 8.5451 13.6 11.9451 1.2
+fill 1
+begin
+roundRect 16.4 8.8927 20 12.2927 1.2
+fill 1
+restore
+restore
+# more-vertical 0 0.6 1
+save
+scale 1 1 12 12
+rotate 90 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.6 10.3 7.2 13.7 1.2
+fill 1
+begin
+roundRect 10 10.3 13.6 13.7 1.2
+fill 1
+begin
+roundRect 16.4 10.3 20 13.7 1.2
+fill 1
+restore
+restore
+# check 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 10 17.6
+lineTo 19.6 6.6
+strokeTrim 2.5 1
+restore
+restore
+# check 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 10 17.6
+lineTo 19.6 6.6
+strokeTrim 2.5 1
+restore
+restore
+# check -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 10 17.6
+lineTo 19.6 6.6
+strokeTrim 2.5 1
+restore
+restore
+# check 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 10 17.6
+lineTo 19.6 6.6
+strokeTrim 2.5 0.5295
+restore
+restore
+# check 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 10 17.6
+lineTo 19.6 6.6
+strokeTrim 2.5 0.963
+restore
+restore
+# check 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 10 17.6
+lineTo 19.6 6.6
+strokeTrim 2.5 1
+restore
+restore
+# search 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 14.4 10.4 5
+stroke 2.4 1
+begin
+moveTo 18.3598 14.3598
+lineTo 21.5598 17.5598
+stroke 2.6 1
+begin
+moveTo 1.6 8.6625
+lineTo 6.45 7.65
+arc 6.45 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 3.4 12.8275
+lineTo 6.55 11.95
+arc 6.55 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# search 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 13 10.4 5
+stroke 2.4 1
+begin
+moveTo 16.9598 14.3598
+lineTo 20.1598 17.5598
+stroke 2.6 1
+begin
+moveTo 3.2 8.6625
+lineTo 5.05 7.65
+arc 5.05 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 5 12.8275
+lineTo 5.15 11.95
+arc 5.15 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# search -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 14.89 10.4 5
+stroke 2.4 1
+begin
+moveTo 18.8498 14.3598
+lineTo 22.0498 17.5598
+stroke 2.6 1
+begin
+moveTo 1.04 8.6625
+lineTo 6.94 7.65
+arc 6.94 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 2.84 12.8275
+lineTo 7.04 11.95
+arc 7.04 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# search 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 15.4285 10.4 5
+stroke 2.4 1
+begin
+moveTo 19.3883 14.3598
+lineTo 22.5883 17.5598
+stroke 2.6 1
+begin
+moveTo -0.0712 8.6625
+lineTo 7.4785 7.65
+arc 7.4785 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 1.7288 12.8275
+lineTo 7.5785 11.95
+arc 7.5785 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# search 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 15.7856 10.4 5
+stroke 2.4 1
+begin
+moveTo 19.7454 14.3598
+lineTo 22.9454 17.5598
+stroke 2.6 1
+begin
+moveTo -0.6517 8.6625
+lineTo 7.8356 7.65
+arc 7.8356 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 1.1483 12.8275
+lineTo 7.9356 11.95
+arc 7.9356 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# search 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 14.3301 10.4 5
+stroke 2.4 1
+begin
+moveTo 18.2899 14.3598
+lineTo 21.4899 17.5598
+stroke 2.6 1
+begin
+moveTo 1.6 8.6625
+lineTo 6.3801 7.65
+arc 6.3801 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 3.4 12.8275
+lineTo 6.4801 11.95
+arc 6.4801 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# settings 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.5 5.5
+lineTo 20.5 5.5
+stroke 1.9 0.55
+begin
+roundRect 6.2 2.9 9.8 8.1 1.2
+fill 1
+begin
+moveTo 3.5 12
+lineTo 20.5 12
+stroke 1.9 0.55
+begin
+roundRect 13.6 9.4 17.2 14.6 1.2
+fill 1
+begin
+moveTo 3.5 18.5
+lineTo 20.5 18.5
+stroke 1.9 0.55
+begin
+roundRect 8.6 15.9 12.2 21.1 1.2
+fill 1
+restore
+restore
+# settings 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.5 5.5
+lineTo 20.5 5.5
+stroke 1.9 0.55
+begin
+roundRect 6.2 2.9 9.8 8.1 1.2
+fill 1
+begin
+moveTo 3.5 12
+lineTo 20.5 12
+stroke 1.9 0.55
+begin
+roundRect 13.6 9.4 17.2 14.6 1.2
+fill 1
+begin
+moveTo 3.5 18.5
+lineTo 20.5 18.5
+stroke 1.9 0.55
+begin
+roundRect 8.6 15.9 12.2 21.1 1.2
+fill 1
+restore
+restore
+# settings -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.5 5.5
+lineTo 20.5 5.5
+stroke 1.9 0.55
+begin
+roundRect 6.2 2.9 9.8 8.1 1.2
+fill 1
+begin
+moveTo 3.5 12
+lineTo 20.5 12
+stroke 1.9 0.55
+begin
+roundRect 13.6 9.4 17.2 14.6 1.2
+fill 1
+begin
+moveTo 3.5 18.5
+lineTo 20.5 18.5
+stroke 1.9 0.55
+begin
+roundRect 8.6 15.9 12.2 21.1 1.2
+fill 1
+restore
+restore
+# settings 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.5 5.5
+lineTo 20.5 5.5
+stroke 1.9 0.55
+begin
+roundRect 7.614 2.9 11.214 8.1 1.2
+fill 1
+begin
+moveTo 3.5 12
+lineTo 20.5 12
+stroke 1.9 0.55
+begin
+roundRect 13.6 9.4 17.2 14.6 1.2
+fill 1
+begin
+moveTo 3.5 18.5
+lineTo 20.5 18.5
+stroke 1.9 0.55
+begin
+roundRect 8.6 15.9 12.2 21.1 1.2
+fill 1
+restore
+restore
+# settings 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.5 5.5
+lineTo 20.5 5.5
+stroke 1.9 0.55
+begin
+roundRect 5.8048 2.9 9.4048 8.1 1.2
+fill 1
+begin
+moveTo 3.5 12
+lineTo 20.5 12
+stroke 1.9 0.55
+begin
+roundRect 13.3917 9.4 16.9917 14.6 1.2
+fill 1
+begin
+moveTo 3.5 18.5
+lineTo 20.5 18.5
+stroke 1.9 0.55
+begin
+roundRect 10.014 15.9 13.614 21.1 1.2
+fill 1
+restore
+restore
+# settings 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.5 5.5
+lineTo 20.5 5.5
+stroke 1.9 0.55
+begin
+roundRect 6.2513 2.9 9.8513 8.1 1.2
+fill 1
+begin
+moveTo 3.5 12
+lineTo 20.5 12
+stroke 1.9 0.55
+begin
+roundRect 13.4988 9.4 17.0988 14.6 1.2
+fill 1
+begin
+moveTo 3.5 18.5
+lineTo 20.5 18.5
+stroke 1.9 0.55
+begin
+roundRect 8.479 15.9 12.079 21.1 1.2
+fill 1
+restore
+restore
+# refresh 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+arc 12 12 7.4 -50 272
+stroke 2.3 1
+begin
+moveTo 9.1075 8.5528
+lineTo 9.8479 4.1458
+lineTo 5.3793 4.1097
+close
+solid 1.6 1
+restore
+restore
+# refresh 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 30 12 12
+begin
+arc 12 12 7.4 -50 272
+stroke 2.3 1
+begin
+moveTo 9.1075 8.5528
+lineTo 9.8479 4.1458
+lineTo 5.3793 4.1097
+close
+solid 1.6 1
+restore
+restore
+# refresh -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -10.5 12 12
+begin
+arc 12 12 7.4 -50 272
+stroke 2.3 1
+begin
+moveTo 9.1075 8.5528
+lineTo 9.8479 4.1458
+lineTo 5.3793 4.1097
+close
+solid 1.6 1
+restore
+restore
+# refresh 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -226.7055 12 12
+begin
+arc 12 12 7.4 -50 272
+stroke 2.3 1
+begin
+moveTo 9.1075 8.5528
+lineTo 9.8479 4.1458
+lineTo 5.3793 4.1097
+close
+solid 1.6 1
+restore
+restore
+# refresh 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -67.172 12 12
+begin
+arc 12 12 7.4 -50 272
+stroke 2.3 1
+begin
+moveTo 9.1075 8.5528
+lineTo 9.8479 4.1458
+lineTo 5.3793 4.1097
+close
+solid 1.6 1
+restore
+restore
+# refresh 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -1.0496 12 12
+begin
+arc 12 12 7.4 -50 272
+stroke 2.3 1
+begin
+moveTo 9.1075 8.5528
+lineTo 9.8479 4.1458
+lineTo 5.3793 4.1097
+close
+solid 1.6 1
+restore
+restore
+# download 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.4
+lineTo 12 12.6
+stroke 2.4 1
+begin
+moveTo 7 10.4
+lineTo 12 16.4
+lineTo 17 10.4
+close
+solid 1.6 1
+begin
+roundRect 4.2 18.4 19.8 21 1.2
+fill 1
+restore
+restore
+# download 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 4.1
+lineTo 12 14
+stroke 2.4 1
+begin
+moveTo 7 11.8
+lineTo 12 17.8
+lineTo 17 11.8
+close
+solid 1.6 1
+begin
+roundRect 4.2 18.4 19.8 21 1.2
+fill 1
+restore
+restore
+# download -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.155
+lineTo 12 12.11
+stroke 2.4 1
+begin
+moveTo 7 9.91
+lineTo 12 15.91
+lineTo 17 9.91
+close
+solid 1.6 1
+begin
+roundRect 4.2 18.4 19.8 21 1.2
+fill 1
+restore
+restore
+# download 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 4.5727
+lineTo 12 14.9455
+stroke 2.4 1
+begin
+moveTo 7 12.7455
+lineTo 12 18.7455
+lineTo 17 12.7455
+close
+solid 1.6 1
+begin
+roundRect 4.2 18.4 19.8 21 1.2
+fill 1
+restore
+restore
+# download 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 4.0508
+lineTo 12 13.9017
+stroke 2.4 1
+begin
+moveTo 7 11.7017
+lineTo 12 17.7017
+lineTo 17 11.7017
+close
+solid 1.6 1
+begin
+roundRect 3.9513 18.5492 20.0487 21 1.2
+fill 1
+restore
+restore
+# download 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.4
+lineTo 12 12.6
+stroke 2.4 1
+begin
+moveTo 7 10.4
+lineTo 12 16.4
+lineTo 17 10.4
+close
+solid 1.6 1
+begin
+roundRect 4.2 18.4 19.8 21 1.2
+fill 1
+restore
+restore
+# heart 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1.1 0
+scale 0.9 0.9 12 12.5
+begin
+moveTo 12 20.4
+cubicTo 5.2 15.6 2.6 12.2 2.6 8.7
+cubicTo 2.6 5.7 4.9 3.6 7.6 3.6
+cubicTo 9.5 3.6 11 4.7 12 6.3
+cubicTo 13 4.7 14.5 3.6 16.4 3.6
+cubicTo 19.1 3.6 21.4 5.7 21.4 8.7
+cubicTo 21.4 12.2 18.8 15.6 12 20.4
+close
+stroke 2.1 1
+restore
+restore
+# heart 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1.1 0
+scale 0.9 0.9 12 12.5
+begin
+moveTo 12 20.4
+cubicTo 5.2 15.6 2.6 12.2 2.6 8.7
+cubicTo 2.6 5.7 4.9 3.6 7.6 3.6
+cubicTo 9.5 3.6 11 4.7 12 6.3
+cubicTo 13 4.7 14.5 3.6 16.4 3.6
+cubicTo 19.1 3.6 21.4 5.7 21.4 8.7
+cubicTo 21.4 12.2 18.8 15.6 12 20.4
+close
+stroke 2.1 1
+restore
+restore
+# heart -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1.1 0
+scale 0.9 0.9 12 12.5
+begin
+moveTo 12 20.4
+cubicTo 5.2 15.6 2.6 12.2 2.6 8.7
+cubicTo 2.6 5.7 4.9 3.6 7.6 3.6
+cubicTo 9.5 3.6 11 4.7 12 6.3
+cubicTo 13 4.7 14.5 3.6 16.4 3.6
+cubicTo 19.1 3.6 21.4 5.7 21.4 8.7
+cubicTo 21.4 12.2 18.8 15.6 12 20.4
+close
+fill 1
+stroke 2.1 1
+restore
+restore
+# heart 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1.1 0
+scale 1.0559 1.0559 12 12.5
+begin
+moveTo 12 20.4
+cubicTo 5.2 15.6 2.6 12.2 2.6 8.7
+cubicTo 2.6 5.7 4.9 3.6 7.6 3.6
+cubicTo 9.5 3.6 11 4.7 12 6.3
+cubicTo 13 4.7 14.5 3.6 16.4 3.6
+cubicTo 19.1 3.6 21.4 5.7 21.4 8.7
+cubicTo 21.4 12.2 18.8 15.6 12 20.4
+close
+fill 1
+stroke 2.1 1
+restore
+restore
+# heart 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1.1 0
+scale 0.9 0.9 12 12.5
+begin
+moveTo 12 20.4
+cubicTo 5.2 15.6 2.6 12.2 2.6 8.7
+cubicTo 2.6 5.7 4.9 3.6 7.6 3.6
+cubicTo 9.5 3.6 11 4.7 12 6.3
+cubicTo 13 4.7 14.5 3.6 16.4 3.6
+cubicTo 19.1 3.6 21.4 5.7 21.4 8.7
+cubicTo 21.4 12.2 18.8 15.6 12 20.4
+close
+fill 0.5
+stroke 2.1 1
+restore
+restore
+# heart 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1.1 0
+scale 0.9 0.9 12 12.5
+begin
+moveTo 12 20.4
+cubicTo 5.2 15.6 2.6 12.2 2.6 8.7
+cubicTo 2.6 5.7 4.9 3.6 7.6 3.6
+cubicTo 9.5 3.6 11 4.7 12 6.3
+cubicTo 13 4.7 14.5 3.6 16.4 3.6
+cubicTo 19.1 3.6 21.4 5.7 21.4 8.7
+cubicTo 21.4 12.2 18.8 15.6 12 20.4
+close
+fill 1
+stroke 2.1 1
+restore
+restore
+# trash 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+translate 0 0
+rotate 0 4 6.4
+begin
+moveTo 4 6.4
+lineTo 20 6.4
+moveTo 9.4 6.4
+lineTo 9.8 3.8
+lineTo 14.2 3.8
+lineTo 14.6 6.4
+stroke 2.1 1
+restore
+begin
+moveTo 6.1 8.9
+lineTo 7.3 19.1
+quadTo 7.5 20.8 9.1 20.8
+lineTo 14.9 20.8
+quadTo 16.5 20.8 16.7 19.1
+lineTo 17.9 8.9
+stroke 2.1 1
+begin
+moveTo 10.4 11.6
+lineTo 10.6 17.6
+moveTo 13.6 11.6
+lineTo 13.4 17.6
+stroke 1.6 0.7
+restore
+restore
+# trash 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+translate 0 0
+rotate 0 4 6.4
+begin
+moveTo 4 6.4
+lineTo 20 6.4
+moveTo 9.4 6.4
+lineTo 9.8 3.8
+lineTo 14.2 3.8
+lineTo 14.6 6.4
+stroke 2.1 1
+restore
+begin
+moveTo 6.1 8.9
+lineTo 7.3 19.1
+quadTo 7.5 20.8 9.1 20.8
+lineTo 14.9 20.8
+quadTo 16.5 20.8 16.7 19.1
+lineTo 17.9 8.9
+stroke 2.1 1
+begin
+moveTo 10.4 11.6
+lineTo 10.6 17.6
+moveTo 13.6 11.6
+lineTo 13.4 17.6
+stroke 1.6 0.7
+restore
+restore
+# trash -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+translate 0 0
+rotate 0 4 6.4
+begin
+moveTo 4 6.4
+lineTo 20 6.4
+moveTo 9.4 6.4
+lineTo 9.8 3.8
+lineTo 14.2 3.8
+lineTo 14.6 6.4
+stroke 2.1 1
+restore
+begin
+moveTo 6.1 8.9
+lineTo 7.3 19.1
+quadTo 7.5 20.8 9.1 20.8
+lineTo 14.9 20.8
+quadTo 16.5 20.8 16.7 19.1
+lineTo 17.9 8.9
+stroke 2.1 1
+begin
+moveTo 10.4 11.6
+lineTo 10.6 17.6
+moveTo 13.6 11.6
+lineTo 13.4 17.6
+stroke 1.6 0.7
+restore
+restore
+# trash 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+translate 0 -1.2931
+rotate -8.229 4 6.4
+begin
+moveTo 4 6.4
+lineTo 20 6.4
+moveTo 9.4 6.4
+lineTo 9.8 3.8
+lineTo 14.2 3.8
+lineTo 14.6 6.4
+stroke 2.1 1
+restore
+begin
+moveTo 6.1 8.9
+lineTo 7.3 19.1
+quadTo 7.5 20.8 9.1 20.8
+lineTo 14.9 20.8
+quadTo 16.5 20.8 16.7 19.1
+lineTo 17.9 8.9
+stroke 2.1 1
+begin
+moveTo 10.4 11.6
+lineTo 10.6 17.6
+moveTo 13.6 11.6
+lineTo 13.4 17.6
+stroke 1.6 0.7
+restore
+restore
+# trash 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+translate 0 -2.0923
+rotate -13.3148 4 6.4
+begin
+moveTo 4 6.4
+lineTo 20 6.4
+moveTo 9.4 6.4
+lineTo 9.8 3.8
+lineTo 14.2 3.8
+lineTo 14.6 6.4
+stroke 2.1 1
+restore
+begin
+moveTo 6.1 8.9
+lineTo 7.3 19.1
+quadTo 7.5 20.8 9.1 20.8
+lineTo 14.9 20.8
+quadTo 16.5 20.8 16.7 19.1
+lineTo 17.9 8.9
+stroke 2.1 1
+begin
+moveTo 10.4 11.6
+lineTo 10.6 17.6
+moveTo 13.6 11.6
+lineTo 13.4 17.6
+stroke 1.6 0.7
+restore
+restore
+# trash 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+translate 0 0
+rotate 0 4 6.4
+begin
+moveTo 4 6.4
+lineTo 20 6.4
+moveTo 9.4 6.4
+lineTo 9.8 3.8
+lineTo 14.2 3.8
+lineTo 14.6 6.4
+stroke 2.1 1
+restore
+begin
+moveTo 6.1 8.9
+lineTo 7.3 19.1
+quadTo 7.5 20.8 9.1 20.8
+lineTo 14.9 20.8
+quadTo 16.5 20.8 16.7 19.1
+lineTo 17.9 8.9
+stroke 2.1 1
+begin
+moveTo 10.4 11.6
+lineTo 10.6 17.6
+moveTo 13.6 11.6
+lineTo 13.4 17.6
+stroke 1.6 0.7
+restore
+restore
+# drag 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 9
+lineTo 19 9
+moveTo 5 15
+lineTo 19 15
+stroke 2.3 1
+restore
+restore
+# drag 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 9
+lineTo 19 9
+moveTo 5 15
+lineTo 19 15
+stroke 2.3 1
+restore
+restore
+# drag -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 9
+lineTo 19 9
+moveTo 5 15
+lineTo 19 15
+stroke 2.3 1
+restore
+restore
+# drag 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 9
+lineTo 19 9
+moveTo 5 15
+lineTo 19 15
+stroke 2.3 1
+restore
+restore
+# drag 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 9
+lineTo 19 9
+moveTo 5 15
+lineTo 19 15
+stroke 2.3 1
+restore
+restore
+# drag 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 9
+lineTo 19 9
+moveTo 5 15
+lineTo 19 15
+stroke 2.3 1
+restore
+restore
+# queue 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 19.15 4.55
+arc 19.15 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.6 12.4375
+lineTo 14.35 10.75
+arc 14.35 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 14.2 13.8
+lineTo 21.2 17.5
+lineTo 14.2 21.2
+close
+solid 1.6 1
+restore
+restore
+# queue 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4 6.2375
+lineTo 17.35 4.55
+arc 17.35 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 5.8 12.4375
+lineTo 12.19 10.75
+arc 12.19 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 13.2 13.8
+lineTo 20.2 17.5
+lineTo 13.2 21.2
+close
+solid 1.6 1
+restore
+restore
+# queue -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.38 6.2375
+lineTo 19.78 4.55
+arc 19.78 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.18 12.4375
+lineTo 15.106 10.75
+arc 15.106 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 14.55 13.8
+lineTo 21.55 17.5
+lineTo 14.55 21.2
+close
+solid 1.6 1
+restore
+restore
+# queue 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5491 6.2375
+lineTo 20.3669 4.55
+arc 20.3669 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.4566 12.4375
+lineTo 14.5895 10.75
+arc 14.5895 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 14.2 13.8
+lineTo 21.2 17.5
+lineTo 14.2 21.2
+close
+solid 1.6 1
+restore
+restore
+# queue 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.1058 6.2375
+lineTo 18.863 4.55
+arc 18.863 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 3.0783 12.4375
+lineTo 14.2197 10.75
+arc 14.2197 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 16.2 13.8
+lineTo 23.2 17.5
+lineTo 16.2 21.2
+close
+solid 1.6 1
+restore
+restore
+# queue 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 19.15 4.55
+arc 19.15 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.6 12.4375
+lineTo 14.3834 10.75
+arc 14.3834 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 14.2 13.8
+lineTo 21.2 17.5
+lineTo 14.2 21.2
+close
+solid 1.6 1
+restore
+restore
+# lyrics 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 7.6 8.6 3.3
+fill 1
+begin
+moveTo 10.7 9.2
+cubicTo 10.6 13.6 8.2 16.8 4.6 18.4
+stroke 2.3 1
+begin
+circle 15.6 8.6 3.3
+fill 1
+begin
+moveTo 18.7 9.2
+cubicTo 18.6 13.6 16.2 16.8 12.6 18.4
+stroke 2.3 1
+restore
+restore
+# lyrics 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 7.6 8.6 3.3
+fill 1
+begin
+moveTo 10.7 9.2
+cubicTo 10.6 13.6 8.2 16.8 4.6 18.4
+stroke 2.3 1
+begin
+circle 15.6 8.6 3.3
+fill 1
+begin
+moveTo 18.7 9.2
+cubicTo 18.6 13.6 16.2 16.8 12.6 18.4
+stroke 2.3 1
+restore
+restore
+# lyrics -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 7.6 8.6 3.3
+fill 1
+begin
+moveTo 10.7 9.2
+cubicTo 10.6 13.6 8.2 16.8 4.6 18.4
+stroke 2.3 1
+begin
+circle 15.6 8.6 3.3
+fill 1
+begin
+moveTo 18.7 9.2
+cubicTo 18.6 13.6 16.2 16.8 12.6 18.4
+stroke 2.3 1
+restore
+restore
+# lyrics 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 7.6 7.0679 3.3
+fill 1
+begin
+moveTo 10.7 7.6679
+cubicTo 10.6 12.0679 8.2 15.2679 4.6 16.8679
+stroke 2.3 1
+begin
+circle 15.6 8.6 3.3
+fill 1
+begin
+moveTo 18.7 9.2
+cubicTo 18.6 13.6 16.2 16.8 12.6 18.4
+stroke 2.3 1
+restore
+restore
+# lyrics 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 7.6 7.6 3.3
+fill 1
+begin
+moveTo 10.7 8.2
+cubicTo 10.6 12.6 8.2 15.8 4.6 17.4
+stroke 2.3 1
+begin
+circle 15.6 6.6 3.3
+fill 1
+begin
+moveTo 18.7 7.2
+cubicTo 18.6 11.6 16.2 14.8 12.6 16.4
+stroke 2.3 1
+restore
+restore
+# lyrics 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 7.6 8.6 3.3
+fill 1
+begin
+moveTo 10.7 9.2
+cubicTo 10.6 13.6 8.2 16.8 4.6 18.4
+stroke 2.3 1
+begin
+circle 15.6 8.6 3.3
+fill 1
+begin
+moveTo 18.7 9.2
+cubicTo 18.6 13.6 16.2 16.8 12.6 18.4
+stroke 2.3 1
+restore
+restore
+# playlist 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 18.95 4.55
+arc 18.95 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.6 12.4375
+lineTo 15.75 10.75
+arc 15.75 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 6.4 18.6375
+lineTo 12.55 16.95
+arc 12.55 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# playlist 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4 6.2375
+lineTo 17.15 4.55
+arc 17.15 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 5.8 12.4375
+lineTo 13.59 10.75
+arc 13.59 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 7.6 18.6375
+lineTo 10.03 16.95
+arc 10.03 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# playlist -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.38 6.2375
+lineTo 19.58 4.55
+arc 19.58 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.18 12.4375
+lineTo 16.506 10.75
+arc 16.506 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 5.98 18.6375
+lineTo 13.432 16.95
+arc 13.432 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# playlist 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5491 6.2375
+lineTo 20.1531 4.55
+arc 20.1531 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.4566 12.4375
+lineTo 16.0199 10.75
+arc 16.0199 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 6.4 18.6375
+lineTo 12.55 16.95
+arc 12.55 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# playlist 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.1058 6.2375
+lineTo 18.6663 4.55
+arc 18.6663 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 3.0783 12.4375
+lineTo 15.6031 10.75
+arc 15.6031 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.991 18.6375
+lineTo 12.9547 16.95
+arc 12.9547 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# playlist 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 18.95 4.55
+arc 18.95 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.6 12.4375
+lineTo 15.7877 10.75
+arc 15.7877 12 1.25 -90 180
+close
+fill 1
+begin
+moveTo 6.4 18.6375
+lineTo 12.5875 16.95
+arc 12.5875 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# playlist-add 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 18.95 4.55
+arc 18.95 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.6 12.4375
+lineTo 11.35 10.75
+arc 11.35 12 1.25 -90 180
+close
+fill 1
+save
+rotate 0 17.2 18.2
+begin
+moveTo 17.2 14.6
+lineTo 17.2 21.8
+moveTo 13.6 18.2
+lineTo 20.8 18.2
+stroke 2.3 1
+restore
+restore
+restore
+# playlist-add 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4 6.2375
+lineTo 17.15 4.55
+arc 17.15 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 5.8 12.4375
+lineTo 9.19 10.75
+arc 9.19 12 1.25 -90 180
+close
+fill 1
+save
+rotate 0 17.2 18.2
+begin
+moveTo 17.2 14.6
+lineTo 17.2 21.8
+moveTo 13.6 18.2
+lineTo 20.8 18.2
+stroke 2.3 1
+restore
+restore
+restore
+# playlist-add -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.38 6.2375
+lineTo 19.58 4.55
+arc 19.58 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.18 12.4375
+lineTo 12.106 10.75
+arc 12.106 12 1.25 -90 180
+close
+fill 1
+save
+rotate 0 17.2 18.2
+begin
+moveTo 17.2 14.6
+lineTo 17.2 21.8
+moveTo 13.6 18.2
+lineTo 20.8 18.2
+stroke 2.3 1
+restore
+restore
+restore
+# playlist-add 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5491 6.2375
+lineTo 20.1531 4.55
+arc 20.1531 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.4566 12.4375
+lineTo 11.5242 10.75
+arc 11.5242 12 1.25 -90 180
+close
+fill 1
+save
+rotate -30.6717 17.2 18.2
+begin
+moveTo 17.2 14.6
+lineTo 17.2 21.8
+moveTo 13.6 18.2
+lineTo 20.8 18.2
+stroke 2.3 1
+restore
+restore
+restore
+# playlist-add 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.1058 6.2375
+lineTo 18.6663 4.55
+arc 18.6663 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 3.0783 12.4375
+lineTo 11.2552 10.75
+arc 11.2552 12 1.25 -90 180
+close
+fill 1
+save
+rotate 8.7904 17.2 18.2
+begin
+moveTo 17.2 14.6
+lineTo 17.2 21.8
+moveTo 13.6 18.2
+lineTo 20.8 18.2
+stroke 2.3 1
+restore
+restore
+restore
+# playlist-add 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 18.95 4.55
+arc 18.95 5.8 1.25 -90 180
+close
+fill 1
+begin
+moveTo 4.6 12.4375
+lineTo 11.3743 10.75
+arc 11.3743 12 1.25 -90 180
+close
+fill 1
+save
+rotate 0 17.2 18.2
+begin
+moveTo 17.2 14.6
+lineTo 17.2 21.8
+moveTo 13.6 18.2
+lineTo 20.8 18.2
+stroke 2.3 1
+restore
+restore
+restore
+# disc 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 8.6
+stroke 2.1 1
+begin
+circle 12 12 2.2
+fill 1
+begin
+arc 12 12 5.4 925 62
+stroke 1.6 0.65
+restore
+restore
+# disc 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 8.6
+stroke 2.1 1
+begin
+circle 12 12 2.2
+fill 1
+begin
+arc 12 12 5.4 925 62
+stroke 1.6 0.65
+restore
+restore
+# disc -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 8.6
+stroke 2.1 1
+begin
+circle 12 12 2.2
+fill 1
+begin
+arc 12 12 5.4 925 62
+stroke 1.6 0.65
+restore
+restore
+# disc 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 8.6
+stroke 2.1 1
+begin
+circle 12 12 2.2
+fill 1
+begin
+arc 12 12 5.4 430.3939 62
+stroke 1.6 0.65
+restore
+restore
+# disc 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 8.6
+stroke 2.1 1
+begin
+circle 12 12 2.2
+fill 1
+begin
+arc 12 12 5.4 729.942 62
+stroke 1.6 0.65
+restore
+restore
+# disc 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 8.6
+stroke 2.1 1
+begin
+circle 12 12 2.2
+fill 1
+begin
+arc 12 12 5.4 906.6813 62
+stroke 1.6 0.65
+restore
+restore
+# artist 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 7.8 3.9
+stroke 2.2 1
+begin
+moveTo 4.6 20.2
+cubicTo 5.4 15.8 8.4 13.6 12 13.6
+cubicTo 15.6 13.6 18.6 15.8 19.4 20.2
+stroke 2.2 1
+restore
+restore
+# artist 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 7.8 3.9
+stroke 2.2 1
+begin
+moveTo 4.6 20.2
+cubicTo 5.4 15.8 8.4 13.6 12 13.6
+cubicTo 15.6 13.6 18.6 15.8 19.4 20.2
+stroke 2.2 1
+restore
+restore
+# artist -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 7.8 3.9
+stroke 2.2 1
+begin
+moveTo 4.6 20.2
+cubicTo 5.4 15.8 8.4 13.6 12 13.6
+cubicTo 15.6 13.6 18.6 15.8 19.4 20.2
+stroke 2.2 1
+restore
+restore
+# artist 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 6.5232 3.9
+stroke 2.2 1
+begin
+moveTo 4.6 20.2
+cubicTo 5.4 15.8 8.4 13.6 12 13.6
+cubicTo 15.6 13.6 18.6 15.8 19.4 20.2
+stroke 2.2 1
+restore
+restore
+# artist 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 7.222 3.9
+stroke 2.2 1
+begin
+moveTo 4.6 20.2
+cubicTo 5.4 15.8 8.4 13.6 12 13.6
+cubicTo 15.6 13.6 18.6 15.8 19.4 20.2
+stroke 2.2 1
+restore
+restore
+# artist 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 7.8 3.9
+stroke 2.2 1
+begin
+moveTo 4.6 20.2
+cubicTo 5.4 15.8 8.4 13.6 12 13.6
+cubicTo 15.6 13.6 18.6 15.8 19.4 20.2
+stroke 2.2 1
+restore
+restore
+# music 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+scale 1 1 12 20.4
+begin
+moveTo 11.8 17.4
+lineTo 11.8 3.8
+cubicTo 14.8 4.6 17.8 5.8 18.4 9.6
+stroke 2.2 1
+save
+rotate -20 8.6 17.4
+begin
+roundRect 5.2 15 12 19.8 2.4
+fill 1
+restore
+restore
+restore
+# music 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+scale 1 1 12 20.4
+begin
+moveTo 11.8 17.4
+lineTo 11.8 3.8
+cubicTo 14.8 4.6 17.8 5.8 18.4 9.6
+stroke 2.2 1
+save
+rotate -20 8.6 17.4
+begin
+roundRect 5.2 15 12 19.8 2.4
+fill 1
+restore
+restore
+restore
+# music -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+scale 1 1 12 20.4
+begin
+moveTo 11.8 17.4
+lineTo 11.8 3.8
+cubicTo 14.8 4.6 17.8 5.8 18.4 9.6
+stroke 2.2 1
+save
+rotate -20 8.6 17.4
+begin
+roundRect 5.2 15 12 19.8 2.4
+fill 1
+restore
+restore
+restore
+# music 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 -2.0405
+scale 1 1 12 20.4
+begin
+moveTo 11.8 17.4
+lineTo 11.8 3.8
+cubicTo 14.8 4.6 17.8 5.8 18.4 9.6
+stroke 2.2 1
+save
+rotate -20 8.6 17.4
+begin
+roundRect 5.2 15 12 19.8 2.4
+fill 1
+restore
+restore
+restore
+# music 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 -2.3455
+scale 1 1 12 20.4
+begin
+moveTo 11.8 17.4
+lineTo 11.8 3.8
+cubicTo 14.8 4.6 17.8 5.8 18.4 9.6
+stroke 2.2 1
+save
+rotate -20 8.6 17.4
+begin
+roundRect 5.2 15 12 19.8 2.4
+fill 1
+restore
+restore
+restore
+# music 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+scale 1.0247 0.9629 12 20.4
+begin
+moveTo 11.8 17.4
+lineTo 11.8 3.8
+cubicTo 14.8 4.6 17.8 5.8 18.4 9.6
+stroke 2.2 1
+save
+rotate -20 8.6 17.4
+begin
+roundRect 5.2 15 12 19.8 2.4
+fill 1
+restore
+restore
+restore
+# edit 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 5 19
+begin
+moveTo 14.6 4.6
+lineTo 19.4 9.4
+lineTo 9 19.8
+lineTo 4.2 19.8
+lineTo 4.2 15
+close
+stroke 2.1 1
+begin
+moveTo 12.4 6.8
+lineTo 17.2 11.6
+stroke 2.1 1
+restore
+restore
+# edit 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 5 19
+begin
+moveTo 14.6 4.6
+lineTo 19.4 9.4
+lineTo 9 19.8
+lineTo 4.2 19.8
+lineTo 4.2 15
+close
+stroke 2.1 1
+begin
+moveTo 12.4 6.8
+lineTo 17.2 11.6
+stroke 2.1 1
+restore
+restore
+# edit -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 5 19
+begin
+moveTo 14.6 4.6
+lineTo 19.4 9.4
+lineTo 9 19.8
+lineTo 4.2 19.8
+lineTo 4.2 15
+close
+stroke 2.1 1
+begin
+moveTo 12.4 6.8
+lineTo 17.2 11.6
+stroke 2.1 1
+restore
+restore
+# edit 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -6.5261 5 19
+begin
+moveTo 14.6 4.6
+lineTo 19.4 9.4
+lineTo 9 19.8
+lineTo 4.2 19.8
+lineTo 4.2 15
+close
+stroke 2.1 1
+begin
+moveTo 12.4 6.8
+lineTo 17.2 11.6
+stroke 2.1 1
+restore
+restore
+# edit 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 1.824 5 19
+begin
+moveTo 14.6 4.6
+lineTo 19.4 9.4
+lineTo 9 19.8
+lineTo 4.2 19.8
+lineTo 4.2 15
+close
+stroke 2.1 1
+begin
+moveTo 12.4 6.8
+lineTo 17.2 11.6
+stroke 2.1 1
+restore
+restore
+# edit 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -0.237 5 19
+begin
+moveTo 14.6 4.6
+lineTo 19.4 9.4
+lineTo 9 19.8
+lineTo 4.2 19.8
+lineTo 4.2 15
+close
+stroke 2.1 1
+begin
+moveTo 12.4 6.8
+lineTo 17.2 11.6
+stroke 2.1 1
+restore
+restore
+# playing 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 13.4 7.8 20.4 1.2
+fill 1
+begin
+roundRect 10 5.8 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 10 19.4 20.4 1.2
+fill 1
+restore
+restore
+# playing 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 13.4 7.8 20.4 1.2
+fill 1
+begin
+roundRect 10 5.8 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 10 19.4 20.4 1.2
+fill 1
+restore
+restore
+# playing -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 13.4 7.8 20.4 1.2
+fill 1
+begin
+roundRect 10 5.8 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 10 19.4 20.4 1.2
+fill 1
+restore
+restore
+# playing 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 12.5357 7.8 20.4 1.2
+fill 1
+begin
+roundRect 10 4.7565 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 10 19.4 20.4 1.2
+fill 1
+restore
+restore
+# playing 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 13.6038 7.8 20.4 1.2
+fill 1
+begin
+roundRect 10 6.2054 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 9.3028 19.4 20.4 1.2
+fill 1
+restore
+restore
+# playing 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 13.4 7.8 20.4 1.2
+fill 1
+begin
+roundRect 10 5.7374 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 9.8941 19.4 20.4 1.2
+fill 1
+restore
+restore
+# play 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+begin
+moveTo 6.5 4.5
+lineTo 20 12
+lineTo 6.5 19.5
+close
+solid 2.2 1
+restore
+restore
+# play 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1 0
+begin
+moveTo 6.5 4.5
+lineTo 20 12
+lineTo 6.5 19.5
+close
+solid 2.2 1
+restore
+restore
+# play -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0.35 0
+begin
+moveTo 6.5 4.5
+lineTo 20 12
+lineTo 6.5 19.5
+close
+solid 2.2 1
+restore
+restore
+# play 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0.7713 0
+begin
+moveTo 6.5 4.5
+lineTo 20 12
+lineTo 6.5 19.5
+close
+solid 2.2 1
+restore
+restore
+# play 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 1.0392 0
+begin
+moveTo 6.5 4.5
+lineTo 20 12
+lineTo 6.5 19.5
+close
+solid 2.2 1
+restore
+restore
+# play 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+begin
+moveTo 6.5 4.5
+lineTo 20 12
+lineTo 6.5 19.5
+close
+solid 2.2 1
+restore
+restore
+# pause 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+begin
+roundRect 5 4.6 10.2 19.4 1.3
+roundRect 13.8 4.6 19 19.4 1.3
+fill 1
+restore
+restore
+# pause 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate -1 0
+begin
+roundRect 5 4.6 10.2 19.4 1.3
+roundRect 13.8 4.6 19 19.4 1.3
+fill 1
+restore
+restore
+# pause -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0.35 0
+begin
+roundRect 5 4.6 10.2 19.4 1.3
+roundRect 13.8 4.6 19 19.4 1.3
+fill 1
+restore
+restore
+# pause 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0.7713 0
+begin
+roundRect 5 4.6 10.2 19.4 1.3
+roundRect 13.8 4.6 19 19.4 1.3
+fill 1
+restore
+restore
+# pause 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 1.0392 0
+begin
+roundRect 5 4.6 10.2 19.4 1.3
+roundRect 13.8 4.6 19 19.4 1.3
+fill 1
+restore
+restore
+# pause 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+translate 0 0
+begin
+roundRect 5 4.6 10.2 19.4 1.3
+roundRect 13.8 4.6 19 19.4 1.3
+fill 1
+restore
+restore
+# shuffle 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.2 17.2
+cubicTo 9 17.2 12.4 6.8 17.2 6.8
+stroke 2.3 1
+begin
+moveTo 17 3.9
+lineTo 20.8 6.8
+lineTo 17 9.7
+close
+solid 1.6 1
+begin
+moveTo 3.2 6.8
+cubicTo 9 6.8 12.4 17.2 17.2 17.2
+stroke 2.3 1
+begin
+moveTo 17 14.3
+lineTo 20.8 17.2
+lineTo 17 20.1
+close
+solid 1.6 1
+restore
+restore
+# shuffle 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.2 17.2
+cubicTo 9 17.2 12.4 6.8 16 6.8
+stroke 2.3 1
+begin
+moveTo 15.8 3.9
+lineTo 19.6 6.8
+lineTo 15.8 9.7
+close
+solid 1.6 1
+begin
+moveTo 3.2 6.8
+cubicTo 9 6.8 12.4 17.2 16 17.2
+stroke 2.3 1
+begin
+moveTo 15.8 14.3
+lineTo 19.6 17.2
+lineTo 15.8 20.1
+close
+solid 1.6 1
+restore
+restore
+# shuffle -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.2 17.2
+cubicTo 9 17.2 12.4 6.8 17.62 6.8
+stroke 2.3 1
+begin
+moveTo 17.42 3.9
+lineTo 21.22 6.8
+lineTo 17.42 9.7
+close
+solid 1.6 1
+begin
+moveTo 3.2 6.8
+cubicTo 9 6.8 12.4 17.2 17.62 17.2
+stroke 2.3 1
+begin
+moveTo 17.42 14.3
+lineTo 21.22 17.2
+lineTo 17.42 20.1
+close
+solid 1.6 1
+restore
+restore
+# shuffle 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.2 17.2
+cubicTo 9.9946 17.2 13.3946 6.8 18.4728 6.8
+stroke 2.3 1
+begin
+moveTo 18.2728 3.9
+lineTo 22.0728 6.8
+lineTo 18.2728 9.7
+close
+solid 1.6 1
+begin
+moveTo 3.2 6.8
+cubicTo 9.9946 6.8 13.3946 17.2 18.4728 17.2
+stroke 2.3 1
+begin
+moveTo 18.2728 14.3
+lineTo 22.0728 17.2
+lineTo 18.2728 20.1
+close
+solid 1.6 1
+restore
+restore
+# shuffle 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.2 17.2
+cubicTo 9 17.2 12.4 6.8 18.4728 6.8
+stroke 2.3 1
+begin
+moveTo 18.2728 3.9
+lineTo 22.0728 6.8
+lineTo 18.2728 9.7
+close
+solid 1.6 1
+begin
+moveTo 3.2 6.8
+cubicTo 9 6.8 12.4 17.2 18.4728 17.2
+stroke 2.3 1
+begin
+moveTo 18.2728 14.3
+lineTo 22.0728 17.2
+lineTo 18.2728 20.1
+close
+solid 1.6 1
+restore
+restore
+# shuffle 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.2 17.2
+cubicTo 9.072 17.2 12.472 6.8 17.2 6.8
+stroke 2.3 1
+begin
+moveTo 17 3.9
+lineTo 20.8 6.8
+lineTo 17 9.7
+close
+solid 1.6 1
+begin
+moveTo 3.2 6.8
+cubicTo 9.072 6.8 12.472 17.2 17.2 17.2
+stroke 2.3 1
+begin
+moveTo 17 14.3
+lineTo 20.8 17.2
+lineTo 17 20.1
+close
+solid 1.6 1
+restore
+restore
+# next 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.2 9.445
+lineTo 7.9 8.5
+arc 7.9 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 3.8 15.01
+lineTo 8 14.2
+arc 8 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 10 6
+lineTo 19.2 12
+lineTo 10 18
+close
+solid 1.6 1
+restore
+restore
+# next 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.7 9.445
+lineTo 7.26 8.5
+arc 7.26 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 5.3 15.01
+lineTo 7.36 14.2
+arc 7.36 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 8.4 6
+lineTo 17.6 12
+lineTo 8.4 18
+close
+solid 1.6 1
+restore
+restore
+# next -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.675 9.445
+lineTo 8.124 8.5
+arc 8.124 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 3.275 15.01
+lineTo 8.224 14.2
+arc 8.224 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 10.56 6
+lineTo 19.76 12
+lineTo 10.56 18
+close
+solid 1.6 1
+restore
+restore
+# next 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 0.0787 9.445
+lineTo 8.6354 8.5
+arc 8.6354 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 1.6787 15.01
+lineTo 8.7354 14.2
+arc 8.7354 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 9.7878 6.5
+lineTo 18.7878 12
+lineTo 9.7878 17.5
+close
+solid 1.6 0.1082
+begin
+moveTo 11.8385 6
+lineTo 21.0385 12
+lineTo 11.8385 18
+close
+solid 1.6 1
+restore
+restore
+# next 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 0.0787 9.445
+lineTo 8.6354 8.5
+arc 8.6354 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 1.6787 15.01
+lineTo 8.7354 14.2
+arc 8.7354 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 7.4385 6.5
+lineTo 16.4385 12
+lineTo 7.4385 17.5
+close
+solid 1.6 0.35
+begin
+moveTo 11.8385 6
+lineTo 21.0385 12
+lineTo 11.8385 18
+close
+solid 1.6 1
+restore
+restore
+# next 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.2 9.445
+lineTo 7.9 8.5
+arc 7.9 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 3.8 15.01
+lineTo 8 14.2
+arc 8 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 10 6
+lineTo 19.2 12
+lineTo 10 18
+close
+solid 1.6 1
+restore
+restore
+# previous 0 1 0
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.2 9.445
+lineTo 7.9 8.5
+arc 7.9 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 3.8 15.01
+lineTo 8 14.2
+arc 8 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 10 6
+lineTo 19.2 12
+lineTo 10 18
+close
+solid 1.6 1
+restore
+restore
+# previous 1 1 0
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.7 9.445
+lineTo 7.26 8.5
+arc 7.26 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 5.3 15.01
+lineTo 7.36 14.2
+arc 7.36 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 8.4 6
+lineTo 17.6 12
+lineTo 8.4 18
+close
+solid 1.6 1
+restore
+restore
+# previous -0.35 1 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.675 9.445
+lineTo 8.124 8.5
+arc 8.124 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 3.275 15.01
+lineTo 8.224 14.2
+arc 8.224 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 10.56 6
+lineTo 19.76 12
+lineTo 10.56 18
+close
+solid 1.6 1
+restore
+restore
+# previous 0 0.1 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 0.0787 9.445
+lineTo 8.6354 8.5
+arc 8.6354 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 1.6787 15.01
+lineTo 8.7354 14.2
+arc 8.7354 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 9.7878 6.5
+lineTo 18.7878 12
+lineTo 9.7878 17.5
+close
+solid 1.6 0.1082
+begin
+moveTo 11.8385 6
+lineTo 21.0385 12
+lineTo 11.8385 18
+close
+solid 1.6 1
+restore
+restore
+# previous 0 0.3 0.5
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 0.0787 9.445
+lineTo 8.6354 8.5
+arc 8.6354 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 1.6787 15.01
+lineTo 8.7354 14.2
+arc 8.7354 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 7.4385 6.5
+lineTo 16.4385 12
+lineTo 7.4385 17.5
+close
+solid 1.6 0.35
+begin
+moveTo 11.8385 6
+lineTo 21.0385 12
+lineTo 11.8385 18
+close
+solid 1.6 1
+restore
+restore
+# previous 0 0.6 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.2 9.445
+lineTo 7.9 8.5
+arc 7.9 9.2 0.7 -90 180
+close
+fill 0.75
+begin
+moveTo 3.8 15.01
+lineTo 8 14.2
+arc 8 14.8 0.6 -90 180
+close
+fill 0.5
+begin
+moveTo 10 6
+lineTo 19.2 12
+lineTo 10 18
+close
+solid 1.6 1
+restore
+restore
+# error 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+roundRect 10.9 6.8 13.1 13.2 1
+fill 1
+begin
+circle 12 16.8 1.35
+fill 1
+restore
+restore
+# error 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+roundRect 10.9 6.8 13.1 13.2 1
+fill 1
+begin
+circle 12 16.8 1.35
+fill 1
+restore
+restore
+# error -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+roundRect 10.9 6.8 13.1 13.2 1
+fill 1
+begin
+circle 12 16.8 1.35
+fill 1
+restore
+restore
+# error 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+roundRect 10.9 6.8 13.1 13.2 1
+fill 1
+begin
+circle 12 16.8 1.35
+fill 1
+restore
+restore
+# error 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+roundRect 10.9 6.8 13.1 13.2 1
+fill 1
+begin
+circle 12 16.8 1.35
+fill 1
+restore
+restore
+# error 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+roundRect 10.9 6.8 13.1 13.2 1
+fill 1
+begin
+circle 12 16.8 1.35
+fill 1
+restore
+restore
+# alert 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 5 13.1 14 1
+fill 1
+begin
+circle 12 18.6 1.35
+fill 1
+restore
+restore
+# alert 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 5 13.1 14 1
+fill 1
+begin
+circle 12 18.6 1.35
+fill 1
+restore
+restore
+# alert -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 5 13.1 14 1
+fill 1
+begin
+circle 12 18.6 1.35
+fill 1
+restore
+restore
+# alert 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 5 13.1 14 1
+fill 1
+begin
+circle 12 18.6 1.35
+fill 1
+restore
+restore
+# alert 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 5 13.1 14 1
+fill 1
+begin
+circle 12 18.6 1.35
+fill 1
+restore
+restore
+# alert 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 5 13.1 14 1
+fill 1
+begin
+circle 12 18.6 1.35
+fill 1
+restore
+restore
+# warning 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.8
+lineTo 21 19.6
+lineTo 3 19.6
+close
+stroke 2.1 1
+begin
+roundRect 10.9 9.4 13.1 14.2 1
+fill 1
+begin
+circle 12 17 1.35
+fill 1
+restore
+restore
+# warning 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.8
+lineTo 21 19.6
+lineTo 3 19.6
+close
+stroke 2.1 1
+begin
+roundRect 10.9 9.4 13.1 14.2 1
+fill 1
+begin
+circle 12 17 1.35
+fill 1
+restore
+restore
+# warning -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.8
+lineTo 21 19.6
+lineTo 3 19.6
+close
+stroke 2.1 1
+begin
+roundRect 10.9 9.4 13.1 14.2 1
+fill 1
+begin
+circle 12 17 1.35
+fill 1
+restore
+restore
+# warning 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.8
+lineTo 21 19.6
+lineTo 3 19.6
+close
+stroke 2.1 1
+begin
+roundRect 10.9 9.4 13.1 14.2 1
+fill 1
+begin
+circle 12 17 1.35
+fill 1
+restore
+restore
+# warning 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.8
+lineTo 21 19.6
+lineTo 3 19.6
+close
+stroke 2.1 1
+begin
+roundRect 10.9 9.4 13.1 14.2 1
+fill 1
+begin
+circle 12 17 1.35
+fill 1
+restore
+restore
+# warning 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 12 3.8
+lineTo 21 19.6
+lineTo 3 19.6
+close
+stroke 2.1 1
+begin
+roundRect 10.9 9.4 13.1 14.2 1
+fill 1
+begin
+circle 12 17 1.35
+fill 1
+restore
+restore
+# info 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 10.6 13.1 17.4 1
+fill 1
+begin
+circle 12 6.8 1.35
+fill 1
+restore
+restore
+# info 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 10.6 13.1 17.4 1
+fill 1
+begin
+circle 12 6.8 1.35
+fill 1
+restore
+restore
+# info -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 10.6 13.1 17.4 1
+fill 1
+begin
+circle 12 6.8 1.35
+fill 1
+restore
+restore
+# info 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 10.6 13.1 17.4 1
+fill 1
+begin
+circle 12 6.8 1.35
+fill 1
+restore
+restore
+# info 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 10.6 13.1 17.4 1
+fill 1
+begin
+circle 12 6.8 1.35
+fill 1
+restore
+restore
+# info 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 10.9 10.6 13.1 17.4 1
+fill 1
+begin
+circle 12 6.8 1.35
+fill 1
+restore
+restore
+# equalizer 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6 3.5
+lineTo 6 20.5
+stroke 1.9 0.55
+begin
+roundRect 3.4 12.3 8.6 15.7 1.1
+fill 1
+begin
+moveTo 12 3.5
+lineTo 12 20.5
+stroke 1.9 0.55
+begin
+roundRect 9.4 6.3 14.6 9.7 1.1
+fill 1
+begin
+moveTo 18 3.5
+lineTo 18 20.5
+stroke 1.9 0.55
+begin
+roundRect 15.4 10.7 20.6 14.1 1.1
+fill 1
+restore
+restore
+# equalizer 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6 3.5
+lineTo 6 20.5
+stroke 1.9 0.55
+begin
+roundRect 3.4 12.3 8.6 15.7 1.1
+fill 1
+begin
+moveTo 12 3.5
+lineTo 12 20.5
+stroke 1.9 0.55
+begin
+roundRect 9.4 6.3 14.6 9.7 1.1
+fill 1
+begin
+moveTo 18 3.5
+lineTo 18 20.5
+stroke 1.9 0.55
+begin
+roundRect 15.4 10.7 20.6 14.1 1.1
+fill 1
+restore
+restore
+# equalizer -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6 3.5
+lineTo 6 20.5
+stroke 1.9 0.55
+begin
+roundRect 3.4 12.3 8.6 15.7 1.1
+fill 1
+begin
+moveTo 12 3.5
+lineTo 12 20.5
+stroke 1.9 0.55
+begin
+roundRect 9.4 6.3 14.6 9.7 1.1
+fill 1
+begin
+moveTo 18 3.5
+lineTo 18 20.5
+stroke 1.9 0.55
+begin
+roundRect 15.4 10.7 20.6 14.1 1.1
+fill 1
+restore
+restore
+# equalizer 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6 3.5
+lineTo 6 20.5
+stroke 1.9 0.55
+begin
+roundRect 3.4 10.6685 8.6 14.0685 1.1
+fill 1
+begin
+moveTo 12 3.5
+lineTo 12 20.5
+stroke 1.9 0.55
+begin
+roundRect 9.4 6.3 14.6 9.7 1.1
+fill 1
+begin
+moveTo 18 3.5
+lineTo 18 20.5
+stroke 1.9 0.55
+begin
+roundRect 15.4 10.7 20.6 14.1 1.1
+fill 1
+restore
+restore
+# equalizer 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6 3.5
+lineTo 6 20.5
+stroke 1.9 0.55
+begin
+roundRect 3.4 12.756 8.6 16.156 1.1
+fill 1
+begin
+moveTo 12 3.5
+lineTo 12 20.5
+stroke 1.9 0.55
+begin
+roundRect 9.4 6.5404 14.6 9.9404 1.1
+fill 1
+begin
+moveTo 18 3.5
+lineTo 18 20.5
+stroke 1.9 0.55
+begin
+roundRect 15.4 9.0685 20.6 12.4685 1.1
+fill 1
+restore
+restore
+# equalizer 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6 3.5
+lineTo 6 20.5
+stroke 1.9 0.55
+begin
+roundRect 3.4 12.2408 8.6 15.6408 1.1
+fill 1
+begin
+moveTo 12 3.5
+lineTo 12 20.5
+stroke 1.9 0.55
+begin
+roundRect 9.4 6.4168 14.6 9.8168 1.1
+fill 1
+begin
+moveTo 18 3.5
+lineTo 18 20.5
+stroke 1.9 0.55
+begin
+roundRect 15.4 10.8396 20.6 14.2396 1.1
+fill 1
+restore
+restore
+# share 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 5 18.6
+quadTo 5 20.6 7 20.6
+lineTo 17 20.6
+quadTo 19 20.6 19 18.6
+lineTo 19 12.6
+stroke 2.1 1
+begin
+moveTo 12 15.4
+lineTo 12 6
+stroke 2.3 1
+begin
+moveTo 7.8 8.6
+lineTo 12 3
+lineTo 16.2 8.6
+close
+solid 1.6 1
+restore
+restore
+# share 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 5 18.6
+quadTo 5 20.6 7 20.6
+lineTo 17 20.6
+quadTo 19 20.6 19 18.6
+lineTo 19 12.6
+stroke 2.1 1
+begin
+moveTo 12 15.4
+lineTo 12 7.2
+stroke 2.3 1
+begin
+moveTo 7.8 9.8
+lineTo 12 4.2
+lineTo 16.2 9.8
+close
+solid 1.6 1
+restore
+restore
+# share -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 5 18.6
+quadTo 5 20.6 7 20.6
+lineTo 17 20.6
+quadTo 19 20.6 19 18.6
+lineTo 19 12.6
+stroke 2.1 1
+begin
+moveTo 12 15.4
+lineTo 12 5.58
+stroke 2.3 1
+begin
+moveTo 7.8 8.18
+lineTo 12 2.58
+lineTo 16.2 8.18
+close
+solid 1.6 1
+restore
+restore
+# share 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 5 18.6
+quadTo 5 20.6 7 20.6
+lineTo 17 20.6
+quadTo 19 20.6 19 18.6
+lineTo 19 12.6
+stroke 2.1 1
+begin
+moveTo 12 15.4
+lineTo 12 3.8787
+stroke 2.3 1
+begin
+moveTo 7.8 6.4787
+lineTo 12 0.8787
+lineTo 16.2 6.4787
+close
+solid 1.6 1
+restore
+restore
+# share 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 5 18.6
+quadTo 5 20.6 7 20.6
+lineTo 17 20.6
+quadTo 19 20.6 19 18.6
+lineTo 19 12.6
+stroke 2.1 1
+begin
+moveTo 12 15.4
+lineTo 12 3.8787
+stroke 2.3 1
+begin
+moveTo 7.8 6.4787
+lineTo 12 0.8787
+lineTo 16.2 6.4787
+close
+solid 1.6 1
+restore
+restore
+# share 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 12.6
+lineTo 5 18.6
+quadTo 5 20.6 7 20.6
+lineTo 17 20.6
+quadTo 19 20.6 19 18.6
+lineTo 19 12.6
+stroke 2.1 1
+begin
+moveTo 12 15.4
+lineTo 12 6
+stroke 2.3 1
+begin
+moveTo 7.8 8.6
+lineTo 12 3
+lineTo 16.2 8.6
+close
+solid 1.6 1
+restore
+restore
+# layers 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.4 4.8 19 8.8 1.2
+fill 1
+begin
+roundRect 5.3 10 17.9 14 1.2
+fill 0.7
+begin
+roundRect 4.2 15.2 16.8 19.2 1.2
+fill 0.45
+restore
+restore
+# layers 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.4 4.8 19 8.8 1.2
+fill 1
+begin
+roundRect 5.3 10 17.9 14 1.2
+fill 0.7
+begin
+roundRect 4.2 15.2 16.8 19.2 1.2
+fill 0.45
+restore
+restore
+# layers -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.4 4.8 19 8.8 1.2
+fill 1
+begin
+roundRect 5.3 10 17.9 14 1.2
+fill 0.7
+begin
+roundRect 4.2 15.2 16.8 19.2 1.2
+fill 0.45
+restore
+restore
+# layers 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.4 4.8 19 8.8 1.2
+fill 1
+begin
+roundRect 5.3 10 17.9 14 1.2
+fill 0.7
+begin
+roundRect 4.2 15.2 16.8 19.2 1.2
+fill 0.45
+restore
+restore
+# layers 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.4 4.8 19 8.8 1.2
+fill 1
+begin
+roundRect 5.3 10 17.9 14 1.2
+fill 0.7
+begin
+roundRect 4.2 15.2 16.8 19.2 1.2
+fill 0.45
+restore
+restore
+# layers 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.4 4.8 19 8.8 1.2
+fill 1
+begin
+roundRect 5.3 10 17.9 14 1.2
+fill 0.7
+begin
+roundRect 4.2 15.2 16.8 19.2 1.2
+fill 0.45
+restore
+restore
+# check-circle 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+moveTo 7.8 12.4
+lineTo 10.8 15.4
+lineTo 16.4 8.8
+strokeTrim 2.3 1
+restore
+restore
+# check-circle 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+begin
+moveTo 7.8 12.4
+lineTo 10.8 15.4
+lineTo 16.4 8.8
+strokeTrim 2.3 1
+restore
+restore
+# check-circle -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.22
+stroke 2.1 1
+begin
+moveTo 7.8 12.4
+lineTo 10.8 15.4
+lineTo 16.4 8.8
+strokeTrim 2.3 1
+restore
+restore
+# check-circle 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.22
+stroke 2.1 1
+begin
+moveTo 7.8 12.4
+lineTo 10.8 15.4
+lineTo 16.4 8.8
+strokeTrim 2.3 0.5295
+restore
+restore
+# check-circle 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.11
+stroke 2.1 1
+begin
+moveTo 7.8 12.4
+lineTo 10.8 15.4
+lineTo 16.4 8.8
+strokeTrim 2.3 0.963
+restore
+restore
+# check-circle 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.22
+stroke 2.1 1
+begin
+moveTo 7.8 12.4
+lineTo 10.8 15.4
+lineTo 16.4 8.8
+strokeTrim 2.3 1
+restore
+restore
+# circle 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+restore
+restore
+# circle 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+stroke 2.1 1
+restore
+restore
+# circle -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.22
+stroke 2.1 1
+restore
+restore
+# circle 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.22
+stroke 2.1 1
+restore
+restore
+# circle 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.11
+stroke 2.1 1
+restore
+restore
+# circle 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 12 12 9
+fill 0.22
+stroke 2.1 1
+restore
+restore
+# font 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 20
+lineTo 12 4
+lineTo 19.4 20
+moveTo 7.8 14.4
+lineTo 16.2 14.4
+stroke 2.3 1
+restore
+restore
+# font 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 20
+lineTo 12 4
+lineTo 19.4 20
+moveTo 7.8 14.4
+lineTo 16.2 14.4
+stroke 2.3 1
+restore
+restore
+# font -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 20
+lineTo 12 4
+lineTo 19.4 20
+moveTo 7.8 14.4
+lineTo 16.2 14.4
+stroke 2.3 1
+restore
+restore
+# font 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 20
+lineTo 12 4
+lineTo 19.4 20
+moveTo 7.8 14.4
+lineTo 16.2 14.4
+stroke 2.3 1
+restore
+restore
+# font 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 20
+lineTo 12 4
+lineTo 19.4 20
+moveTo 7.8 14.4
+lineTo 16.2 14.4
+stroke 2.3 1
+restore
+restore
+# font 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 20
+lineTo 12 4
+lineTo 19.4 20
+moveTo 7.8 14.4
+lineTo 16.2 14.4
+stroke 2.3 1
+restore
+restore
+# stardust 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 10.4 5.4
+quadTo 11.616 11.784 18 13
+quadTo 11.616 14.216 10.4 20.6
+quadTo 9.184 14.216 2.8 13
+quadTo 9.184 11.784 10.4 5.4
+close
+fill 1
+begin
+moveTo 18.6 2
+quadTo 19.112 4.688 21.8 5.2
+quadTo 19.112 5.712 18.6 8.4
+quadTo 18.088 5.712 15.4 5.2
+quadTo 18.088 4.688 18.6 2
+close
+fill 0.7
+restore
+restore
+# stardust 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 10.4 5.4
+quadTo 11.616 11.784 18 13
+quadTo 11.616 14.216 10.4 20.6
+quadTo 9.184 14.216 2.8 13
+quadTo 9.184 11.784 10.4 5.4
+close
+fill 1
+begin
+moveTo 18.6 2
+quadTo 19.112 4.688 21.8 5.2
+quadTo 19.112 5.712 18.6 8.4
+quadTo 18.088 5.712 15.4 5.2
+quadTo 18.088 4.688 18.6 2
+close
+fill 0.7
+restore
+restore
+# stardust -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 10.4 5.4
+quadTo 11.616 11.784 18 13
+quadTo 11.616 14.216 10.4 20.6
+quadTo 9.184 14.216 2.8 13
+quadTo 9.184 11.784 10.4 5.4
+close
+fill 1
+begin
+moveTo 18.6 2
+quadTo 19.112 4.688 21.8 5.2
+quadTo 19.112 5.712 18.6 8.4
+quadTo 18.088 5.712 15.4 5.2
+quadTo 18.088 4.688 18.6 2
+close
+fill 0.7
+restore
+restore
+# stardust 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 10.4 3.6174
+quadTo 11.9012 11.4988 19.7826 13
+quadTo 11.9012 14.5012 10.4 22.3826
+quadTo 8.8988 14.5012 1.0174 13
+quadTo 8.8988 11.4988 10.4 3.6174
+close
+fill 1
+begin
+moveTo 18.6 2
+quadTo 19.112 4.688 21.8 5.2
+quadTo 19.112 5.712 18.6 8.4
+quadTo 18.088 5.712 15.4 5.2
+quadTo 18.088 4.688 18.6 2
+close
+fill 0.7
+restore
+restore
+# stardust 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 10.4 4.4107
+quadTo 11.7743 11.6257 18.9893 13
+quadTo 11.7743 14.3743 10.4 21.5893
+quadTo 9.0257 14.3743 1.8107 13
+quadTo 9.0257 11.6257 10.4 4.4107
+close
+fill 1
+begin
+moveTo 18.6 0.591
+quadTo 19.3374 4.4626 23.209 5.2
+quadTo 19.3374 5.9374 18.6 9.809
+quadTo 17.8626 5.9374 13.991 5.2
+quadTo 17.8626 4.4626 18.6 0.591
+close
+fill 0.7
+restore
+restore
+# stardust 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 10.4 5.4
+quadTo 11.616 11.784 18 13
+quadTo 11.616 14.216 10.4 20.6
+quadTo 9.184 14.216 2.8 13
+quadTo 9.184 11.784 10.4 5.4
+close
+fill 1
+begin
+moveTo 18.6 2
+quadTo 19.112 4.688 21.8 5.2
+quadTo 19.112 5.712 18.6 8.4
+quadTo 18.088 5.712 15.4 5.2
+quadTo 18.088 4.688 18.6 2
+close
+fill 0.7
+restore
+restore
+# aurora 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 8
+cubicTo 8 3.4 13 10.8 21 5.8
+stroke 2.2 1
+begin
+moveTo 3 13.6
+cubicTo 8 9 13 16.4 21 11.4
+stroke 2.2 0.72
+begin
+moveTo 3 19.2
+cubicTo 8 14.6 13 22 21 17
+stroke 2.2 0.45
+restore
+restore
+# aurora 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 8
+cubicTo 8 3.4 13 10.8 21 5.8
+stroke 2.2 1
+begin
+moveTo 3 13.6
+cubicTo 8 9 13 16.4 21 11.4
+stroke 2.2 0.72
+begin
+moveTo 3 19.2
+cubicTo 8 14.6 13 22 21 17
+stroke 2.2 0.45
+restore
+restore
+# aurora -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 8
+cubicTo 8 3.4 13 10.8 21 5.8
+stroke 2.2 1
+begin
+moveTo 3 13.6
+cubicTo 8 9 13 16.4 21 11.4
+stroke 2.2 0.72
+begin
+moveTo 3 19.2
+cubicTo 8 14.6 13 22 21 17
+stroke 2.2 0.45
+restore
+restore
+# aurora 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 8
+cubicTo 9.6878 3.4 14.6878 10.8 21 5.8
+stroke 2.2 1
+begin
+moveTo 3 13.6
+cubicTo 9.1815 9 14.1815 16.4 21 11.4
+stroke 2.2 0.72
+begin
+moveTo 3 19.2
+cubicTo 8.6751 14.6 13.6751 22 21 17
+stroke 2.2 0.45
+restore
+restore
+# aurora 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 8
+cubicTo 7.635 3.4 12.635 10.8 21 5.8
+stroke 2.2 1
+begin
+moveTo 3 13.6
+cubicTo 7.7445 9 12.7445 16.4 21 11.4
+stroke 2.2 0.72
+begin
+moveTo 3 19.2
+cubicTo 7.854 14.6 12.854 22 21 17
+stroke 2.2 0.45
+restore
+restore
+# aurora 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 8
+cubicTo 8.1223 3.4 13.1223 10.8 21 5.8
+stroke 2.2 1
+begin
+moveTo 3 13.6
+cubicTo 8.0856 9 13.0856 16.4 21 11.4
+stroke 2.2 0.72
+begin
+moveTo 3 19.2
+cubicTo 8.0489 14.6 13.0489 22 21 17
+stroke 2.2 0.45
+restore
+restore
+# neon 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 15.4
+lineTo 7.6 8.4
+lineTo 12.2 15.4
+lineTo 16.8 8.4
+lineTo 21 13
+stroke 5.4 0.18
+stroke 2.3 1
+restore
+restore
+# neon 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 15.4
+lineTo 7.6 8.4
+lineTo 12.2 15.4
+lineTo 16.8 8.4
+lineTo 21 13
+stroke 5.4 0.18
+stroke 2.3 1
+restore
+restore
+# neon -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 15.4
+lineTo 7.6 8.4
+lineTo 12.2 15.4
+lineTo 16.8 8.4
+lineTo 21 13
+stroke 5.4 0.18
+stroke 2.3 1
+restore
+restore
+# neon 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 15.4
+lineTo 7.6 8.4
+lineTo 12.2 15.4
+lineTo 16.8 8.4
+lineTo 21 13
+stroke 5.4 0.0757
+stroke 2.3 0.4204
+restore
+restore
+# neon 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 15.4
+lineTo 7.6 8.4
+lineTo 12.2 15.4
+lineTo 16.8 8.4
+lineTo 21 13
+stroke 5.4 0.252
+stroke 2.3 1
+restore
+restore
+# neon 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 15.4
+lineTo 7.6 8.4
+lineTo 12.2 15.4
+lineTo 16.8 8.4
+lineTo 21 13
+stroke 5.4 0.18
+stroke 2.3 1
+restore
+restore
+# ember 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+scale 1 1 12 20.5
+begin
+moveTo 12 3
+cubicTo 16.2 7.8 18.6 11 18.6 14.4
+cubicTo 18.6 18 15.6 20.8 12 20.8
+cubicTo 8.4 20.8 5.4 18 5.4 14.4
+cubicTo 5.4 11.6 7.2 9.6 8.8 8.2
+cubicTo 9.2 10.6 10.4 11.6 11.6 12
+cubicTo 10.8 9 11 6 12 3
+close
+fill 1
+restore
+restore
+# ember 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+scale 1 1 12 20.5
+begin
+moveTo 12 3
+cubicTo 16.2 7.8 18.6 11 18.6 14.4
+cubicTo 18.6 18 15.6 20.8 12 20.8
+cubicTo 8.4 20.8 5.4 18 5.4 14.4
+cubicTo 5.4 11.6 7.2 9.6 8.8 8.2
+cubicTo 9.2 10.6 10.4 11.6 11.6 12
+cubicTo 10.8 9 11 6 12 3
+close
+fill 1
+restore
+restore
+# ember -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+scale 1 1 12 20.5
+begin
+moveTo 12 3
+cubicTo 16.2 7.8 18.6 11 18.6 14.4
+cubicTo 18.6 18 15.6 20.8 12 20.8
+cubicTo 8.4 20.8 5.4 18 5.4 14.4
+cubicTo 5.4 11.6 7.2 9.6 8.8 8.2
+cubicTo 9.2 10.6 10.4 11.6 11.6 12
+cubicTo 10.8 9 11 6 12 3
+close
+fill 1
+restore
+restore
+# ember 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+scale 0.948 1.1212 12 20.5
+begin
+moveTo 12 3
+cubicTo 16.2 7.8 18.6 11 18.6 14.4
+cubicTo 18.6 18 15.6 20.8 12 20.8
+cubicTo 8.4 20.8 5.4 18 5.4 14.4
+cubicTo 5.4 11.6 7.2 9.6 8.8 8.2
+cubicTo 9.2 10.6 10.4 11.6 11.6 12
+cubicTo 10.8 9 11 6 12 3
+close
+fill 1
+restore
+restore
+# ember 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+scale 1 1 12 20.5
+begin
+moveTo 12 3
+cubicTo 16.2 7.8 18.6 11 18.6 14.4
+cubicTo 18.6 18 15.6 20.8 12 20.8
+cubicTo 8.4 20.8 5.4 18 5.4 14.4
+cubicTo 5.4 11.6 7.2 9.6 8.8 8.2
+cubicTo 9.2 10.6 10.4 11.6 11.6 12
+cubicTo 10.8 9 11 6 12 3
+close
+fill 1
+restore
+restore
+# ember 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+scale 1 1 12 20.5
+begin
+moveTo 12 3
+cubicTo 16.2 7.8 18.6 11 18.6 14.4
+cubicTo 18.6 18 15.6 20.8 12 20.8
+cubicTo 8.4 20.8 5.4 18 5.4 14.4
+cubicTo 5.4 11.6 7.2 9.6 8.8 8.2
+cubicTo 9.2 10.6 10.4 11.6 11.6 12
+cubicTo 10.8 9 11 6 12 3
+close
+fill 1
+restore
+restore
+# silk 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 9
+cubicTo 8 4 12 14 21 7.2
+stroke 2.3 1
+begin
+moveTo 3 15
+cubicTo 8 10 12 20 21 13.2
+stroke 1.8 0.6
+restore
+restore
+# silk 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 9
+cubicTo 8 4 12 14 21 7.2
+stroke 2.3 1
+begin
+moveTo 3 15
+cubicTo 8 10 12 20 21 13.2
+stroke 1.8 0.6
+restore
+restore
+# silk -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 9
+cubicTo 8 4 12 14 21 7.2
+stroke 2.3 1
+begin
+moveTo 3 15
+cubicTo 8 10 12 20 21 13.2
+stroke 1.8 0.6
+restore
+restore
+# silk 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 9
+cubicTo 9.6878 4 10.3122 14 21 7.2
+stroke 2.3 1
+begin
+moveTo 3 15
+cubicTo 9.6878 10 10.3122 20 21 13.2
+stroke 1.8 0.6
+restore
+restore
+# silk 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 9
+cubicTo 7.635 4 12.365 14 21 7.2
+stroke 2.3 1
+begin
+moveTo 3 15
+cubicTo 7.635 10 12.365 20 21 13.2
+stroke 1.8 0.6
+restore
+restore
+# silk 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3 9
+cubicTo 8.1223 4 11.8777 14 21 7.2
+stroke 2.3 1
+begin
+moveTo 3 15
+cubicTo 8.1223 10 11.8777 20 21 13.2
+stroke 1.8 0.6
+restore
+restore
+# columns 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 9.4 7.8 20.4 1.2
+fill 0.55
+begin
+roundRect 10 4 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 12.2 19.4 20.4 1.2
+fill 0.55
+restore
+restore
+# columns 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 9.4 7.8 20.4 1.2
+fill 0.55
+begin
+roundRect 10 4 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 12.2 19.4 20.4 1.2
+fill 0.55
+restore
+restore
+# columns -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 9.4 7.8 20.4 1.2
+fill 0.55
+begin
+roundRect 10 4 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 12.2 19.4 20.4 1.2
+fill 0.55
+restore
+restore
+# columns 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 8.0419 7.8 20.4 1.2
+fill 0.55
+begin
+roundRect 10 2.8278 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 12.2 19.4 20.4 1.2
+fill 0.55
+restore
+restore
+# columns 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 9.7203 7.8 20.4 1.2
+fill 0.55
+begin
+roundRect 10 4.4553 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 11.6503 19.4 20.4 1.2
+fill 0.55
+restore
+restore
+# columns 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.2 9.4 7.8 20.4 1.2
+fill 0.55
+begin
+roundRect 10 3.9297 13.6 20.4 1.2
+fill 1
+begin
+roundRect 15.8 12.1165 19.4 20.4 1.2
+fill 0.55
+restore
+restore
+# caustics 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.4 12
+cubicTo 5.4 4.6 8.6 4.6 12 12
+cubicTo 15.4 19.4 18.6 19.4 21.6 12
+stroke 2.3 1
+restore
+restore
+# caustics 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.4 12
+cubicTo 5.4 4.6 8.6 4.6 12 12
+cubicTo 15.4 19.4 18.6 19.4 21.6 12
+stroke 2.3 1
+restore
+restore
+# caustics -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.4 12
+cubicTo 5.4 4.6 8.6 4.6 12 12
+cubicTo 15.4 19.4 18.6 19.4 21.6 12
+stroke 2.3 1
+restore
+restore
+# caustics 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.4 12
+cubicTo 5.4 6.2878 8.6 6.2878 12 12
+cubicTo 15.4 17.7122 18.6 17.7122 21.6 12
+stroke 2.3 1
+restore
+restore
+# caustics 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.4 12
+cubicTo 5.4 4.235 8.6 4.235 12 12
+cubicTo 15.4 19.765 18.6 19.765 21.6 12
+stroke 2.3 1
+restore
+restore
+# caustics 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.4 12
+cubicTo 5.4 4.7223 8.6 4.7223 12 12
+cubicTo 15.4 19.2777 18.6 19.2777 21.6 12
+stroke 2.3 1
+restore
+restore
+# refraction 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 4.6 9.2
+lineTo 8.8 4.4
+lineTo 15.2 4.4
+lineTo 19.4 9.2
+lineTo 12 20.2
+close
+stroke 2.1 1
+begin
+moveTo 4.6 9.2
+lineTo 19.4 9.2
+moveTo 8.8 4.4
+lineTo 12 9.2
+lineTo 15.2 4.4
+moveTo 12 9.2
+lineTo 12 20.2
+stroke 1.5 0.6
+restore
+restore
+# refraction 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 4.6 9.2
+lineTo 8.8 4.4
+lineTo 15.2 4.4
+lineTo 19.4 9.2
+lineTo 12 20.2
+close
+stroke 2.1 1
+begin
+moveTo 4.6 9.2
+lineTo 19.4 9.2
+moveTo 8.8 4.4
+lineTo 12 9.2
+lineTo 15.2 4.4
+moveTo 12 9.2
+lineTo 12 20.2
+stroke 1.5 0.6
+restore
+restore
+# refraction -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+moveTo 4.6 9.2
+lineTo 8.8 4.4
+lineTo 15.2 4.4
+lineTo 19.4 9.2
+lineTo 12 20.2
+close
+stroke 2.1 1
+begin
+moveTo 4.6 9.2
+lineTo 19.4 9.2
+moveTo 8.8 4.4
+lineTo 12 9.2
+lineTo 15.2 4.4
+moveTo 12 9.2
+lineTo 12 20.2
+stroke 1.5 0.6
+restore
+restore
+# refraction 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 4.3508 12 12
+begin
+moveTo 4.6 9.2
+lineTo 8.8 4.4
+lineTo 15.2 4.4
+lineTo 19.4 9.2
+lineTo 12 20.2
+close
+stroke 2.1 1
+begin
+moveTo 4.6 9.2
+lineTo 19.4 9.2
+moveTo 8.8 4.4
+lineTo 12 9.2
+lineTo 15.2 4.4
+moveTo 12 9.2
+lineTo 12 20.2
+stroke 1.5 0.6
+restore
+restore
+# refraction 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -1.216 12 12
+begin
+moveTo 4.6 9.2
+lineTo 8.8 4.4
+lineTo 15.2 4.4
+lineTo 19.4 9.2
+lineTo 12 20.2
+close
+stroke 2.1 1
+begin
+moveTo 4.6 9.2
+lineTo 19.4 9.2
+moveTo 8.8 4.4
+lineTo 12 9.2
+lineTo 15.2 4.4
+moveTo 12 9.2
+lineTo 12 20.2
+stroke 1.5 0.6
+restore
+restore
+# refraction 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0.158 12 12
+begin
+moveTo 4.6 9.2
+lineTo 8.8 4.4
+lineTo 15.2 4.4
+lineTo 19.4 9.2
+lineTo 12 20.2
+close
+stroke 2.1 1
+begin
+moveTo 4.6 9.2
+lineTo 19.4 9.2
+moveTo 8.8 4.4
+lineTo 12 9.2
+lineTo 15.2 4.4
+moveTo 12 9.2
+lineTo 12 20.2
+stroke 1.5 0.6
+restore
+restore
+# tab-home 0 1 0
+save
+scale 1 1 12 12
+save
+translate 12 12
+skewX 0
+scale 1 1 0 0
+scale 0.032 0.032 0 0
+translate -503 -511
+begin
+svgPath 313
+fill 1
+restore
+restore
+# tab-home 1 1 0
+save
+scale 1 1 12 12
+save
+translate 10.8 12
+skewX 0.2493
+scale 0.9 1 0 0
+scale 0.032 0.032 0 0
+translate -503 -511
+begin
+svgPath 313
+fill 1
+restore
+restore
+# tab-home -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 12.42 12
+skewX -0.0857
+scale 1.035 1 0 0
+scale 0.032 0.032 0 0
+translate -503 -511
+begin
+svgPath 313
+fill 1
+restore
+restore
+# tab-home 0 0.1 1
+save
+scale 1 1 12 12
+begin
+moveTo -0.0931 9.41
+lineTo 7 8.6
+arc 7 9.2 0.6 -90 180
+close
+fill 0.3233
+begin
+moveTo 1.3069 14.9925
+lineTo 7.85 14.25
+arc 7.85 14.8 0.55 -90 180
+close
+fill 0.2351
+save
+translate 12.8229 12
+skewX -0.1133
+scale 1.0705 1 0 0
+scale 0.032 0.032 0 0
+translate -503 -511
+begin
+svgPath 313
+fill 1
+restore
+restore
+# tab-home 0 0.3 0.5
+save
+scale 1 1 12 12
+begin
+moveTo -0.8923 9.41
+lineTo 7 8.6
+arc 7 9.2 0.6 -90 180
+close
+fill 0.5231
+begin
+moveTo 0.5077 14.9925
+lineTo 7.85 14.25
+arc 7.85 14.8 0.55 -90 180
+close
+fill 0.3804
+save
+translate 13.3315 12
+skewX -0.1846
+scale 1.1141 1 0 0
+scale 0.032 0.032 0 0
+translate -503 -511
+begin
+svgPath 313
+fill 1
+restore
+restore
+# tab-home 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 12 12
+skewX 0
+scale 1 1 0 0
+scale 0.032 0.032 0 0
+translate -503 -511
+begin
+svgPath 313
+fill 1
+restore
+restore
+# tab-library 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.2 4.6 19.2 8.8 1.2
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 5 10 18 14.2 1.2
+fill 0.7
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.8 15.4 16.8 19.6 1.2
+fill 0.45
+restore
+restore
+# tab-library 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.9 4.6 17.9 8.8 1.2
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.31 10 16.31 14.2 1.2
+fill 0.7
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 1.72 15.4 14.72 19.6 1.2
+fill 0.45
+restore
+restore
+# tab-library -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.655 4.6 19.655 8.8 1.2
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 5.5915 10 18.5915 14.2 1.2
+fill 0.7
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 4.528 15.4 17.528 19.6 1.2
+fill 0.45
+restore
+restore
+# tab-library 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8483 6.8575
+lineTo 6.2864 6.25
+arc 6.2864 6.7 0.45 -90 180
+close
+fill 0.4389
+begin
+roundRect 7.6364 4.6 20.6364 8.8 1.2
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 5 10 18 14.2 1.2
+fill 0.7
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.8 15.4 16.8 19.6 1.2
+fill 0.45
+restore
+restore
+# tab-library 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6828 6.8575
+lineTo 5.5002 6.25
+arc 5.5002 6.7 0.45 -90 180
+close
+fill 0.1987
+begin
+roundRect 6.8502 4.6 19.8502 8.8 1.2
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 0.9603 12.2575
+lineTo 5.3813 11.65
+arc 5.3813 12.1 0.45 -90 180
+close
+fill 0.529
+begin
+roundRect 6.7313 10 19.7313 14.2 1.2
+fill 0.7
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 0.4483 17.6575
+lineTo 3.8864 17.05
+arc 3.8864 17.5 0.45 -90 180
+close
+fill 0.4389
+begin
+roundRect 5.2364 15.4 18.2364 19.6 1.2
+fill 0.45
+restore
+restore
+# tab-library 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 6.2 4.6 19.2 8.8 1.2
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 5 10 18 14.2 1.2
+fill 0.7
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 3.8 15.4 16.8 19.6 1.2
+fill 0.45
+restore
+restore
+# tab-search 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 14.4 10.4 5
+stroke 2.5 1
+begin
+moveTo 18.3598 14.3598
+lineTo 21.5598 17.5598
+stroke 2.7 1
+begin
+moveTo 1.6 8.6625
+lineTo 6.45 7.65
+arc 6.45 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 3.4 12.8275
+lineTo 6.55 11.95
+arc 6.55 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# tab-search 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 13 10.4 4.7
+stroke 2.5 1
+begin
+moveTo 16.7477 14.1477
+lineTo 18.9877 16.3877
+stroke 2.7 1
+begin
+moveTo 3.2 8.6625
+lineTo 5.35 7.65
+arc 5.35 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 5 12.8275
+lineTo 5.45 11.95
+arc 5.45 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# tab-search -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 14.89 10.4 5.105
+fill 0.22
+stroke 2.5 1
+begin
+moveTo 18.924 14.434
+lineTo 22.46 17.97
+stroke 2.7 1
+begin
+moveTo 1.04 8.6625
+lineTo 6.835 7.65
+arc 6.835 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 2.84 12.8275
+lineTo 6.935 11.95
+arc 6.935 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# tab-search 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 15.4285 10.4 5
+fill 0.22
+stroke 2.5 1
+begin
+moveTo 19.3883 14.3598
+lineTo 22.5883 17.5598
+stroke 2.7 1
+begin
+moveTo -0.0712 8.6625
+lineTo 7.4785 7.65
+arc 7.4785 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 1.7288 12.8275
+lineTo 7.5785 11.95
+arc 7.5785 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# tab-search 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 15.7856 10.4 5
+fill 0.11
+stroke 2.5 1
+begin
+moveTo 19.7454 14.3598
+lineTo 22.9454 17.5598
+stroke 2.7 1
+begin
+moveTo -0.6517 8.6625
+lineTo 7.8356 7.65
+arc 7.8356 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 1.1483 12.8275
+lineTo 7.9356 11.95
+arc 7.9356 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# tab-search 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+circle 14.3301 10.4 5
+fill 0.22
+stroke 2.5 1
+begin
+moveTo 18.2899 14.3598
+lineTo 21.4899 17.5598
+stroke 2.7 1
+begin
+moveTo 1.6 8.6625
+lineTo 6.3801 7.65
+arc 6.3801 8.4 0.75 -90 180
+close
+fill 0.9
+begin
+moveTo 3.4 12.8275
+lineTo 6.4801 11.95
+arc 6.4801 12.6 0.65 -90 180
+close
+fill 0.6
+restore
+restore
+# tab-playlists 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 18.95 4.55
+arc 18.95 5.8 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 12.4375
+lineTo 15.75 10.75
+arc 15.75 12 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.4 18.6375
+lineTo 12.55 16.95
+arc 12.55 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# tab-playlists 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4 6.2375
+lineTo 17.15 4.55
+arc 17.15 5.8 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5.8 12.4375
+lineTo 13.59 10.75
+arc 13.59 12 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.6 18.6375
+lineTo 10.03 16.95
+arc 10.03 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# tab-playlists -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.38 6.2375
+lineTo 19.58 4.55
+arc 19.58 5.8 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.18 12.4375
+lineTo 16.506 10.75
+arc 16.506 12 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5.98 18.6375
+lineTo 13.432 16.95
+arc 13.432 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# tab-playlists 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 1.5491 6.2375
+lineTo 20.1531 4.55
+arc 20.1531 5.8 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.4566 12.4375
+lineTo 16.0199 10.75
+arc 16.0199 12 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.4 18.6375
+lineTo 12.55 16.95
+arc 12.55 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# tab-playlists 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.1058 6.2375
+lineTo 18.6663 4.55
+arc 18.6663 5.8 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.0783 12.4375
+lineTo 15.6031 10.75
+arc 15.6031 12 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.991 18.6375
+lineTo 12.9547 16.95
+arc 12.9547 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# tab-playlists 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 2.8 6.2375
+lineTo 18.95 4.55
+arc 18.95 5.8 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 4.6 12.4375
+lineTo 15.7877 10.75
+arc 15.7877 12 1.25 -90 180
+close
+fill 1
+restore
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.4 18.6375
+lineTo 12.5875 16.95
+arc 12.5875 18.2 1.25 -90 180
+close
+fill 1
+restore
+restore
+# play-pause 0 1 0
+save
+scale 1 1 12 12
+save
+translate 0 0
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.5 4.5
+lineTo 13.25 8.25
+lineTo 13.25 15.75
+lineTo 6.5 19.5
+close
+solid 2.2 1
+begin
+moveTo 13.25 8.25
+lineTo 20 12
+lineTo 20 12
+lineTo 13.25 15.75
+close
+solid 2.2 1
+restore
+restore
+restore
+# play-pause 1 1 0
+save
+scale 1 1 12 12
+save
+translate -1 0
+scale 0.9 0.94 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.5 4.5
+lineTo 13.25 8.25
+lineTo 13.25 15.75
+lineTo 6.5 19.5
+close
+solid 2.2 1
+begin
+moveTo 13.25 8.25
+lineTo 20 12
+lineTo 20 12
+lineTo 13.25 15.75
+close
+solid 2.2 1
+restore
+restore
+restore
+# play-pause -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 0.35 0
+scale 1.035 1.021 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 4.6
+lineTo 10.2 4.6
+lineTo 10.2 19.4
+lineTo 5 19.4
+close
+solid 2.2 1
+begin
+moveTo 13.8 4.6
+lineTo 19 4.6
+lineTo 19 19.4
+lineTo 13.8 19.4
+close
+solid 2.2 1
+restore
+restore
+restore
+# play-pause 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 0.2144 9.1925
+lineTo 5.95 8.45
+arc 5.95 9 0.55 -90 180
+close
+fill 0.3214
+begin
+moveTo 1.2144 15.175
+lineTo 6.3 14.5
+arc 6.3 15 0.5 -90 180
+close
+fill 0.2571
+restore
+save
+translate 0.7713 0
+scale 1.0771 0.9486 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 4.6
+lineTo 10.2 4.6
+lineTo 10.2 19.4
+lineTo 5 19.4
+close
+solid 2.2 1
+begin
+moveTo 13.8 4.6
+lineTo 19 4.6
+lineTo 19 19.4
+lineTo 13.8 19.4
+close
+solid 2.2 1
+restore
+restore
+restore
+# play-pause 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo -0.2321 9.1925
+lineTo 5.95 8.45
+arc 5.95 9 0.55 -90 180
+close
+fill 0.433
+begin
+moveTo 0.7679 15.175
+lineTo 6.3 14.5
+arc 6.3 15 0.5 -90 180
+close
+fill 0.3464
+restore
+save
+translate 1.0392 0
+scale 1.1039 0.9307 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5.75 4.55
+lineTo 11.725 6.425
+lineTo 11.725 17.575
+lineTo 5.75 19.45
+close
+solid 2.2 1
+begin
+moveTo 13.525 6.425
+lineTo 19.5 8.3
+lineTo 19.5 15.7
+lineTo 13.525 17.575
+close
+solid 2.2 1
+restore
+restore
+restore
+# play-pause 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 0 0
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 5 4.6
+lineTo 10.2 4.6
+lineTo 10.2 19.4
+lineTo 5 19.4
+close
+solid 2.2 1
+begin
+moveTo 13.8 4.6
+lineTo 19 4.6
+lineTo 19 19.4
+lineTo 13.8 19.4
+close
+solid 2.2 1
+restore
+restore
+restore
+# repeat 0 1 0
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 18.8516 8.2357
+lineTo 19.1976 8.6667
+lineTo 19.4868 9.1377
+lineTo 19.7146 9.6412
+lineTo 19.8776 10.1692
+lineTo 19.973 10.7136
+lineTo 20 11.2656
+lineTo 20 11.8186
+lineTo 20 12.3716
+lineTo 19.9982 12.9246
+lineTo 19.9479 13.4749
+lineTo 19.829 14.0146
+lineTo 19.6434 14.5352
+lineTo 19.394 15.0283
+lineTo 19.0848 15.4864
+lineTo 18.7205 15.902
+lineTo 18.3071 16.2687
+lineTo 17.8509 16.5807
+lineTo 17.3592 16.833
+lineTo 16.8398 17.0217
+lineTo 16.3008 17.1438
+lineTo 15.7508 17.1974
+lineTo 15.1978 17.2
+lineTo 14.6448 17.2
+lineTo 14.0918 17.2
+lineTo 13.5388 17.2
+lineTo 12.9858 17.2
+lineTo 12.4328 17.2
+lineTo 11.8798 17.2
+lineTo 11.3268 17.2
+lineTo 10.7738 17.2
+lineTo 10.2208 17.2
+lineTo 9.6677 17.2
+lineTo 9.1147 17.2
+lineTo 8.5617 17.2
+lineTo 8.0092 17.1826
+lineTo 7.4629 17.0991
+lineTo 6.9314 16.9477
+lineTo 6.4231 16.7309
+lineTo 5.9459 16.4521
+lineTo 5.5075 16.1156
+lineTo 5.1147 15.7269
+lineTo 4.7737 15.292
+lineTo 4.4899 14.8178
+lineTo 4.2678 14.3117
+lineTo 4.1109 13.7818
+lineTo 4.0217 13.2364
+lineTo 4 12.6841
+lineTo 4 12.1311
+lineTo 4 11.5781
+lineTo 4.0035 11.0252
+lineTo 4.0601 10.4754
+lineTo 4.1851 9.9371
+lineTo 4.3767 9.4187
+lineTo 4.6317 8.9285
+lineTo 4.9462 8.474
+lineTo 5.3151 8.0626
+lineTo 5.7327 7.7006
+lineTo 6.1924 7.3939
+lineTo 6.687 7.1472
+lineTo 7.2085 6.9644
+lineTo 7.7488 6.8484
+lineTo 8.2995 6.8011
+lineTo 8.8525 6.8
+lineTo 9.4055 6.8
+lineTo 9.9585 6.8
+lineTo 10.5115 6.8
+lineTo 11.0645 6.8
+lineTo 11.6175 6.8
+lineTo 12.1705 6.8
+lineTo 12.7235 6.8
+lineTo 13.2765 6.8
+lineTo 13.8295 6.8
+stroke 2.2 1
+save
+translate 13.8295 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+restore
+restore
+restore
+# repeat 1 1 0
+save
+scale 1 1 12 12
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 18.8516 8.2357
+lineTo 19.1976 8.6667
+lineTo 19.4868 9.1377
+lineTo 19.7146 9.6412
+lineTo 19.8776 10.1692
+lineTo 19.973 10.7136
+lineTo 20 11.2656
+lineTo 20 11.8186
+lineTo 20 12.3716
+lineTo 19.9982 12.9246
+lineTo 19.9479 13.4749
+lineTo 19.829 14.0146
+lineTo 19.6434 14.5352
+lineTo 19.394 15.0283
+lineTo 19.0848 15.4864
+lineTo 18.7205 15.902
+lineTo 18.3071 16.2687
+lineTo 17.8509 16.5807
+lineTo 17.3592 16.833
+lineTo 16.8398 17.0217
+lineTo 16.3008 17.1438
+lineTo 15.7508 17.1974
+lineTo 15.1978 17.2
+lineTo 14.6448 17.2
+lineTo 14.0918 17.2
+lineTo 13.5388 17.2
+lineTo 12.9858 17.2
+lineTo 12.4328 17.2
+lineTo 11.8798 17.2
+lineTo 11.3268 17.2
+lineTo 10.7738 17.2
+lineTo 10.2208 17.2
+lineTo 9.6677 17.2
+lineTo 9.1147 17.2
+lineTo 8.5617 17.2
+lineTo 8.0092 17.1826
+lineTo 7.4629 17.0991
+lineTo 6.9314 16.9477
+lineTo 6.4231 16.7309
+lineTo 5.9459 16.4521
+lineTo 5.5075 16.1156
+lineTo 5.1147 15.7269
+lineTo 4.7737 15.292
+lineTo 4.4899 14.8178
+lineTo 4.2678 14.3117
+lineTo 4.1109 13.7818
+lineTo 4.0217 13.2364
+lineTo 4 12.6841
+lineTo 4 12.1311
+lineTo 4 11.5781
+lineTo 4.0035 11.0252
+lineTo 4.0601 10.4754
+lineTo 4.1851 9.9371
+lineTo 4.3767 9.4187
+lineTo 4.6317 8.9285
+lineTo 4.9462 8.474
+lineTo 5.3151 8.0626
+lineTo 5.7327 7.7006
+lineTo 6.1924 7.3939
+lineTo 6.687 7.1472
+lineTo 7.2085 6.9644
+lineTo 7.7488 6.8484
+lineTo 8.2995 6.8011
+lineTo 8.8525 6.8
+lineTo 9.4055 6.8
+lineTo 9.9585 6.8
+lineTo 10.5115 6.8
+lineTo 11.0645 6.8
+lineTo 11.6175 6.8
+lineTo 12.1705 6.8
+lineTo 12.7235 6.8
+lineTo 13.2765 6.8
+lineTo 13.8295 6.8
+stroke 2.2 1
+save
+translate 13.8295 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+restore
+restore
+restore
+# repeat -0.35 1 1
+save
+scale 1 1 12 12
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 18.8516 8.2357
+lineTo 19.1976 8.6667
+lineTo 19.4868 9.1377
+lineTo 19.7146 9.6412
+lineTo 19.8776 10.1692
+lineTo 19.973 10.7136
+lineTo 20 11.2656
+lineTo 20 11.8186
+lineTo 20 12.3716
+lineTo 19.9982 12.9246
+lineTo 19.9479 13.4749
+lineTo 19.829 14.0146
+lineTo 19.6434 14.5352
+lineTo 19.394 15.0283
+lineTo 19.0848 15.4864
+lineTo 18.7205 15.902
+lineTo 18.3071 16.2687
+lineTo 17.8509 16.5807
+lineTo 17.3592 16.833
+lineTo 16.8398 17.0217
+lineTo 16.3008 17.1438
+lineTo 15.7508 17.1974
+lineTo 15.1978 17.2
+lineTo 14.6448 17.2
+lineTo 14.0918 17.2
+lineTo 13.5388 17.2
+lineTo 12.9858 17.2
+lineTo 12.4328 17.2
+lineTo 11.8798 17.2
+lineTo 11.3268 17.2
+lineTo 10.7738 17.2
+lineTo 10.2208 17.2
+lineTo 9.6677 17.2
+lineTo 9.1147 17.2
+lineTo 8.5617 17.2
+lineTo 8.0092 17.1826
+lineTo 7.4629 17.0991
+lineTo 6.9314 16.9477
+lineTo 6.4231 16.7309
+lineTo 5.9459 16.4521
+lineTo 5.5075 16.1156
+lineTo 5.1147 15.7269
+lineTo 4.7737 15.292
+lineTo 4.4899 14.8178
+lineTo 4.2678 14.3117
+lineTo 4.1109 13.7818
+lineTo 4.0217 13.2364
+lineTo 4 12.6841
+lineTo 4 12.1311
+lineTo 4 11.5781
+lineTo 4.0035 11.0252
+lineTo 4.0601 10.4754
+lineTo 4.1851 9.9371
+lineTo 4.3767 9.4187
+lineTo 4.6317 8.9285
+lineTo 4.9462 8.474
+lineTo 5.3151 8.0626
+lineTo 5.7327 7.7006
+lineTo 6.1924 7.3939
+lineTo 6.687 7.1472
+lineTo 7.2085 6.9644
+lineTo 7.7488 6.8484
+lineTo 8.2995 6.8011
+lineTo 8.8525 6.8
+lineTo 9.4055 6.8
+lineTo 9.9585 6.8
+lineTo 10.5115 6.8
+lineTo 11.0645 6.8
+lineTo 11.6175 6.8
+lineTo 12.1705 6.8
+lineTo 12.7235 6.8
+lineTo 13.2765 6.8
+lineTo 13.8295 6.8
+stroke 2.2 1
+save
+translate 13.8295 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+restore
+restore
+restore
+# repeat 0 0.1 1
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 13.1998 17.2
+lineTo 12.6468 17.2
+lineTo 12.0938 17.2
+lineTo 11.5408 17.2
+lineTo 10.9878 17.2
+lineTo 10.4348 17.2
+lineTo 9.8818 17.2
+lineTo 9.3288 17.2
+lineTo 8.7758 17.2
+lineTo 8.2228 17.1964
+lineTo 7.6731 17.1395
+lineTo 7.1349 17.0142
+lineTo 6.6166 16.8224
+lineTo 6.1264 16.5671
+lineTo 5.6722 16.2524
+lineTo 5.2609 15.8832
+lineTo 4.8992 15.4654
+lineTo 4.5927 15.0055
+lineTo 4.3462 14.5109
+lineTo 4.1638 13.9892
+lineTo 4.0481 13.4488
+lineTo 4.0011 12.8982
+lineTo 4 12.3452
+lineTo 4 11.7922
+lineTo 4 11.2392
+lineTo 4.03 10.6873
+lineTo 4.1287 10.1436
+lineTo 4.2948 9.6165
+lineTo 4.5257 9.1144
+lineTo 4.8177 8.6452
+lineTo 5.1662 8.2163
+lineTo 5.5657 7.8345
+lineTo 6.01 7.5057
+lineTo 6.4919 7.2353
+lineTo 7.0039 7.0273
+lineTo 7.538 6.8853
+lineTo 8.0857 6.8112
+lineTo 8.6384 6.8
+lineTo 9.1914 6.8
+lineTo 9.7444 6.8
+lineTo 10.2974 6.8
+lineTo 10.8504 6.8
+lineTo 11.4034 6.8
+lineTo 11.9565 6.8
+lineTo 12.5095 6.8
+lineTo 13.0625 6.8
+lineTo 13.6155 6.8
+lineTo 14.1685 6.8
+lineTo 14.7215 6.8
+lineTo 15.2745 6.8
+lineTo 15.8274 6.8059
+lineTo 16.3764 6.869
+lineTo 16.9132 7.0005
+lineTo 17.4293 7.1983
+lineTo 17.9164 7.4591
+lineTo 18.3671 7.779
+lineTo 18.7741 8.1529
+lineTo 19.131 8.5748
+lineTo 19.4323 9.0381
+lineTo 19.673 9.5356
+lineTo 19.8496 10.0592
+lineTo 19.959 10.6009
+lineTo 19.9997 11.1521
+lineTo 20 11.7051
+lineTo 20 12.2581
+lineTo 20 12.8111
+lineTo 19.9639 13.3626
+lineTo 19.8589 13.9052
+lineTo 19.6868 14.4303
+lineTo 19.4502 14.9297
+lineTo 19.1529 15.3956
+lineTo 18.7995 15.8205
+lineTo 18.3956 16.1977
+stroke 2.2 1
+save
+translate 18.3956 16.1977
+rotate 140.5524 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+restore
+restore
+restore
+# repeat 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.0247 7.0205
+lineTo 7.5595 6.881
+lineTo 8.1075 6.8097
+lineTo 8.6603 6.8
+lineTo 9.2133 6.8
+lineTo 9.7663 6.8
+lineTo 10.3193 6.8
+lineTo 10.8723 6.8
+lineTo 11.4253 6.8
+lineTo 11.9783 6.8
+lineTo 12.5313 6.8
+lineTo 13.0843 6.8
+lineTo 13.6374 6.8
+lineTo 14.1904 6.8
+lineTo 14.7434 6.8
+lineTo 15.2964 6.8
+lineTo 15.8492 6.8071
+lineTo 16.3979 6.873
+lineTo 16.9341 7.0071
+lineTo 17.4491 7.2074
+lineTo 17.935 7.4707
+lineTo 18.3841 7.7928
+lineTo 18.7892 8.1687
+lineTo 19.144 8.5924
+lineTo 19.443 9.0572
+lineTo 19.6813 9.5558
+lineTo 19.8552 10.0804
+lineTo 19.962 10.6226
+lineTo 19.9999 11.174
+lineTo 20 11.727
+lineTo 20 12.28
+lineTo 19.9999 12.833
+lineTo 19.961 13.3843
+lineTo 19.8534 13.9263
+lineTo 19.6787 14.4506
+lineTo 19.4396 14.9489
+lineTo 19.1399 15.4132
+lineTo 18.7844 15.8363
+lineTo 18.3787 16.2116
+lineTo 17.9291 16.533
+lineTo 17.4428 16.7955
+lineTo 16.9274 16.995
+lineTo 16.3911 17.1283
+lineTo 15.8423 17.1933
+lineTo 15.2894 17.2
+lineTo 14.7364 17.2
+lineTo 14.1834 17.2
+lineTo 13.6304 17.2
+lineTo 13.0774 17.2
+lineTo 12.5244 17.2
+lineTo 11.9714 17.2
+lineTo 11.4184 17.2
+lineTo 10.8654 17.2
+lineTo 10.3124 17.2
+lineTo 9.7594 17.2
+lineTo 9.2064 17.2
+lineTo 8.6534 17.2
+lineTo 8.1006 17.1898
+lineTo 7.5527 17.1176
+lineTo 7.0181 16.9774
+lineTo 6.5054 16.7712
+lineTo 6.0225 16.5024
+lineTo 5.5772 16.1752
+lineTo 5.1764 15.7947
+lineTo 4.8264 15.367
+lineTo 4.5328 14.8988
+lineTo 4.3002 14.3974
+lineTo 4.1323 13.8709
+lineTo 4.0317 13.3275
+lineTo 4 12.7758
+lineTo 4 12.2228
+lineTo 4 11.6698
+lineTo 4.0008 11.1168
+stroke 2.2 1
+save
+translate 4.0008 11.1168
+rotate 271.0841 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+restore
+restore
+restore
+# repeat 0 0.6 1
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 17.9743 7.4956
+lineTo 18.4199 7.8224
+lineTo 18.821 8.2025
+lineTo 19.1714 8.6299
+lineTo 19.4654 9.0979
+lineTo 19.6984 9.599
+lineTo 19.8668 10.1254
+lineTo 19.9678 10.6687
+lineTo 20 11.2204
+lineTo 20 11.7734
+lineTo 20 12.3264
+lineTo 19.9993 12.8794
+lineTo 19.9546 13.4303
+lineTo 19.8413 13.9712
+lineTo 19.661 14.4936
+lineTo 19.4167 14.9893
+lineTo 19.1121 15.4504
+lineTo 18.7522 15.8698
+lineTo 18.3425 16.2407
+lineTo 17.8896 16.5574
+lineTo 17.4005 16.8147
+lineTo 16.8831 17.0088
+lineTo 16.3454 17.1364
+lineTo 15.7959 17.1956
+lineTo 15.243 17.2
+lineTo 14.69 17.2
+lineTo 14.137 17.2
+lineTo 13.584 17.2
+lineTo 13.031 17.2
+lineTo 12.4779 17.2
+lineTo 11.9249 17.2
+lineTo 11.3719 17.2
+lineTo 10.8189 17.2
+lineTo 10.2659 17.2
+lineTo 9.7129 17.2
+lineTo 9.1599 17.2
+lineTo 8.6069 17.2
+lineTo 8.0542 17.1864
+lineTo 7.5071 17.1085
+lineTo 6.9741 16.9625
+lineTo 6.4636 16.751
+lineTo 5.9836 16.4771
+lineTo 5.5417 16.1452
+lineTo 5.1449 15.7605
+lineTo 4.7995 15.3291
+lineTo 4.5109 14.8578
+lineTo 4.2836 14.3541
+lineTo 4.1212 13.8258
+lineTo 4.0264 13.2814
+lineTo 4 12.7293
+lineTo 4 12.1763
+lineTo 4 11.6233
+lineTo 4.0019 11.0703
+lineTo 4.0529 10.52
+lineTo 4.1724 9.9805
+lineTo 4.3586 9.4601
+lineTo 4.6086 8.9673
+lineTo 4.9184 8.5096
+lineTo 5.2831 8.0944
+lineTo 5.697 7.7282
+lineTo 6.1535 7.4167
+lineTo 6.6454 7.165
+lineTo 7.1651 6.9769
+lineTo 7.7042 6.8554
+lineTo 8.2543 6.8024
+lineTo 8.8073 6.8
+lineTo 9.3603 6.8
+lineTo 9.9133 6.8
+lineTo 10.4663 6.8
+lineTo 11.0193 6.8
+lineTo 11.5723 6.8
+lineTo 12.1253 6.8
+lineTo 12.6783 6.8
+stroke 2.2 1
+save
+translate 12.6783 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+restore
+restore
+restore
+# repeat-one 0 1 0
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 18.8516 8.2357
+lineTo 19.1976 8.6667
+lineTo 19.4868 9.1377
+lineTo 19.7146 9.6412
+lineTo 19.8776 10.1692
+lineTo 19.973 10.7136
+lineTo 20 11.2656
+lineTo 20 11.8186
+lineTo 20 12.3716
+lineTo 19.9982 12.9246
+lineTo 19.9479 13.4749
+lineTo 19.829 14.0146
+lineTo 19.6434 14.5352
+lineTo 19.394 15.0283
+lineTo 19.0848 15.4864
+lineTo 18.7205 15.902
+lineTo 18.3071 16.2687
+lineTo 17.8509 16.5807
+lineTo 17.3592 16.833
+lineTo 16.8398 17.0217
+lineTo 16.3008 17.1438
+lineTo 15.7508 17.1974
+lineTo 15.1978 17.2
+lineTo 14.6448 17.2
+lineTo 14.0918 17.2
+lineTo 13.5388 17.2
+lineTo 12.9858 17.2
+lineTo 12.4328 17.2
+lineTo 11.8798 17.2
+lineTo 11.3268 17.2
+lineTo 10.7738 17.2
+lineTo 10.2208 17.2
+lineTo 9.6677 17.2
+lineTo 9.1147 17.2
+lineTo 8.5617 17.2
+lineTo 8.0092 17.1826
+lineTo 7.4629 17.0991
+lineTo 6.9314 16.9477
+lineTo 6.4231 16.7309
+lineTo 5.9459 16.4521
+lineTo 5.5075 16.1156
+lineTo 5.1147 15.7269
+lineTo 4.7737 15.292
+lineTo 4.4899 14.8178
+lineTo 4.2678 14.3117
+lineTo 4.1109 13.7818
+lineTo 4.0217 13.2364
+lineTo 4 12.6841
+lineTo 4 12.1311
+lineTo 4 11.5781
+lineTo 4.0035 11.0252
+lineTo 4.0601 10.4754
+lineTo 4.1851 9.9371
+lineTo 4.3767 9.4187
+lineTo 4.6317 8.9285
+lineTo 4.9462 8.474
+lineTo 5.3151 8.0626
+lineTo 5.7327 7.7006
+lineTo 6.1924 7.3939
+lineTo 6.687 7.1472
+lineTo 7.2085 6.9644
+lineTo 7.7488 6.8484
+lineTo 8.2995 6.8011
+lineTo 8.8525 6.8
+lineTo 9.4055 6.8
+lineTo 9.9585 6.8
+lineTo 10.5115 6.8
+lineTo 11.0645 6.8
+lineTo 11.6175 6.8
+lineTo 12.1705 6.8
+lineTo 12.7235 6.8
+lineTo 13.2765 6.8
+lineTo 13.8295 6.8
+stroke 2.2 1
+save
+translate 13.8295 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+begin
+roundRect 11 9.6 13 14.4 0.9
+fill 1
+restore
+restore
+restore
+# repeat-one 1 1 0
+save
+scale 1 1 12 12
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 18.8516 8.2357
+lineTo 19.1976 8.6667
+lineTo 19.4868 9.1377
+lineTo 19.7146 9.6412
+lineTo 19.8776 10.1692
+lineTo 19.973 10.7136
+lineTo 20 11.2656
+lineTo 20 11.8186
+lineTo 20 12.3716
+lineTo 19.9982 12.9246
+lineTo 19.9479 13.4749
+lineTo 19.829 14.0146
+lineTo 19.6434 14.5352
+lineTo 19.394 15.0283
+lineTo 19.0848 15.4864
+lineTo 18.7205 15.902
+lineTo 18.3071 16.2687
+lineTo 17.8509 16.5807
+lineTo 17.3592 16.833
+lineTo 16.8398 17.0217
+lineTo 16.3008 17.1438
+lineTo 15.7508 17.1974
+lineTo 15.1978 17.2
+lineTo 14.6448 17.2
+lineTo 14.0918 17.2
+lineTo 13.5388 17.2
+lineTo 12.9858 17.2
+lineTo 12.4328 17.2
+lineTo 11.8798 17.2
+lineTo 11.3268 17.2
+lineTo 10.7738 17.2
+lineTo 10.2208 17.2
+lineTo 9.6677 17.2
+lineTo 9.1147 17.2
+lineTo 8.5617 17.2
+lineTo 8.0092 17.1826
+lineTo 7.4629 17.0991
+lineTo 6.9314 16.9477
+lineTo 6.4231 16.7309
+lineTo 5.9459 16.4521
+lineTo 5.5075 16.1156
+lineTo 5.1147 15.7269
+lineTo 4.7737 15.292
+lineTo 4.4899 14.8178
+lineTo 4.2678 14.3117
+lineTo 4.1109 13.7818
+lineTo 4.0217 13.2364
+lineTo 4 12.6841
+lineTo 4 12.1311
+lineTo 4 11.5781
+lineTo 4.0035 11.0252
+lineTo 4.0601 10.4754
+lineTo 4.1851 9.9371
+lineTo 4.3767 9.4187
+lineTo 4.6317 8.9285
+lineTo 4.9462 8.474
+lineTo 5.3151 8.0626
+lineTo 5.7327 7.7006
+lineTo 6.1924 7.3939
+lineTo 6.687 7.1472
+lineTo 7.2085 6.9644
+lineTo 7.7488 6.8484
+lineTo 8.2995 6.8011
+lineTo 8.8525 6.8
+lineTo 9.4055 6.8
+lineTo 9.9585 6.8
+lineTo 10.5115 6.8
+lineTo 11.0645 6.8
+lineTo 11.6175 6.8
+lineTo 12.1705 6.8
+lineTo 12.7235 6.8
+lineTo 13.2765 6.8
+lineTo 13.8295 6.8
+stroke 2.2 1
+save
+translate 13.8295 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+begin
+roundRect 11 9.6 13 14.4 0.9
+fill 1
+restore
+restore
+restore
+# repeat-one -0.35 1 1
+save
+scale 1 1 12 12
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 18.8516 8.2357
+lineTo 19.1976 8.6667
+lineTo 19.4868 9.1377
+lineTo 19.7146 9.6412
+lineTo 19.8776 10.1692
+lineTo 19.973 10.7136
+lineTo 20 11.2656
+lineTo 20 11.8186
+lineTo 20 12.3716
+lineTo 19.9982 12.9246
+lineTo 19.9479 13.4749
+lineTo 19.829 14.0146
+lineTo 19.6434 14.5352
+lineTo 19.394 15.0283
+lineTo 19.0848 15.4864
+lineTo 18.7205 15.902
+lineTo 18.3071 16.2687
+lineTo 17.8509 16.5807
+lineTo 17.3592 16.833
+lineTo 16.8398 17.0217
+lineTo 16.3008 17.1438
+lineTo 15.7508 17.1974
+lineTo 15.1978 17.2
+lineTo 14.6448 17.2
+lineTo 14.0918 17.2
+lineTo 13.5388 17.2
+lineTo 12.9858 17.2
+lineTo 12.4328 17.2
+lineTo 11.8798 17.2
+lineTo 11.3268 17.2
+lineTo 10.7738 17.2
+lineTo 10.2208 17.2
+lineTo 9.6677 17.2
+lineTo 9.1147 17.2
+lineTo 8.5617 17.2
+lineTo 8.0092 17.1826
+lineTo 7.4629 17.0991
+lineTo 6.9314 16.9477
+lineTo 6.4231 16.7309
+lineTo 5.9459 16.4521
+lineTo 5.5075 16.1156
+lineTo 5.1147 15.7269
+lineTo 4.7737 15.292
+lineTo 4.4899 14.8178
+lineTo 4.2678 14.3117
+lineTo 4.1109 13.7818
+lineTo 4.0217 13.2364
+lineTo 4 12.6841
+lineTo 4 12.1311
+lineTo 4 11.5781
+lineTo 4.0035 11.0252
+lineTo 4.0601 10.4754
+lineTo 4.1851 9.9371
+lineTo 4.3767 9.4187
+lineTo 4.6317 8.9285
+lineTo 4.9462 8.474
+lineTo 5.3151 8.0626
+lineTo 5.7327 7.7006
+lineTo 6.1924 7.3939
+lineTo 6.687 7.1472
+lineTo 7.2085 6.9644
+lineTo 7.7488 6.8484
+lineTo 8.2995 6.8011
+lineTo 8.8525 6.8
+lineTo 9.4055 6.8
+lineTo 9.9585 6.8
+lineTo 10.5115 6.8
+lineTo 11.0645 6.8
+lineTo 11.6175 6.8
+lineTo 12.1705 6.8
+lineTo 12.7235 6.8
+lineTo 13.2765 6.8
+lineTo 13.8295 6.8
+stroke 2.2 1
+save
+translate 13.8295 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+begin
+roundRect 11 9.6 13 14.4 0.9
+fill 1
+restore
+restore
+restore
+# repeat-one 0 0.1 1
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 13.1998 17.2
+lineTo 12.6468 17.2
+lineTo 12.0938 17.2
+lineTo 11.5408 17.2
+lineTo 10.9878 17.2
+lineTo 10.4348 17.2
+lineTo 9.8818 17.2
+lineTo 9.3288 17.2
+lineTo 8.7758 17.2
+lineTo 8.2228 17.1964
+lineTo 7.6731 17.1395
+lineTo 7.1349 17.0142
+lineTo 6.6166 16.8224
+lineTo 6.1264 16.5671
+lineTo 5.6722 16.2524
+lineTo 5.2609 15.8832
+lineTo 4.8992 15.4654
+lineTo 4.5927 15.0055
+lineTo 4.3462 14.5109
+lineTo 4.1638 13.9892
+lineTo 4.0481 13.4488
+lineTo 4.0011 12.8982
+lineTo 4 12.3452
+lineTo 4 11.7922
+lineTo 4 11.2392
+lineTo 4.03 10.6873
+lineTo 4.1287 10.1436
+lineTo 4.2948 9.6165
+lineTo 4.5257 9.1144
+lineTo 4.8177 8.6452
+lineTo 5.1662 8.2163
+lineTo 5.5657 7.8345
+lineTo 6.01 7.5057
+lineTo 6.4919 7.2353
+lineTo 7.0039 7.0273
+lineTo 7.538 6.8853
+lineTo 8.0857 6.8112
+lineTo 8.6384 6.8
+lineTo 9.1914 6.8
+lineTo 9.7444 6.8
+lineTo 10.2974 6.8
+lineTo 10.8504 6.8
+lineTo 11.4034 6.8
+lineTo 11.9565 6.8
+lineTo 12.5095 6.8
+lineTo 13.0625 6.8
+lineTo 13.6155 6.8
+lineTo 14.1685 6.8
+lineTo 14.7215 6.8
+lineTo 15.2745 6.8
+lineTo 15.8274 6.8059
+lineTo 16.3764 6.869
+lineTo 16.9132 7.0005
+lineTo 17.4293 7.1983
+lineTo 17.9164 7.4591
+lineTo 18.3671 7.779
+lineTo 18.7741 8.1529
+lineTo 19.131 8.5748
+lineTo 19.4323 9.0381
+lineTo 19.673 9.5356
+lineTo 19.8496 10.0592
+lineTo 19.959 10.6009
+lineTo 19.9997 11.1521
+lineTo 20 11.7051
+lineTo 20 12.2581
+lineTo 20 12.8111
+lineTo 19.9639 13.3626
+lineTo 19.8589 13.9052
+lineTo 19.6868 14.4303
+lineTo 19.4502 14.9297
+lineTo 19.1529 15.3956
+lineTo 18.7995 15.8205
+lineTo 18.3956 16.1977
+stroke 2.2 1
+save
+translate 18.3956 16.1977
+rotate 140.5524 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+begin
+roundRect 11 9.6 13 14.4 0.9
+fill 1
+restore
+restore
+restore
+# repeat-one 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.0247 7.0205
+lineTo 7.5595 6.881
+lineTo 8.1075 6.8097
+lineTo 8.6603 6.8
+lineTo 9.2133 6.8
+lineTo 9.7663 6.8
+lineTo 10.3193 6.8
+lineTo 10.8723 6.8
+lineTo 11.4253 6.8
+lineTo 11.9783 6.8
+lineTo 12.5313 6.8
+lineTo 13.0843 6.8
+lineTo 13.6374 6.8
+lineTo 14.1904 6.8
+lineTo 14.7434 6.8
+lineTo 15.2964 6.8
+lineTo 15.8492 6.8071
+lineTo 16.3979 6.873
+lineTo 16.9341 7.0071
+lineTo 17.4491 7.2074
+lineTo 17.935 7.4707
+lineTo 18.3841 7.7928
+lineTo 18.7892 8.1687
+lineTo 19.144 8.5924
+lineTo 19.443 9.0572
+lineTo 19.6813 9.5558
+lineTo 19.8552 10.0804
+lineTo 19.962 10.6226
+lineTo 19.9999 11.174
+lineTo 20 11.727
+lineTo 20 12.28
+lineTo 19.9999 12.833
+lineTo 19.961 13.3843
+lineTo 19.8534 13.9263
+lineTo 19.6787 14.4506
+lineTo 19.4396 14.9489
+lineTo 19.1399 15.4132
+lineTo 18.7844 15.8363
+lineTo 18.3787 16.2116
+lineTo 17.9291 16.533
+lineTo 17.4428 16.7955
+lineTo 16.9274 16.995
+lineTo 16.3911 17.1283
+lineTo 15.8423 17.1933
+lineTo 15.2894 17.2
+lineTo 14.7364 17.2
+lineTo 14.1834 17.2
+lineTo 13.6304 17.2
+lineTo 13.0774 17.2
+lineTo 12.5244 17.2
+lineTo 11.9714 17.2
+lineTo 11.4184 17.2
+lineTo 10.8654 17.2
+lineTo 10.3124 17.2
+lineTo 9.7594 17.2
+lineTo 9.2064 17.2
+lineTo 8.6534 17.2
+lineTo 8.1006 17.1898
+lineTo 7.5527 17.1176
+lineTo 7.0181 16.9774
+lineTo 6.5054 16.7712
+lineTo 6.0225 16.5024
+lineTo 5.5772 16.1752
+lineTo 5.1764 15.7947
+lineTo 4.8264 15.367
+lineTo 4.5328 14.8988
+lineTo 4.3002 14.3974
+lineTo 4.1323 13.8709
+lineTo 4.0317 13.3275
+lineTo 4 12.7758
+lineTo 4 12.2228
+lineTo 4 11.6698
+lineTo 4.0008 11.1168
+stroke 2.2 1
+save
+translate 4.0008 11.1168
+rotate 271.0841 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+begin
+roundRect 11 9.6 13 14.4 0.9
+fill 1
+restore
+restore
+restore
+# repeat-one 0 0.6 1
+save
+scale 1 1 12 12
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 17.9743 7.4956
+lineTo 18.4199 7.8224
+lineTo 18.821 8.2025
+lineTo 19.1714 8.6299
+lineTo 19.4654 9.0979
+lineTo 19.6984 9.599
+lineTo 19.8668 10.1254
+lineTo 19.9678 10.6687
+lineTo 20 11.2204
+lineTo 20 11.7734
+lineTo 20 12.3264
+lineTo 19.9993 12.8794
+lineTo 19.9546 13.4303
+lineTo 19.8413 13.9712
+lineTo 19.661 14.4936
+lineTo 19.4167 14.9893
+lineTo 19.1121 15.4504
+lineTo 18.7522 15.8698
+lineTo 18.3425 16.2407
+lineTo 17.8896 16.5574
+lineTo 17.4005 16.8147
+lineTo 16.8831 17.0088
+lineTo 16.3454 17.1364
+lineTo 15.7959 17.1956
+lineTo 15.243 17.2
+lineTo 14.69 17.2
+lineTo 14.137 17.2
+lineTo 13.584 17.2
+lineTo 13.031 17.2
+lineTo 12.4779 17.2
+lineTo 11.9249 17.2
+lineTo 11.3719 17.2
+lineTo 10.8189 17.2
+lineTo 10.2659 17.2
+lineTo 9.7129 17.2
+lineTo 9.1599 17.2
+lineTo 8.6069 17.2
+lineTo 8.0542 17.1864
+lineTo 7.5071 17.1085
+lineTo 6.9741 16.9625
+lineTo 6.4636 16.751
+lineTo 5.9836 16.4771
+lineTo 5.5417 16.1452
+lineTo 5.1449 15.7605
+lineTo 4.7995 15.3291
+lineTo 4.5109 14.8578
+lineTo 4.2836 14.3541
+lineTo 4.1212 13.8258
+lineTo 4.0264 13.2814
+lineTo 4 12.7293
+lineTo 4 12.1763
+lineTo 4 11.6233
+lineTo 4.0019 11.0703
+lineTo 4.0529 10.52
+lineTo 4.1724 9.9805
+lineTo 4.3586 9.4601
+lineTo 4.6086 8.9673
+lineTo 4.9184 8.5096
+lineTo 5.2831 8.0944
+lineTo 5.697 7.7282
+lineTo 6.1535 7.4167
+lineTo 6.6454 7.165
+lineTo 7.1651 6.9769
+lineTo 7.7042 6.8554
+lineTo 8.2543 6.8024
+lineTo 8.8073 6.8
+lineTo 9.3603 6.8
+lineTo 9.9133 6.8
+lineTo 10.4663 6.8
+lineTo 11.0193 6.8
+lineTo 11.5723 6.8
+lineTo 12.1253 6.8
+lineTo 12.6783 6.8
+stroke 2.2 1
+save
+translate 12.6783 6.8
+rotate 0 0 0
+begin
+moveTo -1.2 -3
+lineTo 3 0
+lineTo -1.2 3
+close
+solid 1.4 1
+restore
+begin
+roundRect 11 9.6 13 14.4 0.9
+fill 1
+restore
+restore
+restore
+# volume 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+restore
+restore
+# volume 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+restore
+restore
+# volume -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+begin
+arc 11.4 12 4.2 -48 96
+stroke 2.1 1
+begin
+arc 11.4 12 7.6 -48 96
+stroke 2.1 1
+restore
+restore
+# volume 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+begin
+arc 11.4 12 5.0485 -48 96
+stroke 2.1 1
+begin
+arc 11.4 12 7.6 -48 96
+stroke 2.1 1
+restore
+restore
+# volume 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+begin
+arc 11.4 12 5.0485 -48 96
+stroke 2.1 1
+restore
+restore
+# volume 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+begin
+arc 11.4 12 4.2 -48 96
+stroke 2.1 1
+begin
+arc 11.4 12 7.6 -48 96
+stroke 2.1 1
+restore
+restore
+# volume-mute 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+save
+rotate 0 17.6 12
+begin
+moveTo 15.2 9.6
+lineTo 20 14.4
+moveTo 20 9.6
+lineTo 15.2 14.4
+stroke 2.2 1
+restore
+restore
+restore
+# volume-mute 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+save
+rotate 0 17.6 12
+begin
+moveTo 15.2 9.6
+lineTo 20 14.4
+moveTo 20 9.6
+lineTo 15.2 14.4
+stroke 2.2 1
+restore
+restore
+restore
+# volume-mute -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+save
+rotate 0 17.6 12
+begin
+moveTo 15.2 9.6
+lineTo 20 14.4
+moveTo 20 9.6
+lineTo 15.2 14.4
+stroke 2.2 1
+restore
+restore
+restore
+# volume-mute 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+save
+rotate -30.6717 17.6 12
+begin
+moveTo 15.2 9.6
+lineTo 20 14.4
+moveTo 20 9.6
+lineTo 15.2 14.4
+stroke 2.2 1
+restore
+restore
+restore
+# volume-mute 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+save
+rotate 8.7904 17.6 12
+begin
+moveTo 15.2 9.6
+lineTo 20 14.4
+moveTo 20 9.6
+lineTo 15.2 14.4
+stroke 2.2 1
+restore
+restore
+restore
+# volume-mute 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 9.4
+lineTo 6.8 9.4
+lineTo 11.4 5.2
+lineTo 11.4 18.8
+lineTo 6.8 14.6
+lineTo 3.4 14.6
+close
+solid 1.6 1
+save
+rotate 0 17.6 12
+begin
+moveTo 15.2 9.6
+lineTo 20 14.4
+moveTo 20 9.6
+lineTo 15.2 14.4
+stroke 2.2 1
+restore
+restore
+restore
+# mic 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 9 2.8 15 14.2 3
+fill 0.22
+stroke 2.1 1
+begin
+moveTo 5.6 10.8
+quadTo 5.6 17.6 12 17.6
+quadTo 18.4 17.6 18.4 10.8
+stroke 2.1 1
+begin
+moveTo 12 17.6
+lineTo 12 21
+moveTo 8.6 21
+lineTo 15.4 21
+stroke 2.1 1
+restore
+restore
+# mic 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 9 2.8 15 14.2 3
+fill 0.22
+stroke 2.1 1
+begin
+moveTo 5.6 10.8
+quadTo 5.6 17.6 12 17.6
+quadTo 18.4 17.6 18.4 10.8
+stroke 2.1 1
+begin
+moveTo 12 17.6
+lineTo 12 21
+moveTo 8.6 21
+lineTo 15.4 21
+stroke 2.1 1
+restore
+restore
+# mic -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 9 2.8 15 14.2 3
+fill 1
+stroke 2.1 1
+begin
+moveTo 5.6 10.8
+quadTo 5.6 17.6 12 17.6
+quadTo 18.4 17.6 18.4 10.8
+stroke 2.1 1
+begin
+moveTo 12 17.6
+lineTo 12 21
+moveTo 8.6 21
+lineTo 15.4 21
+stroke 2.1 1
+restore
+restore
+# mic 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 9 1.5743 15 12.9743 3
+fill 1
+stroke 2.1 1
+begin
+moveTo 5.6 10.8
+quadTo 5.6 17.6 12 17.6
+quadTo 18.4 17.6 18.4 10.8
+stroke 2.1 1
+begin
+moveTo 12 17.6
+lineTo 12 21
+moveTo 8.6 21
+lineTo 15.4 21
+stroke 2.1 1
+restore
+restore
+# mic 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 9 2 15 13.4 3
+fill 0.61
+stroke 2.1 1
+begin
+moveTo 5.6 10.8
+quadTo 5.6 17.6 12 17.6
+quadTo 18.4 17.6 18.4 10.8
+stroke 2.1 1
+begin
+moveTo 12 17.6
+lineTo 12 21
+moveTo 8.6 21
+lineTo 15.4 21
+stroke 2.1 1
+restore
+restore
+# mic 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 9 2.8 15 14.2 3
+fill 1
+stroke 2.1 1
+begin
+moveTo 5.6 10.8
+quadTo 5.6 17.6 12 17.6
+quadTo 18.4 17.6 18.4 10.8
+stroke 2.1 1
+begin
+moveTo 12 17.6
+lineTo 12 21
+moveTo 8.6 21
+lineTo 15.4 21
+stroke 2.1 1
+restore
+restore
+# seek-back 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+scale -1 1 12 12
+rotate 0 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-back 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+scale -1 1 12 12
+rotate -26 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-back -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+scale -1 1 12 12
+rotate 9.1 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-back 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+scale -1 1 12 12
+rotate 16.3153 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-back 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+scale -1 1 12 12
+rotate -4.5599 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-back 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+scale -1 1 12 12
+rotate 0.5925 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-forward 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+rotate 0 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-forward 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+rotate -26 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-forward -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+rotate 9.1 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-forward 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+rotate 16.3153 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-forward 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+rotate -4.5599 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# seek-forward 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+save
+rotate 0.5925 12 12
+begin
+arc 12 12 8.4 -5 290
+stroke 2.2 1
+begin
+moveTo 14.075 6.5946
+lineTo 17.867 5.2545
+lineTo 15.9456 1.7213
+close
+solid 1.6 1
+restore
+begin
+roundRect 8.3 9.2 10.1 15 0.8
+fill 1
+begin
+circle 14.1 12.1 2.35
+stroke 1.8 1
+restore
+restore
+# keyboard 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 2.8 6.4 21.2 17.6 2.4
+stroke 2.1 1
+begin
+roundRect 5.9 8.9 7.8 10.8 0.6
+fill 1
+begin
+roundRect 9.5 8.9 11.4 10.8 0.6
+fill 1
+begin
+roundRect 13.1 8.9 15 10.8 0.6
+fill 1
+begin
+roundRect 16.7 8.9 18.6 10.8 0.6
+fill 1
+begin
+roundRect 8 13.3 16 14.9 0.8
+fill 1
+restore
+restore
+# keyboard 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 2.8 6.4 21.2 17.6 2.4
+stroke 2.1 1
+begin
+roundRect 5.9 8.9 7.8 10.8 0.6
+fill 1
+begin
+roundRect 9.5 8.9 11.4 10.8 0.6
+fill 1
+begin
+roundRect 13.1 8.9 15 10.8 0.6
+fill 1
+begin
+roundRect 16.7 8.9 18.6 10.8 0.6
+fill 1
+begin
+roundRect 8 13.3 16 14.9 0.8
+fill 1
+restore
+restore
+# keyboard -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 2.8 6.4 21.2 17.6 2.4
+stroke 2.1 1
+begin
+roundRect 5.9 8.9 7.8 10.8 0.6
+fill 1
+begin
+roundRect 9.5 8.9 11.4 10.8 0.6
+fill 1
+begin
+roundRect 13.1 8.9 15 10.8 0.6
+fill 1
+begin
+roundRect 16.7 8.9 18.6 10.8 0.6
+fill 1
+begin
+roundRect 8 13.3 16 14.9 0.8
+fill 1
+restore
+restore
+# keyboard 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 2.8 6.4 21.2 17.6 2.4
+stroke 2.1 1
+begin
+roundRect 5.9 8.9 7.8 10.8 0.6
+fill 1
+begin
+roundRect 9.5 8.9 11.4 10.8 0.6
+fill 1
+begin
+roundRect 13.1 8.9 15 10.8 0.6
+fill 1
+begin
+roundRect 16.7 8.9 18.6 10.8 0.6
+fill 1
+begin
+roundRect 8 13.3 16 14.9 0.8
+fill 1
+restore
+restore
+# keyboard 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 2.8 6.4 21.2 17.6 2.4
+stroke 2.1 1
+begin
+roundRect 5.9 8.9 7.8 10.8 0.6
+fill 1
+begin
+roundRect 9.5 8.9 11.4 10.8 0.6
+fill 1
+begin
+roundRect 13.1 8.9 15 10.8 0.6
+fill 1
+begin
+roundRect 16.7 8.9 18.6 10.8 0.6
+fill 1
+begin
+roundRect 8 13.3 16 14.9 0.8
+fill 1
+restore
+restore
+# keyboard 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 2.8 6.4 21.2 17.6 2.4
+stroke 2.1 1
+begin
+roundRect 5.9 8.9 7.8 10.8 0.6
+fill 1
+begin
+roundRect 9.5 8.9 11.4 10.8 0.6
+fill 1
+begin
+roundRect 13.1 8.9 15 10.8 0.6
+fill 1
+begin
+roundRect 16.7 8.9 18.6 10.8 0.6
+fill 1
+begin
+roundRect 8 13.3 16 14.9 0.8
+fill 1
+restore
+restore
+# phone 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 7 2.8 17 21.2 2.6
+stroke 2.1 1
+begin
+roundRect 10.4 17.3 13.6 18.5 0.6
+fill 1
+restore
+restore
+# phone 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 7 2.8 17 21.2 2.6
+stroke 2.1 1
+begin
+roundRect 10.4 17.3 13.6 18.5 0.6
+fill 1
+restore
+restore
+# phone -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 7 2.8 17 21.2 2.6
+stroke 2.1 1
+begin
+roundRect 10.4 17.3 13.6 18.5 0.6
+fill 1
+restore
+restore
+# phone 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 7 2.8 17 21.2 2.6
+stroke 2.1 1
+begin
+roundRect 10.4 17.3 13.6 18.5 0.6
+fill 1
+restore
+restore
+# phone 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 7 2.8 17 21.2 2.6
+stroke 2.1 1
+begin
+roundRect 10.4 17.3 13.6 18.5 0.6
+fill 1
+restore
+restore
+# phone 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+roundRect 7 2.8 17 21.2 2.6
+stroke 2.1 1
+begin
+roundRect 10.4 17.3 13.6 18.5 0.6
+fill 1
+restore
+restore
+# folder 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 7
+quadTo 3.4 5.4 5 5.4
+lineTo 9.2 5.4
+lineTo 11.2 7.8
+lineTo 19 7.8
+quadTo 20.6 7.8 20.6 9.4
+lineTo 20.6 17.4
+quadTo 20.6 19 19 19
+lineTo 5 19
+quadTo 3.4 19 3.4 17.4
+close
+stroke 2.1 1
+restore
+restore
+# folder 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 7
+quadTo 3.4 5.4 5 5.4
+lineTo 9.2 5.4
+lineTo 11.2 7.8
+lineTo 19 7.8
+quadTo 20.6 7.8 20.6 9.4
+lineTo 20.6 17.4
+quadTo 20.6 19 19 19
+lineTo 5 19
+quadTo 3.4 19 3.4 17.4
+close
+stroke 2.1 1
+restore
+restore
+# folder -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 7
+quadTo 3.4 5.4 5 5.4
+lineTo 9.2 5.4
+lineTo 11.2 7.8
+lineTo 19 7.8
+quadTo 20.6 7.8 20.6 9.4
+lineTo 20.6 17.4
+quadTo 20.6 19 19 19
+lineTo 5 19
+quadTo 3.4 19 3.4 17.4
+close
+stroke 2.1 1
+restore
+restore
+# folder 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 7
+quadTo 3.4 5.4 5 5.4
+lineTo 9.2 5.4
+lineTo 11.2 7.8
+lineTo 19 7.8
+quadTo 20.6 7.8 20.6 9.4
+lineTo 20.6 17.4
+quadTo 20.6 19 19 19
+lineTo 5 19
+quadTo 3.4 19 3.4 17.4
+close
+stroke 2.1 1
+restore
+restore
+# folder 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 7
+quadTo 3.4 5.4 5 5.4
+lineTo 9.2 5.4
+lineTo 11.2 7.8
+lineTo 19 7.8
+quadTo 20.6 7.8 20.6 9.4
+lineTo 20.6 17.4
+quadTo 20.6 19 19 19
+lineTo 5 19
+quadTo 3.4 19 3.4 17.4
+close
+stroke 2.1 1
+restore
+restore
+# folder 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 3.4 7
+quadTo 3.4 5.4 5 5.4
+lineTo 9.2 5.4
+lineTo 11.2 7.8
+lineTo 19 7.8
+quadTo 20.6 7.8 20.6 9.4
+lineTo 20.6 17.4
+quadTo 20.6 19 19 19
+lineTo 5 19
+quadTo 3.4 19 3.4 17.4
+close
+stroke 2.1 1
+restore
+restore
+# sync 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 0 12 12
+begin
+arc 12 12 7.2 200 118
+stroke 2.2 1
+begin
+moveTo 15.8307 9.2168
+lineTo 19.5236 10.106
+lineTo 19.8191 6.3191
+close
+solid 1.6 1
+begin
+arc 12 12 7.2 20 118
+stroke 2.2 1
+begin
+moveTo 8.1693 14.7832
+lineTo 4.4764 13.894
+lineTo 4.1809 17.6809
+close
+solid 1.6 1
+restore
+restore
+# sync 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate 24 12 12
+begin
+arc 12 12 7.2 200 118
+stroke 2.2 1
+begin
+moveTo 15.8307 9.2168
+lineTo 19.5236 10.106
+lineTo 19.8191 6.3191
+close
+solid 1.6 1
+begin
+arc 12 12 7.2 20 118
+stroke 2.2 1
+begin
+moveTo 8.1693 14.7832
+lineTo 4.4764 13.894
+lineTo 4.1809 17.6809
+close
+solid 1.6 1
+restore
+restore
+# sync -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -8.4 12 12
+begin
+arc 12 12 7.2 200 118
+stroke 2.2 1
+begin
+moveTo 15.8307 9.2168
+lineTo 19.5236 10.106
+lineTo 19.8191 6.3191
+close
+solid 1.6 1
+begin
+arc 12 12 7.2 20 118
+stroke 2.2 1
+begin
+moveTo 8.1693 14.7832
+lineTo 4.4764 13.894
+lineTo 4.1809 17.6809
+close
+solid 1.6 1
+restore
+restore
+# sync 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -113.3528 12 12
+begin
+arc 12 12 7.2 200 118
+stroke 2.2 1
+begin
+moveTo 15.8307 9.2168
+lineTo 19.5236 10.106
+lineTo 19.8191 6.3191
+close
+solid 1.6 1
+begin
+arc 12 12 7.2 20 118
+stroke 2.2 1
+begin
+moveTo 8.1693 14.7832
+lineTo 4.4764 13.894
+lineTo 4.1809 17.6809
+close
+solid 1.6 1
+restore
+restore
+# sync 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -33.586 12 12
+begin
+arc 12 12 7.2 200 118
+stroke 2.2 1
+begin
+moveTo 15.8307 9.2168
+lineTo 19.5236 10.106
+lineTo 19.8191 6.3191
+close
+solid 1.6 1
+begin
+arc 12 12 7.2 20 118
+stroke 2.2 1
+begin
+moveTo 8.1693 14.7832
+lineTo 4.4764 13.894
+lineTo 4.1809 17.6809
+close
+solid 1.6 1
+restore
+restore
+# sync 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+rotate -0.5248 12 12
+begin
+arc 12 12 7.2 200 118
+stroke 2.2 1
+begin
+moveTo 15.8307 9.2168
+lineTo 19.5236 10.106
+lineTo 19.8191 6.3191
+close
+solid 1.6 1
+begin
+arc 12 12 7.2 20 118
+stroke 2.2 1
+begin
+moveTo 8.1693 14.7832
+lineTo 4.4764 13.894
+lineTo 4.1809 17.6809
+close
+solid 1.6 1
+restore
+restore
+# spinner 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+arc 12 12 8.2 -90 270
+stroke 2.3 1
+begin
+circle 20.2 12 1.45
+fill 1
+restore
+restore
+# spinner 1 1 0
+save
+scale 0.9 0.9 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+arc 12 12 8.2 -90 270
+stroke 2.3 1
+begin
+circle 20.2 12 1.45
+fill 1
+restore
+restore
+# spinner -0.35 1 1
+save
+scale 1.035 1.035 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+arc 12 12 8.2 -90 270
+stroke 2.3 1
+begin
+circle 20.2 12 1.45
+fill 1
+restore
+restore
+# spinner 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+arc 12 12 8.2 -90 270
+stroke 2.3 1
+begin
+circle 20.2 12 1.45
+fill 1
+restore
+restore
+# spinner 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+arc 12 12 8.2 -90 270
+stroke 2.3 1
+begin
+circle 20.2 12 1.45
+fill 1
+restore
+restore
+# spinner 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+arc 12 12 8.2 -90 270
+stroke 2.3 1
+begin
+circle 20.2 12 1.45
+fill 1
+restore
+restore
+# undo 0 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.4 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 8.8 5.4
+lineTo 3.4 9.4
+lineTo 8.8 13.4
+close
+solid 1.6 1
+restore
+restore
+# undo 1 1 0
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 8.6 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 10 5.4
+lineTo 4.6 9.4
+lineTo 10 13.4
+close
+solid 1.6 1
+restore
+restore
+# undo -0.35 1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.98 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 8.38 5.4
+lineTo 2.98 9.4
+lineTo 8.38 13.4
+close
+solid 1.6 1
+restore
+restore
+# undo 0 0.1 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.1272 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 7.5272 5.4
+lineTo 2.1272 9.4
+lineTo 7.5272 13.4
+close
+solid 1.6 1
+restore
+restore
+# undo 0 0.3 0.5
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.1272 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 7.5272 5.4
+lineTo 2.1272 9.4
+lineTo 7.5272 13.4
+close
+solid 1.6 1
+restore
+restore
+# undo 0 0.6 1
+save
+scale 1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.4 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 8.8 5.4
+lineTo 3.4 9.4
+lineTo 8.8 13.4
+close
+solid 1.6 1
+restore
+restore
+# redo 0 1 0
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.4 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 8.8 5.4
+lineTo 3.4 9.4
+lineTo 8.8 13.4
+close
+solid 1.6 1
+restore
+restore
+# redo 1 1 0
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 8.6 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 10 5.4
+lineTo 4.6 9.4
+lineTo 10 13.4
+close
+solid 1.6 1
+restore
+restore
+# redo -0.35 1 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.98 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 8.38 5.4
+lineTo 2.98 9.4
+lineTo 8.38 13.4
+close
+solid 1.6 1
+restore
+restore
+# redo 0 0.1 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.1272 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 7.5272 5.4
+lineTo 2.1272 9.4
+lineTo 7.5272 13.4
+close
+solid 1.6 1
+restore
+restore
+# redo 0 0.3 0.5
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 6.1272 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 7.5272 5.4
+lineTo 2.1272 9.4
+lineTo 7.5272 13.4
+close
+solid 1.6 1
+restore
+restore
+# redo 0 0.6 1
+save
+scale 1 1 12 12
+scale -1 1 12 12
+save
+translate 4.3676 0
+skewX -0.364
+begin
+moveTo 7.4 9.4
+lineTo 14.6 9.4
+cubicTo 18.2 9.4 20.4 11.8 20.4 14.9
+cubicTo 20.4 18.1 18.1 20.4 14.6 20.4
+lineTo 10.6 20.4
+stroke 2.2 1
+begin
+moveTo 8.8 5.4
+lineTo 3.4 9.4
+lineTo 8.8 13.4
+close
+solid 1.6 1
+restore
+restore

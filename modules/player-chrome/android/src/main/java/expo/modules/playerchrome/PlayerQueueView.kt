@@ -7,20 +7,23 @@ import android.view.View
 import android.view.ViewGroup
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.ImageView
+import com.bumptech.glide.Glide
 import androidx.recyclerview.widget.ItemTouchHelper
 import androidx.recyclerview.widget.RecyclerView
 import androidx.recyclerview.widget.LinearLayoutManager
 import org.json.JSONArray
 import org.json.JSONObject
-import java.util.Collections
 
 internal class PlayerQueueView(context: Context, private val action: (String, Map<String, Any>) -> Unit, close: () -> Unit) : LinearLayout(context) {
     private val heading = context.playerText(20f, 700).apply { text = "En cola" }
     private val count = context.playerText(12f, 400)
     private val nowLabel = context.playerText(11f, 700).apply { text = "SONANDO AHORA"; letterSpacing = 0.1f }
-    private val nextLabel = context.playerText(11f, 700).apply { text = "A CONTINUACION"; letterSpacing = 0.1f }
+    private val nextLabel = context.playerText(11f, 700).apply { text = "A CONTINUACIÓN"; letterSpacing = 0.1f }
     private val current = QueueRow(context, true)
-    private val empty = context.playerText(13f, 400).apply { text = "Nada despues de esta cancion"; gravity = Gravity.CENTER }
+    private val empty = context.playerText(14f, 400).apply {
+        setSingleLine(false); text = "Tu cola está al día.\nAgrega canciones desde Inicio o Biblioteca."; gravity = Gravity.CENTER
+    }
     private val list = RecyclerView(context)
     private val rows = mutableListOf<JSONObject>()
     private var revision = ""
@@ -32,6 +35,7 @@ internal class PlayerQueueView(context: Context, private val action: (String, Ma
     private val adapter: RecyclerView.Adapter<QueueHolder> = object : RecyclerView.Adapter<QueueHolder>() {
         override fun getItemCount() = rows.size
         override fun onCreateViewHolder(parent: ViewGroup, type: Int) = QueueHolder(QueueRow(context, false))
+        override fun onViewRecycled(holder: QueueHolder) { Glide.with(context.applicationContext).clear(holder.row.artwork) }
         override fun onBindViewHolder(holder: QueueHolder, position: Int) {
             holder.row.bind(rows[position], accent, ink)
             holder.row.info.setOnClickListener {
@@ -80,7 +84,7 @@ internal class PlayerQueueView(context: Context, private val action: (String, Ma
         header.addView(PlayerControl(context, "close", 24f, "Cerrar cola", close), LayoutParams(px(48), px(48)))
         addView(header)
         listOf(nowLabel, nextLabel).forEach { it.setPadding(px(18), px(14), px(18), px(6)) }
-        addView(nowLabel); addView(current, LayoutParams(-1, px(66)).apply { leftMargin=px(16);rightMargin=px(16);topMargin=px(2);bottomMargin=px(2) })
+        addView(nowLabel); addView(current, LayoutParams(-1, -2).apply { leftMargin=px(16);rightMargin=px(16);topMargin=px(2);bottomMargin=px(2) })
         addView(nextLabel)
         list.layoutManager = LinearLayoutManager(context); list.adapter = adapter; list.itemAnimator = null
         list.setPadding(px(10), 0, px(10), px(32)); list.clipToPadding = false
@@ -94,7 +98,7 @@ internal class PlayerQueueView(context: Context, private val action: (String, Ma
         revision = token
         rows.clear(); val upcoming = value.optJSONArray("upcoming") ?: JSONArray()
         for (i in 0 until upcoming.length()) rows.add(upcoming.getJSONObject(i))
-        count.text = "${rows.size} siguientes"
+        count.text = if (rows.size == 1) "1 canción por escuchar" else "${rows.size} canciones por escuchar"
         val playing = value.optJSONObject("current")
         current.visibility = if (playing == null) GONE else VISIBLE; nowLabel.visibility = current.visibility
         if (playing != null) current.bind(playing, accent, ink)
@@ -112,28 +116,36 @@ internal class PlayerQueueView(context: Context, private val action: (String, Ma
         val info = LinearLayout(context).apply { orientation = VERTICAL; gravity = Gravity.CENTER_VERTICAL; setPadding(0, px(10), 0, px(10)); isClickable = !current }
         val title = context.playerText(15f, 600)
         val artist = context.playerText(13f, 400)
-        private val number = context.playerText(11f, 700).apply { gravity = Gravity.CENTER }
         private val bars = QueuePlayingBars(context)
+        val artwork = ImageView(context).apply {
+            scaleType = ImageView.ScaleType.CENTER_CROP; clipToOutline = true
+            background = roundSurface(0x22888888, dp(8f))
+            importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
+        }
         val remove = PlayerControl(context, "trash-can-outline", 18f, "Quitar de la cola") {}
         val drag = PlayerControl(context, "drag", 20f, "Reordenar") {}
         init {
             orientation = HORIZONTAL; gravity = Gravity.CENTER_VERTICAL
             setPadding(px(10), px(5), px(2), px(5)); minimumHeight = px(66)
             layoutParams = RecyclerView.LayoutParams(-1, -2).apply { setMargins(px(16), px(2), px(16), px(2)) }
-            addView(if(current) bars else number, LayoutParams(px(if(current)14 else 24), px(32)).apply { rightMargin = px(if(current)10 else 8) })
+            if (current) addView(bars, LayoutParams(px(14), px(32)).apply { rightMargin = px(10) })
+            addView(artwork, LayoutParams(px(44), px(44)).apply { rightMargin = px(12) })
             info.addView(title,LayoutParams(-1,-2).apply { bottomMargin=px(3) }); info.addView(artist); addView(info, LayoutParams(0, -2, 1f))
-            if (!current) { addView(remove, LayoutParams(px(40), px(48))); addView(drag, LayoutParams(px(40), px(48))) }
+            if (!current) { addView(remove, LayoutParams(px(48), px(48))); addView(drag, LayoutParams(px(48), px(48))) }
             remove.colors(0xffff4d4d.toInt())
         }
         fun bind(item: JSONObject, accent: Int, ink: Int) {
             title.text = item.optString("title"); artist.text = item.optString("artist")
-            number.text = (item.optInt("index") + 1).toString()
+            info.contentDescription = "${item.optString("title")}, ${item.optString("artist")}"
+            val placeholder = context.stayIcon("music", interactive = false).apply { this.ink = alphaColor(ink, .65f) }
+            Glide.with(context.applicationContext).load(item.optString("artwork").ifEmpty { null })
+                .override(px(88)).centerCrop().placeholder(placeholder).error(placeholder).dontAnimate().into(artwork)
             recolor(accent, ink)
         }
         fun recolor(accent: Int, ink: Int) {
             bars.ink = accent
             title.setTextColor(if (current) accent else ink); artist.setTextColor(alphaColor(ink, 0.7f))
-            number.setTextColor(if (current) accent else alphaColor(ink, 0.5f)); drag.colors(alphaColor(ink, 0.5f))
+            drag.colors(alphaColor(ink, 0.5f))
             background = roundSurface(if (current) alphaColor(accent, 0.125f) else Color.TRANSPARENT, dp(14f))
         }
     }

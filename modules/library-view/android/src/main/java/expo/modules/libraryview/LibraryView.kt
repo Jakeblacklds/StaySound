@@ -1,5 +1,7 @@
 package expo.modules.libraryview
 
+import expo.modules.playerchrome.stayIcon
+import expo.modules.playerchrome.TrackActionsSheet
 import android.animation.ValueAnimator
 import android.os.Build
 import androidx.core.view.ViewCompat
@@ -69,6 +71,7 @@ class LibraryView(context: Context, appContext: AppContext) : ExpoView(context, 
     private var searchOpen = false
     private var resetScroll = false
     private var dialog: androidx.appcompat.app.AlertDialog? = null
+    private var trackSheet: TrackActionsSheet? = null
     private val title = text(30f, true)
     private val toolbar = LinearLayout(ui)
     private val tabs = LibraryTabs(ui) { selectTab(it) }
@@ -256,6 +259,7 @@ class LibraryView(context: Context, appContext: AppContext) : ExpoView(context, 
         worker = null
         dialog?.dismiss()
         dialog = null
+        trackSheet?.dispose(); trackSheet = null
         super.onDetachedFromWindow()
     }
 
@@ -374,7 +378,7 @@ class LibraryView(context: Context, appContext: AppContext) : ExpoView(context, 
         search.setTextColor(color("onSurface"))
         search.setHintTextColor(color("onSurfaceVariant"))
         search.background = shape(color("surfaceVariant"), 16)
-        searchToggle.setImageResource(if (searchOpen) R.drawable.library_close else R.drawable.library_search)
+        searchToggle.setImageDrawable(ui.stayIcon(if (searchOpen) "close" else "search"))
         searchToggle.imageTintList = ColorStateList.valueOf(color("onSurface"))
         searchToggle.background = ripple(Color.TRANSPARENT, 24)
         searchToggle.contentDescription = label(if (searchOpen) "closeSearch" else "search")
@@ -412,14 +416,21 @@ class LibraryView(context: Context, appContext: AppContext) : ExpoView(context, 
             .show()
     }
     private fun showActions(entry: LibraryEntry) {
-        dialog = MaterialAlertDialogBuilder(ui).setTitle(entry.title)
-            .setItems(arrayOf(label("queue"), label("playlist"), label("remove"), label("deleteFile"))) { _, index ->
-                when (index) {
-                    0 -> emit("queue", entry.id)
-                    1 -> showPlaylists(entry)
-                    else -> confirmRemoval(entry, index == 3)
+        trackSheet?.dispose()
+        trackSheet = TrackActionsSheet(ui, entry.title, entry.subtitle, entry.displayArtwork, entry.fallbackThumbnail,
+            ColorUtils.blendARGB(color("background"), color("surfaceVariant"), .55f),
+            color("onSurface"), color("onSurfaceVariant"), color("primary"), label("cancel"), motionEnabled,
+            listOf("queue", "playlist", "remove", "deleteFile").map { action ->
+                TrackActionsSheet.Action(label(action), when (action) {
+                    "queue" -> "queue"; "playlist" -> "playlist-add"; else -> "trash"
+                }, if (action == "queue") label("queueHint") else "",
+                    destructive = action == "remove" || action == "deleteFile") {
+                when (action) {
+                    "queue" -> emit("queue", entry.id)
+                    "playlist" -> showPlaylists(entry)
+                    else -> confirmRemoval(entry, action == "deleteFile")
                 }
-            }.setNegativeButton(label("cancel"), null).show()
+            } }).also { it.show() }
     }
     private fun showPlaylists(entry: LibraryEntry) {
         val choices = catalog.playlists.toList()
@@ -508,7 +519,7 @@ class LibraryView(context: Context, appContext: AppContext) : ExpoView(context, 
             root.addView(copy, if (song) LayoutParams(0, -2, 1f) else LayoutParams(-1, -2))
             if (song) {
                 root.addView(detail, LayoutParams(-2, -2))
-                more.setImageResource(R.drawable.library_queue)
+                more.setImageDrawable(ui.stayIcon("queue"))
                 more.setPadding(dp(14), dp(14), dp(14), dp(14))
                 root.addView(more, LayoutParams(dp(48), dp(48)))
                 more.setOnClickListener { bound?.let(::showActions) }
@@ -560,8 +571,8 @@ class LibraryView(context: Context, appContext: AppContext) : ExpoView(context, 
             bound = entry
             name.text = entry.title
             subtitle.text = entry.subtitle
-            detail.setCompoundDrawablesRelativeWithIntrinsicBounds(0, 0,
-                if (entry.favorite) R.drawable.library_favorite else 0, 0,
+            detail.setCompoundDrawablesRelativeWithIntrinsicBounds(null, null,
+                if (entry.favorite) context.stayIcon("heart", 14f, interactive = false) else null, null,
             )
             detail.compoundDrawablePadding = dp(6)
             val seconds = entry.duration / 1000
@@ -569,10 +580,10 @@ class LibraryView(context: Context, appContext: AppContext) : ExpoView(context, 
             paint(entry)
             val request = Glide.with(context.applicationContext).load(entry.displayArtwork.ifEmpty { null })
                 .override(dp(if (song) 56 else 240)).centerCrop().dontAnimate()
-                .placeholder(R.drawable.library_artwork).error(R.drawable.library_artwork)
+                .placeholder(context.stayIcon("music", interactive = false)).error(context.stayIcon("music", interactive = false))
             if (entry.fallbackThumbnail.isNotEmpty()) {
                 request.error(Glide.with(context.applicationContext).load(entry.fallbackThumbnail)
-                    .override(dp(if (song) 56 else 240)).centerCrop().dontAnimate().error(R.drawable.library_artwork))
+                    .override(dp(if (song) 56 else 240)).centerCrop().dontAnimate().error(context.stayIcon("music", interactive = false)))
             }
             if (motionEnabled) request.transition(DrawableTransitionOptions.withCrossFade(160))
             request.into(art)

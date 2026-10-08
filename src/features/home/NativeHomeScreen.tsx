@@ -1,5 +1,6 @@
 import { useDynamicColors } from '@/src/hooks';
 import { useI18n } from '@/src/i18n';
+import { resolveRemoteTrackForPlayback } from '@/src/services/remotePlaybackService';
 import { createTidalStreamTrack } from '@/src/services/tidalService';
 import { useLibraryStore, useNotificationStore, usePlayerStore } from '@/src/stores';
 import { useOnboardingStore } from '@/src/stores/onboardingStore';
@@ -49,7 +50,7 @@ function displayTrack(track: Track) {
 
 const actionLabels = {
     es: {
-        queue: 'Agregar a cola', playlist: 'Agregar a playlist', newPlaylist: 'Nueva playlist',
+        queue: 'Agregar a cola', queueHint: 'Se reproducirá al final de la cola', queued: 'Agregada a la cola', playlist: 'Agregar a playlist', newPlaylist: 'Nueva playlist',
         playlistName: 'Nombre de la playlist', remove: 'Quitar de la biblioteca', deleteFile: 'Borrar del dispositivo',
         removeMessage: 'Se quitará “{title}” de tu biblioteca. El archivo permanecerá en tu dispositivo.',
         deleteFileMessage: 'Se borrará “{title}” permanentemente del dispositivo. Esta acción no se puede deshacer.',
@@ -58,7 +59,7 @@ const actionLabels = {
         actionError: 'No se pudo completar la acción. Inténtalo de nuevo.',
     },
     en: {
-        queue: 'Add to queue', playlist: 'Add to playlist', newPlaylist: 'New playlist',
+        queue: 'Add to queue', queueHint: 'Plays at the end of the queue', queued: 'Added to queue', playlist: 'Add to playlist', newPlaylist: 'New playlist',
         playlistName: 'Playlist name', remove: 'Remove from library', deleteFile: 'Delete from device',
         removeMessage: '“{title}” will be removed from your library. The file will remain on your device.',
         deleteFileMessage: '“{title}” will be permanently deleted from this device. This cannot be undone.',
@@ -148,7 +149,23 @@ export default function NativeHomeScreen() {
                     } catch (error) { player.setPendingTrackPreview(null); throw error; }
                     return;
                 }
-                case 'queue': player.addToQueue(track); return;
+                case 'queue': {
+                    // Recent streams can have expired URLs. Reuse a download when available,
+                    // otherwise resolve a fresh stream just as the play action does.
+                    const tidalId = track.tidalId ?? Number(track.id.match(/^tidal(?:_stream)?_(\d+)$/)?.[1]);
+                    const downloaded = tidalId ? library.tracks.get(`tidal_${tidalId}`) : undefined;
+                    const resolved = local ?? downloaded ?? (Number.isFinite(tidalId) && tidalId
+                        ? await createTidalStreamTrack({
+                            id: tidalId, title: track.title, artist: track.artist, album: track.album,
+                            durationMs: track.duration, quality: track.quality || 'LOSSLESS',
+                            isHiRes: (track.quality || '').toUpperCase().includes('HI_RES'),
+                            artworkUrl: track.artwork, trackNumber: track.trackNumber, year: track.year,
+                            sampleRate: track.sampleRate, bitDepth: track.bitDepth, codec: track.codec, albumId: track.tidalAlbumId,
+                        }, { qobuzOnly: true }) : await resolveRemoteTrackForPlayback(track));
+                    if (await player.addToQueue(resolved)) useNotificationStore.getState().showNotification(
+                        `${actionLabels[language].queued} · ${track.title}`, 'success');
+                    return;
+                }
                 case 'playlist':
                     if (library.playlists.has(event.value)) library.addToPlaylist(event.value, track.id);
                     return;

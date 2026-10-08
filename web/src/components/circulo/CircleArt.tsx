@@ -18,7 +18,7 @@ interface CircleArtProps {
   ring?: boolean;
   ringGap?: number;
   label?: string;
-  onClick?: () => void;
+  onClick?: (source: HTMLElement) => void;
   className?: string;
 }
 
@@ -38,7 +38,7 @@ export function CircleArt({ size = 118, src, hue = 30, ring = false, ringGap = 5
     if (!onClick) return;
     if (event.key === 'Enter' || event.key === ' ') {
       event.preventDefault();
-      onClick();
+      onClick(event.currentTarget);
     }
   }
 
@@ -46,7 +46,7 @@ export function CircleArt({ size = 118, src, hue = 30, ring = false, ringGap = 5
     <span
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
-      onClick={onClick}
+      onClick={onClick ? event => onClick(event.currentTarget) : undefined}
       onKeyDown={handleKeyDown}
       className={`circ-art ${ring ? 'ringed' : ''} ${onClick ? 'interactive' : ''} ${fill ? 'fill' : ''} ${className ?? ''}`}
       style={{

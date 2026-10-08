@@ -155,7 +155,7 @@ function persist(id: string, waveform: TrackWaveform): void {
 
 /* ---------------------------------------------------------------- analysis */
 
-function decodeAudio(context: BaseAudioContext, bytes: ArrayBuffer): Promise<AudioBuffer> {
+export function decodeAudio(context: BaseAudioContext, bytes: ArrayBuffer): Promise<AudioBuffer> {
   return new Promise((resolve, reject) => {
     // Older WebKit only implements the callback form and returns undefined.
     const maybePromise = context.decodeAudioData(bytes, resolve, reject) as unknown;

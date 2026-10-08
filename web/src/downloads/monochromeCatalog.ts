@@ -5,6 +5,8 @@ import {
   normalizeTidalTrack,
   type TidalTrackApiResponse,
 } from '../library/tidalDiscovery';
+import { isTauriDesktop, tidalCatalogRequest } from '../desktop/tauriMusicLibrary';
+import { canonicalAlbumTitle, dedupeAlbumVariants, rankCatalogSearch } from './catalogRanking';
 
 /**
  * Catálogo navegable de Descargas.
@@ -18,10 +20,16 @@ import {
  *   /search/?s=   canciones      /search/?al=  álbumes     /search/?a=  artistas
  *   /album/?id=   álbum + tracks /artist/?id=  ficha del artista
  *
- * El endpoint de artista no devuelve discografía, así que se reconstruye por
- * nombre (búsqueda de álbumes + los álbumes implícitos en sus canciones), igual
- * que hace la app nativa en src/services/tidalService.ts.
+ * El endpoint de artista de los mirrors no devuelve discografía, así que en la
+ * web se reconstruye por nombre (búsqueda de álbumes + los álbumes implícitos en
+ * sus canciones), igual que hace la app nativa en src/services/tidalService.ts.
+ *
+ * En escritorio (Tauri) nada de eso hace falta: el lado nativo habla con la API
+ * de catálogo de TIDAL, que sí tiene búsqueda unificada con "mejor resultado",
+ * top tracks reales, discografía por tipo y artistas similares.
  */
+
+export type CatalogAlbumType = 'ALBUM' | 'EP' | 'SINGLE' | 'COMPILATION';
 
 export type CatalogAlbum = {
   id: number;
@@ -33,18 +41,28 @@ export type CatalogAlbum = {
   year?: number;
   trackCount?: number;
   explicit?: boolean;
+  type?: CatalogAlbumType;
+  popularity?: number;
 };
 
 export type CatalogArtist = {
   id: number;
   name: string;
   artworkUrl?: string;
+  popularity?: number;
 };
+
+/** El primer resultado de una búsqueda, que puede ser de cualquiera de los tres tipos. */
+export type CatalogTopResult =
+  | { kind: 'artist'; artist: CatalogArtist }
+  | { kind: 'track'; track: TidalTrack }
+  | { kind: 'album'; album: CatalogAlbum };
 
 export type CatalogSearch = {
   tracks: TidalTrack[];
   albums: CatalogAlbum[];
   artists: CatalogArtist[];
+  top?: CatalogTopResult | null;
 };
 
 export type CatalogAlbumDetail = {
@@ -55,12 +73,20 @@ export type CatalogAlbumDetail = {
 export type CatalogArtistDetail = {
   artist: CatalogArtist;
   topTracks: TidalTrack[];
+  /** Álbumes de estudio (y recopilatorios propios). */
   albums: CatalogAlbum[];
+  /** Sencillos y EP. */
+  singles: CatalogAlbum[];
+  /** "Fans también escuchan": vacío cuando el origen no lo expone. */
+  related: CatalogArtist[];
 };
 
 type AlbumApiResponse = {
   id?: number;
   title?: string;
+  version?: string | null;
+  type?: string;
+  popularity?: number;
   cover?: string | null;
   releaseDate?: string;
   numberOfTracks?: number;
@@ -74,6 +100,7 @@ type ArtistApiResponse = {
   id?: number;
   name?: string;
   picture?: string | null;
+  popularity?: number;
 };
 
 type AlbumSearchApiResponse = {
@@ -120,11 +147,26 @@ function withCatalogCache<T>(key: string, loader: () => Promise<T>): Promise<T> 
   return value;
 }
 
+function albumType(value?: string): CatalogAlbumType | undefined {
+  const normalized = value?.toUpperCase();
+  return normalized === 'ALBUM' || normalized === 'EP' || normalized === 'SINGLE' || normalized === 'COMPILATION'
+    ? normalized
+    : undefined;
+}
+
+function withVersion(title: string, version?: string | null): string {
+  const trimmed = version?.trim();
+  if (!trimmed || title.toLowerCase().includes(trimmed.toLowerCase())) return title;
+  return `${title} (${trimmed})`;
+}
+
 function normalizeAlbum(item: AlbumApiResponse): CatalogAlbum | null {
   if (!item?.id || !item.title) return null;
   return {
     id: item.id,
-    title: item.title,
+    title: withVersion(item.title, item.version),
+    type: albumType(item.type),
+    popularity: item.popularity,
     artist: item.artist?.name ?? item.artists?.[0]?.name ?? 'Artista desconocido',
     artistId: item.artist?.id ?? item.artists?.[0]?.id,
     artworkUrl: getTidalArtworkUrl(item.cover ?? undefined),
@@ -141,7 +183,20 @@ function normalizeArtist(item: ArtistApiResponse): CatalogArtist | null {
     id: item.id,
     name: item.name,
     artworkUrl: getTidalArtworkUrl(item.picture ?? undefined),
+    popularity: item.popularity,
   };
+}
+
+type VersionedTrackApiResponse = TidalTrackApiResponse & { version?: string | null; volumeNumber?: number };
+
+/**
+ * Igual que normalizeTidalTrack, pero con la versión en el título: "DtMF" y
+ * "DtMF (Live)" son canciones distintas, y Soulseek busca por ese título.
+ */
+function normalizeCatalogTrack(item: VersionedTrackApiResponse): TidalTrack | null {
+  const track = normalizeTidalTrack(item);
+  if (!track) return null;
+  return { ...track, title: withVersion(track.title, item.version) };
 }
 
 function unwrapAlbumTrack(entry: { item?: TidalTrackApiResponse } | TidalTrackApiResponse): TidalTrackApiResponse {
@@ -207,7 +262,7 @@ export function artistsFromTracks(tracks: TidalTrack[]): CatalogArtist[] {
 async function searchCatalogTracks(query: string): Promise<TidalTrack[]> {
   const payload = await fetchFromTidalMirrors<TrackSearchApiResponse>(`/search/?s=${encodeURIComponent(query)}`);
   const items = payload.data?.items ?? payload.data?.tracks?.items ?? payload.items ?? [];
-  return dedupeTracks(items.map(normalizeTidalTrack).filter((track): track is TidalTrack => Boolean(track)));
+  return dedupeTracks(items.map(normalizeCatalogTrack).filter((track): track is TidalTrack => Boolean(track)));
 }
 
 async function searchCatalogAlbums(query: string): Promise<CatalogAlbum[]> {
@@ -224,46 +279,172 @@ async function searchCatalogArtists(query: string): Promise<CatalogArtist[]> {
   return [...byId.values()];
 }
 
+type UnifiedSearchApiResponse = {
+  artists?: { items?: ArtistApiResponse[] };
+  albums?: { items?: AlbumApiResponse[] };
+  tracks?: { items?: VersionedTrackApiResponse[] };
+  topHit?: { type?: string; value?: ArtistApiResponse & AlbumApiResponse & VersionedTrackApiResponse };
+};
+
+function normalizeTopHit(hit: UnifiedSearchApiResponse['topHit']): CatalogTopResult | null {
+  if (!hit?.value) return null;
+  switch (hit.type) {
+    case 'ARTISTS': {
+      const artist = normalizeArtist(hit.value);
+      return artist ? { kind: 'artist', artist } : null;
+    }
+    case 'TRACKS': {
+      const track = normalizeCatalogTrack(hit.value);
+      return track ? { kind: 'track', track } : null;
+    }
+    case 'ALBUMS': {
+      const album = normalizeAlbum(hit.value);
+      return album ? { kind: 'album', album } : null;
+    }
+    default:
+      return null;
+  }
+}
+
+/** Escritorio: una sola petición trae las tres listas y el topHit de TIDAL. */
+async function searchCatalogNative(query: string, limit: number): Promise<CatalogSearch> {
+  const payload = await tidalCatalogRequest<UnifiedSearchApiResponse>('search', {
+    query,
+    types: 'ARTISTS,ALBUMS,TRACKS',
+    limit,
+  });
+  const tracks = dedupeTracks((payload.tracks?.items ?? [])
+    .map(normalizeCatalogTrack)
+    .filter((track): track is TidalTrack => Boolean(track)));
+  const albums = (payload.albums?.items ?? [])
+    .map(normalizeAlbum)
+    .filter((album): album is CatalogAlbum => Boolean(album));
+  const artists = (payload.artists?.items ?? [])
+    .map(normalizeArtist)
+    .filter((artist): artist is CatalogArtist => Boolean(artist));
+  const ranked = rankCatalogSearch(query, { tracks, albums, artists }, normalizeTopHit(payload.topHit));
+
+  // Si lo buscado es un artista, "Canciones" debe ser lo suyo más escuchado, no
+  // las colaboraciones donde solo aparece (buscar "kendrick lamar" devolvía
+  // puros "feat."). Una petición más, solo en este caso.
+  const top = ranked.top;
+  if (top?.kind === 'artist') {
+    const own = ranked.tracks.slice(0, 4).filter(track => track.artistId === top.artist.id).length;
+    if (own < 4) {
+      const topTracks = await tidalCatalogRequest<{ items?: VersionedTrackApiResponse[] }>(`artists/${top.artist.id}/toptracks`, { limit: 6 })
+        .then(result => (result.items ?? []).map(normalizeCatalogTrack).filter((track): track is TidalTrack => Boolean(track)))
+        .catch(() => [] as TidalTrack[]);
+      if (topTracks.length > 0) {
+        const ids = new Set(topTracks.map(track => track.id));
+        ranked.tracks = [...topTracks, ...ranked.tracks.filter(track => !ids.has(track.id))];
+      }
+    }
+  }
+  return ranked;
+}
+
 /**
- * Una sola búsqueda alimenta las tres pestañas del catálogo. Cada endpoint va
- * por separado (allSettled) porque los mirrors no siempre implementan los tres:
- * si el de álbumes o artistas falla, se reconstruye desde las canciones en vez
- * de dejar la pestaña vacía.
+ * Web: cada endpoint va por separado (allSettled) porque los mirrors no siempre
+ * implementan los tres; si el de álbumes o artistas falla, se reconstruye desde
+ * las canciones en vez de dejar la pestaña vacía.
+ */
+async function searchCatalogMirrors(query: string): Promise<CatalogSearch> {
+  const [trackResult, albumResult, artistResult] = await Promise.allSettled([
+    searchCatalogTracks(query),
+    searchCatalogAlbums(query),
+    searchCatalogArtists(query),
+  ]);
+
+  if (trackResult.status === 'rejected' && albumResult.status === 'rejected' && artistResult.status === 'rejected') {
+    throw trackResult.reason instanceof Error
+      ? trackResult.reason
+      : new Error('No se pudo consultar el catálogo de Monochrome.');
+  }
+
+  const tracks = trackResult.status === 'fulfilled' ? trackResult.value : [];
+  const searchedAlbums = albumResult.status === 'fulfilled' ? albumResult.value : [];
+  const searchedArtists = artistResult.status === 'fulfilled' ? artistResult.value : [];
+
+  return rankCatalogSearch(query, {
+    tracks,
+    albums: dedupeAlbums([...searchedAlbums, ...albumsFromTracks(tracks)]),
+    artists: searchedArtists.length > 0 ? searchedArtists : artistsFromTracks(tracks),
+  });
+}
+
+/**
+ * Una sola búsqueda alimenta todas las pestañas del catálogo, ya ordenada por
+ * relevancia (ver catalogRanking.ts) y con su "mejor resultado".
  */
 export async function searchCatalog(query: string): Promise<CatalogSearch> {
   const trimmed = query.trim();
-  if (!trimmed) return { tracks: [], albums: [], artists: [] };
+  if (!trimmed) return { tracks: [], albums: [], artists: [], top: null };
 
   return withCatalogCache(`search:${trimmed.toLowerCase()}`, async () => {
-    const [trackResult, albumResult, artistResult] = await Promise.allSettled([
-      searchCatalogTracks(trimmed),
-      searchCatalogAlbums(trimmed),
-      searchCatalogArtists(trimmed),
-    ]);
-
-    if (trackResult.status === 'rejected' && albumResult.status === 'rejected' && artistResult.status === 'rejected') {
-      throw trackResult.reason instanceof Error
-        ? trackResult.reason
-        : new Error('No se pudo consultar el catálogo de Monochrome.');
+    if (isTauriDesktop()) {
+      try {
+        return await searchCatalogNative(trimmed, 30);
+      } catch {
+        // Si la API nativa falla (sin red momentánea, token rechazado) se
+        // intenta el camino de siempre antes de mostrar un error.
+      }
     }
-
-    const tracks = trackResult.status === 'fulfilled' ? trackResult.value : [];
-    const searchedAlbums = albumResult.status === 'fulfilled' ? albumResult.value : [];
-    const searchedArtists = artistResult.status === 'fulfilled' ? artistResult.value : [];
-
-    return {
-      tracks,
-      albums: dedupeAlbums([...searchedAlbums, ...albumsFromTracks(tracks)]),
-      artists: searchedArtists.length > 0
-        ? searchedArtists
-        : artistsFromTracks(tracks),
-    };
+    return searchCatalogMirrors(trimmed);
   });
 }
 
 /** Álbum completo con su tracklist en orden de disco. */
+type PagedApiResponse<T> = { items?: T[]; totalNumberOfItems?: number };
+
+function fillAlbumTracks(album: CatalogAlbum, tracks: TidalTrack[]): TidalTrack[] {
+  // El endpoint de álbum no siempre repite el artista ni la portada dentro de
+  // cada canción, y Soulseek busca justamente por "artista - título" (además de
+  // que la portada se guarda junto al archivo descargado).
+  return tracks.map(track => ({
+    ...track,
+    artist: track.artist && track.artist !== 'Unknown Artist' ? track.artist : album.artist,
+    album: track.album && track.album !== 'Unknown Album' ? canonicalAlbumTitle(track.album) : album.title,
+    albumId: track.albumId ?? album.id,
+    artistId: track.artistId ?? album.artistId,
+    artworkUrl: track.artworkUrl ?? album.artworkUrl,
+  }));
+}
+
+async function getCatalogAlbumNative(albumId: number): Promise<CatalogAlbumDetail> {
+  const [albumPayload, itemsPayload] = await Promise.all([
+    tidalCatalogRequest<AlbumApiResponse>(`albums/${albumId}`),
+    tidalCatalogRequest<PagedApiResponse<{ item?: VersionedTrackApiResponse; type?: string }>>(`albums/${albumId}/items`, { limit: 100 }),
+  ]);
+  const album = normalizeAlbum(albumPayload);
+  if (!album) throw new Error('TIDAL no devolvió información de este álbum.');
+  const entries = (itemsPayload.items ?? [])
+    // Los álbumes pueden traer videoclips intercalados.
+    .filter(entry => !entry.type || entry.type === 'track')
+    .map(entry => entry.item)
+    .filter((item): item is VersionedTrackApiResponse => Boolean(item));
+  const tracks = fillAlbumTracks(album, entries
+    .map(item => {
+      const track = normalizeCatalogTrack(item);
+      return track ? { ...track, volume: item.volumeNumber ?? 1 } : null;
+    })
+    .filter((track): track is TidalTrack & { volume: number } => Boolean(track))
+    .sort((left, right) => (left.volume - right.volume) || ((left.trackNumber ?? 9999) - (right.trackNumber ?? 9999)))
+    .map(({ volume: _volume, ...track }) => track));
+  return {
+    album: { ...album, trackCount: album.trackCount ?? tracks.length },
+    tracks,
+  };
+}
+
 export async function getCatalogAlbum(albumId: number): Promise<CatalogAlbumDetail> {
   return withCatalogCache(`album:${albumId}`, async () => {
+    if (isTauriDesktop()) {
+      try {
+        return await getCatalogAlbumNative(albumId);
+      } catch {
+        // Cae a los mirrors, igual que la búsqueda.
+      }
+    }
     const payload = await fetchFromTidalMirrors<AlbumDetailApiResponse>(`/album/?id=${albumId}`);
     const data = payload.data ?? payload;
     const album = normalizeAlbum(data);
@@ -271,24 +452,14 @@ export async function getCatalogAlbum(albumId: number): Promise<CatalogAlbumDeta
 
     const tracks = (data.items ?? [])
       .map(unwrapAlbumTrack)
-      .map(normalizeTidalTrack)
+      .map(normalizeCatalogTrack)
       .filter((track): track is TidalTrack => Boolean(track))
-      // El endpoint de álbum no siempre repite el artista ni la portada dentro
-      // de cada canción, y Soulseek busca justamente por "artista - título"
-      // (además de que la portada se guarda junto al archivo descargado).
-      .map(track => ({
-        ...track,
-        artist: track.artist && track.artist !== 'Unknown Artist' ? track.artist : album.artist,
-        album: track.album && track.album !== 'Unknown Album' ? track.album : album.title,
-        albumId: track.albumId ?? album.id,
-        artistId: track.artistId ?? album.artistId,
-        artworkUrl: track.artworkUrl ?? album.artworkUrl,
-      }))
       .sort((left, right) => (left.trackNumber ?? 9999) - (right.trackNumber ?? 9999));
+    const filledTracks = fillAlbumTracks(album, tracks);
 
     return {
-      album: { ...album, trackCount: album.trackCount ?? tracks.length },
-      tracks,
+      album: { ...album, trackCount: album.trackCount ?? filledTracks.length },
+      tracks: filledTracks,
     };
   });
 }
@@ -297,8 +468,56 @@ export async function getCatalogAlbum(albumId: number): Promise<CatalogAlbumDeta
  * Ficha del artista: nombre + foto del endpoint dedicado, y discografía y
  * canciones populares reconstruidas por nombre (el endpoint no las expone).
  */
+function byReleaseDesc(left: CatalogAlbum, right: CatalogAlbum): number {
+  const leftDate = left.releaseDate ? Date.parse(left.releaseDate) : 0;
+  const rightDate = right.releaseDate ? Date.parse(right.releaseDate) : 0;
+  return (rightDate - leftDate) || ((right.year ?? 0) - (left.year ?? 0));
+}
+
+function splitDiscography(albums: CatalogAlbum[]): { albums: CatalogAlbum[]; singles: CatalogAlbum[] } {
+  const unique = dedupeAlbumVariants(albums).sort(byReleaseDesc);
+  return {
+    albums: unique.filter(album => album.type !== 'SINGLE' && album.type !== 'EP'),
+    singles: unique.filter(album => album.type === 'SINGLE' || album.type === 'EP'),
+  };
+}
+
+async function getCatalogArtistNative(artistId: number): Promise<CatalogArtistDetail> {
+  const [artistResult, topResult, albumResult, singleResult, similarResult] = await Promise.allSettled([
+    tidalCatalogRequest<ArtistApiResponse>(`artists/${artistId}`),
+    tidalCatalogRequest<PagedApiResponse<VersionedTrackApiResponse>>(`artists/${artistId}/toptracks`, { limit: 20 }),
+    tidalCatalogRequest<PagedApiResponse<AlbumApiResponse>>(`artists/${artistId}/albums`, { limit: 50 }),
+    tidalCatalogRequest<PagedApiResponse<AlbumApiResponse>>(`artists/${artistId}/albums`, { filter: 'EPSANDSINGLES', limit: 50 }),
+    tidalCatalogRequest<PagedApiResponse<ArtistApiResponse>>(`artists/${artistId}/similar`, { limit: 12 }),
+  ]);
+  const artist = artistResult.status === 'fulfilled' ? normalizeArtist(artistResult.value) : null;
+  if (!artist) throw new Error('TIDAL no devolvió información de este artista.');
+
+  const items = <T,>(result: PromiseSettledResult<PagedApiResponse<T>>): T[] => (
+    result.status === 'fulfilled' ? result.value.items ?? [] : []
+  );
+  const topTracks = dedupeTracks(items(topResult)
+    .map(normalizeCatalogTrack)
+    .filter((track): track is TidalTrack => Boolean(track)));
+  const discography = splitDiscography([...items(albumResult), ...items(singleResult)]
+    .map(normalizeAlbum)
+    .filter((album): album is CatalogAlbum => Boolean(album)));
+  const related = items(similarResult)
+    .map(normalizeArtist)
+    .filter((candidate): candidate is CatalogArtist => Boolean(candidate) && candidate!.id !== artistId);
+
+  return { artist, topTracks, ...discography, related };
+}
+
 export async function getCatalogArtist(artistId: number, nameHint?: string): Promise<CatalogArtistDetail> {
   return withCatalogCache(`artist:${artistId}:${nameHint?.toLowerCase() ?? ''}`, async () => {
+    if (isTauriDesktop()) {
+      try {
+        return await getCatalogArtistNative(artistId);
+      } catch {
+        // Cae a la reconstrucción por nombre de los mirrors.
+      }
+    }
     const detail = await fetchFromTidalMirrors<ArtistDetailApiResponse>(`/artist/?id=${artistId}`)
       .catch(() => null);
 
@@ -314,7 +533,7 @@ export async function getCatalogArtist(artistId: number, nameHint?: string): Pro
     };
 
     const queryTerm = (nameHint?.trim() || artist.name).trim();
-    if (!queryTerm) return { artist, topTracks: [], albums: [] };
+    if (!queryTerm) return { artist, topTracks: [], albums: [], singles: [], related: [] };
 
     const [trackResult, albumResult] = await Promise.allSettled([
       searchCatalogTracks(queryTerm),
@@ -333,19 +552,14 @@ export async function getCatalogArtist(artistId: number, nameHint?: string): Pro
     const searchedAlbums = (albumResult.status === 'fulfilled' ? albumResult.value : [])
       .filter(album => belongsToArtist(album.artistId, album.artist));
 
-    const albums = dedupeAlbums([...searchedAlbums, ...albumsFromTracks(topTracks)])
-      .sort((left, right) => {
-        const leftDate = left.releaseDate ? Date.parse(left.releaseDate) : 0;
-        const rightDate = right.releaseDate ? Date.parse(right.releaseDate) : 0;
-        return (rightDate - leftDate) || ((right.year ?? 0) - (left.year ?? 0));
-      });
+    const discography = splitDiscography(dedupeAlbums([...searchedAlbums, ...albumsFromTracks(topTracks)]));
 
     // Sin nombre útil no hay forma de reconstruir nada: mejor avisar que
     // pintar una ficha vacía que parece un error de la app.
-    if (!apiArtist && topTracks.length === 0 && albums.length === 0) {
+    if (!apiArtist && topTracks.length === 0 && discography.albums.length + discography.singles.length === 0) {
       throw new Error('No pude cargar la información de este artista en Monochrome.');
     }
 
-    return { artist, topTracks, albums };
+    return { artist, topTracks, ...discography, related: [] };
   });
 }

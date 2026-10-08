@@ -11,6 +11,8 @@
 @property --dyn-accent    { syntax: '<color>'; inherits: true; initial-value: #f9a8d4; }
 @property --dyn-bg        { syntax: '<color>'; inherits: true; initial-value: #0f0c16; }
 @property --dyn-bg-alt    { syntax: '<color>'; inherits: true; initial-value: #0e1420; }
+/* Círculo's Home tints itself from its hero; registered so that tint crossfades. */
+@property --hero-accent   { syntax: '<color>'; inherits: true; initial-value: #f9a8d4; }
 
 /* --- Design Tokens --- */
 :root {
@@ -962,6 +964,12 @@ input.karaoke-timeline[type="range"]::-webkit-slider-thumb {
   color: var(--text-secondary);
   font-size: 0.72rem;
   font-weight: 650;
+}
+.settings-action-copy small.settings-action-details {
+  white-space: normal;
+  color: var(--text-tertiary, var(--text-secondary));
+  font-weight: 550;
+  line-height: 1.35;
 }
 .artwork-progress {
   height: 3px;
@@ -5038,6 +5046,17 @@ input[type="range"]::-moz-range-thumb {
 }
 .fp-local-lyrics-button:hover,
 .fp-local-lyrics-empty button:hover { transform: translateY(-1px); }
+.fp-local-lyrics-actions {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 6px;
+}
+.fp-local-lyrics-button.secondary {
+  color: var(--fp-text, #fff);
+  background: rgba(255, 255, 255, 0.08);
+  box-shadow: none;
+}
+.fp-local-lyrics-button.secondary:hover { background: rgba(255, 255, 255, 0.13); }
 .fp-local-lyrics-empty {
   position: absolute;
   z-index: 4;
@@ -7681,3 +7700,6 @@ html[data-motion-direction='vertical'] { --motion-route-x: 0px; --motion-old-x: 
 @media (prefers-reduced-motion: reduce) {
   .getapp-card:hover { transform: none; }
 }
+/* The playing bars lean with the S, like the catalogue's "playing" slabs. */
+.playing-bars { transform: skewX(-20deg); }
+.playing-bars span { width: 3.4px; border-radius: 1.2px; }

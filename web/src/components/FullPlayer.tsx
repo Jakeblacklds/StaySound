@@ -11,9 +11,12 @@ import {
 } from '../library/lyricsFonts';
 import {
   describeSyncKind,
+  loadLocalGeneratedLyricsFor,
+  LOCAL_GENERATED_CANDIDATE_ID,
   lyricsSourcesStore,
   useLyricsSources,
 } from '../library/lyricsSources';
+import type { GeneratedLyrics } from '../karaoke/karaokeDesktop';
 import {
   LYRICS_THEMES,
   readStoredLyricsTheme,
@@ -28,9 +31,8 @@ import {
   MicrophoneIcon,
   MusicNoteIcon,
   NextIcon,
-  PauseIcon,
+  PlayPauseIcon,
   PlaylistIcon,
-  PlayIcon,
   PreviousIcon,
   QueueIcon,
   RepeatIcon,
@@ -146,6 +148,9 @@ export function FullPlayer({
   const [lyricsFont, setLyricsFont] = useState<LyricsFontId>(() => readStoredLyricsFont());
   const [lyricsSettingsOpen, setLyricsSettingsOpen] = useState(false);
   const [localLyricsGeneratorOpen, setLocalLyricsGeneratorOpen] = useState(false);
+  /** Set when the generator opens on an existing letter to adjust its timing. */
+  const [localLyricsToAdjust, setLocalLyricsToAdjust] = useState<GeneratedLyrics | null>(null);
+  const [localLyricsAdjustError, setLocalLyricsAdjustError] = useState('');
   const [lyricsMissing, setLyricsMissing] = useState(false);
   const [timingAdjustmentEnabled, setTimingAdjustmentEnabled] = useState(false);
   const lyricsSources = useLyricsSources();
@@ -198,6 +203,8 @@ export function FullPlayer({
     setAnimatedArtworkReady(false);
     setLyricsMissing(false);
     setLocalLyricsGeneratorOpen(false);
+    setLocalLyricsToAdjust(null);
+    setLocalLyricsAdjustError('');
   }, [currentTrack?.id]);
 
   // The Live Artwork lookup is intentionally separate from the visual effects
@@ -289,8 +296,30 @@ export function FullPlayer({
   const handleOpenLocalLyricsGenerator = useCallback(() => {
     setLyricsSettingsOpen(false);
     setLyricsSettingsClosing(false);
+    setLocalLyricsToAdjust(null);
     setLocalLyricsGeneratorOpen(true);
   }, []);
+
+  const currentTrackIdRef = useRef(currentTrack?.id);
+  currentTrackIdRef.current = currentTrack?.id;
+  const hasLocalLyrics = lyricsSources.candidates.some(candidate => candidate.id === LOCAL_GENERATED_CANDIDATE_ID);
+
+  const handleOpenLyricsTimingEditor = useCallback(() => {
+    if (!currentTrack) return;
+    const trackId = currentTrack.id;
+    setLocalLyricsAdjustError('');
+    void loadLocalGeneratedLyricsFor(currentTrack).then(local => {
+      if (currentTrackIdRef.current !== trackId) return;
+      if (!local) {
+        setLocalLyricsAdjustError('No encontré la letra local de esta canción.');
+        return;
+      }
+      setLyricsSettingsOpen(false);
+      setLyricsSettingsClosing(false);
+      setLocalLyricsToAdjust(local.lyrics);
+      setLocalLyricsGeneratorOpen(true);
+    });
+  }, [currentTrack]);
 
   const handleLyricsAvailability = useCallback((hasLyrics: boolean) => {
     setLyricsMissing(!hasLyrics);
@@ -648,7 +677,7 @@ export function FullPlayer({
               aria-label="Play / Pause"
               title="Play / Pause (Espacio)"
             >
-              {isLoading ? <SpinnerIcon size={22} /> : isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+              {isLoading ? <SpinnerIcon size={22} /> : <PlayPauseIcon playing={isPlaying} size={24} />}
             </button>
             <button className="fp-skip-btn" onClick={handleNext} aria-label="Siguiente" title="Siguiente (N)">
               <NextIcon size={23} />
@@ -832,11 +861,28 @@ export function FullPlayer({
               <div className="fp-lyrics-settings-group fp-local-lyrics-group">
                 <div>
                   <span className="fp-lyrics-settings-label">Letra local</span>
+                  {localLyricsAdjustError ? (
+                    <span className="fp-lyrics-timing-help">{localLyricsAdjustError}</span>
+                  ) : hasLocalLyrics ? (
+                    <span className="fp-lyrics-timing-help">Ajusta a mano cuándo entra cada palabra.</span>
+                  ) : null}
                 </div>
-                <button type="button" className="fp-local-lyrics-button" onClick={handleOpenLocalLyricsGenerator}>
-                  <MicrophoneIcon size={16} />
-                  Crear
-                </button>
+                <div className="fp-local-lyrics-actions">
+                  {hasLocalLyrics ? (
+                    <button type="button" className="fp-local-lyrics-button" onClick={handleOpenLyricsTimingEditor}>
+                      <SlidersIcon size={16} />
+                      Ajustar
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`fp-local-lyrics-button ${hasLocalLyrics ? 'secondary' : ''}`}
+                    onClick={handleOpenLocalLyricsGenerator}
+                  >
+                    <MicrophoneIcon size={16} />
+                    {hasLocalLyrics ? 'Rehacer' : 'Crear'}
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -889,8 +935,13 @@ export function FullPlayer({
 
       {localLyricsGeneratorOpen && currentTrack && isDesktopApp ? (
         <LocalLyricsGenerator
+          key={localLyricsToAdjust ? 'adjust' : 'create'}
           track={currentTrack}
-          onClose={() => setLocalLyricsGeneratorOpen(false)}
+          initialLyrics={localLyricsToAdjust}
+          onClose={() => {
+            setLocalLyricsGeneratorOpen(false);
+            setLocalLyricsToAdjust(null);
+          }}
         />
       ) : null}
     </div>

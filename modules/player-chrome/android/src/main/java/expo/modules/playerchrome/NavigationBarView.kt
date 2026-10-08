@@ -5,6 +5,7 @@ import android.graphics.*
 import android.view.Gravity
 import android.view.HapticFeedbackConstants
 import android.view.View
+import android.view.animation.LinearInterpolator
 import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import android.widget.LinearLayout
@@ -18,7 +19,8 @@ class NavigationBarView(context: Context, appContext: AppContext) : ExpoView(con
     override val shouldUseAndroidLayout = true
     private val onAction by EventDispatcher()
     var nativeAction: ((String) -> Unit)? = null
-    private val row = LinearLayout(context)
+    // Show the squash on touch-down instead of after the tap timeout; the bar never scrolls.
+    private val row = object : LinearLayout(context) { override fun shouldDelayChildPressedState() = false }
     private val surface = DockSurface(context)
     private val tabs = linkedMapOf<String, NativeTab>()
     private var items = emptyList<Map<String, String>>()
@@ -45,8 +47,12 @@ class NavigationBarView(context: Context, appContext: AppContext) : ExpoView(con
             val tab = NativeTab(context, item["name"].orEmpty(), item["label"].orEmpty())
             tab.button.setOnClickListener {
                 it.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                // The native host selects synchronously inside nativeAction; read this first so a
+                // tab that just became active doesn't play its flourish twice.
+                val retap = tab.button.isSelected
                 // Navigation owns selection. Do not optimistically select a prevented tabPress.
                 nativeAction?.invoke(key) ?: onAction(mapOf("action" to "press", "key" to key))
+                if (retap) tab.flourish()
             }
             tab.button.setOnLongClickListener {
                 if (nativeAction == null) onAction(mapOf("action" to "longPress", "key" to key)); true
@@ -149,8 +155,7 @@ private class DockSurface(context: Context) : View(context) {
 
 private class NativeTab(context: Context, name: String, label: String) {
     private val icon = FrameLayout(context).apply { clipChildren = false; clipToPadding = false }
-    private val inactive = ChromeGlyph(context, name)
-    private val active = ChromeGlyph(context, name).apply { wash = 1f }
+    private val glyph = TabGlyph(context, name)
     private val text = context.chromeText(12f, 600).apply {
         this.text = label; gravity = Gravity.CENTER; letterSpacing = 0f
     }
@@ -158,10 +163,16 @@ private class NativeTab(context: Context, name: String, label: String) {
     private var accent = Color.WHITE
     private val selected = ChromeMotion(0f) { update() }
     var motionEnabled = true
-    private val press = ChromeMotion(0f) { update() }
+    // Held: squash in quickly. Released: an underdamped spring (ζ≈.38) overshoots past rest,
+    // which is what makes the icon pop back out instead of just un-squashing.
+    private val press = ChromeMotion(0f) { glyph.press = it }
+    private val flourish = ChromeMotion(1f) { glyph.flourish = it }
     val button = ChromeButton(context) { held ->
-        if (!motionEnabled) press.snap(0f)
-        else press.curve(if (held) 1f else 0f, if (held) 100L else 240L, PathInterpolator(.2f, 0f, 0f, 1f))
+        when {
+            !motionEnabled -> press.snap(0f)
+            held -> press.curve(1f, 110L, PathInterpolator(.33f, 1f, .68f, 1f))
+            else -> press.spring(0f, 15.6f, 420f, 1f)
+        }
     }.apply { tab = true; contentDescription = label; clipChildren = false; clipToPadding = false }
     init {
         val stack = LinearLayout(context).apply {
@@ -171,8 +182,7 @@ private class NativeTab(context: Context, name: String, label: String) {
         // Keep label baselines fixed while the shared selection surface travels beneath the icons.
         button.addView(stack, FrameLayout.LayoutParams(-1, -2, Gravity.CENTER))
         stack.addView(icon, LinearLayout.LayoutParams(button.px(26), button.px(26)))
-        icon.addView(inactive, FrameLayout.LayoutParams(-1, -1))
-        icon.addView(active, FrameLayout.LayoutParams(-1, -1))
+        icon.addView(glyph, FrameLayout.LayoutParams(-1, -1))
         stack.addView(text, LinearLayout.LayoutParams(-1, -2).apply {
             topMargin = button.px(4); leftMargin = button.px(2); rightMargin = button.px(2)
         })
@@ -180,23 +190,28 @@ private class NativeTab(context: Context, name: String, label: String) {
     }
     fun setColors(muted: Int, accent: Int) {
         this.muted = muted; this.accent = accent
-        inactive.ink = muted; active.ink = accent; update()
+        glyph.muted = muted; glyph.accent = accent; update()
     }
     fun select(value: Boolean, animate: Boolean) {
+        val becoming = value && !button.isSelected
         button.isSelected = value
         val target = if (value) 1f else 0f
-        if (!animate || !motionEnabled) { selected.snap(target); press.snap(0f); return }
+        if (!animate || !motionEnabled) { selected.snap(target); press.snap(0f); flourish.snap(1f); return }
         selected.curve(target, 240L, PathInterpolator(.2f, 0f, 0f, 1f))
+        if (becoming) flourish()
+    }
+    /** The icon's one-shot character beat; every pose returns to rest at 1. */
+    fun flourish() {
+        if (!motionEnabled) return
+        flourish.snap(0f)
+        flourish.curve(1f, 720L, LinearInterpolator())
     }
     private fun update() {
-        val s = selected.value; val p = press.value
+        val s = selected.value
         icon.translationY = -button.dp(.5f) * s
-        icon.scaleX = 1f - p * .08f; icon.scaleY = icon.scaleX
-        active.alpha = s.coerceIn(0f, 1f); inactive.alpha = (1f - s).coerceIn(0f, 1f)
+        glyph.selection = s
         text.setTextColor(ColorUtils.blendARGB(muted, accent, s.coerceIn(0f, 1f)))
-        text.alpha = 1f
     }
     fun indicatorCenterY() = (icon.parent as View).top + icon.top + icon.height / 2f
-    fun dispose() { selected.cancel(); press.snap(0f) }
+    fun dispose() { selected.cancel(); press.snap(0f); flourish.snap(1f) }
 }
-

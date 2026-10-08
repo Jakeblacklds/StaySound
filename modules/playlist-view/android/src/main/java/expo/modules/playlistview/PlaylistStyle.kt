@@ -1,5 +1,6 @@
 package expo.modules.playlistview
 
+import expo.modules.playerchrome.StayIconView
 import android.content.Context
 import android.content.res.ColorStateList
 import android.graphics.*
@@ -69,33 +70,12 @@ internal class PlaylistArtwork(private val style: PlaylistStyle, radius: Int, pr
     override fun onDetachedFromWindow() { Glide.with(context.applicationContext).clear(image); super.onDetachedFromWindow() }
 }
 
-internal class PlaylistGlyph(private val style: PlaylistStyle, private val kind: String, private val tint: Int = style.ink) : View(style.context) {
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    override fun onDraw(c: Canvas) {
-        super.onDraw(c)
-        c.save(); c.translate(paddingLeft.toFloat(), paddingTop.toFloat())
-        c.scale((width - paddingLeft - paddingRight) / 24f, (height - paddingTop - paddingBottom) / 24f)
-        paint.color = tint; paint.strokeWidth = 1.8f; paint.strokeCap = Paint.Cap.ROUND; paint.strokeJoin = Paint.Join.ROUND; paint.style = Paint.Style.STROKE
-        fun line(x: Float, y: Float, a: Float, b: Float) = c.drawLine(x, y, a, b, paint)
-        when (kind) {
-            "back" -> { line(15f, 5f, 8f, 12f); line(8f, 12f, 15f, 19f) }
-            "play" -> { paint.style = Paint.Style.FILL; c.drawPath(Path().apply { moveTo(7f, 4f); lineTo(20f, 12f); lineTo(7f, 20f); close() }, paint) }
-            "add" -> { line(12f, 4f, 12f, 20f); line(4f, 12f, 20f, 12f) }
-            "playlist" -> { for (y in listOf(5f, 10f, 15f)) line(3f, y, 15f, y); line(20f, 11f, 20f, 21f); line(16f, 16f, 24f, 16f) }
-            "edit" -> { c.drawCircle(12f, 12f, 4f, paint); for (i in 0..7) { c.save(); c.rotate(i * 45f, 12f, 12f); line(12f, 3f, 12f, 6f); c.restore() } }
-            "download" -> { line(12f, 3f, 12f, 17f); line(6f, 11f, 12f, 17f); line(18f, 11f, 12f, 17f); line(5f, 21f, 19f, 21f) }
-            "done" -> { line(5f, 12f, 10f, 17f); line(10f, 17f, 20f, 6f) }
-            "error" -> { c.drawCircle(12f, 12f, 9f, paint); line(12f, 6f, 12f, 13f); line(12f, 17f, 12f, 17.2f) }
-            "more" -> { paint.style = Paint.Style.FILL; for (y in listOf(5f, 12f, 19f)) c.drawCircle(12f, y, 1.6f, paint) }
-            "pause" -> { line(8f, 5f, 8f, 19f); line(16f, 5f, 16f, 19f) }
-            "playing" -> { line(5f, 14f, 5f, 20f); line(12f, 5f, 12f, 20f); line(19f, 10f, 19f, 20f) }
-            "shuffle" -> {
-                c.drawPath(Path().apply { moveTo(3f, 5f); lineTo(7f, 5f); lineTo(17f, 19f); lineTo(21f, 19f); moveTo(3f, 19f); lineTo(7f, 19f); lineTo(17f, 5f); lineTo(21f, 5f) }, paint)
-                line(18f, 2f, 21f, 5f); line(18f, 8f, 21f, 5f); line(18f, 16f, 21f, 19f); line(18f, 22f, 21f, 19f)
-            }
-            else -> { c.drawCircle(12f, 12f, 9f, paint); c.drawCircle(12f, 12f, 3f, paint) }
-        }
-        c.restore()
+/** Catalogue icon (StayIcons). Status marks sit inside pressable rows, so they stay still. */
+internal class PlaylistGlyph(style: PlaylistStyle, kind: String, tint: Int = style.ink) : StayIconView(style.context, glyphName(kind)) {
+    init { ink = tint; interactive = kind !in STATIC }
+    private companion object {
+        val STATIC = setOf("done", "error", "playing", "pause", "playlist", "album")
+        fun glyphName(kind: String) = when (kind) { "more" -> "more-vertical"; "album" -> "disc"; else -> kind }
     }
 }
 

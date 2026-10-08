@@ -12,6 +12,7 @@ import { fileToTrack } from '../library/importLocalFiles';
 import { resolveTidalArtworkForTrack } from '../library/tidalArtworkResolver';
 import { cacheRemoteArtwork, saveArtworkBlob } from '../storage/webArtworkCache';
 import { writeBlobToDownloadFolder } from './webDownloadFolder';
+import { isSoulseekTrackCandidate, soulseekCoreTitle, soulseekMatchIdentity, soulseekSearchQueries } from './soulseekSearch';
 
 export type DownloadSource = 'monochrome' | 'soulseek';
 
@@ -322,31 +323,33 @@ async function fetchBridgeJson<T>(
   options: RequestInit = {},
   timeoutMs = REQUEST_TIMEOUT_MS,
 ): Promise<T> {
-  let lastError: unknown;
-  for (let attempt = 0; attempt < 2; attempt += 1) {
+  const { signal, cleanup } = withTimeoutSignal(timeoutMs, options.signal ?? undefined);
+  try {
+    const response = await fetch(url, { ...options, signal });
+    const text = await response.text();
+    let payload: unknown = {};
     try {
-      return await fetchJson<T>(url, options, timeoutMs);
-    } catch (error) {
-      lastError = error;
-      if (options.signal?.aborted) throw error;
-      const message = error instanceof Error ? error.message.toLowerCase() : '';
-      const transient = error instanceof DOMException && error.name === 'AbortError'
-        || message.includes('fetch is aborted')
-        || message.includes('failed to fetch')
-        || message.includes('load failed')
-        // The bundled Soulseek bridge returns this when a peer drops a socket
-        // while the desktop is polling or starting a transfer. It is safe to
-        // retry the local request; a terminal peer failure is still surfaced
-        // by the job-status response and advances to another match below.
-        || message.includes('econnreset');
-      if (!transient || attempt === 1) throw error;
-      if (message.includes('load failed') && isTauriDesktop()) {
-        await ensureDesktopSoulseekBridge().catch(() => false);
-      }
-      await new Promise(resolve => window.setTimeout(resolve, 250));
+      payload = text ? JSON.parse(text) : {};
+    } catch {
+      payload = {};
     }
+    if (!response.ok) {
+      const bridgePayload = payload && typeof payload === 'object'
+        ? payload as { error?: unknown; retryable?: unknown }
+        : {};
+      const error = new Error(
+        typeof bridgePayload.error === 'string' && bridgePayload.error
+          ? bridgePayload.error
+          : `${response.status} ${text.slice(0, 120)}`,
+      ) as Error & { retryable?: boolean; status?: number };
+      error.retryable = bridgePayload.retryable === true;
+      error.status = response.status;
+      throw error;
+    }
+    return payload as T;
+  } finally {
+    cleanup();
   }
-  throw lastError;
 }
 
 function friendlySoulseekError(error: unknown): Error {
@@ -1613,6 +1616,30 @@ export async function warmSoulseekBridge(): Promise<boolean> {
   }
 }
 
+export const SOULSEEK_SHARE_MUSIC_KEY = 'staysound.web.soulseek.share-music-folder.v1';
+
+/** Sharing the music folder is on unless the user explicitly turned it off. */
+export function isSoulseekMusicSharingEnabled(): boolean {
+  try {
+    return window.localStorage.getItem(SOULSEEK_SHARE_MUSIC_KEY) !== '0';
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * Desktop is where StaySound gives back to Soulseek: while the app is open it
+ * stays logged in (one login, no searches) and shares the music folder, so
+ * people who queued files from us find us online. Mobile only shares in a
+ * short window to save battery.
+ */
+export async function startSoulseekDesktopSharing(): Promise<SoulseekShareStatus | null> {
+  if (!isTauriDesktop() || !loadSoulseekCredentials()) return null;
+  if (!(await warmSoulseekBridge())) return null;
+  const musicFolder = await getDesktopMusicFolder().catch(() => null);
+  return configureSoulseekShares(isSoulseekMusicSharingEnabled() && musicFolder ? [musicFolder] : []);
+}
+
 export type SoulseekShareStatus = {
   files: number;
   folders: number;
@@ -1777,7 +1804,7 @@ function virtualTrackFromSoulseek(match: SoulseekMatch): TidalTrack {
   };
 }
 
-async function requestSoulseekMatches(query: string): Promise<SoulseekMatch[]> {
+async function requestSoulseekMatches(query: string, maxResults = 60, track?: TidalTrack): Promise<SoulseekMatch[]> {
   const config = getSoulseekBridgeConfig();
   const credentials = getRequiredSoulseekCredentials();
   const payload = await fetchBridgeJson<{ results?: SoulseekMatch[] }>(`${config.baseUrl}/search`, {
@@ -1786,10 +1813,9 @@ async function requestSoulseekMatches(query: string): Promise<SoulseekMatch[]> {
     // Peer replies arrive independently after the server dispatch. Popular
     // tracks can still take longer than nine seconds when the bridge has just
     // connected, so do not turn a slow reply into a false "not found".
-    body: JSON.stringify({ query, timeoutMs: 18_000, maxResults: 60, credentials }),
-  // The bridge may reconnect once when a logged-in but stale Soulseek route
-  // returns no peers, so leave room for that retry as well.
-  }, 55_000);
+    body: JSON.stringify({ query, timeoutMs: 18_000, maxResults, credentials, identity: track ? soulseekMatchIdentity(track) : undefined }),
+  // Includes the serialized queue, login and one bounded session recovery.
+  }, 75_000);
   return payload.results ?? [];
 }
 
@@ -1819,12 +1845,18 @@ function getSoulseekMatchesForTrack(track: TidalTrack): Promise<SoulseekMatch[]>
   }
   if (cached) soulseekMatchCache.delete(key);
 
-  // Soulseek distributes an excluded-phrases list that can suppress searches
-  // containing some well-known artist names. Search by title first and let the
-  // strict filename/path scorer below verify the artist, album and duration.
-  // This also avoids spending two full 18-second rounds retrying a query that
-  // the network will never distribute.
-  const promise = requestSoulseekMatches(track.title.trim())
+  // Preserve title words first; only simplify on a miss. The bridge filters
+  // identity before counting ready peers or limiting results.
+  const promise = (async () => {
+    const matches: SoulseekMatch[] = [];
+    for (const { query, maxResults } of soulseekSearchQueries(track)) {
+      matches.push(...await requestSoulseekMatches(query, maxResults, track));
+      // The fallback query is spent only on a miss, or when the first query
+      // found nothing lossless (so a free MP3 doesn't win while FLAC exists).
+      if (matches.some(match => isLosslessSoulseekMatch(match) && scoreSoulseekMatch(track, match) >= 100)) break;
+    }
+    return matches;
+  })()
     .catch(error => {
       soulseekMatchCache.delete(key);
       throw error;
@@ -1845,10 +1877,26 @@ function getSoulseekMatchesForTrack(track: TidalTrack): Promise<SoulseekMatch[]>
   return promise;
 }
 
+function isLosslessSoulseekMatch(match: SoulseekMatch): boolean {
+  const extension = (match.extension ?? extensionFromUrl(match.filename, '')).toLowerCase();
+  return extension === 'flac' || extension === 'wav';
+}
+
+/**
+ * Hard ordering before the score, same as Android: a free slot first (Seeker:
+ * peers without one rarely start), then lossless, so speed bonuses can never
+ * make an MP3 beat an equally available FLAC.
+ */
+function soulseekMatchTier(match: SoulseekMatch): number {
+  return (match.slots ? 0 : 2) + (isLosslessSoulseekMatch(match) ? 0 : 1);
+}
+
 function scoreSoulseekMatch(track: TidalTrack, match: SoulseekMatch): number {
+  if (!isSoulseekTrackCandidate(track, match.filename)) return -1_000;
   const path = comparable(match.filename.replace(/[\\/]+/g, ' '));
   const leaf = comparable(match.filename.replace(/\//g, '\\').split('\\').pop() ?? match.filename);
-  const title = comparable(track.title);
+  // "Song (feat. X) - Remastered 2011" is named "Song" on disk.
+  const title = comparable(soulseekCoreTitle(track.title));
   const artist = comparable(track.artist);
   const album = comparable(track.album);
   const catalogEdition = comparable(`${track.title} ${track.album}`);
@@ -1904,12 +1952,18 @@ async function resolveMonochromeResultToSoulseek(result: DownloadSearchResult): 
 
   const matches = await getSoulseekMatchesForTrack(track);
   const ranked = matches
-    .map(match => ({ match, score: scoreSoulseekMatch(track, match) }))
-    .sort((left, right) => right.score - left.score);
+    .map(match => ({ match, score: scoreSoulseekMatch(track, match), tier: soulseekMatchTier(match) }))
+    // Wrong songs sink below the identity threshold first; tiers order the rest.
+    .sort((left, right) => Number(right.score >= 100) - Number(left.score >= 100)
+      || left.tier - right.tier
+      || right.score - left.score);
   const best = ranked[0];
 
   if (!best || best.score < 100) {
-    throw new Error(`No encontré en Soulseek un archivo que coincida con "${track.artist} - ${track.title}".`);
+    // An empty response cannot prove that no one shares the song.
+    throw new Error(matches.length === 0
+      ? `Soulseek no devolvió ningún archivo para "${track.title}". No llegaron resultados de las búsquedas realizadas; esto puede deberse a la sesión o a la disponibilidad de los usuarios. Reintenta en unos minutos.`
+      : `Soulseek devolvió ${matches.length} archivos, pero ninguno coincide con "${track.artist} - ${track.title}" (el más parecido: ${best?.match.filename.replace(/^.*[\\/]/, '') ?? '—'}).`);
   }
 
   const match = best.match;
@@ -2058,105 +2112,115 @@ async function resolveSoulseekBridgeFile(
     };
   }
 
+  // Every job we give up on must be abandoned on the bridge, which then
+  // answers the peer's eventual offer with "Cancelled" instead of leaving a
+  // stale entry (and its megabytes) in someone else's upload queue.
+  const abandonJobs = (jobs: typeof activeJobs) => Promise.all(jobs.map(job => (
+    fetchBridgeJson(`${config.baseUrl}/download/abandon`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jobId: job.jobId }),
+    }).catch(() => undefined)
+  )));
+
   const deadline = Date.now() + SOULSEEK_DOWNLOAD_DEADLINE_MS;
-  while (true) {
-    if (options?.signal?.aborted) throw new Error('Descarga cancelada');
-    if (Date.now() > deadline) throw new Error('La descarga Soulseek tardó demasiado; intenta otro resultado.');
+  try {
+    while (true) {
+      if (options?.signal?.aborted) throw new Error('Descarga cancelada');
+      if (Date.now() > deadline) throw new Error('La descarga Soulseek tardó demasiado; intenta otro resultado.');
 
-    const pollResults = await Promise.all(activeJobs.map(async job => {
-      try {
+      const pollResults = await Promise.all(activeJobs.map(async job => {
+        try {
+          return {
+            job,
+            status: await fetchBridgeJson<SoulseekJobStatus>(
+              `${config.baseUrl}/download/status?id=${encodeURIComponent(job.jobId)}`,
+              {},
+              10_000,
+            ) as SoulseekJobStatus | null,
+          };
+        } catch (error) {
+          // Un 404 aquí significa que el bridge se reinició (crash del sidecar o
+          // respawn desde ensure_soulseek_bridge) y perdió sus jobs en memoria.
+          // El job se relanza con el mismo match en vez de abortar la descarga.
+          if (/^404\b/.test(error instanceof Error ? error.message : String(error))) {
+            return { job, status: null };
+          }
+          throw error;
+        }
+      }));
+      const lostJobs = pollResults.filter(item => !item.status).map(item => item.job);
+      for (const lost of lostJobs) {
+        activeJobs.splice(activeJobs.indexOf(lost), 1);
+        try {
+          const restarted = await fetchBridgeJson<{ jobId?: string }>(`${config.baseUrl}/download/start`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ match: lost.match, filename: resolved.filename, credentials, dir: options?.targetDir }),
+          }, 30_000);
+          if (restarted.jobId) {
+            activeJobs.push({ jobId: restarted.jobId, match: lost.match });
+            lastJobStartedAt = Date.now();
+          }
+        } catch {
+          // La siguiente vuelta del bucle probará otra fuente candidata.
+        }
+      }
+      const statuses = pollResults.flatMap(item => (item.status ? [{ job: item.job, status: item.status }] : []));
+      const completed = statuses.find(item => item.status.status === 'done' && item.status.url);
+      if (completed) {
+        void abandonJobs(activeJobs.filter(job => job.jobId !== completed.job.jobId));
+        options?.onProgress?.(1);
         return {
-          job,
-          status: await fetchBridgeJson<SoulseekJobStatus>(
-            `${config.baseUrl}/download/status?id=${encodeURIComponent(job.jobId)}`,
-            {},
-            10_000,
-          ) as SoulseekJobStatus | null,
+          ...resolved,
+          url: completed.status.url!,
+          filename: completed.status.filename || resolved.filename,
+          mimeType: completed.status.mimeType || resolved.mimeType,
+          nativePath: completed.status.path,
         };
-      } catch (error) {
-        // Un 404 aquí significa que el bridge se reinició (crash del sidecar o
-        // respawn desde ensure_soulseek_bridge) y perdió sus jobs en memoria.
-        // El job se relanza con el mismo match en vez de abortar la descarga.
-        if (/^404\b/.test(error instanceof Error ? error.message : String(error))) {
-          return { job, status: null };
-        }
-        throw error;
       }
-    }));
-    const lostJobs = pollResults.filter(item => !item.status).map(item => item.job);
-    for (const lost of lostJobs) {
-      activeJobs.splice(activeJobs.indexOf(lost), 1);
-      try {
-        const restarted = await fetchBridgeJson<{ jobId?: string }>(`${config.baseUrl}/download/start`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ match: lost.match, filename: resolved.filename, credentials, dir: options?.targetDir }),
-        }, 30_000);
-        if (restarted.jobId) {
-          activeJobs.push({ jobId: restarted.jobId, match: lost.match });
-          lastJobStartedAt = Date.now();
-        }
-      } catch {
-        // La siguiente vuelta del bucle probará otra fuente candidata.
-      }
-    }
-    const statuses = pollResults.flatMap(item => (item.status ? [{ job: item.job, status: item.status }] : []));
-    const completed = statuses.find(item => item.status.status === 'done' && item.status.url);
-    if (completed) {
-      void Promise.all(activeJobs
-        .filter(job => job.jobId !== completed.job.jobId)
-        .map(job => fetchBridgeJson(`${config.baseUrl}/download/abandon`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jobId: job.jobId }),
-        }).catch(() => undefined)));
-      options?.onProgress?.(1);
-      return {
-        ...resolved,
-        url: completed.status.url!,
-        filename: completed.status.filename || resolved.filename,
-        mimeType: completed.status.mimeType || resolved.mimeType,
-        nativePath: completed.status.path,
-      };
-    }
 
-    const running = statuses.filter(item => item.status.status === 'downloading');
-    const mostAdvanced = running.reduce<(typeof running)[number] | undefined>((best, item) => {
-      if (!best) return item;
-      return (item.status.received ?? 0) > (best.status.received ?? 0) ? item : best;
-    }, undefined);
-    if (mostAdvanced) {
-      options?.onActivity?.({
-        stage: 'transfer',
-        message: (mostAdvanced.status.received ?? 0) > 0
-          ? `Recibiendo desde ${mostAdvanced.status.peer || mostAdvanced.job.match.username}`
-          : `Esperando respuesta de ${mostAdvanced.status.peer || mostAdvanced.job.match.username}`,
-        detail: (mostAdvanced.status.received ?? 0) > 0
-          ? `${formatDiagnosticBytes(mostAdvanced.status.received)} de ${formatDiagnosticBytes(mostAdvanced.status.total)}`
-          : 'El peer aceptó la solicitud, pero todavía no envía datos',
-        peer: mostAdvanced.status.peer || mostAdvanced.job.match.username,
-        attempt: (mostAdvanced.status.attempts ?? 0) + 1,
-        received: mostAdvanced.status.received,
-        total: mostAdvanced.status.total,
-      });
-    }
-    const bestProgress = running.reduce((best, item) => {
-      const progress = item.status.total ? (item.status.received ?? 0) / item.status.total : 0;
-      return Math.max(best, progress);
-    }, 0);
-    if (bestProgress > 0) {
-      options?.onProgress?.(Math.min(0.99, bestProgress));
-    } else if (Date.now() - lastJobStartedAt >= 7_000 && nextCandidateIndex < candidates.length && activeJobs.length < 3) {
-      await startCandidate().catch(() => false);
-    } else if (running.length === 0) {
-      if (nextCandidateIndex < candidates.length) {
-        await startCandidate().catch(() => false);
-      } else {
-        const error = statuses.find(item => item.status.error)?.status.error;
-        throw friendlySoulseekError(error || 'Soulseek no pudo completar la descarga.');
+      const running = statuses.filter(item => item.status.status === 'downloading');
+      const mostAdvanced = running.reduce<(typeof running)[number] | undefined>((best, item) => {
+        if (!best) return item;
+        return (item.status.received ?? 0) > (best.status.received ?? 0) ? item : best;
+      }, undefined);
+      if (mostAdvanced) {
+        options?.onActivity?.({
+          stage: 'transfer',
+          message: (mostAdvanced.status.received ?? 0) > 0
+            ? `Recibiendo desde ${mostAdvanced.status.peer || mostAdvanced.job.match.username}`
+            : `Esperando respuesta de ${mostAdvanced.status.peer || mostAdvanced.job.match.username}`,
+          detail: (mostAdvanced.status.received ?? 0) > 0
+            ? `${formatDiagnosticBytes(mostAdvanced.status.received)} de ${formatDiagnosticBytes(mostAdvanced.status.total)}`
+            : 'El peer aceptó la solicitud, pero todavía no envía datos',
+          peer: mostAdvanced.status.peer || mostAdvanced.job.match.username,
+          attempt: (mostAdvanced.status.attempts ?? 0) + 1,
+          received: mostAdvanced.status.received,
+          total: mostAdvanced.status.total,
+        });
       }
+      const bestProgress = running.reduce((best, item) => {
+        const progress = item.status.total ? (item.status.received ?? 0) / item.status.total : 0;
+        return Math.max(best, progress);
+      }, 0);
+      if (bestProgress > 0) {
+        options?.onProgress?.(Math.min(0.99, bestProgress));
+      } else if (Date.now() - lastJobStartedAt >= 7_000 && nextCandidateIndex < candidates.length && activeJobs.length < 3) {
+        await startCandidate().catch(() => false);
+      } else if (running.length === 0) {
+        if (nextCandidateIndex < candidates.length) {
+          await startCandidate().catch(() => false);
+        } else {
+          const error = statuses.find(item => item.status.error)?.status.error;
+          throw friendlySoulseekError(error || 'Soulseek no pudo completar la descarga.');
+        }
+      }
+      await wait(SOULSEEK_POLL_INTERVAL_MS);
     }
-    await wait(SOULSEEK_POLL_INTERVAL_MS);
+  } catch (error) {
+    void abandonJobs(activeJobs);
+    throw error;
   }
 }
 

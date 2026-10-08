@@ -4,6 +4,8 @@ import android.content.Context
 import android.graphics.*
 import android.view.View
 import android.view.Gravity
+import android.view.animation.LinearInterpolator
+import android.view.animation.PathInterpolator
 import android.widget.FrameLayout
 import androidx.core.graphics.ColorUtils
 import kotlin.math.*
@@ -29,13 +31,26 @@ internal fun gammaColor(from: Int, to: Int, progress: Float): Int {
     return Color.argb((Color.alpha(from)+(Color.alpha(to)-Color.alpha(from))*p).roundToInt(),channel(Color.red(from),Color.red(to)),channel(Color.green(from),Color.green(to)),channel(Color.blue(from),Color.blue(to)))
 }
 
+/** Draws the StayIcons catalogue; only names it lacks (brand logos) fall back to the icon font. */
 internal class PlayerIcon(context: Context, name: String, val sizeDp: Float) : View(context) {
     private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+    private val pen = CanvasPen()
     private var glyph = ""
+    /** Catalogue kind for [name], or null when the font draws it. */
+    var kind: String? = null
+        private set
     var name = name
-        set(value) { field = value; glyph = String(Character.toChars(PlayerIcons.glyphs[value] ?: 983925)); invalidate() }
+        set(value) {
+            field = value; kind = StayIcons.resolve(value); state = StayIcons.stateOf(value)
+            glyph = String(Character.toChars(PlayerIcons.glyphs[value] ?: 983925)); invalidate()
+        }
     var ink = Color.WHITE
         set(value) { field = value; invalidate() }
+    var press = 0f
+        set(value) { field = value; invalidate() }
+    var flourish = 1f
+        set(value) { field = value; invalidate() }
+    private var state = 0f
     init {
         if (font == null) font = Typeface.createFromAsset(context.assets, "player/MaterialCommunityIcons.ttf")
         paint.typeface = font; paint.textAlign = Paint.Align.CENTER
@@ -43,6 +58,14 @@ internal class PlayerIcon(context: Context, name: String, val sizeDp: Float) : V
         importantForAccessibility = IMPORTANT_FOR_ACCESSIBILITY_NO
     }
     override fun onDraw(canvas: Canvas) {
+        kind?.let { kind ->
+            // The font's glyphs sit in ~85% of their em box; match that footprint.
+            val size = dp(sizeDp) * .86f
+            pen.ink = ink
+            canvas.save(); canvas.translate((width - size) / 2f, (height - size) / 2f)
+            pen.draw(canvas, kind, size, size, press, flourish, state)
+            canvas.restore(); return
+        }
         paint.color = ink; paint.textSize = dp(sizeDp)
         val fm = paint.fontMetrics
         canvas.drawText(glyph, width / 2f, (height - fm.ascent - fm.descent) / 2f, paint)
@@ -53,6 +76,8 @@ internal class PlayerIcon(context: Context, name: String, val sizeDp: Float) : V
 internal class PlayerControl(context: Context, name: String, size: Float, label: String, action: () -> Unit) : FrameLayout(context) {
     val icon = PlayerIcon(context, name, size)
     private val pause = PlayerIcon(context, "pause", size).apply { alpha = 0f }
+    /** Transport controls draw their own animated S-language glyph instead of the icon font. */
+    private val glyph = if (name in TransportGlyph.KINDS) TransportGlyph(context, name) else null
     private val particles = FavoriteParticles(context)
     private val selectedPill = View(context).apply { alpha=0f }
     private var active = false
@@ -65,13 +90,19 @@ internal class PlayerControl(context: Context, name: String, size: Float, label:
     private val playState = ChromeMotion(0f) { update() }
     private val favoriteScale = ChromeMotion(1f) { update() }
     private val burst = ChromeMotion(1f) { particles.progress = it }
+    private val flourish = ChromeMotion(1f) { glyph?.flourish = it; icon.flourish = it }
+    /** Catalogue-drawn controls animate themselves instead of scaling/dimming the icon. */
+    private val drawn get() = glyph != null || icon.kind != null
     var lyricsControl = false
     var pressedScale = .9f
     var toggleControl = false
     var favoriteControl = false
     var playControl = false
     private val button = ChromeButton(context) { held ->
-        if (lyricsControl) {
+        if (drawn) {
+            // Wind back while held; an underdamped spring (ζ≈.38) pops it past rest on release.
+            if (held) press.curve(1f, 110L, PathInterpolator(.33f, 1f, .68f, 1f)) else press.spring(0f, 15.6f, 420f, 1f)
+        } else if (lyricsControl) {
             if (held) press.timing(1f,120) else press.curve(0f,170,android.view.animation.OvershootInterpolator(1.2f))
         } else press.timing(if (held) 1f else 0f, if (held) 80 else 150, !held)
     }
@@ -81,19 +112,23 @@ internal class PlayerControl(context: Context, name: String, size: Float, label:
         button.addView(selectedPill, LayoutParams(-1,-1))
         button.addView(icon, LayoutParams(-1, -1))
         button.addView(pause, LayoutParams(-1, -1))
+        glyph?.let { button.addView(it, LayoutParams(px(size.toInt()), px(size.toInt()), Gravity.CENTER)) }
         addView(particles, LayoutParams(px(90), px(90), Gravity.CENTER))
         addView(button, LayoutParams(-1, -1))
         button.setOnClickListener {
             if (favoriteControl) {
                 if (!active) {
-                    favoriteScale.timing(1.8f, 200) { favoriteScale.spring(1.1f, 30f, 600f, 0.8f) }
+                    // A drawn heart pumps on its own; the old scale-pop only suits the font glyph.
+                    if (!drawn) favoriteScale.timing(1.8f, 200) { favoriteScale.spring(1.1f, 30f, 600f, 0.8f) }
                     burst.snap(0f); burst.timing(1f, 400)
                 } else favoriteScale.timing(1f, 100)
             }
+            if (glyph != null || icon.kind in StayIcons.ANIMATED) { flourish.snap(0f); flourish.curve(1f, 720L, LinearInterpolator()) }
             action()
         }
     }
     fun setLabel(value: String) { button.contentDescription = value }
+    fun setIcon(name: String) { icon.name = name; glyph?.kind = name }
     fun onTap(action: () -> Unit) { button.setOnClickListener { action() } }
     fun onHold(action: () -> Unit) { button.setOnLongClickListener { action(); true } }
     fun colors(inactive: Int, selected: Int = inactive) {
@@ -112,15 +147,31 @@ internal class PlayerControl(context: Context, name: String, size: Float, label:
     }
     fun playing(value: Boolean) {
         if (!playControl) return
-        playState.curve(if (value) 1f else 0f, if(lyricsControl)220 else 200, FullPlayerMotion.cubicInOut)
+        // The glyph morphs wedge→slabs on a lightly bouncy spring; the font fallback crossfades.
+        if (glyph != null) playState.spring(if (value) 1f else 0f, 17.3f, 300f, 1f)
+        else playState.curve(if (value) 1f else 0f, if(lyricsControl)220 else 200, FullPlayerMotion.cubicInOut)
         setLabel(if (value) "Pausar" else "Reproducir")
     }
     private fun update() {
         val scale = (1f - press.value * if (toggleControl) 0.16f else 0.14f) * (1f + pop.value * 0.28f) * favoriteScale.value
-        if (lyricsControl) { scaleX=1-press.value*(1-pressedScale); scaleY=scaleX }
+        if (lyricsControl && !drawn) { scaleX=1-press.value*(1-pressedScale); scaleY=scaleX }
         selectedPill.background=roundSurface(selectedInk,dp(99f))
         selectedPill.alpha=if(lyricsControl && toggleControl) toggle.value.coerceIn(0f,1f)*.2f else 0f
         selectedPill.scaleX=.5f+toggle.value*.5f;selectedPill.scaleY=selectedPill.scaleX
+        if (glyph != null) {
+            icon.alpha = 0f; pause.alpha = 0f
+            glyph.ink = if (playControl) baseInk else gammaColor(baseInk, selectedInk, toggle.value)
+            glyph.press = press.value; glyph.morph = playState.value
+            // The accent disc gives slightly under the finger; the glyph does the talking.
+            if (playControl && !lyricsControl) { scaleX = 1f - .05f * press.value; scaleY = scaleX }
+            return
+        }
+        if (icon.kind != null) {
+            icon.press = press.value; pause.alpha = 0f
+            icon.scaleX = 1f + pop.value * .28f; icon.scaleY = icon.scaleX
+            icon.ink = gammaColor(baseInk, selectedInk, toggle.value)
+            return
+        }
         val glyphScale=if(lyricsControl)1f else scale
         icon.scaleX = glyphScale; icon.scaleY = glyphScale; pause.scaleX = glyphScale; pause.scaleY = glyphScale
         button.alpha = if(lyricsControl)1f else 1f - press.value * 0.4f
@@ -132,7 +183,7 @@ internal class PlayerControl(context: Context, name: String, size: Float, label:
         }
     }
     override fun onDetachedFromWindow() {
-        listOf(press, toggle, pop, playState, favoriteScale, burst).forEach { it.cancel() }
+        listOf(press, toggle, pop, playState, favoriteScale, burst, flourish).forEach { it.cancel() }
         super.onDetachedFromWindow()
     }
 }

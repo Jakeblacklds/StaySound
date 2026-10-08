@@ -1,7 +1,6 @@
 import {
   createCanonicalLyricsKey,
   forceRefreshLyrics as nativeForceRefreshLyrics,
-  getLrcLibLyrics as nativeGetLrcLibLyrics,
   getLyrics as nativeGetLyrics,
   normalizeLyricsKeyPart,
 } from 'karaoke-view';
@@ -20,7 +19,7 @@ export interface LyricsPayload extends KaraokeLyricsJSON { }
 export interface AppleWordLyricsCandidate {
   id: string;
   label: string;
-  source: 'binimum' | 'kpoe' | 'lrclib';
+  source: 'lrc-red' | 'binimum' | 'kpoe' | 'lrclib';
   sourceId: LyricsSourceId;
   providerLabel: string;
   wordLevel: boolean;
@@ -43,14 +42,14 @@ type AppleWordLyricsCachePayload = {
 };
 
 class LyricsRepositoryService {
-  private readonly APPLE_CACHE_PREFIX = 'apple-word-cache-v3';
-  private readonly TRACK_APPLE_CACHE_PREFIX = 'apple-word-track-cache-v3';
-  private readonly LRC_CACHE_PREFIX = 'lrc-lib-cache-v1';
-  private readonly TRACK_LRC_CACHE_PREFIX = 'lrc-lib-track-cache-v1';
+  private readonly APPLE_CACHE_PREFIX = 'apple-word-cache-v4';
+  private readonly TRACK_APPLE_CACHE_PREFIX = 'apple-word-track-cache-v4';
+  private readonly LRC_CACHE_PREFIX = 'lrc-lib-cache-v2';
+  private readonly TRACK_LRC_CACHE_PREFIX = 'lrc-lib-track-cache-v2';
   // How long a "we tried and Apple/KPoe had nothing" result is trusted before re-checking.
-  // Kept short (1 day) because the word service swallows network errors as empty results,
+  // Kept short (5 minutes) because the word service swallows network errors as empty results,
   // so a transient failure could otherwise suppress lyrics for too long.
-  private readonly NEGATIVE_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+  private readonly NEGATIVE_CACHE_TTL_MS = 5 * 60 * 1000;
 
   private cleanCacheMetadata(value: string): string {
     return value
@@ -192,7 +191,7 @@ class LyricsRepositoryService {
    * there's no point hammering the network again on every replay. Expires after the TTL.
    */
   private async hasFreshEmptyAppleAttempt(songTitle: string, artist: string, trackId: string | undefined, requiredServiceSources: LyricsSourceId[]): Promise<boolean> {
-    const required = requiredServiceSources.filter(id => id !== 'lrclib');
+    const required = requiredServiceSources;
 
     const isFreshNegative = (raw: string | null): boolean => {
       if (!raw) return false;
@@ -226,10 +225,9 @@ class LyricsRepositoryService {
   async getCachedAppleWordLyricsOptions(songTitle: string, artist: string, trackId?: string, requiredSources?: LyricsSourceId[]): Promise<AppleWordLyricsCandidate[]> {
     if (!songTitle.trim() || !artist.trim()) return [];
 
-    // This cache only holds Apple/KPoe candidates — LRCLIB is a separate path — so the
-    // coverage check ignores 'lrclib'. Empty after stripping ⇒ no coverage requirement.
+    // Include LRCLIB word candidates in coverage and source filtering.
     const requiredList: LyricsSourceId[] | null = requiredSources
-      ? sanitizeLyricsSourceIds(requiredSources).filter(id => id !== 'lrclib')
+      ? sanitizeLyricsSourceIds(requiredSources)
       : null;
     const required = requiredList && requiredList.length > 0 ? requiredList : null;
 
@@ -397,10 +395,8 @@ class LyricsRepositoryService {
       return cached;
     }
 
-    // Apple (binimum TTML) + KPoe come from the word service as a fast waterfall (it
-    // returns the first good source and stops). LRCLIB stays the separate fallback in
-    // the hook, so we don't slow this path down waiting on it.
-    const serviceSources = enabledSources.filter(source => source !== 'lrclib');
+    // Query word providers in preference order and retain the first good result.
+    const serviceSources = enabledSources;
     if (serviceSources.length === 0) return [];
 
     // Skip the network if we recently tried these exact sources and got nothing — this is
@@ -413,10 +409,33 @@ class LyricsRepositoryService {
     const options: AppleWordLyricsCandidate[] = [];
     let fetchFailed = false;
     try {
-      const result = await appleWordLyricsService.searchWordLyricsOptions(songTitle, artist, album, durationSec, isrc, serviceSources);
-      for (const option of result) {
-        const candidate = this.toAppleCandidate(option);
-        if (candidate) options.push(candidate);
+      // Same priority as desktop: original lrc.red timing, then contributed
+      // LRCLIB word timing, then Apple/KPoe. Line-only LRCLIB stays a fallback.
+      if (enabledSources.includes('lrc-red')) {
+        const result = await appleWordLyricsService.searchWordLyricsOptions(songTitle, artist, album, durationSec, isrc, ['lrc-red']);
+        for (const option of result) {
+          const candidate = this.toAppleCandidate(option);
+          if (candidate) options.push(candidate);
+        }
+      }
+      if (!options.length && enabledSources.includes('lrclib')) {
+        const payload = await this.getLrcLibLyrics(songTitle, artist, durationSec, trackId, album);
+        if (this.hasWordLevelPayload(payload)) {
+          options.push({
+            id: 'lrclib-word', label: 'LRCLIB', source: 'lrclib', sourceId: 'lrclib',
+            providerLabel: 'LRCLIB', wordLevel: true, payload: payload!,
+            timingType: 'word', trackName: songTitle, artistName: artist,
+            albumName: album, durationSec, isExactMatch: true,
+          });
+        }
+      }
+      const remaining = enabledSources.filter(source => source !== 'lrclib' && source !== 'lrc-red');
+      if (!options.length && remaining.length) {
+        const result = await appleWordLyricsService.searchWordLyricsOptions(songTitle, artist, album, durationSec, isrc, remaining);
+        for (const option of result) {
+          const candidate = this.toAppleCandidate(option);
+          if (candidate) options.push(candidate);
+        }
       }
     } catch (error) {
       fetchFailed = true;
@@ -444,10 +463,10 @@ class LyricsRepositoryService {
 
   /**
    * Fetches lyrics from LRCLIB.
-   * Tries native module first (more stable networking), then JS fallback.
+   * Uses the shared desktop/Android reader, including Lyricsfile word timing.
    * durationSec must be in SECONDS (not milliseconds).
    */
-  async getLrcLibLyrics(songTitle: string, artist: string, durationSec?: number, trackId?: string): Promise<LyricsPayload | null> {
+  async getLrcLibLyrics(songTitle: string, artist: string, durationSec?: number, trackId?: string, album?: string): Promise<LyricsPayload | null> {
     if (!songTitle.trim() || !artist.trim()) return null;
     console.log(`[LyricsRepository] getLrcLibLyrics: "${songTitle}" / "${artist}" / ${durationSec}s`);
 
@@ -456,19 +475,7 @@ class LyricsRepositoryService {
       return cached;
     }
 
-    try {
-      const nativeResult = await nativeGetLrcLibLyrics(songTitle, artist, durationSec);
-      if (this.hasLyrics(nativeResult)) {
-        console.log('[LyricsRepository] Native LRCLIB result: OK', nativeResult.lyrics.length);
-        await this.saveCachedLrcLibLyrics(songTitle, artist, nativeResult as LyricsPayload, trackId);
-        return nativeResult as LyricsPayload;
-      }
-      console.log('[LyricsRepository] Native LRCLIB result: null/empty');
-    } catch (error) {
-      console.warn('[LyricsRepository] Native LRCLIB failed, using JS fallback:', error);
-    }
-
-    const jsResult = await lrcLibService.fetchLyrics(songTitle, artist, durationSec);
+    const jsResult = await lrcLibService.fetchLyrics(songTitle, artist, durationSec, album);
     console.log('[LyricsRepository] JS LRCLIB result:', jsResult ? `OK (${jsResult.lyrics?.length} lines)` : 'null');
     if (this.hasLyrics(jsResult)) {
       await this.saveCachedLrcLibLyrics(songTitle, artist, jsResult as LyricsPayload, trackId);

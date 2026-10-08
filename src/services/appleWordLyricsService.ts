@@ -11,7 +11,7 @@ import {
 export type AppleWordLyricsOption = {
     id: string;
     label: string;
-    source: 'binimum' | 'kpoe';
+    source: 'lrc-red' | 'binimum' | 'kpoe';
     /** Concrete provider this candidate came from (apple, lyricsplus, …). */
     sourceId: LyricsSourceId;
     /** Human-facing provider name for the picker ("Apple Music", "Musixmatch", …). */
@@ -42,6 +42,14 @@ type LyricsApiSearchResponse = {
     results?: LyricsApiSearchResult[];
 };
 
+type LrcRedHit = {
+    isrc?: string;
+    title?: string;
+    artist?: string;
+    album?: string;
+    duration?: number;
+};
+
 type KpoeSyllable = {
     time?: number;
     duration?: number;
@@ -69,6 +77,7 @@ type KpoePayload = {
 };
 
 class AppleWordLyricsService {
+    private readonly LRC_RED_URL = 'https://lrc.red';
     private readonly CACHE_API_URL = 'https://lyrics-api.binimum.org/';
     private readonly MAX_WORD_OPTIONS = 3;
     // Extra KPoe providers am-lyrics queries but we don't expose as toggles. Appended to
@@ -136,6 +145,91 @@ class AppleWordLyricsService {
             .replace(/[^a-z0-9]+/g, ' ')
             .replace(/\s+/g, ' ')
             .trim();
+    }
+
+    private lrcRedBaseTitle(value: string): string {
+        return this.normalizeComparisonValue(
+            value.replace(/\s*[[(](?:feat\.?|ft\.?|featuring)\s+[^\])]*[\])]/gi, '')
+        );
+    }
+
+    private lrcRedVersionMarker(value: string): boolean {
+        return /\b(?:live|acoustic|remix|instrumental|karaoke|sped up|slowed|cover)\b/i.test(value);
+    }
+
+    private isMatchingLrcRedHit(hit: LrcRedHit, title: string, artist: string, album?: string, durationSec?: number): boolean {
+        if (!hit.isrc || !hit.title || !hit.artist) return false;
+        if (this.lrcRedBaseTitle(hit.title) !== this.lrcRedBaseTitle(title)) return false;
+        if (this.lrcRedVersionMarker(hit.title) !== this.lrcRedVersionMarker(title)) return false;
+
+        const durationDifference = durationSec && Number.isFinite(hit.duration)
+            ? Math.abs(durationSec - (hit.duration as number))
+            : null;
+        if (durationDifference !== null && durationDifference > 12) return false;
+
+        const requestedArtist = this.normalizeComparisonValue(artist);
+        const resultArtist = this.normalizeComparisonValue(hit.artist);
+        if (resultArtist === requestedArtist || (requestedArtist.length >= 6 && resultArtist.includes(requestedArtist))) {
+            return true;
+        }
+
+        // lrc.red sometimes localizes the artist (Julieta Venegas appears in
+        // Chinese). The exact title and close recording duration still identify it.
+        const albumMatches = !album || this.normalizeComparisonValue(hit.album) === this.normalizeComparisonValue(album);
+        return !/[a-z]/i.test(hit.artist)
+            && albumMatches
+            && durationDifference !== null
+            && durationDifference <= (album ? 8 : 3);
+    }
+
+    private async fetchLrcRedOption(
+        title: string,
+        artist: string,
+        album?: string,
+        durationSec?: number,
+        isrc?: string,
+    ): Promise<AppleWordLyricsOption | null> {
+        const makeOption = async (matchedIsrc: string, hit?: LrcRedHit): Promise<AppleWordLyricsOption | null> => {
+            if (!/^[A-Z0-9]{12}$/i.test(matchedIsrc)) return null;
+            const lyricsUrl = `${this.LRC_RED_URL}/s/${matchedIsrc.toUpperCase()}.ttml`;
+            const payload = await this.fetchTtmlLyrics(lyricsUrl, title, artist, hit?.duration ?? durationSec);
+            if (!payload || !this.hasWordLevelTiming(payload)) return null;
+            return {
+                id: 'lrc-red',
+                label: 'lrc.red',
+                source: 'lrc-red',
+                sourceId: 'lrc-red',
+                providerLabel: 'lrc.red',
+                wordLevel: true,
+                payload,
+                lyricsUrl,
+                timingType: 'word',
+                trackName: hit?.title ?? title,
+                artistName: hit?.artist ?? artist,
+                albumName: hit?.album ?? album,
+                durationSec: hit?.duration ?? durationSec,
+                isExactMatch: true,
+            };
+        };
+
+        if (isrc?.trim()) {
+            const direct = await makeOption(isrc.trim());
+            if (direct) return direct;
+        }
+
+        try {
+            const url = `${this.LRC_RED_URL}/search.json?q=${encodeURIComponent(`${title} ${artist}`)}`;
+            const raw = await this.requestWithFallback(url, 0);
+            const hits = (JSON.parse(raw) as { hits?: LrcRedHit[] }).hits;
+            if (!Array.isArray(hits)) return null;
+            for (const hit of hits.filter(candidate => this.isMatchingLrcRedHit(candidate, title, artist, album, durationSec)).slice(0, 3)) {
+                const option = await makeOption(hit.isrc!, hit);
+                if (option) return option;
+            }
+            return null;
+        } catch {
+            return null;
+        }
     }
 
     private async sleep(ms: number) {
@@ -379,6 +473,12 @@ class AppleWordLyricsService {
     private parseTtmlTimestamp(value?: string | null): number {
         const trimmed = value?.trim();
         if (!trimmed) return 0;
+
+        const offsetTime = trimmed.match(/^(\d+(?:\.\d+)?)(ms|s|m|h)$/);
+        if (offsetTime) {
+            const scale = { ms: 0.001, s: 1, m: 60, h: 3600 }[offsetTime[2] as 'ms' | 's' | 'm' | 'h'];
+            return Number(offsetTime[1]) * scale;
+        }
 
         const parts = trimmed.split(':');
         const numericParts = parts.map(part => Number(part));
@@ -919,7 +1019,13 @@ class AppleWordLyricsService {
         // Waterfall, am-lyrics style: take the first good source and stop. This is what
         // makes it fast and find "muchas" — we don't wait on every provider.
 
-        // 1) Apple Music (binimum TTML cache). If it answers, return immediately.
+        // 1) The original word-timed TTML from lrc.red.
+        if (enabled.includes('lrc-red')) {
+            const lrcRedOption = await this.fetchLrcRedOption(title, artist, album, durationSec, isrc);
+            if (lrcRedOption) return [lrcRedOption];
+        }
+
+        // 2) Apple Music (binimum TTML cache). If it answers, return immediately.
         if (enabled.includes('apple')) {
             const appleOptions = await this.fetchAppleTtmlOptions(
                 title, artist, cleanTitle, cleanArtist, cleanAlbum, durationSec, isrc,
@@ -930,7 +1036,7 @@ class AppleWordLyricsService {
             }
         }
 
-        // 2) One combined KPoe request over the enabled sources, in preference order.
+        // 3) One combined KPoe request over the enabled sources, in preference order.
         const enabledKpoeSources = enabled
             .map(sourceId => getLyricsSourceMeta(sourceId)?.kpoeSource)
             .filter((source): source is string => Boolean(source));

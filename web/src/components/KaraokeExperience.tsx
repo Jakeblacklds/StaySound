@@ -40,8 +40,7 @@ import { KaraokePreparingStage } from './KaraokePreparingStage';
 import {
   CloseIcon,
   MicrophoneIcon,
-  PauseIcon,
-  PlayIcon,
+  PlayPauseIcon,
   SeekBackIcon,
   SeekForwardIcon,
   SpinnerIcon,
@@ -770,7 +769,7 @@ export function KaraokeExperience({
                 <SeekBackIcon size={23} />
               </button>
               <button className="karaoke-play" onClick={() => void handleToggle()} aria-label={isPlaying ? 'Pausar' : 'Reproducir'}>
-                {isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+                <PlayPauseIcon playing={isPlaying} size={24} />
               </button>
               <button
                 className="karaoke-seek-button"

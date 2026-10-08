@@ -17,7 +17,9 @@ export async function runGolden({ name, entry, target }, { check }) {
         const outfile = join(directory, 'cases.mjs');
         await build({ entryPoints: [entry], bundle: true, platform: 'node', format: 'esm', outfile, logLevel: 'warning' });
         const { generate } = await import(pathToFileURL(outfile).href);
-        const json = JSON.stringify(generate(), null, 1) + '\n';
+        // A string is written as-is (line-per-op fixtures diff better than JSON).
+        const output = generate();
+        const json = typeof output === 'string' ? output : JSON.stringify(output, null, 1) + '\n';
         if (!check) { await writeFile(file, json); console.log(`golden ${name}: wrote ${target}`); return true; }
         const committed = await readFile(file, 'utf8').catch(() => '');
         if (committed === json) { console.log(`golden ${name}: up to date`); return true; }

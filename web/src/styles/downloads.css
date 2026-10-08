@@ -43,78 +43,66 @@
 .dl-header-row {
   display: flex;
   align-items: center;
-  gap: 16px;
+  gap: 14px;
 }
 
-.dl-header-lead {
+/* ---------- flechas de historial (‹ ›, como Spotify) ---------- */
+.dl-history {
   display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  flex: 1;
+  gap: 6px;
+  flex: 0 0 auto;
 }
 
-.dl-back {
+.dl-nav-arrow {
   display: grid;
   place-items: center;
-  width: 34px;
-  height: 34px;
-  flex: 0 0 auto;
+  width: 36px;
+  height: 36px;
   border-radius: 50%;
-  color: var(--text-secondary);
-  transition: color var(--dl-fast) var(--dl-ease), background-color var(--dl-fast) var(--dl-ease);
-}
-
-.dl-back:hover {
+  background: var(--dl-surface);
   color: var(--text-primary);
-  background: var(--bg-hover, rgba(255, 255, 255, 0.06));
+  transition: color var(--dl-fast) var(--dl-ease), background-color var(--dl-fast) var(--dl-ease), opacity var(--dl-fast) var(--dl-ease);
 }
 
-.dl-breadcrumb {
+.dl-nav-arrow:hover:not(:disabled) { background: var(--dl-line-strong); }
+.dl-nav-arrow:disabled { opacity: 0.32; cursor: default; }
+
+/* ---------- ruta (debajo del buscador, discreta) ---------- */
+.dl-trail {
   display: flex;
-  align-items: baseline;
-  gap: 6px;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
   overflow: hidden;
 }
 
-.dl-crumb {
-  display: flex;
-  align-items: baseline;
-  gap: 6px;
+.dl-trail-crumb {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
   min-width: 0;
-}
-
-.dl-crumb strong {
-  font-size: 1.5rem;
-  font-weight: 800;
-  letter-spacing: -0.02em;
-  color: var(--text-primary);
-  white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-
-.dl-crumb button {
-  font-size: 1.5rem;
-  font-weight: 500;
-  letter-spacing: -0.02em;
   color: var(--text-muted);
-  white-space: nowrap;
-  max-width: 22ch;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  transition: color var(--dl-fast) var(--dl-ease);
 }
 
-.dl-crumb button:hover { color: var(--text-primary); }
-.dl-crumb-sep { color: var(--text-muted); font-size: 1.2rem; }
+.dl-trail-crumb strong,
+.dl-trail-crumb button {
+  max-width: 24ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: inherit;
+}
+
+.dl-trail-crumb strong { color: var(--text-secondary); font-weight: 600; }
+.dl-trail-crumb button { color: var(--text-muted); transition: color var(--dl-fast) var(--dl-ease); }
+.dl-trail-crumb button:hover { color: var(--text-primary); }
 
 .dl-header-actions {
   display: flex;
   align-items: center;
   gap: 8px;
   flex: 0 0 auto;
+  margin-left: auto;
 }
 
 .dl-activity-btn {
@@ -171,18 +159,36 @@
   display: flex;
   align-items: center;
   gap: 12px;
-  height: 50px;
-  max-width: 620px;
-  padding: 0 18px;
-  border: 1px solid var(--dl-line-strong);
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 48px;
+  max-width: 560px;
+  padding: 0 16px 0 18px;
+  border: 1px solid transparent;
   border-radius: 999px;
+  background: var(--dl-surface);
   color: var(--text-muted);
-  transition: border-color var(--dl-fast) var(--dl-ease), color var(--dl-fast) var(--dl-ease);
+  transition: border-color var(--dl-fast) var(--dl-ease), color var(--dl-fast) var(--dl-ease), background-color var(--dl-fast) var(--dl-ease);
 }
 
+.dl-search-field:hover { background: var(--dl-panel-bg); border-color: var(--dl-line-strong); }
+
 .dl-search-field:focus-within {
-  border-color: var(--accent);
-  color: var(--accent);
+  border-color: var(--text-primary);
+  background: var(--dl-panel-bg);
+  color: var(--text-primary);
+}
+
+.dl-search-kbd {
+  flex: 0 0 auto;
+  padding: 2px 7px;
+  border: 1px solid var(--dl-line-strong);
+  border-radius: 6px;
+  color: var(--text-muted);
+  font-family: inherit;
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
 }
 
 .dl-search-field input {
@@ -320,39 +326,34 @@
 .dl-filters {
   display: flex;
   align-items: center;
-  gap: 26px;
-  padding: 16px 0 0;
-  border-bottom: 1px solid var(--dl-line);
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 18px 0 0;
 }
 
 .dl-filters button {
-  position: relative;
-  padding: 4px 2px 12px;
-  color: var(--text-secondary);
-  font-size: 0.9rem;
-  font-weight: 500;
-  transition: color var(--dl-fast) var(--dl-ease);
+  height: 32px;
+  padding: 0 14px;
+  border-radius: 999px;
+  background: var(--dl-surface);
+  color: var(--text-primary);
+  font-size: 0.86rem;
+  font-weight: 600;
+  transition: color var(--dl-fast) var(--dl-ease), background-color var(--dl-fast) var(--dl-ease);
 }
 
-.dl-filters button:hover { color: var(--text-primary); }
-.dl-filters button.active { color: var(--accent); font-weight: 700; }
+.dl-filters button:hover { background: var(--dl-line-strong); }
 
-.dl-filters button.active::after {
-  content: '';
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: -1px;
-  height: 2px;
-  background: var(--accent);
+.dl-filters button.active {
+  background: var(--text-primary);
+  color: var(--dl-page-bg);
 }
 
-.dl-filters-busy {
-  margin-left: auto;
-  padding-bottom: 12px;
-  color: var(--text-muted);
-  font-size: 0.78rem;
-}
+.dl-filters.inline { padding: 0 0 18px; }
+
+/* Resultados viejos mientras llegan los nuevos: se quedan, pero se nota. */
+.dl-browse.is-refreshing .dl-section { opacity: 0.55; transition: opacity var(--dl-base) var(--dl-ease); }
+.dl-browse .dl-section { transition: opacity var(--dl-base) var(--dl-ease); }
 
 /* ---------- artwork ---------- */
 .dl-art {
@@ -379,29 +380,48 @@
 /* Círculo redondea cada thumbnail de la app; Descargas habla el mismo idioma. */
 .circ-app-shell .dl-art { border-radius: 50%; }
 
-/* ---------- mejor resultado ---------- */
-.dl-top-result {
+/* ---------- todo: mejor resultado + canciones ---------- */
+.dl-overview {
   display: grid;
-  grid-template-columns: 128px minmax(0, 1fr);
-  gap: 24px;
-  align-items: center;
-  padding: 22px;
-  border: 1px solid var(--dl-line);
-  border-radius: var(--dl-radius);
-  background:
-    linear-gradient(120deg, color-mix(in srgb, var(--accent) 9%, transparent), transparent 58%),
-    var(--dl-surface);
+  grid-template-columns: minmax(300px, 0.85fr) minmax(0, 1.15fr);
+  gap: 28px;
+  align-items: start;
 }
 
-.dl-top-result-art { width: 128px; height: 128px; }
+.dl-overview.no-top { grid-template-columns: minmax(0, 1fr); }
+.dl-overview > .dl-section { margin-top: 26px; }
 
-.dl-top-result-copy { display: grid; gap: 6px; min-width: 0; }
+.dl-top-result {
+  position: relative;
+  display: grid;
+  align-content: start;
+  gap: 18px;
+  width: 100%;
+  min-height: 244px;
+  padding: 22px;
+  border-radius: 12px;
+  background: var(--dl-surface);
+  text-align: left;
+  transition: background-color var(--dl-base) var(--dl-ease);
+}
 
-.dl-top-result-copy h3 {
-  margin: 2px 0 0;
-  font-size: clamp(1.5rem, 2.4vw, 2.1rem);
+.dl-top-result:hover { background: var(--dl-panel-bg); }
+
+.dl-top-result-art,
+.dl-top-result-art-btn { width: 104px; height: 104px; }
+.dl-top-result-art-btn { border-radius: 6px; }
+.dl-top-result-art { box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45); }
+
+.dl-top-result-copy { display: grid; gap: 10px; min-width: 0; }
+
+.dl-top-result-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+  font-size: clamp(1.7rem, 2.6vw, 2.2rem);
   font-weight: 800;
-  letter-spacing: -0.025em;
+  letter-spacing: -0.03em;
   line-height: 1.08;
   color: var(--text-primary);
   overflow: hidden;
@@ -410,18 +430,64 @@
 }
 
 .dl-top-result-meta {
-  margin: 0;
-  color: var(--text-secondary);
-  font-size: 0.92rem;
-}
-
-.dl-top-result-actions {
   display: flex;
   align-items: center;
-  gap: 12px;
-  margin-top: 10px;
   flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+  color: var(--text-secondary);
+  font-size: 0.9rem;
 }
+
+.dl-kind-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 24px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--text-primary) 9%, transparent);
+  color: var(--text-primary);
+  font-size: 0.74rem;
+  font-weight: 700;
+}
+
+/* La flecha (y en canciones, el botón) aparece donde Spotify pone el play. */
+.dl-top-result-go,
+.dl-top-result-action {
+  position: absolute;
+  right: 20px;
+  bottom: 20px;
+}
+
+.dl-top-result-go {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 50%;
+  background: var(--accent);
+  color: var(--text-on-accent, var(--accent-text, #08100f));
+  box-shadow: 0 8px 22px rgba(0, 0, 0, 0.4);
+  opacity: 0;
+  transform: translateY(8px);
+  transition: opacity var(--dl-base) var(--dl-ease), transform var(--dl-base) var(--dl-ease);
+}
+
+.dl-top-result:hover .dl-top-result-go,
+.dl-top-result:focus-visible .dl-top-result-go { opacity: 1; transform: none; }
+
+.dl-top-skeleton {
+  display: grid;
+  gap: 18px;
+  min-height: 244px;
+  margin-top: 26px;
+  padding: 22px;
+  border-radius: 12px;
+  background: var(--dl-surface);
+}
+
+.dl-top-skeleton .dl-skeleton-art.block { width: 104px; }
+.dl-top-skeleton .dl-skeleton-lines span:first-child { height: 22px; }
 
 .dl-quality-pill {
   display: inline-flex;
@@ -443,7 +509,7 @@
 
 .dl-track-row {
   display: grid;
-  grid-template-columns: 40px minmax(0, 1fr) auto auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 14px;
   min-height: 58px;
@@ -452,8 +518,14 @@
   transition: background-color var(--dl-fast) var(--dl-ease);
 }
 
-/* Sin carátula ni índice el grid se ajusta solo. */
-.dl-track-list:not(.numbered) .dl-track-row { grid-template-columns: 44px minmax(0, 1fr) auto auto auto; }
+/* Las columnas dependen de lo que la fila realmente pinta (índice, carátula). */
+.dl-track-row.has-art { grid-template-columns: 44px minmax(0, 1fr) auto auto auto; }
+.dl-track-row.has-index { grid-template-columns: 32px minmax(0, 1fr) auto auto auto; }
+.dl-track-row.has-index.has-art { grid-template-columns: 32px 44px minmax(0, 1fr) auto auto auto; }
+
+/* Junto al mejor resultado: filas sueltas, sin reglas, como una lista flotante. */
+.dl-track-list.compact { border-top: 0; }
+.dl-track-list.compact .dl-track-row { border-bottom: 0; border-radius: 8px; min-height: 60px; padding-left: 8px; }
 
 .dl-track-row:hover { background: var(--bg-hover, rgba(255, 255, 255, 0.04)); }
 .dl-track-row.is-done { opacity: 0.62; }
@@ -462,7 +534,7 @@
 .dl-track-row.is-resolving { box-shadow: inset 2px 0 0 var(--accent); }
 
 .dl-track-index {
-  width: 40px;
+  width: 32px;
   text-align: center;
   color: var(--text-muted);
   font-size: 0.86rem;
@@ -554,6 +626,17 @@
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
   gap: 26px 20px;
+}
+
+/* Una sola fila en "Todo": lo que no cabe se ve con "Ver todos". El margen
+   negativo deja sitio a la sombra del hover sin que overflow la recorte. */
+.dl-card-grid.single-row {
+  grid-template-rows: auto;
+  grid-auto-rows: 0;
+  row-gap: 0;
+  overflow: hidden;
+  margin: -6px -12px -22px;
+  padding: 6px 12px 22px;
 }
 
 .dl-card {
@@ -686,7 +769,26 @@
   padding-bottom: 30px;
 }
 
-.dl-hero-art { width: 216px; height: 216px; }
+.dl-hero-art { width: 216px; height: 216px; box-shadow: 0 18px 50px rgba(0, 0, 0, 0.5); }
+
+/* Artista: su foto, desenfocada, tiñe la cabecera — la ficha se siente suya. */
+.dl-hero.has-backdrop {
+  position: relative;
+  isolation: isolate;
+}
+
+.dl-hero.has-backdrop::before {
+  content: '';
+  position: absolute;
+  z-index: -1;
+  inset: -26px calc(var(--dl-gutter) * -1) 0;
+  background: var(--dl-hero-image) center 30% / cover no-repeat;
+  filter: blur(56px) saturate(1.2);
+  opacity: 0.34;
+  -webkit-mask-image: linear-gradient(to bottom, #000 30%, transparent);
+  mask-image: linear-gradient(to bottom, #000 30%, transparent);
+  pointer-events: none;
+}
 
 .dl-hero-copy { display: grid; gap: 8px; min-width: 0; }
 
@@ -761,15 +863,74 @@
   line-height: 1.5;
 }
 
-.dl-recent { margin-top: 22px; display: grid; gap: 10px; justify-items: center; }
-.dl-recent-label {
-  color: var(--text-muted);
-  font-size: 0.72rem;
-  font-weight: 700;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+/* ---------- búsquedas recientes ---------- */
+.dl-recent-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 6px 14px;
 }
-.dl-recent-chips { display: flex; flex-wrap: wrap; gap: 8px; justify-content: center; }
+
+.dl-recent-item {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 10px;
+  transition: background-color var(--dl-fast) var(--dl-ease);
+}
+
+.dl-recent-item:hover { background: var(--dl-surface); }
+
+.dl-recent-open {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex: 1;
+  min-width: 0;
+  padding: 8px 44px 8px 8px;
+  text-align: left;
+}
+
+.dl-recent-open .dl-art { width: 52px; height: 52px; }
+.dl-recent-query-icon { color: var(--text-secondary); background: var(--dl-surface); }
+.dl-recent-item:hover .dl-recent-query-icon { background: var(--dl-panel-bg); }
+
+.dl-recent-copy { display: grid; gap: 3px; min-width: 0; }
+
+.dl-recent-copy strong {
+  color: var(--text-primary);
+  font-size: 0.94rem;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-recent-copy small {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.dl-recent-forget {
+  position: absolute;
+  right: 10px;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: var(--text-muted);
+  opacity: 0;
+  transition: opacity var(--dl-fast) var(--dl-ease), color var(--dl-fast) var(--dl-ease);
+}
+
+.dl-recent-item:hover .dl-recent-forget,
+.dl-recent-forget:focus-visible { opacity: 1; }
+.dl-recent-forget:hover { color: var(--text-primary); }
+
+.dl-more-toggle { margin-top: 14px; }
 
 .dl-error-state {
   display: grid;
@@ -1091,9 +1252,8 @@
 @media (max-width: 900px) {
   .dl-hero { grid-template-columns: 148px minmax(0, 1fr); gap: 20px; }
   .dl-hero-art { width: 148px; height: 148px; }
-  .dl-top-result { grid-template-columns: 92px minmax(0, 1fr); gap: 16px; padding: 16px; }
-  .dl-top-result-art { width: 92px; height: 92px; }
-  .dl-crumb strong, .dl-crumb button { font-size: 1.2rem; }
+  .dl-overview { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .dl-top-result, .dl-top-skeleton { min-height: 0; }
   .dl-track-quality { display: none; }
   .dl-card-grid { grid-template-columns: repeat(auto-fill, minmax(126px, 1fr)); gap: 20px 14px; }
 }
@@ -1101,7 +1261,21 @@
 @media (max-width: 620px) {
   .dl-activity-btn span:not(.dl-badge) { display: none; }
   .dl-activity-btn { padding: 0 12px; }
+  .dl-header-row { flex-wrap: wrap; }
+  .dl-search-field { order: 3; flex-basis: 100%; max-width: none; }
+  .dl-search-kbd { display: none; }
   .dl-hero { grid-template-columns: minmax(0, 1fr); }
   .dl-hero-art { width: 132px; height: 132px; }
   .dl-track-time { display: none; }
 }
+
+/* Canción como mejor resultado: el botón de descarga va en el flujo para no
+   pisar el artista o la calidad cuando la línea es larga. */
+.dl-top-result.is-track .dl-top-result-action { position: static; justify-self: start; }
+.dl-top-result:not(.is-track) .dl-top-result-meta { padding-right: 58px; }
+
+@media (prefers-reduced-motion: reduce) {
+  .dl-top-result-go { transition: none; transform: none; }
+  .dl-browse .dl-section { transition: none; }
+}
+.dl-top-result-art-btn:disabled { opacity: 1; cursor: default; }

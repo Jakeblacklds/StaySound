@@ -20,6 +20,7 @@ import com.google.android.material.dialog.MaterialAlertDialogBuilder
 import expo.modules.kotlin.AppContext
 import expo.modules.kotlin.viewevent.EventDispatcher
 import expo.modules.kotlin.views.ExpoView
+import expo.modules.playerchrome.TrackActionsSheet
 import org.json.JSONArray
 import java.util.concurrent.ExecutorService
 import java.util.concurrent.Executors
@@ -50,6 +51,7 @@ class HomeView(context: Context, appContext: AppContext) : ExpoView(context, app
     private var topInset = 0
     private var bottomInset = style.dp(180)
     private var dialog: AlertDialog? = null
+    private var trackSheet: TrackActionsSheet? = null
     private val railPositions = mutableMapOf<String, Parcelable?>()
     private val list = RecyclerView(ui)
     private val rows = Rows()
@@ -91,6 +93,7 @@ class HomeView(context: Context, appContext: AppContext) : ExpoView(context, app
         scrollState = list.layoutManager?.onSaveInstanceState()
         main.removeCallbacksAndMessages(null); work?.cancel(true); worker?.shutdownNow(); worker = null
         dialog?.dismiss(); dialog = null
+        trackSheet?.dispose(); trackSheet = null
         super.onDetachedFromWindow()
     }
     private fun schedule() {
@@ -129,14 +132,20 @@ class HomeView(context: Context, appContext: AppContext) : ExpoView(context, app
     private fun showActions(item: HomeItem) {
         val local = catalog?.songs?.any { it.id == item.id } == true
         val actions = if (local) listOf("queue", "playlist", "remove", "deleteFile") else listOf("queue", "playlist")
-        dialog = MaterialAlertDialogBuilder(ui).setTitle(item.title)
-            .setItems(actions.map(style::label).toTypedArray()) { _, index ->
-                when (val action = actions[index]) {
+        trackSheet?.dispose()
+        trackSheet = TrackActionsSheet(ui, item.title, item.artist, item.displayArtwork, item.fallbackThumbnail,
+            style.panel, style.ink, style.secondary, style.primary, style.label("cancel"), style.motionEnabled,
+            actions.map { action ->
+                TrackActionsSheet.Action(style.label(action), when (action) {
+                    "queue" -> "queue"; "playlist" -> "playlist-add"; else -> "trash"
+                }, if (action == "queue") style.label("queueHint") else "",
+                    destructive = action == "remove" || action == "deleteFile") {
+                when (action) {
                     "queue" -> emit(action, item.id)
                     "playlist" -> showPlaylists(item)
                     else -> confirmRemoval(item, action == "deleteFile")
                 }
-            }.setNegativeButton(style.label("cancel"), null).show()
+            } }).also { it.show() }
     }
     private fun showPlaylists(item: HomeItem) {
         val choices = catalog?.playlists.orEmpty()

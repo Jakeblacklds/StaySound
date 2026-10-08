@@ -230,6 +230,16 @@
     display: grid;
   }
 
+  /* The moment a disc becomes "the one playing": one soft ring of accent leaves it. */
+  .circ-art.ringed {
+    animation: circRingPulse 900ms var(--circ-ease-enter) 1;
+  }
+
+  @keyframes circRingPulse {
+    from { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 55%, transparent); }
+    to { box-shadow: 0 0 0 18px transparent; }
+  }
+
   .circ-art.interactive {
     cursor: pointer;
   }
@@ -442,8 +452,19 @@
     }
 
     .circ-player-bar,
-    .circ-player-bar > * {
+    .circ-player-bar > *,
+    .circ-pb-art,
+    .circ-pb-copy > *,
+    .circ-art.ringed,
+    .circ-home-hero-art,
+    .circ-home-welcome-body > *,
+    .circ-home-greeting-text,
+    .circ-home-reason {
       animation: none;
+    }
+
+    .circ-home {
+      transition: none;
     }
 
     /* Keep the hover ring — it is the affordance — and drop only the travel. */
@@ -502,6 +523,27 @@
 
   .circ-pb-art {
     flex: 0 0 auto;
+    animation: circPbArtSwap 520ms var(--circ-ease-enter) both;
+  }
+
+  @keyframes circPbArtSwap {
+    from { opacity: 0; transform: rotate(-60deg) scale(0.84); }
+    to { opacity: 1; transform: rotate(0) scale(1); }
+  }
+
+  /* While a disc is flying in from Home it is the one that carries the change. */
+  html[data-art-flight] .circ-pb-art { animation: none; }
+  html[data-art-flight] .circ-pb-copy > * { animation-delay: 300ms; }
+
+  .circ-pb-copy > * {
+    animation: circPbCopyIn 460ms var(--circ-ease-enter) both;
+  }
+  .circ-pb-copy > :nth-child(2) { animation-delay: 50ms; }
+  .circ-pb-copy > :nth-child(3) { animation-delay: 100ms; }
+
+  @keyframes circPbCopyIn {
+    from { opacity: 0; transform: translate3d(0, 12px, 0); }
+    to { opacity: 1; transform: translate3d(0, 0, 0); }
   }
 
   .circ-pb-copy {
@@ -755,6 +797,10 @@
 
   /* ---------- home ---------- */
   .circ-home {
+    --accent: var(--hero-accent);
+    --accent-hover: color-mix(in oklch, var(--accent) 82%, white);
+    --accent-soft: color-mix(in srgb, var(--accent) 14%, transparent);
+    transition: --hero-accent 900ms ease;
     position: relative;
     min-height: 100%;
     overflow: hidden;
@@ -793,6 +839,28 @@
     pointer-events: none;
   }
 
+  .circ-home-hero-art {
+    animation: circHeroDiscIn 760ms var(--circ-ease-enter) both;
+  }
+
+  @keyframes circHeroDiscIn {
+    from { opacity: 0; transform: rotate(-38deg) scale(0.9); filter: blur(6px); }
+    to { opacity: 1; transform: rotate(0) scale(1); filter: blur(0); }
+  }
+
+  .circ-home-welcome-body > * {
+    animation: circHeroLineIn 640ms var(--circ-ease-enter) both;
+  }
+  .circ-home-welcome-body > :nth-child(1) { animation-delay: 60ms; }
+  .circ-home-welcome-body > :nth-child(2) { animation-delay: 130ms; }
+  .circ-home-welcome-body > :nth-child(3) { animation-delay: 190ms; }
+  .circ-home-welcome-body > :nth-child(4) { animation-delay: 250ms; }
+
+  @keyframes circHeroLineIn {
+    from { opacity: 0; transform: translate3d(0, 18px, 0); clip-path: inset(0 0 100% 0); }
+    to { opacity: 1; transform: translate3d(0, 0, 0); clip-path: inset(0 0 -20% 0); }
+  }
+
   .circ-home-welcome {
     grid-column: 1;
     grid-row: 1;
@@ -810,6 +878,51 @@
     font-size: 1.05rem;
     font-weight: 500;
     color: var(--text-secondary);
+  }
+
+  .circ-home-greeting {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 6px 12px;
+  }
+
+  .circ-home-greeting-text {
+    animation: circGreetingIn 900ms var(--circ-ease-enter) both;
+  }
+
+  @keyframes circGreetingIn {
+    from { opacity: 0; letter-spacing: 0.08em; filter: blur(4px); }
+    to { opacity: 1; letter-spacing: 0; filter: blur(0); }
+  }
+
+  /* Why this album is here — it swaps with the pick, so it re-plays on change. */
+  .circ-home-reason {
+    position: relative;
+    padding-left: 14px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    animation: circReasonIn 520ms var(--circ-ease-enter) 120ms both;
+  }
+
+  .circ-home-reason::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 50%;
+    width: 6px;
+    height: 6px;
+    margin-top: -3px;
+    border-radius: 50%;
+    background: var(--accent);
+  }
+
+  @keyframes circReasonIn {
+    from { opacity: 0; transform: translate3d(-10px, 0, 0); }
+    to { opacity: 1; transform: translate3d(0, 0, 0); }
   }
 
   .circ-home-welcome h1 {

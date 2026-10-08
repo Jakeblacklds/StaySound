@@ -166,6 +166,17 @@ export const useSettingsStore = create<SettingsStore>()(
         }),
         {
             name: 'staysound-settings',
+            version: 1,
+            migrate: (persisted, version) => {
+                const settings = persisted as Partial<PersistedSettingsState>;
+                if (version < 1) {
+                    settings.lyricsSources = sanitizeLyricsSourceIds([
+                        'lrc-red',
+                        ...(Array.isArray(settings.lyricsSources) ? settings.lyricsSources : DEFAULT_LYRICS_SOURCE_IDS),
+                    ]);
+                }
+                return settings as SettingsStore;
+            },
             storage: createJSONStorage(() => FileSystemStorage),
             partialize: (state): PersistedSettingsState => ({
                 language: state.language,

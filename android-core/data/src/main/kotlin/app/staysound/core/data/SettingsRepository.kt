@@ -18,10 +18,10 @@ class SettingsRepository internal constructor(
     internal suspend fun remove(name: String) { store.edit { it.remove(stringPreferencesKey(name)) } }
     internal suspend fun documents(): Map<String, String> = store.data.first().asMap().map { (key, value) -> key.name to (value as String) }.toMap()
     val settings: Flow<Settings> = store.data.map { prefs ->
-        ownership.native { Settings.from(LegacyCodec.envelope(prefs[stringPreferencesKey(LegacyCodec.SETTINGS)]).getJSONObject("state")) }
+        ownership.native { Settings.from(LegacyCodec.settingsEnvelope(prefs[stringPreferencesKey(LegacyCodec.SETTINGS)]).getJSONObject("state")) }
     }
     suspend fun read(): Settings = ownership.native {
-        Settings.from(LegacyCodec.envelope(documents()[LegacyCodec.SETTINGS]).getJSONObject("state"))
+        Settings.from(LegacyCodec.settingsEnvelope(documents()[LegacyCodec.SETTINGS]).getJSONObject("state"))
     }
     suspend fun setLanguage(language: String) { require(language in setOf("es", "en")); update { put("language", language) } }
     suspend fun setMirror(mirror: String) { require(mirror.isNotBlank()); update { put("tidalMirror", mirror) } }
@@ -61,7 +61,7 @@ class SettingsRepository internal constructor(
     private suspend fun update(mutate: JSONObject.() -> Unit) = ownership.native {
         store.edit { prefs ->
             val key = stringPreferencesKey(LegacyCodec.SETTINGS)
-            val envelope = LegacyCodec.envelope(prefs[key])
+            val envelope = LegacyCodec.settingsEnvelope(prefs[key])
             envelope.getJSONObject("state").mutate()
             prefs[key] = envelope.toString()
         }
@@ -69,7 +69,7 @@ class SettingsRepository internal constructor(
 }
 
 internal val LYRICS_FONTS = setOf("newsreader", "classic", "syne", "grotesk", "fraunces", "nunito")
-internal val DEFAULT_LYRICS_SOURCES = listOf("apple", "lyricsplus", "musixmatch", "spotify", "lrclib")
+internal val DEFAULT_LYRICS_SOURCES = listOf("lrc-red", "apple", "lyricsplus", "musixmatch", "spotify", "lrclib")
 
 data class Settings(
     val language: String, val downloadQuality: String, val mirror: String,

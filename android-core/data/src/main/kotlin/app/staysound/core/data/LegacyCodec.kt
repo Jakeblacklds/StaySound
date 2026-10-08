@@ -62,9 +62,19 @@ internal object LegacyCodec {
             key to pair.get(1)
         }
     }
-    fun envelope(raw: String?): JSONObject = if (raw == null) JSONObject().put("state", JSONObject()).put("version", 0) else JSONObject(raw).also {
+    fun envelope(raw: String?, maxVersion: Int = 0): JSONObject = if (raw == null) JSONObject().put("state", JSONObject()).put("version", 0) else JSONObject(raw).also {
         require(it.has("state") && it.get("state") is JSONObject) { "Invalid Zustand envelope" }
-        require(!it.has("version") || it.getInt("version") == 0) { "Unsupported Zustand version" }
+        require(!it.has("version") || it.getInt("version") in 0..maxVersion) { "Unsupported Zustand version" }
+    }
+    // Settings v1 introduced lrc.red. Preserve explicit v1 source preferences;
+    // enable the new provider when reading older settings, as Zustand does.
+    fun settingsEnvelope(raw: String?): JSONObject = envelope(raw, maxVersion = 1).also {
+        if (it.optInt("version", 0) < 1) {
+            val state = it.getJSONObject("state")
+            val sources = state.optJSONArray("lyricsSources")?.let(::strings) ?: DEFAULT_LYRICS_SOURCES
+            state.put("lyricsSources", JSONArray(DEFAULT_LYRICS_SOURCES.filter { source -> source == "lrc-red" || source in sources }))
+            it.put("version", 1)
+        }
     }
     fun array(state: JSONObject, name: String): JSONArray = if (state.has(name)) state.getJSONArray(name) else JSONArray()
     fun pair(key: String, value: Any) = JSONArray().put(key).put(value)
@@ -119,7 +129,7 @@ internal data class LegacyImport(
                 DownloadRow("legacy:${row.key}", Download("legacy:${row.key}", row.key, DownloadStatus.COMPLETED,
                     uri = row.track.uri, updatedAt = row.track.downloadedAt ?: row.track.dateAdded))
             }
-            files[SETTINGS]?.let { envelope(it) }
+            files[SETTINGS]?.let { settingsEnvelope(it) }
             LegacyImport(tracks, playlists, cloud, history, downloads.sortedBy { it.key }, ArtistCache.decode(files[ArtistCache.DOCUMENT]),
                 listOf(DocumentRow(LIBRARY, library.toString()), DocumentRow("cloud-order", cloudOrder)) +
                     files.filterKeys { it !in setOf(LIBRARY, PLAYER, SETTINGS, DOWNLOADS, ArtistCache.DOCUMENT, "staysound-onboarding") }

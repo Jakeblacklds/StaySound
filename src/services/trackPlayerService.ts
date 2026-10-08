@@ -776,8 +776,36 @@ export async function syncNativeQueue(targetTrackIds: string[]): Promise<void> {
 }
 
 /**
- * Remove tracks from native queue by index
+ * Append without resetting playback, then trim the bounded queue if needed.
  */
+export async function appendToNativeQueue(
+  track: Track,
+  expectedIds: string[],
+  dropIndex: number = -1,
+): Promise<void> {
+  if (!isInitialized && !(await initializeTrackPlayer())) {
+    throw new Error("Track Player initialization failed");
+  }
+  const nativeTrack = await buildNativeTrack(track, { artwork: resolveArtworkForQueue(track) });
+  const queue = await TrackPlayer.getQueue();
+  // A native library tap can replace the queue while the track is being prepared.
+  // Never apply stale indices to that new listening session.
+  if (queue.length !== expectedIds.length || queue.some((item, index) => String(item.id) !== expectedIds[index])) {
+    throw new Error("Playback queue changed while adding a track");
+  }
+  await TrackPlayer.add([nativeTrack]);
+  if (dropIndex >= 0) {
+    try {
+      await TrackPlayer.remove([dropIndex]);
+    } catch (error) {
+      // Undo this append if the bounded queue could not be updated.
+      await TrackPlayer.remove([queue.length]);
+      throw error;
+    }
+  }
+}
+
+/** Remove tracks from native queue by index. */
 export async function removeTracks(indices: number[]): Promise<void> {
   if (!isInitialized) return;
   await TrackPlayer.remove(indices);

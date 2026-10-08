@@ -12,7 +12,9 @@
 // Bump this whenever the cache-selection policy changes. Version 1 could retain a
 // plain Genius result indefinitely, masking a word-synchronised result once its
 // provider recovered.
-const DB_NAME = 'staysound_lyrics_cache_v3';
+const DB_NAME = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  ? 'staysound_lyrics_cache_tauri_v4'
+  : 'staysound_lyrics_cache_v3';
 const STORE = 'candidates';
 
 /** Keeps the cache bounded; the oldest entries are dropped past this count. */

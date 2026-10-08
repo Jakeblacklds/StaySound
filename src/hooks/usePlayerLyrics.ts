@@ -192,7 +192,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0, nativ
     setIsDownloadingLrc(true);
     setLrcError(null);
     try {
-      const payload = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId);
+      const payload = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId, lyricsLookupTrack?.album);
       if (payload && Array.isArray(payload.lyrics) && payload.lyrics.length > 0) {
         setLrcLyrics(payload as KaraokeLyricsJSON);
         setLyricsMode('lrc');
@@ -387,7 +387,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0, nativ
         }
 
         const [cached, cachedAppleOptions] = await Promise.all([
-          LyricsRepository.getCachedLrcLibLyrics(songTitle, artist, trackId),
+          lyricsSources.includes('lrclib') ? LyricsRepository.getCachedLrcLibLyrics(songTitle, artist, trackId) : Promise.resolve(null),
           LyricsRepository.getCachedAppleWordLyricsOptions(songTitle, artist, trackId, lyricsSources),
         ]);
         if (lyricsRequestIdRef.current !== requestId) return;
@@ -495,7 +495,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0, nativ
           setLrcError(null);
 
           try {
-            const fallback = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId);
+            const fallback = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId, lyricsLookupTrack?.album);
             if (lyricsRequestIdRef.current !== requestId) return;
 
             if (fallback?.lyrics?.length) {
@@ -601,7 +601,9 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0, nativ
       if (!hasApple) {
         await LyricsRepository.getLyrics(title, artist).catch(() => { });
       }
-      LyricsRepository.getLrcLibLyrics(title, artist, durationSec, trackId).catch(() => { });
+      if (lyricsSourcesRef.current.includes('lrclib')) {
+        await LyricsRepository.getLrcLibLyrics(title, artist, durationSec, trackId, album).catch(() => { });
+      }
     } catch {
       // best effort prefetch
     }

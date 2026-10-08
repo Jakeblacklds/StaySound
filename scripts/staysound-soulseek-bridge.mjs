@@ -5,6 +5,8 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import slsk from 'slsk-client';
+import { isLosslessResult, rankSoulseekResults } from './lib/soulseek-result-ranking.mjs';
+import { createSearchRecovery } from './lib/soulseek-search-recovery.mjs';
 
 const PORT = Number.parseInt(process.env.STAYSOUND_SOULSEEK_BRIDGE_PORT ?? '4317', 10);
 const HOST = process.env.STAYSOUND_SOULSEEK_BRIDGE_HOST ?? '127.0.0.1';
@@ -40,9 +42,50 @@ const files = new Map();
 const jobs = new Map();
 const JOB_RETENTION_MS = 30 * 60 * 1000;
 const PEER_TRANSFER_RETRY_LIMIT = 1;
-const SESSION_CONNECT_RETRY_LIMIT = 2;
+const SESSION_CONNECT_COOLDOWN_MS = Math.max(
+  5_000,
+  Number.parseInt(process.env.SOULSEEK_CONNECT_COOLDOWN_MS ?? '30000', 10),
+);
+const SESSION_LOGIN_TIMEOUT_MS = Math.max(
+  2_000,
+  Number.parseInt(process.env.SOULSEEK_LOGIN_TIMEOUT_MS ?? '8000', 10),
+);
+// The Soulseek server bans accounts and IPs that log in or search in bursts.
+// Every login and search from the desktop app goes through this process, so
+// the limits below are the single place where StaySound stays polite.
+const SESSION_CONNECT_MAX_COOLDOWN_MS = 30 * 60 * 1000;
+const MIN_LOGIN_GAP_MS = 15_000;
+const SEARCH_MIN_GAP_MS = Math.max(
+  1_000,
+  Number.parseInt(process.env.SOULSEEK_SEARCH_MIN_GAP_MS ?? '4000', 10),
+);
+const SEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
+const EMPTY_SEARCH_CACHE_TTL_MS = 2 * 60 * 1000;
+const SEARCH_CACHE_MAX_ENTRIES = 200;
 let clientPromise = null;
+let connectedClient = null;
 let activeCredentials = null;
+let reconnectNotBefore = 0;
+let consecutiveConnectFailures = 0;
+let lastLoginAttemptAt = 0;
+let lastConnectError = null;
+let searchQueue = Promise.resolve();
+let lastSearchAt = 0;
+/** normalized query → { expiresAt, promise } */
+const searchCache = new Map();
+// Liveness: a login whose route died silently (Mac asleep, router/NAT
+// timeout) still looks connected, and searches sent into it just come back
+// empty. These track the server's silence and our heartbeat.
+const QUIET_PROBE_MS = 45_000;
+const HEARTBEAT_QUIET_MS = 60_000;
+const PROBE_TIMEOUT_MS = 5_000;
+const RELOGGED_COOLDOWN_MS = 2 * 60 * 1000;
+let lastCredentials = null;
+let heartbeatSentAt = 0;
+/** Diagnostics of the last network search, exposed on /health. */
+let lastSearch = null;
+const searchWithRecovery = createSearchRecovery();
+let lastSearchRecoveryAt = null;
 let runtimeShareDirs = (process.env.SOULSEEK_SHARED_DIRS ?? process.env.SOULSEEK_SHARED_DIR ?? '')
   .split(path.delimiter)
   .map(folder => folder.trim())
@@ -202,8 +245,26 @@ function sameCredentials(left, right) {
   return Boolean(left && right && left.username === right.username && left.password === right.password);
 }
 
-function waitForRetry(ms) {
-  return new Promise(resolve => setTimeout(resolve, ms));
+async function resetClient(expectedClient = null) {
+  const pendingClient = clientPromise;
+  if (!pendingClient) return false;
+
+  const client = await pendingClient.catch(() => null);
+  // Do not let an older failed request tear down a replacement session that
+  // another request already established in the meantime.
+  if (clientPromise !== pendingClient || (expectedClient && client !== expectedClient)) {
+    return false;
+  }
+
+  clientPromise = null;
+  connectedClient = null;
+  activeCredentials = null;
+  try {
+    client?.destroy?.();
+  } catch {
+    // The session is already unusable; cleanup is best effort.
+  }
+  return true;
 }
 
 function requestedShareFolders() {
@@ -240,6 +301,7 @@ function connectClient(credentials) {
       port: Number.parseInt(process.env.SOULSEEK_SERVER_PORT ?? '2242', 10),
       incomingPort: Number.parseInt(process.env.SOULSEEK_LISTEN_PORT ?? '2234', 10),
       uploadSlots: Number.parseInt(process.env.SOULSEEK_UPLOAD_SLOTS ?? '2', 10),
+      timeout: SESSION_LOGIN_TIMEOUT_MS,
       // StaySound only re-shares its own completed Soulseek downloads by
       // default. It never exposes the user's broader music library.
       sharedFolders,
@@ -252,7 +314,12 @@ function connectClient(credentials) {
 
 async function getClient(credentials) {
   const normalized = ensureCredentials(credentials);
-  if (clientPromise && sameCredentials(activeCredentials, normalized)) return clientPromise;
+  if (clientPromise && sameCredentials(activeCredentials, normalized)) {
+    // A login whose server socket dropped would otherwise be reused forever,
+    // returning empty searches that make callers retry.
+    if (!connectedClient || connectedClient.isConnected?.() !== false) return clientPromise;
+    await resetClient(connectedClient);
+  }
 
   if (clientPromise && !sameCredentials(activeCredentials, normalized)) {
     clientPromise.then(client => {
@@ -263,38 +330,189 @@ async function getClient(credentials) {
       }
     }).catch(() => {});
     clientPromise = null;
+    connectedClient = null;
   }
 
   if (clientPromise) return clientPromise;
+  if (Date.now() < reconnectNotBefore) {
+    const remainingSeconds = Math.max(1, Math.ceil((reconnectNotBefore - Date.now()) / 1000));
+    const reason = lastConnectError?.startsWith('Otra sesión') ? `${lastConnectError} ` : 'Soulseek rechazo la conexión recientemente. ';
+    const error = new Error(`${reason}Espera ${remainingSeconds} s antes de reintentar.`);
+    error.code = 'SOULSEEK_COOLDOWN';
+    error.retryAfterMs = reconnectNotBefore - Date.now();
+    throw error;
+  }
+  // Even successful logins must not come in bursts (credential switches,
+  // dropped sessions); wait out the minimum gap instead of failing.
+  const loginGapMs = lastLoginAttemptAt + MIN_LOGIN_GAP_MS - Date.now();
+  if (loginGapMs > 0) await new Promise(resolve => setTimeout(resolve, loginGapMs));
+  if (clientPromise) return clientPromise;
+  lastLoginAttemptAt = Date.now();
   activeCredentials = normalized;
 
-  const pendingClient = (async () => {
-    let lastError;
-    for (let attempt = 0; attempt <= SESSION_CONNECT_RETRY_LIMIT; attempt += 1) {
-      try {
-        return await connectClient(normalized);
-      } catch (error) {
-        lastError = error;
-        if (!isRetryablePeerTransferError(error) || attempt === SESSION_CONNECT_RETRY_LIMIT) {
-          throw error;
-        }
-        await waitForRetry(350 * (attempt + 1));
-      }
-    }
-    throw lastError;
-  })();
+  const pendingClient = connectClient(normalized);
   clientPromise = pendingClient;
 
   try {
-    return await pendingClient;
+    const client = await pendingClient;
+    connectedClient = client;
+    reconnectNotBefore = 0;
+    consecutiveConnectFailures = 0;
+    lastConnectError = null;
+    return client;
   } catch (error) {
-    if (clientPromise === pendingClient) clientPromise = null;
+    if (clientPromise === pendingClient) {
+      clientPromise = null;
+      connectedClient = null;
+      activeCredentials = null;
+      noteConnectFailure(error);
+    }
     throw error;
   }
 }
 
-async function searchSoulseek(query, timeoutMs, maxResults, credentials, allowReconnect = true) {
+/** Exponential login backoff: 30 s, 1 min, 2 min… capped at 30 min. */
+function noteConnectFailure(error) {
+  consecutiveConnectFailures += 1;
+  const cooldown = Math.min(
+    SESSION_CONNECT_MAX_COOLDOWN_MS,
+    SESSION_CONNECT_COOLDOWN_MS * 2 ** Math.min(consecutiveConnectFailures - 1, 6),
+  );
+  reconnectNotBefore = Date.now() + cooldown;
+  lastConnectError = error instanceof Error ? error.message : String(error);
+}
+
+function normalizeSearchKey(query) {
+  return query.normalize('NFKC').toLocaleLowerCase().replace(/\s+/g, ' ').trim();
+}
+
+/**
+ * Cached, serialized search. Identical queries within the TTL share one
+ * network search, and distinct ones are spaced SEARCH_MIN_GAP_MS apart.
+ */
+function searchSoulseekPolitely(query, timeoutMs, maxResults, credentials, identity) {
+  const key = JSON.stringify([normalizeSearchKey(query), identity ?? null]);
+  const now = Date.now();
+  for (const [cacheKey, entry] of searchCache) {
+    if (entry.expiresAt <= now) searchCache.delete(cacheKey);
+  }
+  const cached = searchCache.get(key);
+  if (cached) return cached.promise.then(results => results.slice(0, maxResults));
+
+  const run = async () => {
+    const waitMs = lastSearchAt + SEARCH_MIN_GAP_MS - Date.now();
+    if (waitMs > 0) await new Promise(resolve => setTimeout(resolve, waitMs));
+    lastSearchAt = Date.now();
+    return searchSoulseek(query, timeoutMs, Math.max(maxResults, 60), credentials, identity);
+  };
+  const promise = searchQueue.then(run, run);
+  searchQueue = promise.catch(() => undefined);
+
+  const entry = { expiresAt: Number.POSITIVE_INFINITY, promise };
+  searchCache.set(key, entry);
+  promise.then(
+    results => {
+      entry.expiresAt = Date.now() + (results.length ? SEARCH_CACHE_TTL_MS : EMPTY_SEARCH_CACHE_TTL_MS);
+    },
+    () => {
+      if (searchCache.get(key) === entry) searchCache.delete(key);
+    },
+  );
+  while (searchCache.size > SEARCH_CACHE_MAX_ENTRIES) {
+    searchCache.delete(searchCache.keys().next().value);
+  }
+  return promise.then(results => results.slice(0, maxResults));
+}
+
+/**
+ * Another client logging in with the same account makes the server drop us.
+ * Reconnecting straight away would kick that other device in turn, so wait.
+ */
+function handleRelogged() {
+  reconnectNotBefore = Date.now() + RELOGGED_COOLDOWN_MS;
+  lastConnectError = 'Otra sesión (otro dispositivo o programa) entró con esta misma cuenta de Soulseek y el servidor cerró esta. Usa una cuenta distinta en cada dispositivo.';
+}
+
+/** Returns a client whose server route answered recently, re-logging if it is dead. */
+async function getLiveClient(credentials) {
   const client = await getClient(credentials);
+  lastCredentials = ensureCredentials(credentials);
+  const health = client.serverHealth?.();
+  if (!health) return client;
+  if (health.relogged) {
+    await resetClient(client);
+    handleRelogged();
+    const error = new Error(lastConnectError);
+    error.code = 'SOULSEEK_COOLDOWN';
+    error.retryAfterMs = RELOGGED_COOLDOWN_MS;
+    throw error;
+  }
+  if (Date.now() - health.lastDataAt < QUIET_PROBE_MS) return client;
+
+  const sentAt = Date.now();
+  client.probe?.();
+  while (Date.now() - sentAt < PROBE_TIMEOUT_MS) {
+    await new Promise(resolve => setTimeout(resolve, 100));
+    if ((client.serverHealth?.().lastDataAt ?? 0) >= sentAt) return client;
+  }
+  // Dead route: not a login failure, so no backoff; the login gap still applies.
+  lastConnectError = 'La conexión con el servidor de Soulseek se había caído en silencio; se volvió a conectar.';
+  await resetClient(client);
+  return getClient(credentials);
+}
+
+/** Every 30 s: heartbeat a quiet session, recover a dead one, notice kicks. */
+setInterval(() => {
+  const client = connectedClient;
+  const health = client?.serverHealth?.();
+  if (!client || !health) return;
+  const now = Date.now();
+  const reconnect = () => {
+    if (!lastCredentials) return;
+    // Desktop shares while open, so come back online (login gap/backoff apply).
+    getClient(lastCredentials).catch(() => {});
+  };
+  if (health.relogged) {
+    void resetClient(client).then(handleRelogged);
+    return;
+  }
+  if (!client.isConnected?.()) {
+    void resetClient(client).then(reconnect);
+    return;
+  }
+  if (heartbeatSentAt > health.lastDataAt && now - heartbeatSentAt > 20_000) {
+    heartbeatSentAt = 0;
+    lastConnectError = 'La conexión con el servidor de Soulseek se había caído en silencio; se volvió a conectar.';
+    void resetClient(client).then(reconnect);
+    return;
+  }
+  if (now - health.lastDataAt > HEARTBEAT_QUIET_MS && now - heartbeatSentAt > HEARTBEAT_QUIET_MS) {
+    heartbeatSentAt = now;
+    client.probe?.();
+  }
+}, 30_000).unref();
+
+async function searchSoulseek(query, timeoutMs, maxResults, credentials, identity) {
+  const client = await getLiveClient(credentials);
+  return searchWithRecovery({
+    client,
+    query,
+    search: liveClient => searchSoulseekOnClient(liveClient, query, timeoutMs, maxResults, identity),
+    canReconnect: liveClient => connectedClient === liveClient
+      && ![...jobs.values()].some(job => job.status === 'downloading')
+      && !liveClient.hasActiveTransfers?.(),
+    reconnect: async staleClient => {
+      await resetClient(staleClient);
+      searchCache.clear();
+      lastSearchRecoveryAt = new Date().toISOString();
+      console.log('[soulseek] recovering session after distinct searches returned no peers');
+      return getLiveClient(credentials);
+    },
+  });
+}
+
+async function searchSoulseekOnClient(client, query, timeoutMs, maxResults, identity) {
+  const startedAt = Date.now();
 
   const rankResults = results => {
     const unique = new Map();
@@ -303,71 +521,91 @@ async function searchSoulseek(query, timeoutMs, maxResults, credentials, allowRe
       if (!normalized.username || !normalized.filename || !/\.(flac|mp3|m4a|ogg|opus|wav)$/i.test(normalized.filename)) continue;
       unique.set(`${normalized.username}|${normalized.filename}|${normalized.size ?? 0}`, normalized);
     }
-    return [...unique.values()]
-      .sort((a, b) => {
-        if (a.slots !== b.slots) return a.slots ? -1 : 1;
-        const aEta = a.size && a.speed ? a.size / a.speed : Number.POSITIVE_INFINITY;
-        const bEta = b.size && b.speed ? b.size / b.speed : Number.POSITIVE_INFINITY;
-        if (aEta !== bEta) return aEta - bEta;
-        if ((a.extension === 'flac') !== (b.extension === 'flac')) return a.extension === 'flac' ? -1 : 1;
-        return (b.speed ?? 0) - (a.speed ?? 0);
-      })
-      .slice(0, maxResults);
+    return rankSoulseekResults([...unique.values()], maxResults, identity);
   };
 
-  const results = await new Promise((resolve, reject) => {
-    const eventName = `found:${query}`;
-    const collected = [];
-    let quietTimer = null;
-    let settled = false;
+  try {
+    return await new Promise((resolve, reject) => {
+      const eventName = `found:${query}`;
+      const collected = [];
+      let quietTimer = null;
+      let settled = false;
 
-    const finish = results => {
-      if (settled) return;
-      settled = true;
-      if (quietTimer) clearTimeout(quietTimer);
-      client.removeListener(eventName, onFound);
-      resolve(rankResults(results));
-    };
+      const finish = results => {
+        if (settled) return;
+        settled = true;
+        if (quietTimer) clearTimeout(quietTimer);
+        client.removeListener(eventName, onFound);
+        const ranked = rankResults(results);
+        const all = results ?? [];
+        ranked.rawResultCount = all.length;
+        lastSearch = {
+          query,
+          at: new Date().toISOString(),
+          ms: Date.now() - startedAt,
+          rawResults: all.length,
+          peers: new Set(all.map(item => normalizeResult(item).username)).size,
+          returned: ranked.length,
+          serverQuietMs: Date.now() - (client.serverHealth?.().lastDataAt ?? Date.now()),
+        };
+        console.log('[soulseek] search', JSON.stringify(lastSearch));
+        resolve(ranked);
+      };
 
-    const onFound = result => {
-      collected.push(result);
-      const readyPeers = rankResults(collected).filter(item => item.slots && (item.speed ?? 0) > 0);
-      if (readyPeers.length < 3) return;
-      if (readyPeers.length >= 12) {
-        finish(collected);
-        return;
-      }
-      if (quietTimer) clearTimeout(quietTimer);
-      // Once several immediately available peers have answered, a short quiet
-      // window is enough. There is no benefit in always waiting the full search.
-      quietTimer = setTimeout(() => finish(collected), 350);
-    };
+      const onFound = result => {
+        collected.push(result);
+        // Count distinct users, not files: an album query returns a dozen
+        // files per peer, and one peer's album is not three sources.
+        const ready = rankResults(collected).filter(item => item.slots && (item.speed ?? 0) > 0);
+        const readyPeers = new Set(ready.map(item => item.username)).size;
+        // Only lossless sources may end the search quickly: three free MP3
+        // peers must not cut off the FLAC replies still on their way.
+        const readyLosslessPeers = new Set(ready.filter(isLosslessResult).map(item => item.username)).size;
+        if (readyLosslessPeers >= 8) {
+          finish(collected);
+          return;
+        }
+        // Like Seeker's inactivity timeout: once someone can serve the file, a
+        // quiet stream means the useful replies are in. MP3-only tracks wait a
+        // little longer for a FLAC, but never the whole search timeout.
+        const quietMs = readyLosslessPeers >= 3 ? 350
+          : readyLosslessPeers >= 1 ? 1_500
+            : readyPeers >= 3 ? 3_000
+              : 0;
+        if (!quietMs) return;
+        if (quietTimer) clearTimeout(quietTimer);
+        quietTimer = setTimeout(() => finish(collected), quietMs);
+      };
 
-    client.on(eventName, onFound);
-    client.search({ req: query, timeout: timeoutMs }, (error, results) => {
-      if (settled) return;
-      if (error) {
+      client.on(eventName, onFound);
+      try {
+        client.search({ req: query, timeout: timeoutMs }, (error, searchResults) => {
+          if (settled) return;
+          if (error) {
+            settled = true;
+            if (quietTimer) clearTimeout(quietTimer);
+            client.removeListener(eventName, onFound);
+            reject(error);
+            return;
+          }
+          finish(searchResults);
+        });
+      } catch (error) {
+        settled = true;
+        if (quietTimer) clearTimeout(quietTimer);
         client.removeListener(eventName, onFound);
         reject(error);
-        return;
       }
-      finish(results);
     });
-  });
-
-  // A server connection can stay authenticated while its distributed-search
-  // route has gone stale. In that state slsk-client completes every query
-  // with an empty array, even for ubiquitous tracks. Reconnect once and retry
-  // the exact query; never do this while a file transfer is active because
-  // destroying that session would interrupt it.
-  const hasActiveDownload = [...jobs.values()].some(job => job.status === 'downloading');
-  if (results.length || !allowReconnect || hasActiveDownload) return results;
-
-  const staleClient = clientPromise;
-  clientPromise = null;
-  activeCredentials = null;
-  await staleClient?.then(stale => stale.destroy?.()).catch(() => {});
-  return searchSoulseek(query, timeoutMs, maxResults, credentials, false);
+  } catch (error) {
+    // Only a dropped server connection invalidates the login. A slow search
+    // (timeout) is not a reason to log in again; that is how bursts start.
+    if (isServerConnectionError(error) || client.isConnected?.() === false) {
+      noteConnectFailure(error);
+      await resetClient(client);
+    }
+    throw error;
+  }
 }
 
 async function reserveDownloadPaths(directory, base, extension) {
@@ -394,7 +632,10 @@ async function reserveDownloadPaths(directory, base, extension) {
 function pruneJobs() {
   const now = Date.now();
   for (const [id, job] of jobs) {
-    if (now - job.createdAt > JOB_RETENTION_MS) jobs.delete(id);
+    if (now - job.createdAt > JOB_RETENTION_MS) {
+      job.release?.();
+      jobs.delete(id);
+    }
   }
 }
 
@@ -410,6 +651,11 @@ function registerFile(outputPath, filename, mimeType, size) {
   return id;
 }
 
+function isServerConnectionError(error) {
+  const message = error instanceof Error ? error.message : String(error ?? '');
+  return /econnreset|connection reset|socket (?:is )?closed|eof|epipe|not connected/i.test(message);
+}
+
 function isRetryablePeerTransferError(error) {
   const message = error instanceof Error ? error.message : String(error ?? '');
   return /econnreset|connection reset|socket (?:is )?closed|eof|timed?\s*out/i.test(message);
@@ -423,7 +669,7 @@ function isRetryablePeerTransferError(error) {
  * survives app restarts.
  */
 async function startDownloadJob(match, requestedFilename, credentials, targetDir) {
-  const client = await getClient(credentials);
+  const client = await getLiveClient(credentials);
   const downloadDir = targetDir ? path.resolve(String(targetDir)) : DOWNLOAD_DIR;
   await fs.promises.mkdir(downloadDir, { recursive: true });
 
@@ -459,7 +705,14 @@ async function startDownloadJob(match, requestedFilename, credentials, targetDir
     speed: match.speed,
   };
 
-  const runTransfer = () => client.download({ file, path: partialPath }, (error) => {
+  // Once this job stops waiting on the peer, later offers for the file are
+  // answered "Cancelled" so its queue entry does not linger at the uploader.
+  job.release = () => client.cancelDownload?.(file.user, file.file);
+
+  const onTransferComplete = error => {
+    if (!error || job.abandoned || !(job.attempts < PEER_TRANSFER_RETRY_LIMIT && isRetryablePeerTransferError(error))) {
+      job.release();
+    }
     if (job.abandoned) {
       fs.promises.unlink(partialPath).catch(() => {});
       return;
@@ -498,7 +751,19 @@ async function startDownloadJob(match, requestedFilename, credentials, targetDir
         job.error = statError instanceof Error ? statError.message : String(statError);
         fs.promises.unlink(partialPath).catch(() => {});
       });
-  });
+  };
+
+  const runTransfer = () => {
+    try {
+      client.download({ file, path: partialPath }, onTransferComplete);
+    } catch (error) {
+      // A dead cached server socket can make slsk-client throw synchronously.
+      // Treat it like the callback form so the job API can advance to another
+      // peer instead of leaking a route-level HTTP 500 (or an uncaught error
+      // from the delayed retry).
+      onTransferComplete(error);
+    }
+  };
 
   runTransfer();
 
@@ -506,7 +771,7 @@ async function startDownloadJob(match, requestedFilename, credentials, targetDir
 }
 
 async function downloadSoulseek(match, requestedFilename, credentials) {
-  const client = await getClient(credentials);
+  const client = await getLiveClient(credentials);
   await fs.promises.mkdir(DOWNLOAD_DIR, { recursive: true });
 
   const leaf = path.basename(String(match.filename || 'track').replaceAll('\\', '/'));
@@ -525,6 +790,7 @@ async function downloadSoulseek(match, requestedFilename, credentials) {
   try {
     await new Promise((resolve, reject) => {
       client.download({ file, path: partialPath }, (error) => {
+        client.cancelDownload?.(file.user, file.file);
         if (error) {
           reject(error);
           return;
@@ -594,10 +860,16 @@ async function route(request, response) {
 
   try {
     if (request.method === 'GET' && url.pathname === '/health') {
-      const client = clientPromise ? await clientPromise.catch(() => null) : null;
+      const client = connectedClient;
       json(response, 200, {
         ok: true,
-        connected: Boolean(clientPromise),
+        connected: Boolean(client),
+        connecting: Boolean(clientPromise && !client),
+        retryAfterMs: Math.max(0, reconnectNotBefore - Date.now()),
+        lastError: lastConnectError ?? undefined,
+        serverQuietMs: client?.serverHealth ? Date.now() - client.serverHealth().lastDataAt : undefined,
+        lastSearch: lastSearch ?? undefined,
+        lastSearchRecoveryAt: lastSearchRecoveryAt ?? undefined,
         hasCredentials: Boolean(activeCredentials || (DEFAULT_USERNAME && DEFAULT_PASSWORD)),
         downloadDir: DOWNLOAD_DIR,
         shares: client?.getShareStats?.() ?? { files: 0, folders: 0, roots: requestedShareFolders() },
@@ -617,7 +889,7 @@ async function route(request, response) {
 
     if (request.method === 'POST' && url.pathname === '/session/start') {
       const body = await parseBody(request);
-      await getClient(body.credentials);
+      await getLiveClient(body.credentials);
       json(response, 200, { ok: true });
       return;
     }
@@ -650,11 +922,16 @@ async function route(request, response) {
         json(response, 400, { error: 'query requerido' });
         return;
       }
-      const results = await searchSoulseek(
+      const results = await searchSoulseekPolitely(
         query,
         Math.min(30_000, Math.max(2_000, Number(body.timeoutMs ?? 18_000))),
-        Math.min(80, Math.max(1, Number(body.maxResults ?? 60))),
+        // Album queries return whole folders; leave room for several peers' albums.
+        Math.min(250, Math.max(1, Number(body.maxResults ?? 60))),
         body.credentials,
+        body.identity && Array.isArray(body.identity.titleWords) && body.identity.titleWords.length
+          && Array.isArray(body.identity.artistWords) && body.identity.artistWords.length
+          && [...body.identity.titleWords, ...body.identity.artistWords].every(word => typeof word === 'string')
+          ? body.identity : undefined,
       );
       json(response, 200, { results });
       return;
@@ -712,6 +989,7 @@ async function route(request, response) {
       }
       if (job.status === 'downloading') {
         job.abandoned = true;
+        job.release?.();
         job.status = 'error';
         job.error = 'Transferencia reemplazada por un peer más rápido.';
       }
@@ -746,12 +1024,14 @@ async function route(request, response) {
     text(response, 404, 'Not found');
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    const retryable = isRetryablePeerTransferError(error);
-    json(response, 500, {
+    const coolingDown = error?.code === 'SOULSEEK_COOLDOWN';
+    const retryable = !coolingDown && isRetryablePeerTransferError(error);
+    json(response, coolingDown ? 503 : 500, {
       error: retryable
-        ? 'La conexión con Soulseek se reinició. Vuelve a intentar; la app reconectará automáticamente.'
+        ? 'Soulseek cerró la conexión. Espera 30 segundos antes de volver a intentar.'
         : message,
       retryable,
+      retryAfterMs: coolingDown ? error.retryAfterMs : undefined,
     });
   }
 }

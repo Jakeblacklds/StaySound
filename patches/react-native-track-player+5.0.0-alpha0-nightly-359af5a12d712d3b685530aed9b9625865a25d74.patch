@@ -1,3 +1,41 @@
+diff --git a/node_modules/react-native-track-player/android/src/main/AndroidManifest.xml b/node_modules/react-native-track-player/android/src/main/AndroidManifest.xml
+index 346e4dc..bc5490b 100644
+--- a/node_modules/react-native-track-player/android/src/main/AndroidManifest.xml
++++ b/node_modules/react-native-track-player/android/src/main/AndroidManifest.xml
+@@ -22,6 +22,12 @@
+             </intent-filter>
+         </service>
+ 
++        <!-- Lets Android Auto read app-private artwork (file:// is unreadable from its process) -->
++        <provider
++            android:name="com.doublesymmetry.trackplayer.utils.StaySoundArtworkProvider"
++            android:authorities="${applicationId}.staysound.artwork"
++            android:exported="true" />
++
+     </application>
+ 
+ </manifest>
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/models/AudioItem.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/models/AudioItem.kt
+index 5a1b2bf..f6146f4 100644
+--- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/models/AudioItem.kt
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/models/AudioItem.kt
+@@ -4,6 +4,7 @@ import android.net.Uri
+ import android.os.Bundle
+ import androidx.media3.common.MediaItem
+ import androidx.media3.common.MediaMetadata
++import com.doublesymmetry.trackplayer.utils.StaySoundArtworkProvider
+ 
+ open class AudioItem(
+     open var audioUrl: String,
+@@ -33,7 +34,7 @@ open class AudioItem(
+         val mediaMetadata = MediaMetadata.Builder()
+             .setTitle(title)
+             .setArtist(artist)
+-            .setArtworkUri(Uri.parse(artwork))
++            .setArtworkUri(StaySoundArtworkProvider.toShareableUri(artwork)?.let(Uri::parse))
+             .setExtras(extras)
+             .build()
+         return MediaItem.Builder()
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/BaseAudioPlayer.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/BaseAudioPlayer.kt
 index a0f995c..49fcc24 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/kotlinaudio/players/BaseAudioPlayer.kt
@@ -326,7 +364,7 @@ index 0000000..0c96784
 +    }
 +}
 diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
-index b495b5a..022ba6f 100644
+index b495b5a..d9e8f5d 100644
 --- a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 +++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/service/MusicService.kt
 @@ -3,6 +3,7 @@ package com.doublesymmetry.trackplayer.service
@@ -346,7 +384,15 @@ index b495b5a..022ba6f 100644
  import com.doublesymmetry.kotlinaudio.models.*
  import com.doublesymmetry.kotlinaudio.players.QueuedAudioPlayer
  import com.doublesymmetry.trackplayer.HeadlessJsMediaService
-@@ -51,7 +54,9 @@ import com.google.common.util.concurrent.Futures
+@@ -44,6 +47,7 @@ import com.doublesymmetry.trackplayer.module.MusicEvents.Companion.METADATA_PAYL
+ import com.doublesymmetry.trackplayer.utils.BundleUtils
+ import com.doublesymmetry.trackplayer.utils.BundleUtils.setRating
+ import com.doublesymmetry.trackplayer.utils.CoilBitmapLoader
++import com.doublesymmetry.trackplayer.utils.StaySoundArtworkProvider
+ import com.facebook.react.bridge.Arguments
+ import com.facebook.react.jstasks.HeadlessJsTaskConfig
+ import com.google.common.collect.ImmutableList
+@@ -51,7 +55,9 @@ import com.google.common.util.concurrent.Futures
  import com.google.common.util.concurrent.ListenableFuture
  import kotlinx.coroutines.*
  import kotlinx.coroutines.flow.flow
@@ -356,7 +402,7 @@ index b495b5a..022ba6f 100644
  import java.util.concurrent.TimeUnit
  import kotlin.system.exitProcess
  
-@@ -70,6 +75,32 @@ class MusicService : HeadlessJsMediaService() {
+@@ -70,6 +76,32 @@ class MusicService : HeadlessJsMediaService() {
      private var lastWake: Long = 0
      var onStartCommandIntentValid: Boolean = true
  
@@ -389,7 +435,7 @@ index b495b5a..022ba6f 100644
      fun acquireWakeLock() {
          acquireWakeLockNow(this)
      }
-@@ -139,6 +170,34 @@ class MusicService : HeadlessJsMediaService() {
+@@ -139,6 +171,34 @@ class MusicService : HeadlessJsMediaService() {
              return (player.currentItem as TrackAudioItem?)?.track
          }
  
@@ -424,7 +470,7 @@ index b495b5a..022ba6f 100644
      val state
          get() = player.playerState
  
-@@ -209,6 +268,17 @@ class MusicService : HeadlessJsMediaService() {
+@@ -209,6 +269,17 @@ class MusicService : HeadlessJsMediaService() {
              wakeMode = playerOptions?.getInt(WAKE_MODE, 0) ?: 0
          )
          player = QueuedAudioPlayer(this@MusicService, options)
@@ -442,7 +488,7 @@ index b495b5a..022ba6f 100644
          fakePlayer.release()
          mediaSession.player = player.forwardingPlayer
          observeEvents()
-@@ -343,6 +413,43 @@ class MusicService : HeadlessJsMediaService() {
+@@ -343,6 +414,43 @@ class MusicService : HeadlessJsMediaService() {
          }
      }
  
@@ -486,7 +532,7 @@ index b495b5a..022ba6f 100644
      @MainThread
      fun add(track: Track) {
          add(listOf(track))
-@@ -857,6 +964,288 @@ class MusicService : HeadlessJsMediaService() {
+@@ -857,6 +965,339 @@ class MusicService : HeadlessJsMediaService() {
          return null
      }
  
@@ -590,15 +636,92 @@ index b495b5a..022ba6f 100644
 +                    .setIsPlayable(false)
 +                    .setTitle(title)
 +                    .setArtist(subtitle)
-+                    .setArtworkUri(artwork?.let(Uri::parse))
++                    .setArtworkUri(shareableArtworkUri(artwork))
 +                    .build()
 +            )
 +            .build()
 +    }
 +
-+    private fun buildPlayableCatalogItem(track: AutoCatalogTrack): MediaItem {
++    private fun shareableArtworkUri(artwork: String?): Uri? {
++        return StaySoundArtworkProvider.toShareableUri(artwork)?.let(Uri::parse)
++    }
++
++    /**
++     * Browse rows carry the list they were shown in, so a tap can queue the
++     * whole list: Android Auto only ever sends back the tapped item's mediaId.
++     */
++    private fun contextualMediaId(parentId: String, trackId: String): String {
++        return "$AUTO_CONTEXT_PREFIX$parentId$AUTO_CONTEXT_TRACK_SEPARATOR$trackId"
++    }
++
++    /** Splits a browse mediaId into (parentId, trackId); parentId is null for bare track ids. */
++    private fun parseCatalogMediaId(mediaId: String): Pair<String?, String> {
++        if (!mediaId.startsWith(AUTO_CONTEXT_PREFIX)) return null to mediaId
++        val body = mediaId.removePrefix(AUTO_CONTEXT_PREFIX)
++        val separatorIndex = body.lastIndexOf(AUTO_CONTEXT_TRACK_SEPARATOR)
++        if (separatorIndex < 0) return null to mediaId
++        return body.substring(0, separatorIndex) to
++            body.substring(separatorIndex + AUTO_CONTEXT_TRACK_SEPARATOR.length)
++    }
++
++    private fun getCatalogTrackIds(parentId: String, snapshot: AutoCatalogSnapshot): List<String> {
++        return when {
++            parentId == AUTO_SONGS_ID -> snapshot.tracksById.keys.toList()
++            parentId.startsWith(AUTO_ALBUM_PREFIX) ->
++                snapshot.albums.find { it.id == parentId.removePrefix(AUTO_ALBUM_PREFIX) }?.trackIds
++            parentId.startsWith(AUTO_ARTIST_PREFIX) ->
++                snapshot.artists.find { it.id == parentId.removePrefix(AUTO_ARTIST_PREFIX) }?.trackIds
++            parentId.startsWith(AUTO_PLAYLIST_PREFIX) ->
++                snapshot.playlists.find { it.id == parentId.removePrefix(AUTO_PLAYLIST_PREFIX) }?.trackIds
++            else -> null
++        } ?: emptyList()
++    }
++
++    /**
++     * Turns the controller's request into the queue to play and the index to
++     * start at. A single tapped row expands to the list it was browsed from
++     * (or its album when the id carries no context, e.g. voice requests).
++     */
++    private fun expandCatalogSelection(
++        mediaItems: List<MediaItem>,
++        startIndex: Int
++    ): Pair<List<AutoCatalogTrack>, Int> {
++        val snapshot = loadAutoCatalogSnapshot()
++        val requested = mediaItems.mapNotNull { item ->
++            item.mediaId.takeIf { it.isNotBlank() }?.let(::parseCatalogMediaId)
++        }.filter { (_, trackId) -> snapshot.tracksById.containsKey(trackId) }
++
++        if (requested.isEmpty()) return emptyList<AutoCatalogTrack>() to 0
++
++        if (mediaItems.size > 1) {
++            val tracks = requested.mapNotNull { (_, trackId) -> snapshot.tracksById[trackId] }
++            return tracks to startIndex.coerceIn(0, tracks.lastIndex)
++        }
++
++        val (parentId, trackId) = requested.first()
++        val contextTrackIds = parentId?.let { getCatalogTrackIds(it, snapshot) }
++            ?.takeIf { it.contains(trackId) }
++            ?: snapshot.albums.firstOrNull { it.trackIds.contains(trackId) }?.trackIds
++            ?: listOf(trackId)
++
++        val selectedIndex = contextTrackIds.indexOf(trackId)
++        val windowStart = if (contextTrackIds.size > AUTO_MAX_QUEUE_SIZE) {
++            (selectedIndex - AUTO_QUEUE_LOOKBEHIND)
++                .coerceIn(0, contextTrackIds.size - AUTO_MAX_QUEUE_SIZE)
++        } else {
++            0
++        }
++        val tracks = contextTrackIds
++            .subList(windowStart, minOf(contextTrackIds.size, windowStart + AUTO_MAX_QUEUE_SIZE))
++            .mapNotNull { snapshot.tracksById[it] }
++        val index = tracks.indexOfFirst { it.id == trackId }
++
++        return if (index >= 0) tracks to index else listOf(snapshot.tracksById.getValue(trackId)) to 0
++    }
++
++    private fun buildPlayableCatalogItem(track: AutoCatalogTrack, parentId: String? = null): MediaItem {
 +        return MediaItem.Builder()
-+            .setMediaId(track.id)
++            .setMediaId(parentId?.let { contextualMediaId(it, track.id) } ?: track.id)
 +            .setMediaMetadata(
 +                androidx.media3.common.MediaMetadata.Builder()
 +                    .setIsBrowsable(false)
@@ -606,7 +729,7 @@ index b495b5a..022ba6f 100644
 +                    .setTitle(track.title)
 +                    .setArtist(track.artist)
 +                    .setAlbumTitle(track.album)
-+                    .setArtworkUri(track.artwork?.let(Uri::parse))
++                    .setArtworkUri(shareableArtworkUri(track.artwork))
 +                    .build()
 +            )
 +            .build()
@@ -627,7 +750,7 @@ index b495b5a..022ba6f 100644
 +                    .setTitle(track.title)
 +                    .setArtist(track.artist)
 +                    .setAlbumTitle(track.album)
-+                    .setArtworkUri(track.artwork?.let(Uri::parse))
++                    .setArtworkUri(shareableArtworkUri(track.artwork))
 +                    .setDurationMs(track.durationMs ?: C.TIME_UNSET)
 +                    .build()
 +            )
@@ -644,7 +767,7 @@ index b495b5a..022ba6f 100644
 +        return mediaItems.mapNotNull { item ->
 +            val mediaId = item.mediaId
 +            if (!mediaId.isNullOrBlank()) {
-+                snapshot.tracksById[mediaId]?.let(::buildResolvedPlayableItem)
++                snapshot.tracksById[parseCatalogMediaId(mediaId).second]?.let(::buildResolvedPlayableItem)
 +                    ?: item.localConfiguration?.uri?.let { item }
 +            } else {
 +                item.localConfiguration?.uri?.let { item }
@@ -659,7 +782,7 @@ index b495b5a..022ba6f 100644
 +            if (mediaId.isNullOrBlank()) {
 +                null
 +            } else {
-+                snapshot.tracksById[mediaId]
++                snapshot.tracksById[parseCatalogMediaId(mediaId).second]
 +            }
 +        }
 +    }
@@ -693,20 +816,12 @@ index b495b5a..022ba6f 100644
 +        val audioItems = tracks.map(::buildNativeTrack).map { it.toAudioItem() }
 +        val safeIndex = startIndex.coerceIn(0, audioItems.lastIndex)
 +
-+        player.clear()
-+        player.add(audioItems)
-+        if (safeIndex > 0) {
-+            player.jumpToItem(safeIndex)
-+        }
-+        player.play()
++        player.replaceForPlayback(audioItems, safeIndex)
 +    }
 +
-+    private fun buildTrackChildren(
-+        trackIds: List<String>,
-+        snapshot: AutoCatalogSnapshot
-+    ): List<MediaItem> {
-+        return trackIds.mapNotNull { trackId ->
-+            snapshot.tracksById[trackId]?.let(::buildPlayableCatalogItem)
++    private fun buildTrackChildren(parentId: String, snapshot: AutoCatalogSnapshot): List<MediaItem> {
++        return getCatalogTrackIds(parentId, snapshot).mapNotNull { trackId ->
++            snapshot.tracksById[trackId]?.let { buildPlayableCatalogItem(it, parentId) }
 +        }
 +    }
 +
@@ -721,7 +836,7 @@ index b495b5a..022ba6f 100644
 +                if (snapshot.playlists.isNotEmpty()) add(buildBrowsableItem(AUTO_PLAYLISTS_ID, "Playlists"))
 +            }
 +
-+            parentId == AUTO_SONGS_ID -> snapshot.tracksById.values.map(::buildPlayableCatalogItem)
++            parentId == AUTO_SONGS_ID -> buildTrackChildren(parentId, snapshot)
 +
 +            parentId == AUTO_ALBUMS_ID -> snapshot.albums.map { album ->
 +                buildBrowsableItem(
@@ -750,32 +865,14 @@ index b495b5a..022ba6f 100644
 +                )
 +            }
 +
-+            parentId.startsWith(AUTO_ALBUM_PREFIX) -> {
-+                val albumId = parentId.removePrefix(AUTO_ALBUM_PREFIX)
-+                val album = snapshot.albums.find { it.id == albumId }
-+                buildTrackChildren(album?.trackIds ?: emptyList(), snapshot)
-+            }
-+
-+            parentId.startsWith(AUTO_ARTIST_PREFIX) -> {
-+                val artistId = parentId.removePrefix(AUTO_ARTIST_PREFIX)
-+                val artist = snapshot.artists.find { it.id == artistId }
-+                buildTrackChildren(artist?.trackIds ?: emptyList(), snapshot)
-+            }
-+
-+            parentId.startsWith(AUTO_PLAYLIST_PREFIX) -> {
-+                val playlistId = parentId.removePrefix(AUTO_PLAYLIST_PREFIX)
-+                val playlist = snapshot.playlists.find { it.id == playlistId }
-+                buildTrackChildren(playlist?.trackIds ?: emptyList(), snapshot)
-+            }
-+
-+            else -> emptyList()
++            else -> buildTrackChildren(parentId, snapshot)
 +        }
 +    }
 +
      @MainThread
      inner class MusicBinder : Binder() {
          val service = this@MusicService
-@@ -900,10 +1289,13 @@ class MusicService : HeadlessJsMediaService() {
+@@ -900,10 +1341,13 @@ class MusicService : HeadlessJsMediaService() {
                      "com.google.android.projection.gearhead"
                  )
              ) {
@@ -793,7 +890,7 @@ index b495b5a..022ba6f 100644
              }
              return if (
                  isMediaNotificationController ||
-@@ -965,6 +1357,57 @@ class MusicService : HeadlessJsMediaService() {
+@@ -965,6 +1409,52 @@ class MusicService : HeadlessJsMediaService() {
              return super.onPlaybackResumption(mediaSession, controller)
          }
  
@@ -821,17 +918,12 @@ index b495b5a..022ba6f 100644
 +            startIndex: Int,
 +            startPositionMs: Long
 +        ): ListenableFuture<MediaSession.MediaItemsWithStartPosition> {
-+            val resolvedTracks = resolveCatalogTracks(mediaItems)
++            val (resolvedTracks, safeIndex) = expandCatalogSelection(mediaItems, startIndex)
 +            if (resolvedTracks.isEmpty()) {
 +                return super.onSetMediaItems(session, controller, mediaItems, startIndex, startPositionMs)
 +            }
 +
-+            val resolvedItems = resolveRequestedMediaItems(mediaItems)
-+            if (resolvedItems.isEmpty()) {
-+                return super.onSetMediaItems(session, controller, mediaItems, startIndex, startPositionMs)
-+            }
-+
-+            val safeIndex = startIndex.coerceIn(0, resolvedItems.lastIndex)
++            val resolvedItems = resolvedTracks.map(::buildResolvedPlayableItem)
 +            val safePosition = if (startPositionMs >= 0) startPositionMs else C.TIME_UNSET
 +
 +            // RNTP's forwarding player intentionally ignores setMediaItems(), so
@@ -851,7 +943,7 @@ index b495b5a..022ba6f 100644
          override fun onSetRating(
              session: MediaSession,
              controller: MediaSession.ControllerInfo,
-@@ -976,6 +1419,52 @@ class MusicService : HeadlessJsMediaService() {
+@@ -976,6 +1466,52 @@ class MusicService : HeadlessJsMediaService() {
              }
              return super.onSetRating(session, controller, rating)
          }
@@ -904,7 +996,7 @@ index b495b5a..022ba6f 100644
      }
  
      private fun getPendingIntentFlags(): Int {
-@@ -1029,5 +1518,17 @@ class MusicService : HeadlessJsMediaService() {
+@@ -1029,5 +1565,22 @@ class MusicService : HeadlessJsMediaService() {
  
          const val DEFAULT_JUMP_INTERVAL = 15.0
          const val DEFAULT_STOP_FOREGROUND_GRACE_PERIOD = 5
@@ -920,5 +1012,148 @@ index b495b5a..022ba6f 100644
 +        const val AUTO_ALBUM_PREFIX = "album::"
 +        const val AUTO_ARTIST_PREFIX = "artist::"
 +        const val AUTO_PLAYLIST_PREFIX = "playlist::"
++        const val AUTO_CONTEXT_PREFIX = "ctx::"
++        const val AUTO_CONTEXT_TRACK_SEPARATOR = "::track::"
++        // "Canciones" can hold the whole library; queue a window around the tap.
++        const val AUTO_MAX_QUEUE_SIZE = 500
++        const val AUTO_QUEUE_LOOKBEHIND = 50
      }
  }
+diff --git a/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/utils/StaySoundArtworkProvider.kt b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/utils/StaySoundArtworkProvider.kt
+new file mode 100644
+index 0000000..0e7f1c3
+--- /dev/null
++++ b/node_modules/react-native-track-player/android/src/main/java/com/doublesymmetry/trackplayer/utils/StaySoundArtworkProvider.kt
+@@ -0,0 +1,132 @@
++package com.doublesymmetry.trackplayer.utils
++
++import android.content.ContentProvider
++import android.content.ContentValues
++import android.database.Cursor
++import android.database.MatrixCursor
++import android.net.Uri
++import android.os.ParcelFileDescriptor
++import android.provider.OpenableColumns
++import java.io.File
++import java.io.FileNotFoundException
++
++/**
++ * Serves app-private artwork files as content:// URIs.
++ *
++ * Android Auto renders some surfaces (the split-screen media card, browse
++ * lists) from the artwork URI in its own process, where file:// paths into our
++ * cache are unreadable. Read-only, and limited to image files inside the app's
++ * own storage directories.
++ */
++class StaySoundArtworkProvider : ContentProvider() {
++
++    override fun onCreate(): Boolean {
++        val ctx = context ?: return false
++        authority = "${ctx.packageName}$AUTHORITY_SUFFIX"
++        roots = listOfNotNull(
++            ctx.cacheDir,
++            ctx.filesDir,
++            ctx.externalCacheDir,
++            ctx.getExternalFilesDir(null)
++        ).mapNotNull { runCatching { it.canonicalPath }.getOrNull() }
++        return true
++    }
++
++    override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor {
++        if (mode != "r") throw FileNotFoundException("Artwork is read-only: $uri")
++        val file = resolveFile(uri) ?: throw FileNotFoundException("Unknown artwork: $uri")
++        return ParcelFileDescriptor.open(file, ParcelFileDescriptor.MODE_READ_ONLY)
++    }
++
++    override fun getType(uri: Uri): String? {
++        return resolveFile(uri)?.let { MIME_TYPES[it.extension.lowercase()] }
++    }
++
++    override fun query(
++        uri: Uri,
++        projection: Array<out String>?,
++        selection: String?,
++        selectionArgs: Array<out String>?,
++        sortOrder: String?
++    ): Cursor? {
++        val file = resolveFile(uri) ?: return null
++        val columns = projection ?: arrayOf(OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE)
++        return MatrixCursor(columns, 1).apply {
++            addRow(columns.map { column ->
++                when (column) {
++                    OpenableColumns.DISPLAY_NAME -> file.name
++                    OpenableColumns.SIZE -> file.length()
++                    else -> null
++                }
++            })
++        }
++    }
++
++    override fun insert(uri: Uri, values: ContentValues?): Uri? = null
++
++    override fun update(
++        uri: Uri,
++        values: ContentValues?,
++        selection: String?,
++        selectionArgs: Array<out String>?
++    ): Int = 0
++
++    override fun delete(uri: Uri, selection: String?, selectionArgs: Array<out String>?): Int = 0
++
++    private fun resolveFile(uri: Uri): File? {
++        val segments = uri.pathSegments
++        if (segments.size != 2 || segments[0] != PATH_PREFIX) return null
++        return shareableFile(segments[1])
++    }
++
++    companion object {
++        private const val AUTHORITY_SUFFIX = ".staysound.artwork"
++        private const val PATH_PREFIX = "file"
++        private val MIME_TYPES = mapOf(
++            "jpg" to "image/jpeg",
++            "jpeg" to "image/jpeg",
++            "png" to "image/png",
++            "webp" to "image/webp",
++            "gif" to "image/gif",
++            "bmp" to "image/bmp"
++        )
++
++        @Volatile
++        private var authority: String? = null
++
++        @Volatile
++        private var roots: List<String> = emptyList()
++
++        private fun shareableFile(path: String): File? {
++            val file = runCatching { File(path).canonicalFile }.getOrNull() ?: return null
++            if (file.extension.lowercase() !in MIME_TYPES) return null
++            if (roots.none { file.path.startsWith("$it${File.separator}") }) return null
++            return file.takeIf { it.isFile }
++        }
++
++        /**
++         * Rewrites a file:// (or bare path) artwork reference into this
++         * provider's content:// form. Anything else is returned untouched.
++         */
++        @JvmStatic
++        fun toShareableUri(artwork: String?): String? {
++            if (artwork.isNullOrBlank()) return artwork
++            val currentAuthority = authority ?: return artwork
++
++            val path = when {
++                artwork.startsWith("/") -> artwork
++                artwork.startsWith("file://", ignoreCase = true) -> Uri.parse(artwork).path
++                else -> null
++            } ?: return artwork
++
++            val file = shareableFile(path) ?: return artwork
++            return Uri.Builder()
++                .scheme("content")
++                .authority(currentAuthority)
++                .appendPath(PATH_PREFIX)
++                .appendPath(file.path)
++                .build()
++                .toString()
++        }
++    }
++}

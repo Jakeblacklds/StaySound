@@ -1,5 +1,5 @@
 import type { Album, Artist, Playlist, TidalTrack, Track } from '@staysound/types/audio';
-import { ChangeEvent, type CSSProperties, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { ChangeEvent, Children, type CSSProperties, isValidElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { formatDuration } from '@staysound/services/metadataService';
 import {
@@ -19,7 +19,7 @@ import {
   importRememberedDesktopFolder,
 } from './library/importLocalFiles';
 import { getFolderHandle, saveFolderHandle, verifyPermission } from './library/webFolderSync';
-import { useWebLibraryStore, type ArtworkRecoveryProgress } from './library/webLibraryStore';
+import { useWebLibraryStore, type AlacMigrationProgress, type ArtworkRecoveryProgress } from './library/webLibraryStore';
 import {
   buildTidalRadio,
   buildPersonalizedTidalMix,
@@ -34,6 +34,7 @@ import { KEYBOARD_SHORTCUTS, useKeyboardShortcuts } from './hooks/useKeyboardSho
 import {
   monochromeDownloadProvider,
   soulseekDownloadProvider,
+  startSoulseekDesktopSharing,
   type DownloadSearchResult,
   warmSoulseekBridge,
 } from './downloads/downloadProvider';
@@ -85,7 +86,8 @@ import {
   TrashIcon,
 } from './components/icons';
 import type { Tab } from './components/types';
-import { runMotionTransition } from './motion/motionSystem';
+import { flyArtwork, runMotionTransition } from './motion/motionSystem';
+import { useFlipRow } from './motion/useFlipRow';
 
 export function normalize(value: string): string {
   return value
@@ -226,6 +228,8 @@ export function App() {
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
   const [isRecoveringArtwork, setIsRecoveringArtwork] = useState(false);
   const [artworkRecoveryProgress, setArtworkRecoveryProgress] = useState<ArtworkRecoveryProgress | null>(null);
+  const [alacProgress, setAlacProgress] = useState<AlacMigrationProgress | null>(null);
+  const [isMigratingAlac, setIsMigratingAlac] = useState(false);
   const [radioBusy, setRadioBusy] = useState(false);
   const [radioMessage, setRadioMessage] = useState('');
   const [availableUpdate, setAvailableUpdate] = useState<DesktopUpdate | null>(null);
@@ -267,6 +271,7 @@ export function App() {
     seek,
     setVolume,
     recoverMissingArtwork,
+    migrateLibraryToAlac,
     hydrateArtistPhotos,
     hydrateLibrary,
     recordRecentlyPlayed,
@@ -301,6 +306,7 @@ export function App() {
     seek: state.seek,
     setVolume: state.setVolume,
     recoverMissingArtwork: state.recoverMissingArtwork,
+    migrateLibraryToAlac: state.migrateLibraryToAlac,
     hydrateArtistPhotos: state.hydrateArtistPhotos,
     hydrateLibrary: state.hydrateLibrary,
     recordRecentlyPlayed: state.recordRecentlyPlayed,
@@ -349,6 +355,8 @@ export function App() {
     // library shows instantly with artwork, without waiting for a folder rescan.
     void restoreLibrary();
     void checkSavedFolder();
+    // Desktop shares with Soulseek for as long as the app is open.
+    void startSoulseekDesktopSharing().catch(() => undefined);
   }, [hydrateLibrary]);
 
   useEffect(() => {
@@ -683,6 +691,8 @@ export function App() {
     playFromList(libraryTrack, trackList);
   }, [playFromList, trackList, tracks]);
 
+  const getLibraryTrack = useCallback((id: string) => tracks.get(id), [tracks]);
+
   const playHomeAlbum = useCallback((album: Album) => {
     const firstAlbumTrack = album.tracks
       .map(id => tracks.get(id))
@@ -916,6 +926,24 @@ export function App() {
     setInstallPrompt(null);
   }
 
+  async function handleMigrateAlac() {
+    if (isMigratingAlac) return;
+    setIsMigratingAlac(true);
+    try {
+      setAlacProgress(await migrateLibraryToAlac(setAlacProgress));
+    } catch (error) {
+      setAlacProgress(current => ({
+        processed: current?.processed ?? 0,
+        total: current?.total ?? 0,
+        converted: current?.converted ?? 0,
+        removedEmpty: current?.removedEmpty ?? 0,
+        failed: [...(current?.failed ?? []), { name: 'Biblioteca', reason: error instanceof Error ? error.message : String(error) }],
+      }));
+    } finally {
+      setIsMigratingAlac(false);
+    }
+  }
+
   async function handleRecoverArtwork() {
     const total = Array.from(useWebLibraryStore.getState().tracks.values())
       .filter(track => !track.artwork).length;
@@ -1015,6 +1043,7 @@ export function App() {
             onDownloadRecommendation={downloadTidalRecommendationWithSoulseek}
             onImport={() => setShowLibrarySettings(true)}
             onPlayAlbum={playHomeAlbum}
+            getTrack={getLibraryTrack}
           />
         );
       case 'songs':
@@ -1382,6 +1411,10 @@ export function App() {
           isRecoveringArtwork={isRecoveringArtwork}
           artworkRecoveryProgress={artworkRecoveryProgress}
           missingArtworkCount={Array.from(tracks.values()).filter(track => !track.artwork).length}
+          flacCount={Array.from(tracks.values()).filter(track => /\.flac$/i.test((track as Track & { nativePath?: string }).nativePath ?? '')).length}
+          isMigratingAlac={isMigratingAlac}
+          alacProgress={alacProgress}
+          onMigrateAlac={isTauriDesktop() ? handleMigrateAlac : undefined}
           hasTracks={trackList.length > 0}
           onClose={() => setShowLibrarySettings(false)}
           onShowShortcuts={() => { setShowLibrarySettings(false); setShowShortcutHelp(true); }}
@@ -1701,6 +1734,10 @@ function LibrarySettingsModal({
   isRecoveringArtwork,
   artworkRecoveryProgress,
   missingArtworkCount,
+  flacCount,
+  isMigratingAlac,
+  alacProgress,
+  onMigrateAlac,
   hasTracks,
   onClose,
   onShowShortcuts,
@@ -1717,6 +1754,11 @@ function LibrarySettingsModal({
   isRecoveringArtwork: boolean;
   artworkRecoveryProgress: ArtworkRecoveryProgress | null;
   missingArtworkCount: number;
+  flacCount: number;
+  isMigratingAlac: boolean;
+  alacProgress: AlacMigrationProgress | null;
+  /** Desktop only: move the library from FLAC to ALAC. */
+  onMigrateAlac?: () => void;
   hasTracks: boolean;
   onClose: () => void;
   onShowShortcuts: () => void;
@@ -1727,11 +1769,14 @@ function LibrarySettingsModal({
   onClear: () => void;
 }) {
   const [closing, setClosing] = useState(false);
+  const [confirmAlac, setConfirmAlac] = useState(false);
   const handleClose = useCallback(() => {
-    if (closing) return;
+    if (closing || isMigratingAlac) return;
     setClosing(true);
     window.setTimeout(onClose, 220);
-  }, [closing, onClose]);
+  }, [closing, isMigratingAlac, onClose]);
+
+  const alacDone = !isMigratingAlac && alacProgress && alacProgress.processed === alacProgress.total;
 
   return (
     <div className={`settings-modal-overlay ${closing ? 'closing' : ''}`} role="presentation" onClick={handleClose}>
@@ -1809,6 +1854,56 @@ function LibrarySettingsModal({
               )}
             </span>
           </button>
+          {onMigrateAlac && (flacCount > 0 || isMigratingAlac || alacProgress) ? (
+            <button
+              className={`settings-action artwork ${confirmAlac && !isMigratingAlac ? 'primary' : ''}`}
+              onClick={() => {
+                if (isMigratingAlac || alacDone && flacCount === 0) return;
+                if (!confirmAlac) {
+                  setConfirmAlac(true);
+                  return;
+                }
+                setConfirmAlac(false);
+                onMigrateAlac();
+              }}
+              disabled={isImporting || isMigratingAlac}
+            >
+              {isMigratingAlac ? <SpinnerIcon size={18} /> : <SyncIcon size={18} />}
+              <span className="settings-action-copy">
+                <strong>
+                  {isMigratingAlac && alacProgress
+                    ? `Convirtiendo ${alacProgress.processed}/${alacProgress.total}`
+                    : alacDone
+                      ? `Listo: ${alacProgress!.converted} en ALAC`
+                      : confirmAlac
+                        ? `Convertir ${flacCount} a ALAC`
+                        : 'Pasar la biblioteca a ALAC'}
+                </strong>
+                <small>
+                  {isMigratingAlac
+                    ? 'Cada copia se verifica antes de mandar el FLAC a la Papelera.'
+                    : alacDone
+                      ? [
+                        alacProgress!.removedEmpty ? `${alacProgress!.removedEmpty} vacías a la Papelera` : '',
+                        alacProgress!.failed.length ? `${alacProgress!.failed.length} sin convertir` : 'sin errores',
+                      ].filter(Boolean).join(' · ')
+                      : confirmAlac
+                        ? 'Mismo audio, sin pérdida. Los FLAC irán a la Papelera. Toca otra vez para empezar.'
+                        : `${flacCount} canción${flacCount === 1 ? '' : 'es'} en FLAC · saltos exactos en la letra`}
+                </small>
+                {isMigratingAlac && alacProgress && alacProgress.total > 0 && (
+                  <span className="artwork-progress" aria-hidden="true">
+                    <span style={{ width: `${(alacProgress.processed / alacProgress.total) * 100}%` }} />
+                  </span>
+                )}
+                {alacDone && alacProgress!.failed.length ? (
+                  <small className="settings-action-details">
+                    {alacProgress!.failed.slice(0, 4).map(item => `${item.name}: ${item.reason}`).join(' · ')}
+                  </small>
+                ) : null}
+              </span>
+            </button>
+          ) : null}
           <button className="settings-action" onClick={onShowShortcuts}>
             <KeyboardIcon size={18} />
             <span>Atajos de teclado</span>
@@ -1978,20 +2073,24 @@ function heroCopy(album: Album, track?: Track | null): { title: string; subtitle
 /** A rail on Círculo's home: section title on the left, its "see everything" action on
     the right, and the scroller underneath. The action used to be a lone grey circle
     parked after the last tile, where it read as a tile with broken artwork. */
-function CircHomeRail({ title, actionLabel, onAction, className, children }: {
+function CircHomeRail({ title, actionLabel, onAction, className, flip = false, children }: {
   title: string;
   actionLabel: string;
   onAction: () => void;
   className?: string;
+  /** Slide tiles to their new slot when the order changes (the history rail). */
+  flip?: boolean;
   children: ReactNode;
 }) {
+  const orderSignature = Children.toArray(children).map(child => (isValidElement(child) ? String(child.key) : '')).join('|');
+  const rowRef = useFlipRow<HTMLDivElement>(orderSignature, flip);
   return (
     <div className={`circ-home-rail ${className ?? ''}`.trim()}>
       <div className="circ-section-head">
         <h2 className="circ-section-title">{title}</h2>
         <button type="button" className="circ-section-more" onClick={onAction}>{actionLabel}</button>
       </div>
-      <div className="circ-home-rail-row">{children}</div>
+      <div className="circ-home-rail-row" ref={rowRef}>{children}</div>
     </div>
   );
 }
@@ -2015,6 +2114,7 @@ function HomePanel({
   onDownloadRecommendation,
   onImport,
   onPlayAlbum,
+  getTrack,
 }: {
   recentTracks: Track[];
   recentlyPlayedTracks: Track[];
@@ -2034,6 +2134,7 @@ function HomePanel({
   onDownloadRecommendation: (track: TidalTrack) => Promise<void>;
   onImport: () => void;
   onPlayAlbum: (album: Album) => void;
+  getTrack: (id: string) => Track | undefined;
 }) {
   const isDesktopViewport = useIsDesktopViewport();
   const recommendationAlbums = useMemo(() => {
@@ -2052,12 +2153,49 @@ function HomePanel({
   ].slice(0, 4), [currentTrack, recentTracks]);
 
   // Hoisted above the early returns below so the hero's palette hook can depend on it.
+  /* The hero never repeats what the player already shows. While something plays it
+     becomes a suggestion — another album by the same artist, one you played lately,
+     or a stable pick from the library — seeded by the playing album so it holds
+     still across that album's tracks and only changes when the album does. With
+     nothing playing it resumes the last thing you listened to. */
   const heroPick = useMemo(() => {
-    const seedTrack = currentTrack ?? recentlyPlayedTracks[0] ?? recentTracks[0] ?? null;
-    const album = (seedTrack && albums.find(item => item.tracks.includes(seedTrack.id))) || albums[0] || null;
-    const track = album ? recentTracks.find(item => album.tracks.includes(item.id)) ?? null : null;
-    return { seedTrack, album, track };
-  }, [albums, currentTrack, recentlyPlayedTracks, recentTracks]);
+    const albumOf = (track: Track | null | undefined) =>
+      (track && albums.find(item => item.tracks.includes(track.id))) || null;
+    const firstTrackOf = (album: Album | null) => album
+      ? album.tracks
+        .map(getTrack)
+        .filter((track): track is Track => Boolean(track))
+        .sort((a, b) => (a.trackNumber ?? 0) - (b.trackNumber ?? 0))[0] ?? null
+      : null;
+
+    const playingAlbum = albumOf(currentTrack);
+    let album: Album | null;
+    let reason: string | null = null;
+    if (currentTrack && playingAlbum) {
+      const others = albums.filter(item => item.id !== playingAlbum.id);
+      const sameArtist = others.filter(item => item.artist && item.artist === playingAlbum.artist);
+      const recent: Album[] = [];
+      for (const track of recentlyPlayedTracks) {
+        const candidate = albumOf(track);
+        if (candidate && candidate.id !== playingAlbum.id && !recent.includes(candidate)) recent.push(candidate);
+        if (recent.length >= 3) break;
+      }
+      const pool = [...sameArtist, ...recent.filter(item => !sameArtist.includes(item))];
+      const day = new Date().toISOString().slice(0, 10);
+      const picked = shuffleForHome(pool.length > 0 ? pool : others, `${day}|hero|${playingAlbum.id}`)[0] ?? null;
+      album = picked ?? playingAlbum;
+      if (picked) {
+        reason = sameArtist.includes(picked)
+          ? `Más de ${picked.artist}`
+          : recent.includes(picked) ? 'Vuelve a escucharlo' : 'Para descubrir';
+      }
+    } else {
+      const seedTrack = recentlyPlayedTracks[0] ?? recentTracks[0] ?? null;
+      album = albumOf(seedTrack) || albums[0] || null;
+      if (album && recentlyPlayedTracks.length > 0) reason = 'Sigue donde lo dejaste';
+    }
+    return { album, track: firstTrackOf(album), reason };
+  }, [albums, currentTrack, getTrack, recentlyPlayedTracks, recentTracks]);
 
   /* The accent used to come from --dyn-accent, which is extracted from whatever is
      *playing* — not from the cover the hero is actually showing. When those differ you
@@ -2111,21 +2249,30 @@ function HomePanel({
   }
 
   if (isDesktopViewport) {
-    const { seedTrack, album: pickAlbum, track: pickTrack } = heroPick;
+    const { album: pickAlbum, track: pickTrack, reason: heroReason } = heroPick;
     const heroHue = hueFromId(pickAlbum?.id ?? 'staysound');
     const hero = pickAlbum ? heroCopy(pickAlbum, pickTrack) : null;
     // Keep the featured album out of the rail immediately below it.
     const nightAlbums = featuredAlbums.filter(album => album.id !== pickAlbum?.id).slice(0, 8);
-    const historyTracks = recentlyPlayedTracks.filter(track => track.id !== seedTrack?.id).slice(0, 8);
+    // The playing track leads its own history: pressing a song elsewhere on Home
+    // slides it to the front of this rail instead of leaving it out of it.
+    const historyTracks = [
+      ...(currentTrack ? [currentTrack] : []),
+      ...recentlyPlayedTracks.filter(track => track.id !== currentTrack?.id),
+    ].slice(0, 8);
+    const playWithFlight = (source: HTMLElement | null, isCurrent: boolean, play: () => void) => {
+      if (!source || isCurrent) play();
+      else flyArtwork(source, '.circ-pb-art', play);
+    };
     const downloadedTracks = recentlyDownloadedTracks.slice(0, 8);
 
     return (
       <section
         className="circ-home"
-        style={heroAccent ? ({ '--accent': heroAccent } as CSSProperties) : undefined}
+        style={{ '--hero-accent': heroAccent ?? 'var(--dyn-accent, #f9a8d4)' } as CSSProperties}
       >
         {pickAlbum && (
-          <div aria-hidden="true" className="circ-home-hero-art">
+          <div aria-hidden="true" className="circ-home-hero-art" key={pickAlbum.id}>
             <CircleArt size="100%" src={pickAlbum.artwork} hue={heroHue} ring />
           </div>
         )}
@@ -2133,16 +2280,30 @@ function HomePanel({
         <div className="circ-home-welcome">
           {pickAlbum && hero ? (
             <>
-              <p className="circ-home-greeting">{timeOfDayGreeting()}</p>
-              <h1>{hero.title}</h1>
-              <p className="circ-home-pick-artist">{hero.subtitle}</p>
-              <QualityChip quality={formatQualitySpecs(pickTrack)} />
-              <div className="circ-home-pick-actions">
-                <button type="button" aria-label={`Reproducir ${hero.title}`} className="circ-home-play" onClick={() => onPlayAlbum(pickAlbum)}>
-                  <PlayIcon size={20} />
-                  <span>Reproducir</span>
-                </button>
-                <button type="button" className="circ-home-pick-link" onClick={() => onSelectAlbum(pickAlbum)}>Ver álbum</button>
+              <p className="circ-home-greeting">
+                <span className="circ-home-greeting-text">{timeOfDayGreeting()}</span>
+                {heroReason ? <span className="circ-home-reason" key={heroReason}>{heroReason}</span> : null}
+              </p>
+              <div className="circ-home-welcome-body" key={pickAlbum.id}>
+                <h1>{hero.title}</h1>
+                <p className="circ-home-pick-artist">{hero.subtitle}</p>
+                <QualityChip quality={formatQualitySpecs(pickTrack)} />
+                <div className="circ-home-pick-actions">
+                  <button
+                    type="button"
+                    aria-label={`Reproducir ${hero.title}`}
+                    className="circ-home-play"
+                    onClick={() => playWithFlight(
+                      document.querySelector<HTMLElement>('.circ-home-hero-art'),
+                      Boolean(currentTrack && pickAlbum.tracks.includes(currentTrack.id)),
+                      () => onPlayAlbum(pickAlbum),
+                    )}
+                  >
+                    <PlayIcon size={20} />
+                    <span>Reproducir</span>
+                  </button>
+                  <button type="button" className="circ-home-pick-link" onClick={() => onSelectAlbum(pickAlbum)}>Ver álbum</button>
+                </div>
               </div>
             </>
           ) : (
@@ -2160,7 +2321,11 @@ function HomePanel({
                 title={album.name}
                 subtitle={album.artist}
                 ring={Boolean(currentTrack && album.tracks.includes(currentTrack.id))}
-                onClick={() => onPlayAlbum(album)}
+                onClick={source => playWithFlight(
+                  source,
+                  Boolean(currentTrack && album.tracks.includes(currentTrack.id)),
+                  () => onPlayAlbum(album),
+                )}
               />
             ))}
           </CircHomeRail>
@@ -2169,6 +2334,7 @@ function HomePanel({
         {historyTracks.length > 0 && (
           <CircHomeRail
             className="circ-home-history-rail"
+            flip
             title="Reproducidas recientemente"
             actionLabel="Ver todas"
             onAction={() => onOpenTab('songs')}
@@ -2176,12 +2342,13 @@ function HomePanel({
             {historyTracks.map(track => (
               <CircleTile
                 key={track.id}
+                flipKey={track.id}
                 src={track.artwork}
                 hue={hueFromId(track.id)}
                 title={track.title}
                 subtitle={track.artist}
                 ring={track.id === currentTrack?.id}
-                onClick={() => onPlayTrack(track, historyTracks)}
+                onClick={source => playWithFlight(source, track.id === currentTrack?.id, () => onPlayTrack(track, historyTracks))}
               />
             ))}
           </CircHomeRail>
@@ -2202,7 +2369,7 @@ function HomePanel({
                 title={track.title}
                 subtitle={track.artist}
                 ring={track.id === currentTrack?.id}
-                onClick={() => onPlayTrack(track, downloadedTracks)}
+                onClick={source => playWithFlight(source, track.id === currentTrack?.id, () => onPlayTrack(track, downloadedTracks))}
               />
             ))}
           </CircHomeRail>

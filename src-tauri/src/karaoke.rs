@@ -73,6 +73,12 @@ pub struct GeneratedLyricsWord {
     confidence: f32,
     #[serde(default)]
     syllables: Vec<GeneratedLyricsSyllable>,
+    /// A backing vocal, rendered small under the lead line (TTML `x-bg`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    background: bool,
+    /// Split into syllables by hand; the player fills it syllable by syllable.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    syllabic: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -603,7 +609,7 @@ fn parse_clock_ms(value: &str) -> Option<u64> {
     Some(seconds * 1_000)
 }
 
-fn authorized_audio_path(
+pub(crate) fn authorized_audio_path(
     state: &State<'_, MusicLibraryState>,
     path: &str,
 ) -> Result<PathBuf, String> {
@@ -617,7 +623,7 @@ fn authorized_audio_path(
     Ok(source)
 }
 
-fn cache_key(source: &Path) -> Result<String, String> {
+pub(crate) fn cache_key(source: &Path) -> Result<String, String> {
     let metadata = fs::metadata(source).map_err(|error| error.to_string())?;
     let mut hasher = DefaultHasher::new();
     source.hash(&mut hasher);
@@ -865,6 +871,31 @@ pub async fn install_demucs_runtime(app: AppHandle) -> Result<KaraokeCapabilitie
     .map_err(|error| error.to_string())??;
 
     capabilities_snapshot(&app)
+}
+
+/// The stems Demucs already wrote for this file, without ever starting it. The
+/// timing editor draws the isolated voice when it exists and simply does
+/// without it otherwise; separating a song just to draw it is not worth it.
+#[tauri::command]
+pub async fn cached_karaoke_stems(
+    app: AppHandle,
+    state: State<'_, MusicLibraryState>,
+    path: String,
+) -> Result<Option<KaraokeStems>, String> {
+    let source = authorized_audio_path(&state, &path)?;
+    let cache_root = demucs_cache_root(&app, &source)?;
+    let Some((instrumental, vocals)) = locate_stems(&cache_root, &source) else {
+        return Ok(None);
+    };
+    app.asset_protocol_scope()
+        .allow_directory(&cache_root, true)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(KaraokeStems {
+        instrumental_path: instrumental.to_string_lossy().into_owned(),
+        vocals_path: vocals.to_string_lossy().into_owned(),
+        cached: true,
+        model: DEMUCS_MODEL.into(),
+    }))
 }
 
 #[tauri::command]

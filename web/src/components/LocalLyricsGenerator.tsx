@@ -1,5 +1,5 @@
 import type { Track } from '@staysound/types/audio';
-import { useCallback, useMemo, useState } from 'react';
+import { useCallback, useMemo, useRef, useState } from 'react';
 import {
   getKaraokeCapabilities,
   getKaraokeTrackPath,
@@ -8,6 +8,7 @@ import {
   listenToKaraokeProgress,
   persistLocalGeneratedLyrics,
   prepareKaraokeStems,
+  publishLrclibLyricsfile,
   saveLocalGeneratedLyrics,
   transcribeKaraokeVocals,
   type GeneratedLyrics,
@@ -15,14 +16,19 @@ import {
   type LocalLyricsLanguage,
   type LyricsAlignmentEngine,
 } from '../karaoke/karaokeDesktop';
+import { finalizeTimedLyrics, markParenthesisedAsBacking } from '../karaoke/lyricsTimingEdit';
+import { buildLyricsfile } from '../karaoke/lyricsfile';
 import { lyricsSourcesStore } from '../library/lyricsSources';
 import { CloseIcon, SpinnerIcon } from './icons';
+import { LyricsTimingEditor } from './LyricsTimingEditor';
 
 type GeneratorPhase = 'setup' | 'processing' | 'review' | 'saving' | 'error';
-type EditorMode = 'lyrics' | 'json';
+type EditorMode = 'lyrics' | 'timing' | 'json';
 
 interface LocalLyricsGeneratorProps {
   track: Track;
+  /** An existing letter to adjust; opens straight into the timing editor. */
+  initialLyrics?: GeneratedLyrics | null;
   onClose: () => void;
 }
 
@@ -404,20 +410,31 @@ function formatLyricsJson(lyrics: GeneratedLyrics): string {
   return JSON.stringify(lyrics, null, 2);
 }
 
-export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorProps) {
-  const [phase, setPhase] = useState<GeneratorPhase>('setup');
+export function LocalLyricsGenerator({ track, initialLyrics, onClose }: LocalLyricsGeneratorProps) {
+  const [phase, setPhase] = useState<GeneratorPhase>(initialLyrics ? 'review' : 'setup');
   const [language, setLanguage] = useState<LocalLyricsLanguage>('auto');
   const [alignmentEngine, setAlignmentEngine] = useState<LyricsAlignmentEngine>('qwen-sofa');
   const [progress, setProgress] = useState(0);
   const [detail, setDetail] = useState('');
   const [error, setError] = useState('');
-  const [draft, setDraft] = useState<GeneratedLyrics | null>(null);
-  const [editedText, setEditedText] = useState('');
+  const [draft, setDraft] = useState<GeneratedLyrics | null>(initialLyrics ?? null);
+  const [editedText, setEditedText] = useState(() => initialLyrics?.lines.map(line => line.text).join('\n') ?? '');
   const [editedJson, setEditedJson] = useState('');
-  const [editorMode, setEditorMode] = useState<EditorMode>('lyrics');
-  const [savedAligned, setSavedAligned] = useState(false);
+  const [editorMode, setEditorMode] = useState<EditorMode>(initialLyrics ? 'timing' : 'lyrics');
+  const [savedAligned, setSavedAligned] = useState(!!initialLyrics);
   const [jsonDirty, setJsonDirty] = useState(false);
+  // The timing editor keeps its own undo history against the letter it was
+  // opened with; it reports edits back so the other tabs and Save see them.
+  const [timingBase, setTimingBase] = useState<GeneratedLyricsLine[]>(() => initialLyrics?.lines ?? []);
+  const [timingDirty, setTimingDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const [savingExact, setSavingExact] = useState(false);
+  const backdropPressRef = useRef(false);
   const [savedNotice, setSavedNotice] = useState('');
+  // Publishing is public: the Lyricsfile is shown before anything is sent.
+  const [lrclibPreview, setLrclibPreview] = useState<string | null>(null);
+  const [publishing, setPublishing] = useState(false);
+  const unsaved = jsonDirty || timingDirty;
   const nativePath = useMemo(() => getKaraokeTrackPath(track), [track]);
   const sustainedCount = useMemo(() => draft?.lines.reduce(
     (total, line) => total + line.words.reduce(
@@ -519,12 +536,17 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
   }, [language, nativePath, phase]);
 
   const saveDraft = useCallback(async () => {
-    if (!draft || !nativePath) return;
+    if (!draft || !nativePath || savingExact) return;
+    // A letter that is already aligned is saved exactly as edited; only new
+    // text goes back through the aligners.
+    const saveExact = savedAligned;
     let edited: GeneratedLyrics;
     try {
       if (editorMode === 'json') {
         edited = JSON.parse(editedJson) as GeneratedLyrics;
         if (!Array.isArray(edited.lines)) throw new Error('El JSON no contiene lines.');
+      } else if (saveExact) {
+        edited = finalizeTimedLyrics(draft, draft.lines);
       } else {
         const retimed = buildEditedLyricsLines(draft.lines, editedText);
         if (!retimed.lines.length) throw new Error('La letra no puede quedar vacía.');
@@ -540,36 +562,67 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
       setError(errorMessage(parseError));
       return;
     }
+
+    if (saveExact) {
+      // Quick enough to keep the editor mounted, with its selection and undo.
+      const editorLines = editorMode === 'timing' ? draft.lines : null;
+      setSavingExact(true);
+      try {
+        const saved = await persistLocalGeneratedLyrics(nativePath, edited);
+        lyricsSourcesStore.saveGenerated(track, saved);
+        if (editorLines) {
+          setTimingBase(editorLines);
+        } else {
+          setDraft(saved);
+          setTimingBase(saved.lines);
+        }
+        setEditedText(saved.lines.map(line => line.text).join('\n'));
+        setEditedJson(formatLyricsJson(saved));
+        setJsonDirty(false);
+        setTimingDirty(false);
+        setConfirmDiscard(false);
+        setSavedNotice('Guardado.');
+        setError('');
+      } catch (saveError) {
+        setError(errorMessage(saveError));
+      } finally {
+        setSavingExact(false);
+      }
+      return;
+    }
+
     setPhase('saving');
     setProgress(0.02);
-    const saveExactJson = editorMode === 'json' && savedAligned;
-    setDetail(saveExactJson ? 'Guardando…' : 'Sincronizando…');
+    setDetail('Sincronizando…');
     let unlisten: (() => void) | undefined;
     try {
-      if (!saveExactJson) {
-        unlisten = await listenToKaraokeProgress(event => {
-          if (event.stage !== 'alignment') return;
-          setProgress(event.progress);
-          setDetail(event.detail);
-        });
+      unlisten = await listenToKaraokeProgress(event => {
+        if (event.stage !== 'alignment') return;
+        setProgress(event.progress);
+        setDetail(event.detail);
+      });
+      let aligned = await saveLocalGeneratedLyrics(nativePath, edited, alignmentEngine);
+      // Lyrics sites write backing vocals in parentheses; the aligners only
+      // see one voice, so the echo is marked here and saved with the letter.
+      const withBacking = markParenthesisedAsBacking(aligned.lines);
+      if (withBacking !== aligned.lines) {
+        aligned = await persistLocalGeneratedLyrics(nativePath, { ...aligned, lines: withBacking });
       }
-      const aligned = saveExactJson
-        ? await persistLocalGeneratedLyrics(nativePath, edited)
-        : await saveLocalGeneratedLyrics(nativePath, edited, alignmentEngine);
       lyricsSourcesStore.saveGenerated(track, aligned);
       setDraft(aligned);
       setEditedText(aligned.lines.map(line => line.text).join('\n'));
       setEditedJson(formatLyricsJson(aligned));
-      setEditorMode('json');
+      setTimingBase(aligned.lines);
+      setEditorMode('timing');
       setSavedAligned(true);
       setJsonDirty(false);
-      setSavedNotice(saveExactJson
-        ? 'Guardado.'
-        : aligned.alignmentNotes?.length
-          ? aligned.alignmentNotes.join(' ')
+      setTimingDirty(false);
+      setConfirmDiscard(false);
+      setSavedNotice(aligned.alignmentNotes?.length
+        ? aligned.alignmentNotes.join(' ')
         : aligned.alignment === 'word-timing-fallback'
           ? 'Guardado con tiempos de palabras.'
-          : 'Sincronización lista.');
+          : 'Sincronización lista. Ya puedes ajustar cada palabra.');
       setError('');
       setProgress(1);
       setPhase('review');
@@ -579,12 +632,34 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
     } finally {
       unlisten?.();
     }
-  }, [draft, editedJson, editedText, editorMode, nativePath, savedAligned, track, alignmentEngine]);
+  }, [draft, editedJson, editedText, editorMode, nativePath, savedAligned, savingExact, track, alignmentEngine]);
 
   const selectEditorMode = useCallback((mode: EditorMode) => {
     if (!draft || mode === editorMode) return;
     setError('');
     setSavedNotice('');
+    let current = draft;
+    if (editorMode === 'json' && jsonDirty) {
+      try {
+        const parsed = JSON.parse(editedJson) as GeneratedLyrics;
+        if (!Array.isArray(parsed.lines)) throw new Error('El JSON no contiene lines.');
+        current = parsed;
+        setDraft(parsed);
+        setEditedText(parsed.lines.map(line => line.text).join('\n'));
+        setJsonDirty(false);
+        // The edits are carried into the draft; Save still has to write them.
+        setTimingDirty(true);
+      } catch (parseError) {
+        setError(errorMessage(parseError));
+        return;
+      }
+    }
+    if (mode === 'timing') {
+      setTimingBase(current.lines);
+    } else if (editorMode === 'timing') {
+      // A corrected spelling in the timing view is part of the text too.
+      setEditedText(current.lines.map(line => line.text).join('\n'));
+    }
     if (mode === 'json') {
       const retimed = savedAligned ? null : buildEditedLyricsLines(draft.lines, editedText);
       const unchanged = editedText.trim() === draft.lines.map(line => line.text).join('\n').trim();
@@ -598,20 +673,25 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
         : draft;
       setEditedJson(formatLyricsJson(preview));
       setJsonDirty(false);
-    } else if (jsonDirty) {
-      try {
-        const parsed = JSON.parse(editedJson) as GeneratedLyrics;
-        if (!Array.isArray(parsed.lines)) throw new Error('El JSON no contiene lines.');
-        setDraft(parsed);
-        setEditedText(parsed.lines.map(line => line.text).join('\n'));
-        setJsonDirty(false);
-      } catch (parseError) {
-        setError(errorMessage(parseError));
-        return;
-      }
     }
     setEditorMode(mode);
   }, [draft, editedJson, editedText, editorMode, jsonDirty, savedAligned]);
+
+  const handleTimingChange = useCallback((lines: GeneratedLyricsLine[], dirty: boolean) => {
+    setDraft(current => (current ? { ...current, lines } : current));
+    setTimingDirty(dirty);
+    setSavedNotice('');
+    setConfirmDiscard(false);
+  }, []);
+
+  const requestClose = useCallback(() => {
+    if (phase === 'processing' || phase === 'saving') return;
+    if (unsaved && !confirmDiscard) {
+      setConfirmDiscard(true);
+      return;
+    }
+    onClose();
+  }, [confirmDiscard, onClose, phase, unsaved]);
 
   const modalTitle = phase === 'review'
     ? 'Letra'
@@ -621,6 +701,42 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
         ? 'Analizando'
         : 'Crear letra';
   const editorPhase = phase === 'review';
+  const timingPhase = editorPhase && editorMode === 'timing';
+
+  const lrclibMissing = !track.title?.trim() || !track.artist?.trim() || !track.album?.trim() || !(track.duration > 0);
+
+  const openLrclibPreview = useCallback(() => {
+    if (!draft) return;
+    setError('');
+    setSavedNotice('');
+    setLrclibPreview(buildLyricsfile(draft, {
+      title: track.title,
+      artist: track.artist,
+      album: track.album,
+      durationMs: track.duration,
+    }));
+  }, [draft, track]);
+
+  const publishToLrclib = useCallback(async () => {
+    if (!lrclibPreview || publishing) return;
+    setPublishing(true);
+    setError('');
+    try {
+      await publishLrclibLyricsfile({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        durationMs: track.duration,
+        lyricsfile: lrclibPreview,
+      });
+      setLrclibPreview(null);
+      setSavedNotice('Publicada en LRCLIB. Gracias por contribuir.');
+    } catch (publishError) {
+      setError(errorMessage(publishError));
+    } finally {
+      setPublishing(false);
+    }
+  }, [lrclibPreview, publishing, track]);
 
   return (
     <div
@@ -628,13 +744,17 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
       role="dialog"
       aria-modal="true"
       aria-label={modalTitle}
-      onClick={() => {
-        if (phase !== 'processing' && phase !== 'saving') onClose();
+      onPointerDown={event => {
+        backdropPressRef.current = event.target === event.currentTarget;
+      }}
+      onClick={event => {
+        // Only a click that also began on the backdrop: a word dragged past
+        // the modal's edge releases out here too.
+        if (event.target === event.currentTarget && backdropPressRef.current) requestClose();
       }}
     >
       <div
-        className={`local-lyrics-modal ${editorPhase ? 'editor' : 'compact'}`}
-        onClick={event => event.stopPropagation()}
+        className={`local-lyrics-modal ${editorPhase ? 'editor' : 'compact'} ${timingPhase ? 'timing' : ''}`}
       >
         <header className="local-lyrics-titlebar">
           <div>
@@ -644,7 +764,7 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
         <button
           type="button"
           className="local-lyrics-close"
-          onClick={onClose}
+          onClick={requestClose}
           disabled={phase === 'processing' || phase === 'saving'}
           aria-label="Cerrar"
         >
@@ -729,10 +849,31 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
               </div>
               <div className="local-lyrics-editor-tabs" role="tablist" aria-label="Vista del editor">
                 <button type="button" role="tab" aria-selected={editorMode === 'lyrics'} className={editorMode === 'lyrics' ? 'active' : ''} onClick={() => selectEditorMode('lyrics')}>Texto</button>
-                <button type="button" role="tab" aria-selected={editorMode === 'json'} className={editorMode === 'json' ? 'active' : ''} onClick={() => selectEditorMode('json')}>Tiempos</button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={editorMode === 'timing'}
+                  className={editorMode === 'timing' ? 'active' : ''}
+                  disabled={!savedAligned}
+                  title={savedAligned ? undefined : 'Sincroniza la letra para ajustar sus tiempos'}
+                  onClick={() => selectEditorMode('timing')}
+                >
+                  Tiempos
+                </button>
+                <button type="button" role="tab" aria-selected={editorMode === 'json'} className={editorMode === 'json' ? 'active' : ''} onClick={() => selectEditorMode('json')}>JSON</button>
               </div>
             </div>
-            {editorMode === 'lyrics' ? (
+            {editorMode === 'timing' && nativePath ? (
+              <LyricsTimingEditor
+                savedLines={timingBase}
+                track={track}
+                nativePath={nativePath}
+                onChange={handleTimingChange}
+                onSave={() => {
+                  if (unsaved) void saveDraft();
+                }}
+              />
+            ) : editorMode === 'lyrics' ? (
               <label className="local-lyrics-editor">
                 <span>Letra completa</span>
                 <textarea
@@ -760,19 +901,64 @@ export function LocalLyricsGenerator({ track, onClose }: LocalLyricsGeneratorPro
                 />
               </label>
             )}
+            {lrclibPreview ? (
+              <label className="local-lyrics-editor local-lyrics-json-editor">
+                <span>
+                  Lyricsfile para LRCLIB · {track.title} · {track.artist} · {track.album} · {Math.round(track.duration / 1000)} s
+                </span>
+                <textarea value={lrclibPreview} readOnly spellCheck={false} />
+              </label>
+            ) : null}
             {savedNotice ? <p className="local-lyrics-saved">{savedNotice}</p> : null}
             {error ? <p className="local-lyrics-error">{error}</p> : null}
             <div className="local-lyrics-actions local-lyrics-review-actions">
+              {confirmDiscard ? (
+                <>
+                  <span className="local-lyrics-discard-note">Tienes cambios sin guardar.</span>
+                  <button type="button" className="local-lyrics-secondary" onClick={onClose}>Descartar</button>
+                  <button type="button" className="local-lyrics-secondary" onClick={() => setConfirmDiscard(false)}>Seguir editando</button>
+                </>
+              ) : null}
+              {lrclibPreview ? (
+                <>
+                  <span className="local-lyrics-discard-note">Se publicará en LRCLIB para todos.</span>
+                  <button type="button" className="local-lyrics-secondary" disabled={publishing} onClick={() => setLrclibPreview(null)}>Cancelar</button>
+                  <button type="button" className="local-lyrics-primary" disabled={publishing} onClick={() => void publishToLrclib()}>
+                    {publishing ? 'Publicando…' : 'Publicar'}
+                  </button>
+                </>
+              ) : (
+                <>
+              {savedAligned && !unsaved ? (
+                <button
+                  type="button"
+                  className="local-lyrics-secondary"
+                  disabled={lrclibMissing}
+                  title={lrclibMissing ? 'LRCLIB necesita título, artista, álbum y duración' : undefined}
+                  onClick={openLrclibPreview}
+                >
+                  Subir a LRCLIB
+                </button>
+              ) : null}
               <button
                 type="button"
                 className="local-lyrics-primary"
+                disabled={savingExact}
                 onClick={() => {
-                  if (savedAligned && !jsonDirty) onClose();
+                  if (savedAligned && !unsaved) onClose();
                   else void saveDraft();
                 }}
               >
-                {savedAligned && !jsonDirty ? 'Listo' : editorMode === 'json' && savedAligned ? 'Guardar' : 'Sincronizar'}
+                {savingExact
+                  ? 'Guardando…'
+                  : savedAligned && !unsaved
+                    ? 'Listo'
+                    : savedAligned
+                      ? 'Guardar'
+                      : 'Sincronizar'}
               </button>
+                </>
+              )}
             </div>
           </div>
         ) : null}

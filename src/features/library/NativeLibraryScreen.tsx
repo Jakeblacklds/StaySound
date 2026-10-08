@@ -1,6 +1,7 @@
 import { useI18n } from '@/src/i18n';
-import { useLibraryStore, usePlayerStore } from '@/src/stores';
+import { useLibraryStore, useNotificationStore, usePlayerStore } from '@/src/stores';
 import { getNativeLibraryPlayback } from '@/src/services/nativeLibraryPlayback';
+import { resolveRemoteTrackForPlayback } from '@/src/services/remotePlaybackService';
 import { useTheme, usePerformanceProfile } from '@/src/theme';
 import { Album, Artist, Playlist, Track } from '@/src/types';
 import { requireNativeViewManager, requireOptionalNativeModule } from 'expo-modules-core';
@@ -42,7 +43,7 @@ function values<T,>(source: Map<string, T> | unknown): T[] {
 
 const actionLabels = {
     es: {
-        closeSearch: 'Cerrar búsqueda', options: 'Opciones', queue: 'Agregar a cola',
+        closeSearch: 'Cerrar búsqueda', options: 'Opciones', queue: 'Agregar a cola', queueHint: 'Se reproducirá al final de la cola', queued: 'Agregada a la cola',
         playlist: 'Agregar a playlist', newPlaylist: 'Nueva playlist', playlistName: 'Nombre de la playlist',
         remove: 'Quitar de la biblioteca', deleteFile: 'Borrar del dispositivo',
         removeMessage: 'Se quitará “{title}” de tu biblioteca. El archivo permanecerá en tu dispositivo.',
@@ -53,7 +54,7 @@ const actionLabels = {
         favorite: 'Favorita', nowPlaying: 'Reproduciéndose ahora',
     },
     en: {
-        closeSearch: 'Close search', options: 'Options', queue: 'Add to queue',
+        closeSearch: 'Close search', options: 'Options', queue: 'Add to queue', queueHint: 'Plays at the end of the queue', queued: 'Added to queue',
         playlist: 'Add to playlist', newPlaylist: 'New playlist', playlistName: 'Playlist name',
         remove: 'Remove from library', deleteFile: 'Delete from device',
         removeMessage: '“{title}” will be removed from your library. The file will remain on your device.',
@@ -165,7 +166,10 @@ export default function NativeLibraryScreen() {
                 case 'songs':
                     await player.play(track, values<Track>(library.tracks).sort((a, b) => a.title.localeCompare(b.title, locale)));
                     break;
-                case 'queue': player.addToQueue(track); break;
+                case 'queue':
+                    if (await player.addToQueue(await resolveRemoteTrackForPlayback(track))) useNotificationStore.getState().showNotification(
+                        `${actionLabels[language].queued} · ${track.title}`, 'success');
+                    break;
                 case 'playlist':
                     if (library.playlists.has(event.value)) library.addToPlaylist(event.value, track.id);
                     break;

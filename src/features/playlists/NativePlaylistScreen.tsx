@@ -205,7 +205,7 @@ export default function NativePlaylistScreen({ screen, id = '' }: { screen: Scre
         const createdId = library.createPlaylist(`My Playlist ${library.playlists.size + 1}`, 'Created from quick add');
         library.addToPlaylist(createdId, track.id);
       }
-      if (event.action === 'queue') player.addToQueue(await resolveRemoteTrackForPlayback(track));
+      if (event.action === 'queue') await player.addToQueue(await resolveRemoteTrackForPlayback(track));
       if (event.action === 'play' || event.action === 'shuffle') {
         const queue = members.map(e => e.track).filter(s => !s.cloudOnly || !!(s.spotifyId || s.tidalId));
         if (!queue.some(s => s.id === track.id)) return;

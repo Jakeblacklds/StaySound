@@ -2,8 +2,8 @@ import type { ComponentType } from 'react';
 import {
   DownloadIcon,
   HomeIcon,
-  MusicNoteIcon,
-  PlaylistIcon,
+  LibraryTabIcon,
+  PlaylistsTabIcon,
 } from './icons';
 import type { Tab } from './types';
 
@@ -18,11 +18,11 @@ const DESTINATIONS: Array<{
   id: MobileDestination;
   label: string;
   target: Tab;
-  Icon: ComponentType<{ size?: number }>;
+  Icon: ComponentType<{ size?: number; state?: number }>;
 }> = [
   { id: 'home', label: 'Inicio', target: 'home', Icon: HomeIcon },
-  { id: 'library', label: 'Biblioteca', target: 'songs', Icon: MusicNoteIcon },
-  { id: 'playlists', label: 'Playlists', target: 'playlists', Icon: PlaylistIcon },
+  { id: 'library', label: 'Biblioteca', target: 'songs', Icon: LibraryTabIcon },
+  { id: 'playlists', label: 'Playlists', target: 'playlists', Icon: PlaylistsTabIcon },
   { id: 'downloads', label: 'Descargas', target: 'downloads', Icon: DownloadIcon },
 ];
 
@@ -49,7 +49,7 @@ export function MobileBottomNav({ tab, onTabChange }: MobileBottomNavProps) {
             aria-current={active ? 'page' : undefined}
             aria-label={label}
           >
-            <span className="mobile-bottom-nav-icon"><Icon size={20} /></span>
+            <span className="mobile-bottom-nav-icon"><Icon size={20} state={active ? 1 : 0} /></span>
             <span>{label}</span>
           </button>
         );

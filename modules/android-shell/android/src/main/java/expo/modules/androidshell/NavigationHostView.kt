@@ -1,5 +1,6 @@
 package expo.modules.androidshell
 
+import expo.modules.playerchrome.stayIcon
 import android.content.Context
 import android.graphics.Color
 import android.view.View
@@ -24,7 +25,7 @@ class NavigationHostView(context: Context, appContext: AppContext) : ExpoView(co
     private val stage = FrameLayout(context)
     private val bar = NavigationBarView(context, appContext)
     private val settings = ImageButton(context).apply {
-        setImageResource(android.R.drawable.ic_menu_preferences)
+        setImageDrawable(context.stayIcon("settings"))
         contentDescription = "Ajustes"
         val background = android.util.TypedValue()
         context.theme.resolveAttribute(android.R.attr.selectableItemBackgroundBorderless, background, true)

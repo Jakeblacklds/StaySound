@@ -108,7 +108,7 @@ export default function NativeDetailScreen({ kind, id }: { kind: Kind; id: strin
             const allowed = new Set(members.map(track => track.id));
             const track = library.tracks.get(event.id);
             if (!track || !allowed.has(track.id)) return;
-            if (event.action === 'queue') { player.addToQueue(track); return; }
+            if (event.action === 'queue') { await player.addToQueue(track); return; }
             if (event.action === 'play') {
                 const context = Array.from(new Set(event.trackIds))
                     .filter(trackId => allowed.has(trackId)).map(trackId => library.tracks.get(trackId))

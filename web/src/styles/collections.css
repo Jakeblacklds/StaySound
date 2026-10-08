@@ -50,16 +50,11 @@
   .circ-app-shell .playlist-empty { max-width: 640px; margin: 24px auto; }
   .circ-app-shell .playlist-empty .empty-state { padding-top: 40px; }
   .circ-app-shell .dl-header { padding-top: 28px; gap: 16px; }
-  .circ-app-shell .dl-crumb strong { font-size: 2rem; letter-spacing: -.03em; }
-  .circ-app-shell .dl-search-field { max-width: 760px; border-radius: 12px; min-height: 52px; background: var(--circ-surface); }
-  .circ-app-shell .dl-search-submit { min-height: 36px; padding: 0 16px; }
   .circ-app-shell .dl-status-line { font-size: .8rem; flex-wrap: wrap; }
   .circ-app-shell .dl-empty { justify-items: start; align-items: flex-start; text-align: left; max-width: 760px; margin: 40px 0; padding: 0; }
   .circ-app-shell .dl-empty-icon { display: none; }
   .circ-app-shell .dl-empty h2 { font-size: 1.5rem; }
   .circ-app-shell .dl-empty p { max-width: 56ch; color: var(--text-secondary); }
-  .circ-app-shell .dl-recent { justify-items: start; align-items: flex-start; }
-  .circ-app-shell .dl-recent-chips { justify-content: flex-start; }
 
   /* A normal z-index cannot paint above the view-transition top layer.
      Capture persistent chrome separately and order it above route snapshots. */

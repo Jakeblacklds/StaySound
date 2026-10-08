@@ -3,9 +3,8 @@ import type { Playlist, Track } from '@staysound/types/audio';
 import { formatDuration } from '@staysound/services/metadataService';
 import {
   NextIcon,
-  PauseIcon,
+  PlayPauseIcon,
   PlaylistIcon,
-  PlayIcon,
   PreviousIcon,
   QueueIcon,
   RepeatIcon,
@@ -127,8 +126,8 @@ export function PlayerBarCirculo({
       ) : (
         <div className="circ-pb-obra" onClick={onOpenFullPlayer} role="button" tabIndex={0}
           onKeyDown={event => { if (event.key === 'Enter') onOpenFullPlayer(); }}>
-          <CircleArt size={64} src={currentTrack.artwork} hue={hue} className="circ-pb-art" />
-          <span className="circ-pb-copy">
+          <CircleArt key={`art-${currentTrack.id}`} size={64} src={currentTrack.artwork} hue={hue} className="circ-pb-art" />
+          <span className="circ-pb-copy" key={`copy-${currentTrack.id}`}>
             <strong>{currentTrack.title}</strong>
             <small>{currentTrack.artist}</small>
             {/* The format sits with the track it describes (as on Home and the detail
@@ -148,7 +147,7 @@ export function PlayerBarCirculo({
             <PreviousIcon size={22} />
           </button>
           <button type="button" aria-label={isPlaying ? 'Pausar' : 'Reproducir'} className="circ-pb-play" onClick={onToggle}>
-            {isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+            <PlayPauseIcon playing={isPlaying} size={24} />
           </button>
           <button type="button" aria-label="Siguiente" onClick={onNext}>
             <NextIcon size={22} />

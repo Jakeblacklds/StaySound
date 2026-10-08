@@ -110,8 +110,8 @@ internal class PlayerOptionsPane(context: Context, private val send: (String, Ma
             row.addView(chip("+", false) { send("spectrumDelay", mapOf("value" to (model.optInt("spectrumDelay") + 20).coerceAtMost(650))) }, LinearLayout.LayoutParams(px(48), px(48))); body.addView(row)
         }
         val sources = model.optJSONArray("sources") ?: org.json.JSONArray()
-        label("Fuentes de letras", "${sources.length()} de 5 activas · toca para activar o quitar")
-        listOf("apple" to "Apple Music", "lyricsplus" to "LyricsPlus", "musixmatch" to "Musixmatch", "spotify" to "Spotify", "lrclib" to "LRCLIB").chunked(2).forEach { pair ->
+        label("Fuentes de letras", "${sources.length()} de 6 activas · toca para activar o quitar")
+        listOf("lrc-red" to "lrc.red", "apple" to "Apple Music", "lyricsplus" to "LyricsPlus", "musixmatch" to "Musixmatch", "spotify" to "Spotify", "lrclib" to "LRCLIB").chunked(2).forEach { pair ->
             val row = LinearLayout(context).apply { setPadding(px(20), px(4), px(20), px(4)) }
             pair.forEach { (id, name) ->
                 val selected = (0 until sources.length()).any { sources.optString(it) == id }

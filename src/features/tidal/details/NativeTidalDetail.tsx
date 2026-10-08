@@ -120,7 +120,7 @@ export function NativeTidalDetail(props: Props) {
                     if (!local) return;
                 }
                 const resolved = local ?? await createTidalStreamTrack(track, props.source === 'qobuz' ? { qobuzOnly: true } : {});
-                usePlayerStore.getState().addToQueue(resolved);
+                await usePlayerStore.getState().addToQueue(resolved);
             }
         };
         pending.current.add(key);

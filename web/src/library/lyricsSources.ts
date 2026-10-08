@@ -9,8 +9,8 @@
  * end the run on a line-synced result — which is why the same song can be
  * word-by-word one day and plain lines the next.
  *
- * This module runs the providers independently, with a native LRCLIB client
- * that validates title, artist and duration before accepting a result. It
+ * This module runs the providers independently, with native lrc.red and LRCLIB
+ * clients that validate the recording before accepting a result. It
  * keeps every result as a candidate and caches the set so a track that was
  * resolved well once stays resolved.
  */
@@ -19,6 +19,7 @@ import type { Track } from '@staysound/types/audio';
 import { useSyncExternalStore } from 'react';
 import {
   getKaraokeTrackPath,
+  generatedLineLayers,
   generatedWordDisplayParts,
   loadLocalGeneratedLyrics,
   type GeneratedLyrics,
@@ -29,18 +30,19 @@ import {
   type CachedLyricsEntry,
 } from '../storage/webLyricsCache';
 import { fetchLyricsFromLrclib } from './lrclibLyrics';
+import { fetchLyricsFromLrcRed } from './lrcRedLyrics';
 
 export type LyricsSyncKind = 'word' | 'line' | 'plain';
 
 /** Only the fields we inspect are typed; the rest is passed back untouched. */
-interface EngineSyllable {
+export interface EngineSyllable {
   text?: string;
   part?: boolean;
   timestamp?: number;
   endtime?: number;
 }
 
-interface EngineLine {
+export interface EngineLine {
   text?: EngineSyllable[];
   timestamp?: number;
   endtime?: number;
@@ -152,6 +154,7 @@ type AmLyricsInternals = {
 };
 
 type AmLyricsConstructor = {
+  parseTTML?: (ttml: string) => { lines: EngineLine[]; songwriters?: string } | null;
   fetchLyricsFromBiniLyrics?: (
     title: string,
     artist: string,
@@ -276,6 +279,7 @@ function canonicalPhrases(candidate: LyricsCandidate): CanonicalLyricsDraft['phr
 
 function canonicalProviderRank(candidate: LyricsCandidate): number {
   const source = candidate.source.toLowerCase();
+  if (source.includes('lrc.red') && candidate.syncKind === 'word') return 0;
   if (source.includes('bini') && candidate.syncKind !== 'plain') return 0;
   if (source.includes('lrclib') && candidate.syncKind !== 'plain') return 1;
   if (source.includes('genius')) return 2;
@@ -293,31 +297,38 @@ function buildCandidateId(source: string): string {
   return source.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)/g, '') || 'source';
 }
 
-const LOCAL_GENERATED_CANDIDATE_ID = 'staysound-ia-local';
+export const LOCAL_GENERATED_CANDIDATE_ID = 'staysound-ia-local';
+
+function generatedEngineSyllables(words: GeneratedLyrics['lines'][number]['words']): EngineSyllable[] {
+  return words.flatMap((word, wordIndex) => {
+    const syllables = generatedWordDisplayParts(word);
+    return syllables.map((syllable, syllableIndex) => {
+      const isLastSyllable = syllableIndex === syllables.length - 1;
+      return {
+        text: `${syllable.text}${isLastSyllable && wordIndex < words.length - 1 ? ' ' : ''}`,
+        part: !isLastSyllable,
+        timestamp: syllable.startMs,
+        endtime: Math.max(syllable.startMs + 30, syllable.endMs),
+      };
+    });
+  });
+}
 
 function generatedLyricsCandidate(lyrics: GeneratedLyrics): LyricsCandidate {
   const lines: EngineLine[] = lyrics.lines
     .filter(line => line.words.length > 0)
-    .map(line => ({
-      text: line.words.flatMap((word, wordIndex) => {
-        const syllables = generatedWordDisplayParts(word);
-        return syllables.map((syllable, syllableIndex) => {
-          const isLastSyllable = syllableIndex === syllables.length - 1;
-          return {
-            text: `${syllable.text}${isLastSyllable && wordIndex < line.words.length - 1 ? ' ' : ''}`,
-            part: !isLastSyllable,
-            timestamp: syllable.startMs,
-            endtime: Math.max(syllable.startMs + 30, syllable.endMs),
-          };
-        });
-      }),
-      timestamp: line.startMs,
-      endtime: Math.max(line.startMs + 80, line.endMs),
-      isWordSynced: true,
-      background: false,
-      backgroundText: [],
-      oppositeTurn: false,
-    }));
+    .map(line => {
+      const { lead, backing } = generatedLineLayers(line);
+      return {
+        text: generatedEngineSyllables(lead),
+        timestamp: line.startMs,
+        endtime: Math.max(line.startMs + 80, line.endMs),
+        isWordSynced: true,
+        background: backing.length > 0,
+        backgroundText: generatedEngineSyllables(backing),
+        oppositeTurn: false,
+      };
+    });
 
   return {
     id: LOCAL_GENERATED_CANDIDATE_ID,
@@ -342,21 +353,28 @@ function ttmlTime(milliseconds: number): string {
   return (Math.max(0, milliseconds) / 1000).toFixed(3);
 }
 
+function generatedTtmlSpans(words: GeneratedLyrics['lines'][number]['words']): string {
+  return words.flatMap((word, wordIndex) => {
+    const parts = generatedWordDisplayParts(word);
+    return parts.map((part, partIndex) => {
+      const isWordEnd = partIndex === parts.length - 1;
+      const space = isWordEnd && wordIndex < words.length - 1 ? ' ' : '';
+      return `<span begin="${ttmlTime(part.startMs)}" end="${ttmlTime(part.endMs)}">${xmlEscape(part.text)}</span>${space}`;
+    });
+  }).join('');
+}
+
 export function generatedLyricsTtml(lyrics: GeneratedLyrics): string {
   const lines = lyrics.lines.filter(line => line.words.length > 0);
   const body = lines.map((line, lineIndex) => {
-    const spans = line.words.flatMap((word, wordIndex) => {
-      const parts = generatedWordDisplayParts(word);
-      return parts.map((part, partIndex) => {
-        const isWordEnd = partIndex === parts.length - 1;
-        const space = isWordEnd && wordIndex < line.words.length - 1 ? ' ' : '';
-        return `<span begin="${ttmlTime(part.startMs)}" end="${ttmlTime(part.endMs)}">${xmlEscape(part.text)}</span>${space}`;
-      });
-    }).join('');
-    return `<p begin="${ttmlTime(line.startMs)}" end="${ttmlTime(line.endMs)}" itunes:key="L${lineIndex + 1}">${spans}</p>`;
+    const { lead, backing } = generatedLineLayers(line);
+    const backingSpan = backing.length
+      ? ` <span ttm:role="x-bg">${generatedTtmlSpans(backing)}</span>`
+      : '';
+    return `<p begin="${ttmlTime(line.startMs)}" end="${ttmlTime(line.endMs)}" itunes:key="L${lineIndex + 1}">${generatedTtmlSpans(lead)}${backingSpan}</p>`;
   }).join('');
   const duration = lines.at(-1)?.endMs ?? 0;
-  return `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="Word" xml:lang="${xmlEscape(lyrics.language)}"><body dur="${ttmlTime(duration)}"><div>${body}</div></body></tt>`;
+  return `<tt xmlns="http://www.w3.org/ns/ttml" xmlns:ttm="http://www.w3.org/ns/ttml#metadata" xmlns:itunes="http://music.apple.com/lyric-ttml-internal" itunes:timing="Word" xml:lang="${xmlEscape(lyrics.language)}"><body dur="${ttmlTime(duration)}"><div>${body}</div></body></tt>`;
 }
 
 export interface LocalGeneratedLyrics {
@@ -511,6 +529,7 @@ async function sweepProviders(
 
   const { title, artist } = metadata;
   const results = await Promise.allSettled<EngineSource | EngineSource[] | null>([
+    ('__TAURI_INTERNALS__' in window ? fetchLyricsFromLrcRed(metadata, isrc, engine) : null),
     engine.fetchLyricsFromBiniLyrics?.(title, artist, isrc, metadata) ?? null,
     engine.fetchLyricsFromUnison?.(metadata) ?? null,
     engine.fetchLyricsFromYouLyPlus?.(title, artist, isrc, metadata, true) ?? null,
@@ -528,7 +547,11 @@ async function sweepProviders(
   }
 
   if (collected.length === 0) return [];
-  return toCandidates(engine.mergeAndSortSources?.(collected) ?? collected);
+  const candidates = toCandidates(engine.mergeAndSortSources?.(collected) ?? collected);
+  // lrc.red matches a specific recording and serves its original word timing.
+  candidates.sort((left, right) => Number(right.source === 'lrc.red' && right.syncKind === 'word')
+    - Number(left.source === 'lrc.red' && left.syncKind === 'word'));
+  return candidates;
 }
 
 /**
@@ -611,6 +634,29 @@ class LyricsSourcesStore {
   };
 
   getState = (): LyricsSourcesState => this.state;
+
+  /**
+   * Returns the exact lyric currently rendered by `<am-lyrics>`. The element
+   * can complete its built-in lookup before the optional provider sweep has
+   * populated `state.candidates`, so consumers such as Karaoke must not infer
+   * that no lyric exists from an empty candidate list alone.
+   */
+  getRenderedCandidate(track: Track): LyricsCandidate | null {
+    if (!this.element || this.state.trackKey !== getLyricsTrackKey(track)) return null;
+    const internal = this.element as AmLyricsInternals;
+    const lines = internal.lyrics;
+    if (!Array.isArray(lines) || lines.length === 0) return null;
+    const source = internal.lyricsSource?.trim() || 'Player';
+    return {
+      id: `rendered-${buildCandidateId(source)}`,
+      source,
+      syncKind: classifySync(lines),
+      lineCount: lines.length,
+      preview: buildPreview(lines),
+      songwriters: internal.songwriters,
+      lines,
+    };
+  }
 
   private setState(patch: Partial<LyricsSourcesState>): void {
     this.state = { ...this.state, ...patch };
@@ -730,7 +776,10 @@ class LyricsSourcesStore {
         // A reused element must not keep the previous track's local payload.
         element.ttml = undefined;
       }
-      if (candidates.length === 0) return;
+      if (candidates.length === 0) {
+        if ('__TAURI_INTERNALS__' in window && !generated?.lines?.length) void this.refresh();
+        return;
+      }
 
       // Do not restore an old fallback over the element's own live lookup.
       // In particular, this prevents a cached Genius response from replacing a

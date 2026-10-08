@@ -25,7 +25,7 @@ internal class PlayerTransport(context: Context, private val send: (String) -> U
     fun state(model: JSONObject, playing: Boolean) {
         shuffle.selected(model.optBoolean("shuffle")); val mode = model.optString("repeat", "off")
         shuffle.setLabel(if (model.optBoolean("shuffle")) "Desactivar aleatorio" else "Activar aleatorio")
-        repeat.icon.name = if (mode == "one") "repeat-once" else "repeat"
+        repeat.setIcon(if (mode == "one") "repeat-once" else "repeat")
         repeat.selected(mode != "off")
         repeat.setLabel(when(mode) { "off" -> "Activar repetición"; "one" -> "Repetir una vez, toca para desactivar"; else -> "Repetir cola, toca para repetir una vez" })
         if (lastPlaying != playing) { play.playing(playing); if(lyrics)glowMotion.timing(if(playing)1f else 0f,380,true); lastPlaying = playing }

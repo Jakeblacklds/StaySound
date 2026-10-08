@@ -39,7 +39,7 @@ export default function NativeShellRoute({ kind }: { kind: 'lyrics' | 'modal' })
 
             try {
                 // Keep this native route on the same providers as the Android player and
-                // Tauri: Apple TTML/KPoe are the only paths that carry word timestamps.
+                // Tauri, including lrc.red and contributed LRCLIB word timestamps.
                 const options = await LyricsRepository.getAppleWordLyricsOptions(
                     title, artist, album, durationSec, trackId, isrc, lyricsSources,
                 );
@@ -60,10 +60,10 @@ export default function NativeShellRoute({ kind }: { kind: 'lyrics' | 'modal' })
                     return;
                 }
 
-                // LRCLIB remains the line-level fallback and is only queried when the
+                // LRCLIB also supplies the line-level fallback when the
                 // user has enabled it in Settings.
                 const fallback = lyricsSources.includes('lrclib')
-                    ? await LyricsRepository.getLrcLibLyrics(title, artist, durationSec, trackId)
+                    ? await LyricsRepository.getLrcLibLyrics(title, artist, durationSec, trackId, album)
                     : null;
                 if (!cancelled) setResult({ identity, payload: fallback });
             } catch {

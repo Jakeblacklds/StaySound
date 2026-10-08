@@ -1,10 +1,19 @@
 import type { Track } from '@staysound/types/audio';
 import {
+  generatedLineLayers,
   generatedWordDisplayParts,
   getKaraokeTrackPath,
   loadLocalGeneratedLyrics,
   type GeneratedLyrics,
 } from './karaokeDesktop';
+import {
+  getLyricsTrackKey,
+  lyricsSourcesStore,
+  type EngineLine,
+  type LyricsCandidate,
+} from '../library/lyricsSources';
+import { readCachedLyrics as readPlayerLyricsCache } from '../storage/webLyricsCache';
+import { fetchLrcRedTtml } from '../library/lrcRedLyrics';
 
 export interface KaraokeWord {
   id: string;
@@ -37,17 +46,20 @@ function localGeneratedLyricsToStanzas(lyrics: GeneratedLyrics): KaraokeStanza[]
       id: `local-line-${lineIndex}`,
       begin: line.startMs,
       end: line.endMs,
-      words: line.words.flatMap((word, wordIndex) => {
-      const syllables = generatedWordDisplayParts(word);
-        return syllables.map((syllable, syllableIndex) => ({
-          id: `local-line-${lineIndex}-word-${wordIndex}-syllable-${syllableIndex}`,
-          text: syllable.text,
-          begin: syllable.startMs,
-          end: Math.max(syllable.startMs + 30, syllable.endMs),
-          background: false,
-          part: syllableIndex < syllables.length - 1,
-        }));
-      }),
+      words: (() => {
+        const { lead, backing } = generatedLineLayers(line);
+        return [...lead, ...backing].flatMap((word, wordIndex) => {
+          const syllables = generatedWordDisplayParts(word);
+          return syllables.map((syllable, syllableIndex) => ({
+            id: `local-line-${lineIndex}-word-${wordIndex}-syllable-${syllableIndex}`,
+            text: syllable.text,
+            begin: syllable.startMs,
+            end: Math.max(syllable.startMs + 30, syllable.endMs),
+            background: backing.includes(word),
+            part: syllableIndex < syllables.length - 1,
+          }));
+        });
+      })(),
     }));
   if (!lines.length) return [];
   return [{
@@ -60,7 +72,9 @@ function localGeneratedLyricsToStanzas(lyrics: GeneratedLyrics): KaraokeStanza[]
 }
 
 const LYRICS_TIMEOUT_MS = 9_000;
-const LYRICS_CACHE_DB_NAME = 'staysound_lyrics_cache_v1';
+const LYRICS_CACHE_DB_NAME = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+  ? 'staysound_lyrics_cache_tauri_v2'
+  : 'staysound_lyrics_cache_v1';
 const LYRICS_CACHE_STORE_NAME = 'ttml';
 const LYRICS_CACHE_DB_VERSION = 1;
 const LYRICS_TIMING_OFFSETS_KEY = 'staysound_lyrics_timing_offsets_v1';
@@ -348,6 +362,94 @@ export function parseKaraokeTtml(ttml: string): KaraokeStanza[] {
     : [];
 }
 
+/**
+ * The full player keeps the selected provider's result as engine lines rather
+ * than TTML. Convert that representation here so Karaoke does not discard a
+ * lyric the user can already see in the player just because this provider
+ * doesn't expose a TTML URL.
+ */
+function playerCandidateToStanzas(
+  candidate: LyricsCandidate,
+  durationMs: number,
+): KaraokeStanza[] {
+  const sourceLines = candidate.lines.filter(line => (
+    (line.text?.length ?? 0) > 0 || (line.backgroundText?.length ?? 0) > 0
+  ));
+  if (!sourceLines.length) return [];
+
+  const fallbackLineDuration = Math.max(1_800, Math.round(
+    (durationMs > 0 ? durationMs : sourceLines.length * 4_000) / sourceLines.length,
+  ));
+  const lines = sourceLines.map((line, lineIndex): KaraokeLine | null => {
+    const nextLine = sourceLines[lineIndex + 1];
+    const fallbackBegin = lineIndex * fallbackLineDuration;
+    const begin = Number.isFinite(line.timestamp) ? Math.max(0, line.timestamp!) : fallbackBegin;
+    const inferredEnd = Number.isFinite(nextLine?.timestamp)
+      ? Math.max(begin + 80, nextLine!.timestamp!)
+      : begin + fallbackLineDuration;
+    const end = Number.isFinite(line.endtime) && line.endtime! > begin
+      ? line.endtime!
+      : inferredEnd;
+    const words = playerLineToWords(line, lineIndex, begin, end);
+    if (!words.length) return null;
+    return {
+      id: `player-${candidate.id}-line-${lineIndex}`,
+      begin,
+      end: Math.max(end, words.at(-1)?.end ?? end),
+      words,
+    };
+  }).filter((line): line is KaraokeLine => Boolean(line));
+
+  if (!lines.length) return [];
+  return [{
+    id: `player-${candidate.id}`,
+    begin: lines[0].begin,
+    end: lines.at(-1)?.end ?? lines[0].end,
+    part: '',
+    lines,
+  }];
+}
+
+function playerLineToWords(
+  line: EngineLine,
+  lineIndex: number,
+  lineBegin: number,
+  lineEnd: number,
+): KaraokeWord[] {
+  const syllables = [
+    ...(line.text ?? []).map(syllable => ({ syllable, background: Boolean(line.background) })),
+    ...(line.backgroundText ?? []).map(syllable => ({ syllable, background: true })),
+  ].filter(({ syllable }) => Boolean(syllable.text?.trim()));
+  if (!syllables.length) return [];
+
+  return syllables.map(({ syllable, background }, wordIndex) => {
+    const fallbackBegin = lineBegin + (lineEnd - lineBegin) * wordIndex / syllables.length;
+    const fallbackEnd = lineBegin + (lineEnd - lineBegin) * (wordIndex + 1) / syllables.length;
+    const begin = Number.isFinite(syllable.timestamp) ? syllable.timestamp! : fallbackBegin;
+    const end = Number.isFinite(syllable.endtime) && syllable.endtime! > begin
+      ? syllable.endtime!
+      : Math.max(begin + 30, fallbackEnd);
+    return {
+      id: `player-line-${lineIndex}-word-${wordIndex}`,
+      text: syllable.text!.trim(),
+      begin,
+      end,
+      background,
+      part: Boolean(syllable.part),
+    };
+  });
+}
+
+function selectedPlayerLyrics(track: Track): LyricsCandidate | null {
+  const rendered = lyricsSourcesStore.getRenderedCandidate(track);
+  if (rendered) return rendered;
+  const state = lyricsSourcesStore.getState();
+  if (state.trackKey !== getLyricsTrackKey(track)) return null;
+  return state.candidates.find(candidate => candidate.id === state.selectedId)
+    ?? state.candidates[0]
+    ?? null;
+}
+
 export async function fetchKaraokeLyrics(
   track: Track,
   durationMs: number,
@@ -367,10 +469,47 @@ export async function fetchKaraokeLyrics(
       }
     }
 
+    // The player and Karaoke must resolve the same lyric. Prefer its live
+    // selection, then its durable candidate cache, before the old TTML-only
+    // fallback below. This also covers providers such as LRCLIB and Genius.
+    const liveCandidate = selectedPlayerLyrics(track);
+    if (liveCandidate) {
+      const stanzas = playerCandidateToStanzas(liveCandidate, durationMs);
+      if (stanzas.length) return stanzas;
+    }
+    const playerCache = await readPlayerLyricsCache(getLyricsTrackKey(track));
+    const selectedCandidate = playerCache?.candidates.find(
+      candidate => candidate.id === playerCache.selectedId,
+    ) ?? playerCache?.candidates[0];
+    if (selectedCandidate) {
+      const stanzas = playerCandidateToStanzas(
+        selectedCandidate as LyricsCandidate,
+        durationMs,
+      );
+      if (stanzas.length) return stanzas;
+    }
+
     const cacheKey = getLyricsCacheKey(track);
     const cachedTtml = await readCachedLyrics(cacheKey);
     if (controller.signal.aborted) return [];
     if (cachedTtml) return parseKaraokeTtml(cachedTtml);
+
+    if ('__TAURI_INTERNALS__' in window) {
+      const lrcRedTtml = await fetchLrcRedTtml({
+        title: track.title,
+        artist: track.artist,
+        album: track.album,
+        durationMs,
+      }, track.isrc);
+      if (controller.signal.aborted) return [];
+      if (lrcRedTtml) {
+        const stanzas = parseKaraokeTtml(lrcRedTtml);
+        if (stanzas.length) {
+          await writeCachedLyrics(cacheKey, lrcRedTtml);
+          return stanzas;
+        }
+      }
+    }
 
     const params = new URLSearchParams({
       track: track.title,

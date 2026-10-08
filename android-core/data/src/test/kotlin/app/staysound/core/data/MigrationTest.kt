@@ -96,7 +96,7 @@ class MigrationTest {
         assertEquals(false, restored.tracks.single().track.favorite)
         assertEquals(a.extensions, restored.tracks.single().track.extensions)
         assertEquals(listOf(a.id), restored.playlists.first { it.id == id }.trackIds)
-        assertEquals("es", LegacyCodec.envelope(legacy()[LegacyCodec.SETTINGS]).getJSONObject("state").getString("language"))
+        assertEquals("es", LegacyCodec.settingsEnvelope(legacy()[LegacyCodec.SETTINGS]).getJSONObject("state").getString("language"))
         assertEquals(source["staysound-auth"], legacy()["staysound-auth"])
         assertEquals(source["lyrics-%C3%89dith%20%2F%20Song"], legacy()["lyrics-%C3%89dith%20%2F%20Song"])
         close()
@@ -149,7 +149,7 @@ class MigrationTest {
             throws { data.exportForLegacyAtShutdown() }; close()
             val recovered = open(); recovered.recoverInterruptedMigration(); recovered.exportForLegacyAtShutdown(); close()
             assertEquals("Newer", LegacyImport.parse(legacy()).tracks.single().track.title)
-            assertEquals("es", LegacyCodec.envelope(legacy()[LegacyCodec.SETTINGS]).getJSONObject("state").getString("language"))
+            assertEquals("es", LegacyCodec.settingsEnvelope(legacy()[LegacyCodec.SETTINGS]).getJSONObject("state").getString("language"))
         }
     }
     @Test fun damagedBackupNeverActivatesPartialMigration() = runBlocking {
@@ -201,8 +201,30 @@ class MigrationTest {
         assertEquals(oldTrack, data.library.snapshot().tracks.single())
         assertEquals(oldTrack.dateAdded, data.library.downloads.first().single().updatedAt)
     }
+    @Test fun legacySettingsEnableLrcRedAndVersionOnePreservesDisabledSources() = runBlocking {
+        seed(); val data = open(); data.importLegacyAtStartup()
+        assertEquals(listOf("lrc-red", "apple", "lrclib"), data.settings.read().lyricsSources)
+        data.settings.setLyricsSourceEnabled("lrc-red", false)
+        assertEquals(listOf("apple", "lrclib"), data.settings.read().lyricsSources)
+        close()
+        assertEquals(listOf("apple", "lrclib"), open().settings.read().lyricsSources)
+    }
+    @Test fun nativeStorageAcceptsSettingsV1AndRejectsUnknownVersions() = runBlocking {
+        seed(); val data = open(); data.importLegacyAtStartup()
+        val storage = data.documents
+        val state = JSONObject().put("lyricsSources", JSONArray(listOf("lrc-red", "lrclib")))
+        val document = JSONObject().put("state", state).put("version", 1)
+        storage.set(LegacyCodec.SETTINGS, document.toString())
+        assertEquals(listOf("lrc-red", "lrclib"), data.settings.read().lyricsSources)
+        try {
+            storage.set(LegacyCodec.SETTINGS, document.put("version", 2).toString())
+            fail("Unknown settings version must be rejected")
+        } catch (_: IllegalArgumentException) { }
+        assertEquals(listOf("lrc-red", "lrclib"), data.settings.read().lyricsSources)
+    }
     @Test fun settingsEditsKeepUnknownSettingsAndLastLyricsProvider() = runBlocking {
         seed(); val data = open(); data.importLegacyAtStartup()
+        data.settings.setLyricsSourceEnabled("lrc-red", false)
         data.settings.setLyricsSourceEnabled("apple", false)
         data.settings.setLyricsSourceEnabled("lrclib", false)
         assertEquals(listOf("lrclib"), data.settings.read().lyricsSources)
@@ -211,7 +233,7 @@ class MigrationTest {
         data.settings.setAppearance("material3", "dark", "#112233", false, true, "expressive")
         data.settings.setEqualizer(EqualizerSettings("system", true, "flat", mapOf("100" to 2.0)))
         data.exportForLegacyAtShutdown()
-        val settings = LegacyCodec.envelope(legacy()[LegacyCodec.SETTINGS]).getJSONObject("state")
+        val settings = LegacyCodec.settingsEnvelope(legacy()[LegacyCodec.SETTINGS]).getJSONObject("state")
         assertEquals("classic", settings.getString("lyricsFont"))
         assertEquals(650, settings.getInt("spectrumDelayMs"))
         assertEquals("dark", settings.getString("mode"))

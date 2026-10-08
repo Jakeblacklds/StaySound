@@ -1,11 +1,11 @@
 use serde::Serialize;
 use std::{
-    collections::hash_map::DefaultHasher,
+    collections::{hash_map::DefaultHasher, HashMap},
     fs,
     hash::{Hash, Hasher},
     path::{Path, PathBuf},
-    sync::Mutex,
-    time::UNIX_EPOCH,
+    sync::{Mutex, OnceLock},
+    time::{Duration, Instant, UNIX_EPOCH},
 };
 use tauri::{ipc::Response, AppHandle, Manager, State};
 
@@ -270,13 +270,139 @@ pub async fn fetch_tidal_artwork(url: String) -> Result<Response, String> {
     Ok(Response::new(bytes.to_vec()))
 }
 
+const TIDAL_CLIENT_ID: &str = "txNoH4kkV41MfH25";
+const TIDAL_CLIENT_SECRET: &str = "dQjy0MinCEvxi1O4UmxvxWnDjt4cgHBPw8ll6nYBk98=";
+
+/// One HTTP client and one catalog token for the whole session. Search-as-you-type
+/// fires a request every few keystrokes; authenticating on each of them used to
+/// double the latency of every result the user saw.
+fn tidal_client() -> &'static reqwest::Client {
+    static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
+    CLIENT.get_or_init(|| {
+        reqwest::Client::builder()
+            .timeout(Duration::from_secs(12))
+            .build()
+            .unwrap_or_else(|_| reqwest::Client::new())
+    })
+}
+
+fn tidal_token_slot() -> &'static Mutex<Option<(String, Instant)>> {
+    static TOKEN: OnceLock<Mutex<Option<(String, Instant)>>> = OnceLock::new();
+    TOKEN.get_or_init(|| Mutex::new(None))
+}
+
+async fn tidal_token(force_refresh: bool) -> Result<String, String> {
+    if !force_refresh {
+        if let Ok(slot) = tidal_token_slot().lock() {
+            if let Some((token, expires_at)) = slot.as_ref() {
+                if Instant::now() < *expires_at {
+                    return Ok(token.clone());
+                }
+            }
+        }
+    }
+
+    let response = tidal_client()
+        .post("https://auth.tidal.com/v1/oauth2/token")
+        .basic_auth(TIDAL_CLIENT_ID, Some(TIDAL_CLIENT_SECRET))
+        .form(&[
+            ("client_id", TIDAL_CLIENT_ID),
+            ("client_secret", TIDAL_CLIENT_SECRET),
+            ("grant_type", "client_credentials"),
+        ])
+        .send()
+        .await
+        .map_err(|error| format!("No se pudo autenticar el catálogo TIDAL: {error}"))?;
+    if !response.status().is_success() {
+        return Err(format!("La autenticación TIDAL falló ({})", response.status()));
+    }
+    let payload = response
+        .json::<serde_json::Value>()
+        .await
+        .map_err(|error| error.to_string())?;
+    let token = payload
+        .get("access_token")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| "TIDAL no devolvió un token de catálogo.".to_string())?
+        .to_owned();
+    // Refresh a minute early so a request never races the expiry.
+    let lifetime = payload
+        .get("expires_in")
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(3600)
+        .saturating_sub(60)
+        .max(60);
+    if let Ok(mut slot) = tidal_token_slot().lock() {
+        *slot = Some((token.clone(), Instant::now() + Duration::from_secs(lifetime)));
+    }
+    Ok(token)
+}
+
+async fn tidal_get(path: &str, params: &[(String, String)]) -> Result<serde_json::Value, String> {
+    let url = format!("https://api.tidal.com/v1/{path}");
+    let mut query: Vec<(&str, &str)> = vec![("countryCode", "US")];
+    query.extend(params.iter().map(|(key, value)| (key.as_str(), value.as_str())));
+
+    for attempt in 0..2 {
+        let token = tidal_token(attempt > 0).await?;
+        let response = tidal_client()
+            .get(&url)
+            .bearer_auth(token)
+            .query(&query)
+            .send()
+            .await
+            .map_err(|error| format!("No se pudo consultar el catálogo TIDAL: {error}"))?;
+        // A revoked or clock-skewed token answers 401; mint a fresh one once.
+        if response.status() == reqwest::StatusCode::UNAUTHORIZED && attempt == 0 {
+            continue;
+        }
+        if !response.status().is_success() {
+            return Err(format!("El catálogo TIDAL respondió {}", response.status()));
+        }
+        return response
+            .json::<serde_json::Value>()
+            .await
+            .map_err(|error| error.to_string());
+    }
+    Err("TIDAL rechazó el token de catálogo.".into())
+}
+
+/// Only the read-only catalog routes the Descargas browser needs; the webview
+/// can't turn this into a general proxy for the TIDAL API.
+fn is_allowed_tidal_path(path: &str) -> bool {
+    let segments: Vec<&str> = path.split('/').collect();
+    let is_id = |value: &str| !value.is_empty() && value.len() <= 20 && value.bytes().all(|byte| byte.is_ascii_digit());
+    match segments.as_slice() {
+        ["search"] => true,
+        ["artists", id] | ["albums", id] => is_id(id),
+        ["artists", id, "toptracks" | "albums" | "similar"] => is_id(id),
+        ["albums", id, "items"] => is_id(id),
+        _ => false,
+    }
+}
+
+#[tauri::command]
+pub async fn tidal_catalog_request(
+    path: String,
+    params: HashMap<String, String>,
+) -> Result<serde_json::Value, String> {
+    const ALLOWED_PARAMS: &[&str] = &["query", "types", "limit", "offset", "filter"];
+    let path = path.trim_matches('/');
+    if !is_allowed_tidal_path(path) {
+        return Err("La ruta del catálogo TIDAL no está permitida.".into());
+    }
+    let params: Vec<(String, String)> = params
+        .into_iter()
+        .filter(|(key, value)| ALLOWED_PARAMS.contains(&key.as_str()) && value.len() <= 256)
+        .collect();
+    tidal_get(path, &params).await
+}
+
 #[tauri::command]
 pub async fn search_tidal_catalog(
     kind: String,
     query: String,
 ) -> Result<serde_json::Value, String> {
-    const CLIENT_ID: &str = "txNoH4kkV41MfH25";
-    const CLIENT_SECRET: &str = "dQjy0MinCEvxi1O4UmxvxWnDjt4cgHBPw8ll6nYBk98=";
     let endpoint = match kind.as_str() {
         "tracks" | "artists" | "albums" | "playlists" => kind,
         _ => return Err("El tipo de búsqueda TIDAL no está permitido.".into()),
@@ -285,48 +411,14 @@ pub async fn search_tidal_catalog(
     if query.is_empty() {
         return Ok(serde_json::json!({ "items": [] }));
     }
-
-    let client = reqwest::Client::new();
-    let token_response = client
-        .post("https://auth.tidal.com/v1/oauth2/token")
-        .basic_auth(CLIENT_ID, Some(CLIENT_SECRET))
-        .form(&[
-            ("client_id", CLIENT_ID),
-            ("client_secret", CLIENT_SECRET),
-            ("grant_type", "client_credentials"),
-        ])
-        .send()
-        .await
-        .map_err(|error| format!("No se pudo autenticar el catálogo TIDAL: {error}"))?;
-    if !token_response.status().is_success() {
-        return Err(format!(
-            "La autenticación TIDAL falló ({})",
-            token_response.status()
-        ));
-    }
-    let token = token_response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|error| error.to_string())?
-        .get("access_token")
-        .and_then(serde_json::Value::as_str)
-        .ok_or_else(|| "TIDAL no devolvió un token de catálogo.".to_string())?
-        .to_owned();
-
-    let response = client
-        .get(format!("https://api.tidal.com/v1/search/{endpoint}"))
-        .bearer_auth(token)
-        .query(&[("countryCode", "US"), ("query", query), ("limit", "50")])
-        .send()
-        .await
-        .map_err(|error| format!("No se pudo consultar el catálogo TIDAL: {error}"))?;
-    if !response.status().is_success() {
-        return Err(format!("La búsqueda TIDAL falló ({})", response.status()));
-    }
-    response
-        .json::<serde_json::Value>()
-        .await
-        .map_err(|error| error.to_string())
+    tidal_get(
+        &format!("search/{endpoint}"),
+        &[
+            ("query".to_string(), query.to_string()),
+            ("limit".to_string(), "50".to_string()),
+        ],
+    )
+    .await
 }
 
 /// Downloads an Apple motion cover once and keeps it in the app cache.

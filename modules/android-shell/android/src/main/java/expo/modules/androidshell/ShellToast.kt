@@ -1,5 +1,7 @@
 package expo.modules.androidshell
 
+import expo.modules.playerchrome.IconMotion
+import expo.modules.playerchrome.CanvasPen
 import android.animation.ValueAnimator
 import android.annotation.SuppressLint
 import android.content.Context
@@ -225,38 +227,28 @@ internal class ShellToast(
 @SuppressLint("ViewConstructor")
 internal class ToastGlyph(context: Context, private val kind: String, private val tint: Int) : View(context) {
     private val density = resources.displayMetrics.density
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-        style = Paint.Style.STROKE; strokeCap = Paint.Cap.ROUND; strokeJoin = Paint.Join.ROUND
-    }
     private val disc = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val path = Path()
+    private val pen = CanvasPen().apply { ink = tint }
+    private val motion = IconMotion { invalidate() }
+    private val icon = when (kind) { "success" -> "check"; "error" -> "alert"; "warning" -> "warning"; "close" -> "close"; else -> "info" }
 
     fun pop(delayMs: Long) {
         scaleX = .4f; scaleY = .4f; alpha = 0f
         animate().scaleX(1f).scaleY(1f).alpha(1f).setStartDelay(delayMs).setDuration(420L)
             .setInterpolator(android.view.animation.OvershootInterpolator(2.4f)).start()
+        // The check draws itself on as the badge lands.
+        if (icon == "check") { motion.rewind(); postDelayed({ motion.play() }, delayMs + 120L) }
     }
+    override fun setPressed(pressed: Boolean) { super.setPressed(pressed); motion.setPressed(pressed, icon) }
 
     override fun onDraw(canvas: Canvas) {
-        val cx = width / 2f; val cy = height / 2f
-        val unit = if (kind == "close") 16f * density / 24f else 18f * density / 24f
+        val size = (if (kind == "close") 16f else 18f) * density
         if (kind != "close") {
             disc.color = ColorUtils.setAlphaComponent(tint, 46)
-            canvas.drawCircle(cx, cy, min(width, height) / 2f, disc)
+            canvas.drawCircle(width / 2f, height / 2f, min(width, height) / 2f, disc)
         }
-        paint.color = tint
-        paint.strokeWidth = 2f * density
-        path.reset()
-        fun p(x: Float, y: Float) = Pair(cx + (x - 12f) * unit, cy + (y - 12f) * unit)
-        fun move(x: Float, y: Float) = p(x, y).let { path.moveTo(it.first, it.second) }
-        fun line(x: Float, y: Float) = p(x, y).let { path.lineTo(it.first, it.second) }
-        when (kind) {
-            "success" -> { move(5f, 12.5f); line(10f, 17f); line(19f, 7.5f) }
-            "error" -> { move(12f, 6f); line(12f, 13.5f); move(12f, 18f); line(12f, 18.1f) }
-            "warning" -> { move(12f, 4.5f); line(20.5f, 19f); line(3.5f, 19f); path.close(); move(12f, 10f); line(12f, 13.5f); move(12f, 16.4f); line(12f, 16.5f) }
-            "close" -> { move(6f, 6f); line(18f, 18f); move(18f, 6f); line(6f, 18f) }
-            else -> { move(12f, 11f); line(12f, 17f); move(12f, 7f); line(12f, 7.1f) }
-        }
-        canvas.drawPath(path, paint)
+        canvas.save(); canvas.translate((width - size) / 2f, (height - size) / 2f)
+        pen.draw(canvas, icon, size, size, motion.pressValue, motion.flourishValue, 0f)
+        canvas.restore()
     }
 }

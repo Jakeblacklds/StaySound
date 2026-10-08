@@ -2,12 +2,16 @@ import { formatDuration } from '@staysound/services/metadataService';
 import { useEffect, useState } from 'react';
 import {
   getCatalogAlbum,
+  getCatalogArtist,
   type CatalogAlbum,
   type CatalogAlbumDetail,
 } from '../../downloads/monochromeCatalog';
+import { canonicalAlbumTitle, foldText } from '../../downloads/catalogRanking';
 import { DownloadIcon } from '../icons';
 import {
+  CatalogAlbumCard,
   CatalogTrackRow,
+  DlSectionHeader,
   DlArtwork,
   DlErrorState,
   DlTrackSkeleton,
@@ -33,6 +37,7 @@ export function DownloadAlbumView({
   const [detail, setDetail] = useState<CatalogAlbumDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
+  const [moreByArtist, setMoreByArtist] = useState<CatalogAlbum[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -46,6 +51,28 @@ export function DownloadAlbumView({
       });
     return () => { cancelled = true; };
   }, [albumId, reloadKey]);
+
+  const albumArtistId = detail?.album.artistId ?? seed?.artistId;
+  const albumArtistName = detail?.album.artist ?? seed?.artist;
+
+  // "Más de …" como en Spotify: la discografía del artista viene de la misma
+  // caché que su ficha, así que abrirla después es instantáneo.
+  useEffect(() => {
+    let cancelled = false;
+    setMoreByArtist([]);
+    if (!albumArtistId) return undefined;
+    getCatalogArtist(albumArtistId, albumArtistName)
+      .then(artistDetail => {
+        if (cancelled) return;
+        const ownTitle = foldText(canonicalAlbumTitle(detail?.album.title ?? seed?.title ?? ''));
+        setMoreByArtist([...artistDetail.albums, ...artistDetail.singles]
+          .filter(candidate => candidate.id !== albumId && foldText(candidate.title) !== ownTitle)
+          .slice(0, 12));
+      })
+      .catch(() => undefined);
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [albumId, albumArtistId]);
 
   const album = detail?.album ?? seed;
   const tracks = detail?.tracks ?? [];
@@ -118,9 +145,32 @@ export function DownloadAlbumView({
             />
           ))}
           {tracks.length === 0 && (
-            <p className="dl-inline-empty">Monochrome no devolvió canciones para este álbum.</p>
+            <p className="dl-inline-empty">El catálogo no devolvió canciones para este álbum.</p>
           )}
         </div>
+      )}
+
+      {detail && moreByArtist.length > 0 && album?.artist && (
+        <section className="dl-section">
+          <DlSectionHeader
+            title={`Más de ${album.artist}`}
+            action={album.artistId && (
+              <button className="dl-text-btn" onClick={() => api.openArtist({ id: album.artistId!, name: album.artist })}>
+                Ver discografía
+              </button>
+            )}
+          />
+          <div className="dl-card-grid single-row">
+            {moreByArtist.map(candidate => (
+              <CatalogAlbumCard
+                key={candidate.id}
+                album={candidate}
+                subtitle={[candidate.year, candidate.type === 'SINGLE' ? 'Sencillo' : candidate.type === 'EP' ? 'EP' : 'Álbum'].filter(Boolean).join(' · ')}
+                onOpen={() => api.openAlbum(candidate)}
+              />
+            ))}
+          </div>
+        </section>
       )}
     </section>
   );

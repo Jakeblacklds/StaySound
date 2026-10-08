@@ -582,8 +582,12 @@ class AudioEngineClass {
     }
 
     /**
-     * Remove tracks from the native queue by index
+     * Append to the native queue without interrupting playback.
      */
+    async appendToQueue(track: Track, expectedIds: string[], dropIndex = -1): Promise<void> {
+        await TrackPlayerService.appendToNativeQueue(track, expectedIds, dropIndex);
+    }
+
     async removeTracks(indices: number[]): Promise<void> {
         await TrackPlayerService.removeTracks(indices);
     }

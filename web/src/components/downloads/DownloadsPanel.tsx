@@ -1,7 +1,9 @@
 import type { TidalTrack, Track } from '@staysound/types/audio';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   configureSoulseekShares,
+  isSoulseekMusicSharingEnabled,
+  SOULSEEK_SHARE_MUSIC_KEY,
   invalidateSoulseekMatches,
   isSoulseekBridgeAvailable,
   loadSoulseekCredentials,
@@ -24,6 +26,12 @@ import {
   type CatalogSearch,
 } from '../../downloads/monochromeCatalog';
 import {
+  loadRecentCatalogItems,
+  recentItemKey,
+  saveRecentCatalogItems,
+  type RecentCatalogItem,
+} from '../../downloads/recentCatalogItems';
+import {
   canPickDownloadFolder,
   getDownloadFolderHandle,
   pickDownloadFolder,
@@ -37,6 +45,7 @@ import {
 import { DesktopRequiredNotice } from '../DesktopRequiredNotice';
 import {
   ChevronLeftIcon,
+  ChevronRightIcon,
   CloseIcon,
   DownloadIcon,
   FolderIcon,
@@ -70,9 +79,9 @@ import {
  * cajón de Actividad para que la vista principal sea catálogo, no diagnóstico.
  */
 
-const SOULSEEK_SHARE_MUSIC_KEY = 'staysound.web.soulseek.share-music-folder.v1';
-const RECENT_SEARCHES_KEY = 'staysound.web.downloads.recent-searches.v1';
-const RECENT_SEARCHES_LIMIT = 8;
+/** Lo justo para no disparar una búsqueda por cada tecla, sin que se sienta lento. */
+const SEARCH_AS_YOU_TYPE_DELAY_MS = 260;
+const SEARCH_AS_YOU_TYPE_MIN_CHARS = 2;
 
 type DownloadQueueStatus = 'queued' | 'resolving' | 'downloading' | 'done' | 'error';
 
@@ -95,6 +104,32 @@ type DownloadRoute =
   | { kind: 'browse' }
   | { kind: 'album'; id: number; seed?: CatalogAlbum }
   | { kind: 'artist'; id: number; seed?: CatalogArtist };
+
+/**
+ * Historial propio del catálogo, como las flechas ‹ › de Spotify: ir atrás no
+ * destruye lo que había adelante, y cada entrada recuerda hasta dónde se había
+ * bajado para volver exactamente al mismo punto.
+ */
+type DownloadHistory = {
+  entries: Array<{ route: DownloadRoute; scrollTop: number }>;
+  index: number;
+};
+
+function sameRoute(left: DownloadRoute, right: DownloadRoute): boolean {
+  if (left.kind === 'browse' || right.kind === 'browse') return left.kind === right.kind;
+  return left.kind === right.kind && left.id === right.id;
+}
+
+/** El área que hace scroll no es el panel sino el contenedor del shell. */
+function scrollParentOf(element: HTMLElement | null): HTMLElement | null {
+  let node = element?.parentElement ?? null;
+  while (node) {
+    const overflowY = window.getComputedStyle(node).overflowY;
+    if (overflowY === 'auto' || overflowY === 'scroll') return node;
+    node = node.parentElement;
+  }
+  return (document.scrollingElement as HTMLElement | null) ?? null;
+}
 
 const DOWNLOAD_STAGE_LABELS: Record<DownloadActivity['stage'], string> = {
   connecting: 'Conectando',
@@ -137,15 +172,6 @@ function getDownloadProvider(source: DownloadSource) {
   return source === 'soulseek' ? soulseekDownloadProvider : monochromeDownloadProvider;
 }
 
-function loadRecentSearches(): string[] {
-  try {
-    const raw = window.localStorage.getItem(RECENT_SEARCHES_KEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    return Array.isArray(parsed) ? parsed.filter((item): item is string => typeof item === 'string') : [];
-  } catch {
-    return [];
-  }
-}
 
 export function DownloadsPanel({
   onDownloaded,
@@ -155,14 +181,14 @@ export function DownloadsPanel({
   onGetApp: () => void;
 }) {
   const source: DownloadSource = 'soulseek';
-  const [routes, setRoutes] = useState<DownloadRoute[]>([{ kind: 'browse' }]);
+  const [history, setHistory] = useState<DownloadHistory>({ entries: [{ route: { kind: 'browse' }, scrollTop: 0 }], index: 0 });
   const [queryDraft, setQueryDraft] = useState('');
   const [activeQuery, setActiveQuery] = useState('');
   const [results, setResults] = useState<CatalogSearch | null>(null);
   const [isSearching, setIsSearching] = useState(false);
   const [searchError, setSearchError] = useState<string | null>(null);
   const [filter, setFilter] = useState<DownloadCatalogFilter>('all');
-  const [recentSearches, setRecentSearches] = useState<string[]>(loadRecentSearches);
+  const [recentItems, setRecentItems] = useState<RecentCatalogItem[]>(loadRecentCatalogItems);
 
   const [downloadFolder, setDownloadFolder] = useState<FileSystemDirectoryHandle | null>(null);
   const [needsFolderPermission, setNeedsFolderPermission] = useState(false);
@@ -175,9 +201,7 @@ export function DownloadsPanel({
   const [soulseekPassword, setSoulseekPassword] = useState(() => loadSoulseekCredentials()?.password ?? '');
   const [hasSoulseekCredentials, setHasSoulseekCredentials] = useState(() => Boolean(loadSoulseekCredentials()));
   const [desktopMusicFolder, setDesktopMusicFolder] = useState<string | null>(null);
-  const [shareMusicFolder, setShareMusicFolder] = useState(() => (
-    window.localStorage.getItem(SOULSEEK_SHARE_MUSIC_KEY) === '1'
-  ));
+  const [shareMusicFolder, setShareMusicFolder] = useState(isSoulseekMusicSharingEnabled);
   const [shareStatus, setShareStatus] = useState<SoulseekShareStatus | null>(null);
   const [shareBusy, setShareBusy] = useState(false);
 
@@ -187,8 +211,13 @@ export function DownloadsPanel({
   const onDownloadedRef = useRef(onDownloaded);
   const searchRunRef = useRef(0);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const panelRef = useRef<HTMLElement | null>(null);
+  const pendingScrollRef = useRef<number | null>(null);
+  const activeQueryRef = useRef('');
 
-  const route = routes[routes.length - 1];
+  const route = history.entries[history.index].route;
+  const canGoBack = history.index > 0;
+  const canGoForward = history.index < history.entries.length - 1;
 
   // Soulseek necesita una conexión TCP directa, que solo abre el bridge que
   // viene con las builds de escritorio. Si el health check ya respondió que no
@@ -258,62 +287,124 @@ export function DownloadsPanel({
     return () => window.clearTimeout(timer);
   }, [message]);
 
-  const goBack = useCallback(() => {
-    setRoutes(stack => (stack.length > 1 ? stack.slice(0, -1) : stack));
-  }, []);
+  const currentScrollTop = useCallback(() => scrollParentOf(panelRef.current)?.scrollTop ?? 0, []);
 
-  // Esc sube un nivel del catálogo, salvo que haya un diálogo abierto (ese Esc
-  // es suyo) o que el foco esté en un campo de texto.
+  const navigate = useCallback((next: DownloadRoute) => {
+    const scrollTop = currentScrollTop();
+    setHistory(state => {
+      const current = state.entries[state.index];
+      if (sameRoute(current.route, next)) return state;
+      const entries = state.entries.slice(0, state.index + 1);
+      entries[state.index] = { ...current, scrollTop };
+      pendingScrollRef.current = 0;
+      return { entries: [...entries, { route: next, scrollTop: 0 }], index: state.index + 1 };
+    });
+  }, [currentScrollTop]);
+
+  const jumpTo = useCallback((resolveIndex: (state: DownloadHistory) => number) => {
+    const scrollTop = currentScrollTop();
+    setHistory(state => {
+      const index = resolveIndex(state);
+      if (index < 0 || index >= state.entries.length || index === state.index) return state;
+      const entries = [...state.entries];
+      entries[state.index] = { ...entries[state.index], scrollTop };
+      pendingScrollRef.current = entries[index].scrollTop;
+      return { entries, index };
+    });
+  }, [currentScrollTop]);
+
+  const goBack = useCallback(() => jumpTo(state => state.index - 1), [jumpTo]);
+  const goForward = useCallback(() => jumpTo(state => state.index + 1), [jumpTo]);
+
+  // Restaura el scroll de la entrada a la que se llegó. Los detalles cargan
+  // desde la caché del catálogo, así que casi siempre la altura ya está; el
+  // segundo intento cubre el frame en que el contenido aún se está montando.
+  useLayoutEffect(() => {
+    const target = pendingScrollRef.current;
+    if (target === null) return undefined;
+    pendingScrollRef.current = null;
+    const scroller = scrollParentOf(panelRef.current);
+    if (!scroller) return undefined;
+    scroller.scrollTop = target;
+    if (target === 0) return undefined;
+    const frame = window.requestAnimationFrame(() => { scroller.scrollTop = target; });
+    return () => window.cancelAnimationFrame(frame);
+  }, [history]);
+
+  // Atajos del catálogo: Esc / ⌘[ atrás, ⌘] adelante, los botones laterales
+  // del ratón, y "/" o ⌘K para ir al buscador. Las flechas solas (incluso con
+  // Alt) ya son del reproductor, y con un diálogo abierto el teclado es suyo.
   useEffect(() => {
-    if (routes.length <= 1 || showActivity || showSettings) return;
+    if (showActivity || showSettings) return undefined;
+    function isTyping(target: EventTarget | null) {
+      const element = target as HTMLElement | null;
+      return Boolean(element && (/^(INPUT|TEXTAREA|SELECT)$/.test(element.tagName) || element.isContentEditable));
+    }
     function handleKey(event: KeyboardEvent) {
-      const target = event.target as HTMLElement | null;
-      if (event.key !== 'Escape') return;
-      if (target && /^(INPUT|TEXTAREA)$/.test(target.tagName)) return;
-      goBack();
+      if (event.defaultPrevented) return;
+      const meta = event.metaKey || event.ctrlKey;
+      if ((meta && event.key.toLowerCase() === 'k') || (event.key === '/' && !isTyping(event.target))) {
+        event.preventDefault();
+        searchInputRef.current?.focus();
+        searchInputRef.current?.select();
+        return;
+      }
+      if (isTyping(event.target)) return;
+      if (event.key === 'Escape' || (meta && event.key === '[')) {
+        event.preventDefault();
+        goBack();
+      } else if (meta && event.key === ']') {
+        event.preventDefault();
+        goForward();
+      }
+    }
+    function handleMouse(event: MouseEvent) {
+      if (event.button === 3) { event.preventDefault(); goBack(); }
+      if (event.button === 4) { event.preventDefault(); goForward(); }
     }
     window.addEventListener('keydown', handleKey);
-    return () => window.removeEventListener('keydown', handleKey);
-  }, [routes.length, goBack, showActivity, showSettings]);
+    window.addEventListener('mouseup', handleMouse);
+    return () => {
+      window.removeEventListener('keydown', handleKey);
+      window.removeEventListener('mouseup', handleMouse);
+    };
+  }, [goBack, goForward, showActivity, showSettings]);
 
-  function pushRoute(next: DownloadRoute) {
-    setRoutes(stack => {
-      const current = stack[stack.length - 1];
-      if (current.kind === next.kind && 'id' in current && 'id' in next && current.id === next.id) return stack;
-      return [...stack, next];
+  const rememberItem = useCallback((item: RecentCatalogItem) => {
+    setRecentItems(previous => {
+      const key = recentItemKey(item);
+      return saveRecentCatalogItems([item, ...previous.filter(entry => recentItemKey(entry) !== key)]);
     });
-  }
+  }, []);
 
-  function rememberSearch(term: string) {
-    setRecentSearches(previous => {
-      const next = [term, ...previous.filter(item => item.toLowerCase() !== term.toLowerCase())]
-        .slice(0, RECENT_SEARCHES_LIMIT);
-      try {
-        window.localStorage.setItem(RECENT_SEARCHES_KEY, JSON.stringify(next));
-      } catch {
-        // Modo privado: la búsqueda funciona igual sin historial.
-      }
-      return next;
-    });
-  }
+  const forgetItem = useCallback((item: RecentCatalogItem) => {
+    const key = recentItemKey(item);
+    setRecentItems(previous => saveRecentCatalogItems(previous.filter(entry => recentItemKey(entry) !== key)));
+  }, []);
 
-  async function runSearch(term: string) {
+  const clearRecentItems = useCallback(() => setRecentItems(saveRecentCatalogItems([])), []);
+
+  /**
+   * `syncInput` solo cuando la búsqueda viene de fuera del campo (recientes):
+   * mientras se escribe, reescribir el input se comería el espacio que el
+   * usuario acaba de teclear.
+   */
+  async function runSearch(term: string, { syncInput = false } = {}) {
     const trimmed = term.trim();
     if (!trimmed) return;
     const runId = searchRunRef.current + 1;
     searchRunRef.current = runId;
 
-    setQueryDraft(trimmed);
+    if (syncInput) setQueryDraft(trimmed);
     setActiveQuery(trimmed);
-    setRoutes([{ kind: 'browse' }]);
-    setFilter('all');
+    activeQueryRef.current = trimmed;
+    if (route.kind !== 'browse') navigate({ kind: 'browse' });
     setIsSearching(true);
     setSearchError(null);
     try {
       const found = await searchCatalog(trimmed);
       if (searchRunRef.current !== runId) return;
       setResults(found);
-      rememberSearch(trimmed);
     } catch (error) {
       if (searchRunRef.current !== runId) return;
       // Red de seguridad: el proveedor de descargas mantiene su propio catálogo
@@ -330,7 +421,6 @@ export function DownloadsPanel({
           albums: albumsFromTracks(fallbackTracks),
           artists: artistsFromTracks(fallbackTracks),
         });
-        rememberSearch(trimmed);
         return;
       }
       setResults(null);
@@ -339,6 +429,27 @@ export function DownloadsPanel({
       if (searchRunRef.current === runId) setIsSearching(false);
     }
   }
+
+  // Búsqueda mientras se escribe, como en Spotify: sin botón ni Enter. Vaciar
+  // el campo vuelve a la portada de recientes.
+  useEffect(() => {
+    const trimmed = queryDraft.trim();
+    if (!trimmed) {
+      searchRunRef.current += 1;
+      activeQueryRef.current = '';
+      setActiveQuery('');
+      setResults(null);
+      setIsSearching(false);
+      setSearchError(null);
+      setFilter('all');
+      return undefined;
+    }
+    if (trimmed.length < SEARCH_AS_YOU_TYPE_MIN_CHARS || trimmed === activeQueryRef.current) return undefined;
+    const timer = window.setTimeout(() => { void runSearch(trimmed); }, SEARCH_AS_YOU_TYPE_DELAY_MS);
+    return () => window.clearTimeout(timer);
+    // runSearch se recrea en cada render; lo único que dispara esto es el texto.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryDraft]);
 
   function updateQueueItem(queueId: string, patch: Partial<DownloadQueueItem>) {
     queueRef.current = queueRef.current.map(item => (
@@ -550,13 +661,32 @@ export function DownloadsPanel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Lo que se abre o descarga desde los resultados de una búsqueda pasa a
+  // "Recientes" (como en Spotify); navegar dentro de una ficha no.
+  const fromSearch = route.kind === 'browse' && Boolean(activeQuery);
   const catalogApi: DownloadsCatalogApi = useMemo(() => ({
     getTrackState: (tidalId: number) => trackStates.get(tidalId),
-    downloadTracks: tracks => { void downloadTracks(tracks); },
-    openAlbum: album => pushRoute({ kind: 'album', id: album.id, seed: album }),
-    openArtist: artist => pushRoute({ kind: 'artist', id: artist.id, seed: artist }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [trackStates, downloadTracks]);
+    downloadTracks: tracks => {
+      if (fromSearch && tracks.length === 1) rememberItem({ kind: 'track', track: tracks[0] });
+      void downloadTracks(tracks);
+    },
+    openAlbum: album => {
+      if (fromSearch) rememberItem({ kind: 'album', album });
+      navigate({ kind: 'album', id: album.id, seed: album });
+    },
+    openArtist: artist => {
+      if (fromSearch) rememberItem({ kind: 'artist', artist });
+      navigate({ kind: 'artist', id: artist.id, seed: artist });
+    },
+  }), [trackStates, downloadTracks, fromSearch, rememberItem, navigate]);
+
+  function openRecentItem(item: RecentCatalogItem) {
+    rememberItem(item);
+    if (item.kind === 'artist') navigate({ kind: 'artist', id: item.artist.id, seed: item.artist });
+    else if (item.kind === 'album') navigate({ kind: 'album', id: item.album.id, seed: item.album });
+    else if (item.kind === 'track') void runSearch(`${item.track.title} ${item.track.artist}`, { syncInput: true });
+    else void runSearch(item.query, { syncInput: true });
+  }
 
   async function handlePickDownloadFolder() {
     if (isTauriDesktop()) {
@@ -651,38 +781,62 @@ export function DownloadsPanel({
     ? desktopMusicFolder?.split(/[\\/]/).filter(Boolean).slice(-1)[0]
     : downloadFolder?.name;
 
-  const breadcrumb = routes.map((item, index) => {
-    if (item.kind === 'browse') return { key: 'browse', label: activeQuery ? `“${activeQuery}”` : 'Descargas', index };
-    if (item.kind === 'album') return { key: `album-${item.id}`, label: item.seed?.title ?? 'Álbum', index };
-    return { key: `artist-${item.id}`, label: item.seed?.name ?? 'Artista', index };
-  });
+  const routeLabel = (item: DownloadRoute) => (
+    item.kind === 'browse'
+      ? (activeQuery ? `“${activeQuery}”` : 'Búsqueda')
+      : item.kind === 'album' ? item.seed?.title ?? 'Álbum' : item.seed?.name ?? 'Artista'
+  );
+  // Solo el tramo hasta la entrada actual: lo que quedó "adelante" vive en la flecha ›.
+  const trail = history.entries.slice(0, history.index + 1)
+    .map((entry, index) => ({ index, label: routeLabel(entry.route) }))
+    .slice(-3);
 
   return (
-    <section className="downloads-panel dl-panel">
+    <section className="downloads-panel dl-panel" ref={panelRef}>
       <header className="dl-header">
         <div className="dl-header-row">
-          <div className="dl-header-lead">
-            {routes.length > 1 && (
-              <button className="dl-back" onClick={goBack} aria-label="Volver" title="Volver (Esc)">
-                <ChevronLeftIcon size={18} />
-              </button>
-            )}
-            <nav className="dl-breadcrumb" aria-label="Ruta de navegación">
-              {breadcrumb.map((crumb, index) => (
-                <span className="dl-crumb" key={crumb.key}>
-                  {index > 0 && <span className="dl-crumb-sep" aria-hidden="true">/</span>}
-                  {index === breadcrumb.length - 1 ? (
-                    <strong>{crumb.label}</strong>
-                  ) : (
-                    <button onClick={() => setRoutes(stack => stack.slice(0, crumb.index + 1))}>
-                      {crumb.label}
-                    </button>
-                  )}
-                </span>
-              ))}
-            </nav>
+          <div className="dl-history" role="group" aria-label="Historial">
+            <button className="dl-nav-arrow" onClick={goBack} disabled={!canGoBack} aria-label="Atrás" title="Atrás (Esc · ⌘[)">
+              <ChevronLeftIcon size={18} />
+            </button>
+            <button className="dl-nav-arrow" onClick={goForward} disabled={!canGoForward} aria-label="Adelante" title="Adelante (⌘])">
+              <ChevronRightIcon size={18} />
+            </button>
           </div>
-
+          <form className="dl-search-field" role="search" onSubmit={event => {
+            event.preventDefault();
+            const trimmed = queryDraft.trim();
+            if (!trimmed) return;
+            rememberItem({ kind: 'query', query: trimmed });
+            if (trimmed !== activeQuery || searchError) void runSearch(trimmed);
+            else if (route.kind !== 'browse') navigate({ kind: 'browse' });
+          }}>
+            <SearchIcon size={18} />
+            <input
+              ref={searchInputRef}
+              value={queryDraft}
+              onChange={event => setQueryDraft(event.target.value)}
+              onKeyDown={event => {
+                if (event.key === 'Escape') {
+                  if (queryDraft) setQueryDraft('');
+                  else event.currentTarget.blur();
+                }
+              }}
+              placeholder="¿Qué quieres descargar?"
+              aria-label="Buscar música para descargar"
+              spellCheck={false}
+              autoComplete="off"
+            />
+            {isSearching
+              ? <SpinnerIcon size={17} />
+              : queryDraft
+                ? (
+                  <button type="button" className="dl-search-clear" onClick={() => { setQueryDraft(''); searchInputRef.current?.focus(); }} aria-label="Limpiar búsqueda">
+                    <CloseIcon size={15} />
+                  </button>
+                )
+                : <kbd className="dl-search-kbd" aria-hidden="true">⌘K</kbd>}
+          </form>
           <div className="dl-header-actions">
             <button
               className={`dl-activity-btn ${inFlightCount > 0 ? 'busy' : ''} ${failedCount > 0 ? 'has-error' : ''}`.trim()}
@@ -708,32 +862,22 @@ export function DownloadsPanel({
           </div>
         </div>
 
-        <form className="dl-search-field" onSubmit={event => {
-          event.preventDefault();
-          void runSearch(queryDraft);
-        }}>
-          <SearchIcon size={18} />
-          <input
-            ref={searchInputRef}
-            value={queryDraft}
-            onChange={event => setQueryDraft(event.target.value)}
-            onKeyDown={event => {
-              if (event.key === 'Escape') { setQueryDraft(''); event.currentTarget.blur(); }
-            }}
-            placeholder="Busca una canción, un álbum o un artista"
-            aria-label="Buscar música para descargar"
-          />
-          {isSearching
-            ? <SpinnerIcon size={17} />
-            : queryDraft && (
-              <button type="button" className="dl-search-clear" onClick={() => { setQueryDraft(''); searchInputRef.current?.focus(); }} aria-label="Limpiar búsqueda">
-                <CloseIcon size={15} />
-              </button>
-            )}
-          <button className="dl-btn primary dl-search-submit" type="submit" disabled={isSearching || !queryDraft.trim()}>Buscar</button>
-        </form>
-
         <div className="dl-status-line">
+          {trail.length > 1 && (
+            <>
+              <nav className="dl-trail" aria-label="Ruta de navegación">
+                {trail.map((crumb, position) => (
+                  <span className="dl-trail-crumb" key={crumb.index}>
+                    {position > 0 && <ChevronRightIcon size={11} />}
+                    {crumb.index === history.index
+                      ? <strong>{crumb.label}</strong>
+                      : <button onClick={() => jumpTo(() => crumb.index)}>{crumb.label}</button>}
+                  </span>
+                ))}
+              </nav>
+              <span className="dl-status-sep" aria-hidden="true">·</span>
+            </>
+          )}
           <span className={`dl-dot ${bridgeTone}`} aria-hidden="true" />
           <span>{bridgeLabel}</span>
           <span className="dl-status-sep" aria-hidden="true">·</span>
@@ -759,7 +903,7 @@ export function DownloadsPanel({
         </div>
       )}
 
-      <div className="dl-body" key={`${route.kind}:${'id' in route ? route.id : 'browse'}`}>
+      <div className="dl-body" key={`${history.index}:${route.kind}:${'id' in route ? route.id : 'browse'}`}>
         {route.kind === 'browse' && (
           <DownloadBrowseView
             query={activeQuery}
@@ -768,8 +912,10 @@ export function DownloadsPanel({
             error={searchError}
             filter={filter}
             onFilterChange={setFilter}
-            recentSearches={recentSearches}
-            onSearchAgain={term => void runSearch(term)}
+            recentItems={recentItems}
+            onOpenRecent={openRecentItem}
+            onForgetRecent={forgetItem}
+            onClearRecent={clearRecentItems}
             onRetry={() => void runSearch(activeQuery)}
             api={catalogApi}
           />

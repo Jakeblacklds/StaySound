@@ -182,8 +182,14 @@ export function CatalogTrackRow({
   const state = api.getTrackState(track.id);
   const quality = formatCatalogQuality(track.quality, track.isHiRes);
 
+  const layout = [
+    typeof index === 'number' ? 'has-index' : '',
+    showArtwork ? 'has-art' : '',
+    state?.status ? `is-${state.status}` : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <article className={`dl-track-row ${state?.status ? `is-${state.status}` : ''}`.trim()}>
+    <article className={`dl-track-row ${layout}`}>
       {typeof index === 'number' && <span className="dl-track-index">{index}</span>}
       {showArtwork && <DlArtwork src={track.artworkUrl} label={track.title} className="dl-track-art" />}
       <span className="dl-track-main">
@@ -232,12 +238,21 @@ export function CatalogTrackRow({
   );
 }
 
-export function CatalogAlbumCard({ album, onOpen }: { album: CatalogAlbum; onOpen: () => void }) {
+export function CatalogAlbumCard({
+  album,
+  onOpen,
+  subtitle,
+}: {
+  album: CatalogAlbum;
+  onOpen: () => void;
+  /** Dentro de la ficha del artista sobra repetir su nombre: ahí va "2024 · Sencillo". */
+  subtitle?: string;
+}) {
   return (
     <button className="dl-card" onClick={onOpen} title={`${album.title} · ${album.artist}`}>
       <DlArtwork src={album.artworkUrl} label={album.title} />
       <strong>{album.title}</strong>
-      <small>{[album.artist, album.year].filter(Boolean).join(' · ')}</small>
+      <small>{subtitle ?? [album.artist, album.year].filter(Boolean).join(' · ')}</small>
     </button>
   );
 }

@@ -4,8 +4,7 @@ import { CSSProperties, useEffect, useMemo, useState } from 'react';
 import { getDynamicPalette, type WebDynamicPalette } from '../library/dynamicColors';
 import {
   NextIcon,
-  PauseIcon,
-  PlayIcon,
+  PlayPauseIcon,
   PreviousIcon,
   QueueIcon,
   RepeatIcon,
@@ -131,7 +130,7 @@ export function PlayerBar({
             aria-label="Play / Pause"
             title="Play / Pause (Espacio)"
           >
-            {isLoading ? <SpinnerIcon size={20} /> : isPlaying ? <PauseIcon size={20} /> : <PlayIcon size={20} />}
+            {isLoading ? <SpinnerIcon size={20} /> : <PlayPauseIcon playing={isPlaying} size={20} />}
           </button>
           <button className="t-btn" onClick={onNext} aria-label="Siguiente" title="Siguiente (N)">
             <NextIcon size={20} />

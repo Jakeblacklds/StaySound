@@ -1,5 +1,6 @@
 package expo.modules.homeview
 
+import expo.modules.playerchrome.StayIconView
 import android.animation.ValueAnimator
 import android.os.Build
 import android.content.Context
@@ -117,21 +118,8 @@ internal class HomeArtwork(private val style: HomeStyle, private val circle: Boo
 }
 
 /** Same filled Play silhouette as the app's SVG. Disc fallback stays vector-native. */
-internal class HomeGlyph(style: HomeStyle, private val play: Boolean) : View(style.context) {
-    var tint = style.ink
-        set(value) { field = value; invalidate() }
-    private val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-    private val playPath = PathParser.createPathFromPathData("M171.305 118.873c-9.445 8.201-14.814 14.094-86.253 58.175-18.123 11.183-39.022 21.23-39.95-11.035-.587-20.404-1.124-126.736-.338-133.094 4.291-34.686 24.394-19.638 79.494 14.577 57.752 35.862 57.865 44.237 56.429 55.086-.88 6.651-8.404 15.182-9.382 16.291")!!
-    override fun onDraw(canvas: Canvas) {
-        paint.color = tint
-        if (play) {
-            canvas.save(); canvas.scale(width / 224f, height / 215f)
-            canvas.drawPath(playPath, paint); canvas.restore()
-        } else {
-            paint.style = Paint.Style.STROKE; paint.strokeWidth = width * .065f
-            canvas.drawCircle(width / 2f, height / 2f, width * .4f, paint)
-            canvas.drawCircle(width / 2f, height / 2f, width * .12f, paint)
-            paint.style = Paint.Style.FILL
-        }
-    }
+/** Catalogue icon (StayIcons): the play wedge, or the disc used as an artwork fallback. */
+internal class HomeGlyph(style: HomeStyle, play: Boolean) : StayIconView(style.context, if (play) "play" else "disc") {
+    var tint by this::ink
+    init { ink = style.ink; interactive = play }
 }
