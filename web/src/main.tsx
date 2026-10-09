@@ -5,8 +5,16 @@ window.Buffer = Buffer;
 import React from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from './App';
+import { installPerfProbe } from './debug/perfProbe';
 import './styles/app.css';
 import './styles/circulo.css';
+// Después de circulo.css a propósito: la pestaña de Descargas tiene su propio
+// layout y necesita ganarle a las reglas genéricas de `.downloads-panel`.
+import './styles/downloads.css';
+import './styles/collections.css';
+
+// Frame-hitch probe: idle until Cmd/Ctrl + Alt + P (or a stored opt-in).
+installPerfProbe();
 
 // Tauri's transparent macOS window needs a genuinely transparent page root.
 // Keep this opt-in so the regular website/PWA retains its opaque fallback.

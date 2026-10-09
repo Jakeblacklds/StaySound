@@ -73,6 +73,7 @@ export class KaraokeMixer {
   private smoothedFrame = { ...ZERO_FRAME };
   private previousBands = { bass: 0, mid: 0, treble: 0 };
   private bandFloor = { bass: 0.08, mid: 0.08, treble: 0.045 };
+  private lastSampleAt = 0;
 
   constructor() {
     this.instrumental.preload = 'auto';
@@ -212,6 +213,12 @@ export class KaraokeMixer {
   }
 
   sampleSpectrum(): KaraokeSpectrumFrame {
+    // The envelopes below advance once per call with fixed rates, so more than
+    // one visual layer sampling the same frame would smooth twice as fast.
+    // Everything painted inside a single animation frame shares one reading.
+    const now = performance.now();
+    if (now - this.lastSampleAt < 8) return this.smoothedFrame;
+    this.lastSampleAt = now;
     const mixAnalyser = this.mixAnalyser;
     const vocalAnalyser = this.vocalAnalyser;
     const mixData = this.mixData;

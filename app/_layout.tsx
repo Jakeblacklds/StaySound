@@ -1,24 +1,19 @@
+import { hasNativeAndroidShell } from '@/modules/android-shell/src';
+import { NativeGlobalOverlays } from '@/src/features/shell/NativeGlobalOverlays';
 import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { DarkTheme, DefaultTheme, ThemeProvider as NavigationThemeProvider } from '@react-navigation/native';
 import { useFonts } from 'expo-font';
 import { router, Stack, usePathname, useRootNavigationState } from 'expo-router';
-import { useEffect, useRef } from 'react';
-import { AppState, InteractionManager, Platform, StyleSheet, View } from 'react-native';
+import { useEffect } from 'react';
+import { InteractionManager, StyleSheet, View } from 'react-native';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { MD3DarkTheme, MD3LightTheme, PaperProvider } from 'react-native-paper';
 import 'react-native-reanimated';
 
+import { AppBootstraps } from '@/src/bootstrap/AppBootstraps';
 import { FullPlayer } from '@/src/components/player';
 import { WebAmbientBackground } from '@/src/components/backgrounds/WebAmbientBackground';
-import { scheduleAndroidAutoCatalogSync } from '@/src/services/androidAutoCatalogSync';
-import { bootstrapAppUpdates } from '@/src/services/appUpdateService';
-import { refreshAndroidEqualizerCapabilities, syncAndroidEqualizerFromSettings } from '@/src/services/androidEqualizerService';
 import { ActionSheet, ConfirmationModal, GlobalNotification } from '@/src/components/ui';
-import { ensureOnboardingMirrorPlaylist } from '@/src/services/onboardingTasteService';
-import { hasPermissions } from '@/src/services/fileScanner';
-import { addAudioLibraryChangedListenerNative } from '@/src/services/nativeLibraryIndexer';
-import { ensureSeededSpotifyTop50Playlist, hydrateSpotifyTop50GlobalPlaylist } from '@/src/services/spotifyChartsService';
-import { AudioEngine } from '@/src/services';
 import { useLibraryStore, useOnboardingStore, usePlayerStore, useSettingsStore } from '@/src/stores';
 import { createPaperFonts, ThemeProvider, useTheme } from '@/src/theme';
 
@@ -58,215 +53,6 @@ export default function RootLayout() {
   );
 }
 
-function AudioSync() {
-  useEffect(() => {
-    import('@/src/services/database').then(m => m.getDatabase());
-  }, []);
-
-  const lastState = useRef({
-    isPlaying: false,
-    isLoading: false,
-    position: 0,
-    duration: 0,
-    queueIndex: -1,
-    trackId: usePlayerStore.getState().currentTrack?.id
-  });
-
-  useEffect(() => {
-    void AudioEngine.initialize({
-      onStateChange: (audioState) => {
-        const hasMeaningfulChange =
-          audioState.isPlaying !== lastState.current.isPlaying ||
-          audioState.isLoading !== lastState.current.isLoading ||
-          audioState.queueIndex !== lastState.current.queueIndex ||
-          audioState.currentTrack?.id !== lastState.current.trackId ||
-          Math.abs((audioState.duration ?? 0) - lastState.current.duration) > 1000 ||
-          Math.abs((audioState.position ?? 0) - lastState.current.position) > 1000;
-
-        if (!hasMeaningfulChange) {
-          return;
-        }
-
-        usePlayerStore.getState().updateFromEngine({
-          isPlaying: audioState.isPlaying,
-          isLoading: audioState.isLoading,
-          position: audioState.position,
-          duration: audioState.duration,
-          currentTrack: audioState.currentTrack,
-          queueIndex: audioState.queueIndex,
-        });
-        lastState.current = {
-          isPlaying: audioState.isPlaying ?? false,
-          isLoading: audioState.isLoading ?? false,
-          position: audioState.position ?? 0,
-          duration: audioState.duration ?? 0,
-          queueIndex: audioState.queueIndex ?? -1,
-          trackId: audioState.currentTrack?.id,
-        };
-      },
-    });
-  }, []);
-
-  return null;
-}
-
-function DiscoveryBootstrap() {
-  useEffect(() => {
-    ensureSeededSpotifyTop50Playlist();
-    void hydrateSpotifyTop50GlobalPlaylist();
-    void ensureOnboardingMirrorPlaylist();
-
-    const subscription = AppState.addEventListener('change', nextState => {
-      if (nextState === 'active') {
-        void hydrateSpotifyTop50GlobalPlaylist({ force: true });
-        void ensureOnboardingMirrorPlaylist();
-      }
-    });
-
-    return () => {
-      subscription.remove();
-    };
-  }, []);
-
-  return null;
-}
-
-function AndroidAutoCatalogBootstrap() {
-  const hasHydrated = useLibraryStore(state => state._hasHydrated);
-  const catalogRevision = useLibraryStore(state => state.catalogRevision);
-
-  useEffect(() => {
-    if (!hasHydrated) {
-      return;
-    }
-
-    scheduleAndroidAutoCatalogSync();
-  }, [hasHydrated, catalogRevision]);
-
-  return null;
-}
-
-function LibraryAutoScanBootstrap() {
-  const hasHydrated = useLibraryStore(state => state._hasHydrated);
-  const isScanning = useLibraryStore(state => state.isScanning);
-  const trackCount = useLibraryStore(state => state.tracks.size);
-  const scanLibrary = useLibraryStore(state => state.scanLibrary);
-  const pruneInvalidLibraryEntries = useLibraryStore(state => state.pruneInvalidLibraryEntries);
-  const initialScanAttemptedRef = useRef(false);
-  const pruneAttemptedRef = useRef(false);
-  const mediaStoreScanTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const isScanningRef = useRef(isScanning);
-
-  useEffect(() => {
-    isScanningRef.current = isScanning;
-  }, [isScanning]);
-
-  useEffect(() => {
-    if (!hasHydrated || isScanning || trackCount > 0 || initialScanAttemptedRef.current) {
-      return;
-    }
-
-    initialScanAttemptedRef.current = true;
-    void hasPermissions().then(granted => {
-      if (granted) {
-        void scanLibrary();
-      }
-    });
-  }, [hasHydrated, isScanning, scanLibrary, trackCount]);
-
-  useEffect(() => {
-    if (!hasHydrated || pruneAttemptedRef.current) return;
-
-    pruneAttemptedRef.current = true;
-    void pruneInvalidLibraryEntries();
-  }, [hasHydrated, pruneInvalidLibraryEntries]);
-
-  useEffect(() => {
-    if (!hasHydrated) return;
-
-    const subscription = addAudioLibraryChangedListenerNative(() => {
-      if (mediaStoreScanTimeoutRef.current) {
-        clearTimeout(mediaStoreScanTimeoutRef.current);
-      }
-
-      mediaStoreScanTimeoutRef.current = setTimeout(() => {
-        mediaStoreScanTimeoutRef.current = null;
-        if (isScanningRef.current) return;
-
-        void hasPermissions().then(granted => {
-          if (granted) {
-            void scanLibrary();
-          }
-        });
-      }, 1500);
-    });
-
-    return () => {
-      subscription?.remove();
-      if (mediaStoreScanTimeoutRef.current) {
-        clearTimeout(mediaStoreScanTimeoutRef.current);
-        mediaStoreScanTimeoutRef.current = null;
-      }
-    };
-  }, [hasHydrated, scanLibrary]);
-
-  return null;
-}
-
-function EqualizerBootstrap() {
-  const hasHydrated = useSettingsStore(state => state._hasHydrated);
-  const currentTrackId = usePlayerStore(state => state.currentTrack?.id);
-  const equalizerMode = useSettingsStore(state => state.equalizer.mode);
-  const equalizerEnabled = useSettingsStore(state => state.equalizer.enabled);
-
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !hasHydrated) {
-      return;
-    }
-
-    void refreshAndroidEqualizerCapabilities(false);
-  }, [hasHydrated]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !hasHydrated) {
-      return;
-    }
-
-    if (equalizerMode === 'app' && equalizerEnabled) {
-      void syncAndroidEqualizerFromSettings();
-      return;
-    }
-
-    void refreshAndroidEqualizerCapabilities(false);
-  }, [equalizerEnabled, equalizerMode, hasHydrated]);
-
-  useEffect(() => {
-    if (Platform.OS !== 'android' || !hasHydrated) {
-      return;
-    }
-
-    if (equalizerMode !== 'app' || !equalizerEnabled || !currentTrackId) {
-      return;
-    }
-
-    void syncAndroidEqualizerFromSettings();
-  }, [currentTrackId, equalizerEnabled, equalizerMode, hasHydrated]);
-
-  return null;
-}
-
-function AppUpdateBootstrap({ isAppReady }: { isAppReady: boolean }) {
-  useEffect(() => {
-    if (!isAppReady) {
-      return;
-    }
-
-    void bootstrapAppUpdates();
-  }, [isAppReady]);
-
-  return null;
-}
-
 function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
   const { theme, isDark } = useTheme();
   const hasCompletedOnboarding = useOnboardingStore(state => state.hasCompletedOnboarding);
@@ -275,7 +61,8 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
   const pathname = usePathname();
   const rootNavigationState = useRootNavigationState();
   const canNavigate = isAppReady && !!rootNavigationState?.key;
-  const shouldMountFullPlayer = isPlayerVisible || currentTrack != null;
+  const shouldMountFullPlayer = (isPlayerVisible || currentTrack != null)
+    && !(hasNativeAndroidShell && (pathname === '/lyrics' || pathname === '/modal'));
 
   useEffect(() => {
     if (!canNavigate) {
@@ -350,12 +137,7 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
       <NavigationThemeProvider value={isDark ? DarkTheme : DefaultTheme}>
         <GestureHandlerRootView style={{ flex: 1 }}>
           <View style={styles.container}>
-            <DiscoveryBootstrap />
-            <AppUpdateBootstrap isAppReady={isAppReady} />
-            <AndroidAutoCatalogBootstrap />
-            <LibraryAutoScanBootstrap />
-            <EqualizerBootstrap />
-            <AudioSync />
+            <AppBootstraps isAppReady={isAppReady} />
             <WebAmbientBackground />
             <Stack
               screenOptions={{
@@ -397,11 +179,14 @@ function RootLayoutNav({ isAppReady }: { isAppReady: boolean }) {
               />
               <Stack.Screen name="equalizer" options={{ animation: 'slide_from_right' }} />
             </Stack>
-            <ActionSheet />
-            <ConfirmationModal />
-            <GlobalNotification />
+            {!hasNativeAndroidShell ? <>
+              <ActionSheet />
+              <ConfirmationModal />
+              <GlobalNotification />
+            </> : null}
 
             {shouldMountFullPlayer ? <FullPlayer /> : null}
+            {hasNativeAndroidShell ? <NativeGlobalOverlays /> : null}
           </View>
         </GestureHandlerRootView>
       </NavigationThemeProvider>

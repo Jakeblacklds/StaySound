@@ -17,6 +17,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import { Easing, useSharedValue, withTiming } from 'react-native-reanimated';
 import { AlbumColors, getImageColors } from '../services/colorExtractor';
+import { deepenAlbumPalette } from '../utils/albumSurface';
 import { useTheme } from '../theme/ThemeProvider';
 
 // Neutral starting palettes — initialized to a light-neutral or dark-neutral
@@ -56,6 +57,13 @@ interface UseDynamicColorsOptions {
      * hijack the app-wide theme while the player is showing a different track.
      */
     applyToTheme?: boolean;
+    /**
+     * Pull the extracted background down to a deep, low-chroma tone before it
+     * is used (and before it reaches the theme). Chrome surfaces — the player
+     * shell, the dock, the app background — want the artwork's *mood*, not its
+     * full poster saturation. Ignored in light mode.
+     */
+    deepenDarkBackground?: boolean;
 }
 
 export function useDynamicColorsWithOptions(imageUri: string | undefined, options?: UseDynamicColorsOptions) {
@@ -77,6 +85,7 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
     const [rawColors, setRawColors] = useState<AlbumColors>(fallbackColors);
     const [isLoading, setIsLoading] = useState(false);
     const enabled = options?.enabled ?? true;
+    const deepenDark = (options?.deepenDarkBackground ?? false) && isDark;
 
     // Pick the correct default based on the current app theme so shared values
     // start on the right side of the dark/light spectrum.
@@ -134,8 +143,10 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
         setIsLoading(true);
 
         getImageColors(imageUri)
-            .then((extracted) => {
+            .then((raw) => {
                 if (cancelled) return;
+
+                const extracted = deepenDark ? deepenAlbumPalette(raw) : raw;
 
                 setRawColors(extracted);
                 setIsLoading(false);
@@ -159,7 +170,7 @@ export function useDynamicColorsWithOptions(imageUri: string | undefined, option
             cancelled = true;
         };
         // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [animatePalette, applyToTheme, config.dynamicColors, enabled, fallbackColors, imageUri, setDynamicPalette]);
+    }, [animatePalette, applyToTheme, config.dynamicColors, deepenDark, enabled, fallbackColors, imageUri, setDynamicPalette]);
 
     return {
         colors: rawColors,

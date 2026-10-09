@@ -1,0 +1,13 @@
+{
+  "platforms": [
+    "android"
+  ],
+  "android": {
+    "modules": [
+      "expo.modules.androidshell.OverlayHostModule",
+      "expo.modules.androidshell.ShellScreenModule",
+      "expo.modules.androidshell.NavigationModule",
+      "expo.modules.androidshell.NavigationSlotModule"
+    ]
+  }
+}

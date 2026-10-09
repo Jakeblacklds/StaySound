@@ -1,12 +1,11 @@
 import type { ReactNode } from 'react';
 import type { Tab } from '../types';
 
-type NavDestination = 'home' | 'library' | 'search' | 'playlists' | 'downloads' | 'get-app';
+type NavDestination = 'home' | 'library' | 'playlists' | 'downloads' | 'get-app';
 
 const NAV_ITEMS: { id: NavDestination; label: string }[] = [
   { id: 'home', label: 'Inicio' },
   { id: 'library', label: 'Biblioteca' },
-  { id: 'search', label: 'Buscar' },
   { id: 'playlists', label: 'Playlists' },
   { id: 'downloads', label: 'Descargas' },
   { id: 'get-app', label: 'Apps' },
@@ -18,7 +17,7 @@ export function navDestinationForTab(tab: Tab): NavDestination {
   switch (tab) {
     case 'home': return 'home';
     case 'songs': case 'albums': case 'artists': case 'radio': return 'library';
-    case 'search': return 'search';
+    case 'search': return 'library';
     case 'playlists': return 'playlists';
     case 'downloads': return 'downloads';
     case 'get-app': return 'get-app';
@@ -30,7 +29,6 @@ interface TopNavProps {
   tab: Tab;
   onSelectHome: () => void;
   onSelectLibrary: () => void;
-  onSelectSearch: () => void;
   onSelectPlaylists: () => void;
   onSelectDownloads: () => void;
   onSelectGetApp: () => void;
@@ -40,7 +38,6 @@ interface TopNavProps {
 const SELECT: Record<NavDestination, keyof Omit<TopNavProps, 'tab' | 'trailing'>> = {
   home: 'onSelectHome',
   library: 'onSelectLibrary',
-  search: 'onSelectSearch',
   playlists: 'onSelectPlaylists',
   downloads: 'onSelectDownloads',
   'get-app': 'onSelectGetApp',

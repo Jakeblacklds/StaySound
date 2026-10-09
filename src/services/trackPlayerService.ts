@@ -10,6 +10,7 @@
  * - Android Auto support
  */
 
+import { getNativeLibraryPlayback } from "./nativeLibraryPlayback";
 import TrackPlayer, {
   TrackType,
   AppKilledPlaybackBehavior,
@@ -269,7 +270,7 @@ function normalizeArtworkUri(value?: string | null): string | undefined {
   return undefined;
 }
 
-function resolveArtworkForQueue(track: Track): string | undefined {
+function resolveArtworkForQueue(_track: Track): string | undefined {
   // Keep the native queue as light as possible on low-memory Android devices.
   // Artwork for the active item is injected separately via updateNowPlayingMetadata.
   return undefined;
@@ -476,6 +477,13 @@ export function isTrackPlayerReady(): boolean {
  * BUG FIX: Uses reset()+add() instead of load() for absolute queue reliability.
  */
 export async function playTrack(track: Track): Promise<void> {
+  const native = getNativeLibraryPlayback();
+  if (native?.playQueue) {
+    const requestedAt = Date.now();
+    if (!isInitialized && !(await initializeTrackPlayer())) throw new Error("Track Player initialization failed");
+    if (!isTrackPlayable(track)) throw new Error("Track is not playable");
+    return native.playQueue(JSON.stringify([track]), 0, requestedAt);
+  }
   if (!isInitialized) {
     const initialized = await initializeTrackPlayer();
     if (!initialized) {
@@ -514,6 +522,17 @@ export async function playQueue(
   tracks: Track[],
   startIndex: number = 0,
 ): Promise<void> {
+  const native = getNativeLibraryPlayback();
+  if (native?.playQueue) {
+    const requestedAt = Date.now();
+    if (tracks.length === 0) return;
+    if (!isInitialized && !(await initializeTrackPlayer())) throw new Error("Track Player initialization failed");
+    const selected = tracks[Math.max(0, Math.min(startIndex, tracks.length - 1))];
+    const playable = tracks.filter(isTrackPlayable);
+    const index = playable.findIndex(track => track.id === selected.id);
+    if (index < 0) throw new Error("Selected track is not playable");
+    return native.playQueue(JSON.stringify(playable), index, requestedAt);
+  }
   if (!isInitialized) {
     const initialized = await initializeTrackPlayer();
     if (!initialized) {
@@ -598,6 +617,7 @@ export async function playQueue(
  * Pause playback
  */
 export async function pause(): Promise<void> {
+  await getNativeLibraryPlayback()?.cancelPendingPlayback?.();
   if (!isInitialized) return;
   await TrackPlayer.pause();
   console.log("[TrackPlayer] Paused");
@@ -630,6 +650,7 @@ export async function togglePlayPause(): Promise<void> {
  * Stop playback
  */
 export async function stop(): Promise<void> {
+  await getNativeLibraryPlayback()?.cancelPendingPlayback?.();
   if (!isInitialized) return;
   await TrackPlayer.stop();
   await TrackPlayer.reset();
@@ -755,8 +776,36 @@ export async function syncNativeQueue(targetTrackIds: string[]): Promise<void> {
 }
 
 /**
- * Remove tracks from native queue by index
+ * Append without resetting playback, then trim the bounded queue if needed.
  */
+export async function appendToNativeQueue(
+  track: Track,
+  expectedIds: string[],
+  dropIndex: number = -1,
+): Promise<void> {
+  if (!isInitialized && !(await initializeTrackPlayer())) {
+    throw new Error("Track Player initialization failed");
+  }
+  const nativeTrack = await buildNativeTrack(track, { artwork: resolveArtworkForQueue(track) });
+  const queue = await TrackPlayer.getQueue();
+  // A native library tap can replace the queue while the track is being prepared.
+  // Never apply stale indices to that new listening session.
+  if (queue.length !== expectedIds.length || queue.some((item, index) => String(item.id) !== expectedIds[index])) {
+    throw new Error("Playback queue changed while adding a track");
+  }
+  await TrackPlayer.add([nativeTrack]);
+  if (dropIndex >= 0) {
+    try {
+      await TrackPlayer.remove([dropIndex]);
+    } catch (error) {
+      // Undo this append if the bounded queue could not be updated.
+      await TrackPlayer.remove([queue.length]);
+      throw error;
+    }
+  }
+}
+
+/** Remove tracks from native queue by index. */
 export async function removeTracks(indices: number[]): Promise<void> {
   if (!isInitialized) return;
   await TrackPlayer.remove(indices);

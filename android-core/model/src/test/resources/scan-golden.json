@@ -1,0 +1,870 @@
+{
+ "cases": [
+  {
+   "name": "fresh files are named from their file name",
+   "existing": [],
+   "scanned": [
+    {
+     "id": "ms_1",
+     "uri": "content://media/external/audio/media/1",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Édith Piaf - La Vie - La vie en rose.flac"
+    },
+    {
+     "id": "ms_2",
+     "uri": "content://media/external/audio/media/2",
+     "title": "Song Two",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Jay-Z - Song Two.MP3"
+    },
+    {
+     "id": "ms_3",
+     "uri": "content://media/external/audio/media/3",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "01 Only Title.m4a"
+    },
+    {
+     "id": "ms_4",
+     "uri": "content://media/external/audio/media/4",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Artist – Album — Title – With - Dashes.opus"
+    },
+    {
+     "id": "ms_5",
+     "uri": "content://media/external/audio/media/5",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "05. - Weird.wav"
+    },
+    {
+     "id": "ms_6",
+     "uri": "content://media/external/audio/media/6",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "12345.mp3"
+    }
+   ],
+   "expected": [
+    {
+     "id": "ms_1",
+     "uri": "content://media/external/audio/media/1",
+     "title": "La vie en rose",
+     "artist": "Édith Piaf",
+     "album": "La Vie",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Édith Piaf - La Vie - La vie en rose.flac"
+    },
+    {
+     "id": "ms_2",
+     "uri": "content://media/external/audio/media/2",
+     "title": "Song Two",
+     "artist": "Jay-Z",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Jay-Z - Song Two.MP3"
+    },
+    {
+     "id": "ms_3",
+     "uri": "content://media/external/audio/media/3",
+     "title": "Only Title",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "01 Only Title.m4a"
+    },
+    {
+     "id": "ms_4",
+     "uri": "content://media/external/audio/media/4",
+     "title": "Title - With - Dashes",
+     "artist": "Artist",
+     "album": "Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Artist – Album — Title – With - Dashes.opus"
+    },
+    {
+     "id": "ms_5",
+     "uri": "content://media/external/audio/media/5",
+     "title": "Weird",
+     "artist": "05.",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "05. - Weird.wav"
+    },
+    {
+     "id": "ms_6",
+     "uri": "content://media/external/audio/media/6",
+     "title": "12345",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "12345.mp3"
+    }
+   ]
+  },
+  {
+   "name": "parent folder becomes the album unless it is generic",
+   "existing": [],
+   "scanned": [
+    {
+     "id": "f1",
+     "uri": "file:///storage/emulated/0/Music/Rock%20Classics/Riff.mp3",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f2",
+     "uri": "file:///storage/emulated/0/Download/Riff.mp3",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f3",
+     "uri": "file:///storage/emulated/0/Música/Riff.mp3",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f4",
+     "uri": "file:///Riff.mp3",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f5",
+     "uri": "Riff.mp3",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    }
+   ],
+   "expected": [
+    {
+     "id": "f1",
+     "uri": "file:///storage/emulated/0/Music/Rock%20Classics/Riff.mp3",
+     "title": "Riff",
+     "artist": "Unknown Artist",
+     "album": "Rock Classics",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f2",
+     "uri": "file:///storage/emulated/0/Download/Riff.mp3",
+     "title": "Riff",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f3",
+     "uri": "file:///storage/emulated/0/Música/Riff.mp3",
+     "title": "Riff",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f4",
+     "uri": "file:///Riff.mp3",
+     "title": "Riff",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "f5",
+     "uri": "Riff.mp3",
+     "title": "Riff",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    }
+   ]
+  },
+  {
+   "name": "a stored SAF track keeps its metadata, artwork and favorite",
+   "existing": [
+    {
+     "id": "saf_1",
+     "uri": "content://com.android.externalstorage.documents/tree/primary%3ADownload%2FStaySound/document/primary%3ADownload%2FStaySound%2FArtist%20-%20Album%20-%20Title.flac",
+     "title": "Real Title",
+     "artist": "Real Artist",
+     "album": "Real Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "artwork": "https://img.example/a.jpg",
+     "artworkThumb": "file:///thumb/a.jpg",
+     "favorite": true,
+     "year": 1999,
+     "quality": "LOSSLESS",
+     "tidalId": 42
+    }
+   ],
+   "scanned": [
+    {
+     "id": "ms_10",
+     "uri": "content://media/external/audio/media/10",
+     "title": "Artist - Album - Title",
+     "artist": "Unknown Artist",
+     "album": "StaySound",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Artist - Album - Title.flac",
+     "artwork": "content://media/external/audio/albumart/77",
+     "year": 0,
+     "sampleRate": 96000
+    }
+   ],
+   "expected": [
+    {
+     "id": "ms_10",
+     "uri": "content://media/external/audio/media/10",
+     "title": "Real Title",
+     "artist": "Real Artist",
+     "album": "Real Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Artist - Album - Title.flac",
+     "artwork": "https://img.example/a.jpg",
+     "year": 1999,
+     "sampleRate": 96000,
+     "artworkThumb": "file:///thumb/a.jpg",
+     "quality": "LOSSLESS",
+     "tidalId": 42,
+     "favorite": true
+    }
+   ]
+  },
+  {
+   "name": "a scanned real artwork replaces the stored one and drops its thumb",
+   "existing": [
+    {
+     "id": "saf_2",
+     "uri": "content://com.android.externalstorage.documents/tree/primary%3ADownload%2FStaySound/document/primary%3ADownload%2FStaySound%2FSome%20-%20Thing%20-%20Else.flac",
+     "title": "Else",
+     "artist": "Some",
+     "album": "Thing",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "artwork": "https://img.example/old.jpg",
+     "artworkThumb": "file:///thumb/old.jpg"
+    }
+   ],
+   "scanned": [
+    {
+     "id": "ms_11",
+     "uri": "content://media/external/audio/media/11",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Some - Thing - Else.flac",
+     "artwork": "file:///covers/new.jpg"
+    }
+   ],
+   "expected": [
+    {
+     "id": "ms_11",
+     "uri": "content://media/external/audio/media/11",
+     "title": "Else",
+     "artist": "Some",
+     "album": "Thing",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Some - Thing - Else.flac",
+     "artwork": "file:///covers/new.jpg"
+    }
+   ]
+  },
+  {
+   "name": "stored empty artwork lets the scan win",
+   "existing": [
+    {
+     "id": "saf_3",
+     "uri": "content://com.android.externalstorage.documents/tree/primary%3ADownload%2FStaySound/document/primary%3ADownload%2FStaySound%2FNobody%20-%20Nothing%20-%20Blank.flac",
+     "title": "Blank",
+     "artist": "Nobody",
+     "album": "Nothing",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "artwork": "",
+     "artworkThumb": "file:///thumb/x.jpg"
+    }
+   ],
+   "scanned": [
+    {
+     "id": "ms_12",
+     "uri": "content://media/external/audio/media/12",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Nobody - Nothing - Blank.flac"
+    }
+   ],
+   "expected": [
+    {
+     "id": "ms_12",
+     "uri": "content://media/external/audio/media/12",
+     "title": "Blank",
+     "artist": "Nobody",
+     "album": "Nothing",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Nobody - Nothing - Blank.flac"
+    }
+   ]
+  },
+  {
+   "name": "downloads match by the reconstructed sanitized name",
+   "existing": [
+    {
+     "id": "tidal_1",
+     "uri": "content://tidal/opaque/1",
+     "title": "Who Made Who?",
+     "artist": "AC/DC",
+     "album": "Who: Made <Who>",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "source": "tidal",
+     "tidalId": 9,
+     "favorite": false
+    }
+   ],
+   "scanned": [
+    {
+     "id": "ms_13",
+     "uri": "content://media/external/audio/media/13",
+     "title": "whatever",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "AC_DC - Who_ Made _Who_ - Who Made Who_.mp3"
+    }
+   ],
+   "expected": [
+    {
+     "id": "ms_13",
+     "uri": "content://media/external/audio/media/13",
+     "title": "Who Made Who?",
+     "artist": "AC/DC",
+     "album": "Who: Made <Who>",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "AC_DC - Who_ Made _Who_ - Who Made Who_.mp3",
+     "source": "tidal",
+     "tidalId": 9,
+     "favorite": false
+    }
+   ]
+  },
+  {
+   "name": "generic stored values do not overwrite the scan",
+   "existing": [
+    {
+     "id": "e1",
+     "uri": "content://com.android.externalstorage.documents/tree/primary%3ADownload%2FStaySound/document/primary%3ADownload%2FStaySound%2FReal%20Artist%20-%20Real%20Album%20-%20Real%20Title.mp3",
+     "title": "Unknown Title",
+     "artist": "STAYSOUND",
+     "album": "Media",
+     "duration": 200000,
+     "dateAdded": 1000
+    }
+   ],
+   "scanned": [
+    {
+     "id": "ms_14",
+     "uri": "content://media/external/audio/media/14",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Real Artist - Real Album - Real Title.mp3"
+    }
+   ],
+   "expected": [
+    {
+     "id": "ms_14",
+     "uri": "content://media/external/audio/media/14",
+     "title": "Real Title",
+     "artist": "Real Artist",
+     "album": "Real Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Real Artist - Real Album - Real Title.mp3"
+    }
+   ]
+  },
+  {
+   "name": "short or numeric stored names never match",
+   "existing": [
+    {
+     "id": "e2",
+     "uri": "content://x/12345.mp3",
+     "title": "A",
+     "artist": "B",
+     "album": "C",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "e3",
+     "uri": "content://x/abc.mp3",
+     "title": "D",
+     "artist": "E",
+     "album": "F",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "favorite": true
+    }
+   ],
+   "scanned": [
+    {
+     "id": "ms_15",
+     "uri": "content://media/external/audio/media/15",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "12345.mp3"
+    },
+    {
+     "id": "ms_16",
+     "uri": "content://media/external/audio/media/16",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "abc.mp3"
+    }
+   ],
+   "expected": [
+    {
+     "id": "ms_15",
+     "uri": "content://media/external/audio/media/15",
+     "title": "12345",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "12345.mp3"
+    },
+    {
+     "id": "ms_16",
+     "uri": "content://media/external/audio/media/16",
+     "title": "abc",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "abc.mp3"
+    }
+   ]
+  },
+  {
+   "name": "junk is dropped",
+   "existing": [],
+   "scanned": [
+    {
+     "id": "j1",
+     "uri": "file:///storage/emulated/0/Android/data/app/cache/x/song.mp3",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "j2",
+     "uri": "file:///storage/emulated/0/Music/StaySound/broken.flac",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 0,
+     "dateAdded": 1000
+    },
+    {
+     "id": "j3",
+     "uri": "content://x/y",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 0,
+     "dateAdded": 1000,
+     "source": "tidal",
+     "_filename": "ghost.m4a"
+    },
+    {
+     "id": "j4",
+     "uri": "file:///cache/staysound/downloads/partial.flac",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok1",
+     "uri": "file:///storage/emulated/0/Music/Other/zero.flac",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 0,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok2",
+     "uri": "file:///storage/emulated/0/Music/StaySound/fine.flac",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 1000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok3",
+     "uri": "file:///storage/emulated/0/Music/StaySound/notaudio.txt",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 0,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok4",
+     "uri": "content://x/y",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 5,
+     "dateAdded": 1000,
+     "relativePath": "Music\\StaySound\\",
+     "_filename": "w.WAV"
+    }
+   ],
+   "expected": [
+    {
+     "id": "j1",
+     "uri": "file:///storage/emulated/0/Android/data/app/cache/x/song.mp3",
+     "title": "song",
+     "artist": "Unknown Artist",
+     "album": "x",
+     "duration": 200000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok1",
+     "uri": "file:///storage/emulated/0/Music/Other/zero.flac",
+     "title": "zero",
+     "artist": "Unknown Artist",
+     "album": "Other",
+     "duration": 0,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok2",
+     "uri": "file:///storage/emulated/0/Music/StaySound/fine.flac",
+     "title": "fine",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 1000,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok3",
+     "uri": "file:///storage/emulated/0/Music/StaySound/notaudio.txt",
+     "title": "notaudio",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 0,
+     "dateAdded": 1000
+    },
+    {
+     "id": "ok4",
+     "uri": "content://x/y",
+     "title": "w",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 5,
+     "dateAdded": 1000,
+     "relativePath": "Music\\StaySound\\",
+     "_filename": "w.WAV"
+    }
+   ]
+  },
+  {
+   "name": "unicode spaces are trimmed like JavaScript does",
+   "existing": [
+    {
+     "id": "u1",
+     "uri": "content://com.android.externalstorage.documents/tree/primary%3ADownload%2FStaySound/document/primary%3ADownload%2FStaySound%2FN%C2%A0Artist%20-%20Album%20-%20Title.mp3",
+     "title": "Title",
+     "artist": "N Artist",
+     "album": "Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "favorite": true
+    }
+   ],
+   "scanned": [
+    {
+     "id": "u2",
+     "uri": "content://media/external/audio/media/20",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": " N Artist - Album - Title.mp3﻿"
+    },
+    {
+     "id": "u3",
+     "uri": "content://media/external/audio/media/21",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Ünï Çödé - Ålbum - Tïtle.flac"
+    }
+   ],
+   "expected": [
+    {
+     "id": "u2",
+     "uri": "content://media/external/audio/media/20",
+     "title": "Title",
+     "artist": "N Artist",
+     "album": "Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": " N Artist - Album - Title.mp3﻿",
+     "favorite": true
+    },
+    {
+     "id": "u3",
+     "uri": "content://media/external/audio/media/21",
+     "title": "Tïtle",
+     "artist": "Ünï Çödé",
+     "album": "Ålbum",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Ünï Çödé - Ålbum - Tïtle.flac"
+    }
+   ]
+  },
+  {
+   "name": "plus signs in URIs are not spaces",
+   "existing": [
+    {
+     "id": "p1",
+     "uri": "content://x/Artist+-+Album+-+Title+Plus.flac",
+     "title": "T",
+     "artist": "Artist",
+     "album": "Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "favorite": true
+    }
+   ],
+   "scanned": [
+    {
+     "id": "p2",
+     "uri": "content://x/Artist+-+Album+-+Title+Plus.flac",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000
+    }
+   ],
+   "expected": [
+    {
+     "id": "p2",
+     "uri": "content://x/Artist+-+Album+-+Title+Plus.flac",
+     "title": "T",
+     "artist": "Artist",
+     "album": "Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "favorite": true
+    }
+   ]
+  },
+  {
+   "name": "a later file with the same id replaces the earlier one in place",
+   "existing": [],
+   "scanned": [
+    {
+     "id": "d1",
+     "uri": "content://media/external/audio/media/30",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "A - B - One.mp3"
+    },
+    {
+     "id": "d2",
+     "uri": "content://media/external/audio/media/31",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "A - B - Two.mp3"
+    },
+    {
+     "id": "d1",
+     "uri": "content://media/external/audio/media/30",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "A - B - One Again.mp3"
+    }
+   ],
+   "expected": [
+    {
+     "id": "d1",
+     "uri": "content://media/external/audio/media/30",
+     "title": "One Again",
+     "artist": "A",
+     "album": "B",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "A - B - One Again.mp3"
+    },
+    {
+     "id": "d2",
+     "uri": "content://media/external/audio/media/31",
+     "title": "Two",
+     "artist": "A",
+     "album": "B",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "A - B - Two.mp3"
+    }
+   ]
+  },
+  {
+   "name": "stored zero-like values fall back to scanned or stored",
+   "existing": [
+    {
+     "id": "z1",
+     "uri": "content://com.android.externalstorage.documents/tree/primary%3ADownload%2FStaySound/document/primary%3ADownload%2FStaySound%2FZed%20-%20Zone%20-%20Zero.flac",
+     "title": "Zero",
+     "artist": "Zed",
+     "album": "Zone",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "year": 2001,
+     "trackNumber": 3,
+     "genre": "Jazz",
+     "bitDepth": 24,
+     "sampleRate": 48000,
+     "codec": "flac",
+     "quality": "HI_RES",
+     "source": "tidal",
+     "tidalId": 5,
+     "tidalAlbumId": 6
+    }
+   ],
+   "scanned": [
+    {
+     "id": "z2",
+     "uri": "content://media/external/audio/media/40",
+     "title": "Unknown",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Zed - Zone - Zero.flac",
+     "year": 0,
+     "trackNumber": 0,
+     "genre": "",
+     "bitDepth": 16,
+     "sampleRate": 0,
+     "codec": "",
+     "quality": "",
+     "source": "",
+     "tidalId": 0
+    }
+   ],
+   "expected": [
+    {
+     "id": "z2",
+     "uri": "content://media/external/audio/media/40",
+     "title": "Zero",
+     "artist": "Zed",
+     "album": "Zone",
+     "duration": 200000,
+     "dateAdded": 1000,
+     "_filename": "Zed - Zone - Zero.flac",
+     "year": 2001,
+     "trackNumber": 3,
+     "genre": "Jazz",
+     "bitDepth": 16,
+     "sampleRate": 48000,
+     "codec": "flac",
+     "quality": "HI_RES",
+     "source": "tidal",
+     "tidalId": 5,
+     "tidalAlbumId": 6
+    }
+   ]
+  }
+ ]
+}

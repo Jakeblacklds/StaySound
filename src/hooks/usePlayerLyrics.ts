@@ -8,7 +8,7 @@ import type { KaraokeLyricsJSON } from '@/src/types/karaokeTypes';
 import { usePerformanceProfile } from '@/src/theme';
 import { DEFAULT_LYRICS_MOTION_OPTION_ID, LYRICS_MOTION_OPTIONS } from '@/src/components/player/lyricsMotionProfiles';
 import React, { useCallback, useMemo, useRef, useState } from 'react';
-import Animated, { runOnJS, useAnimatedReaction, useSharedValue, withTiming, Easing } from 'react-native-reanimated';
+import { runOnJS, useAnimatedReaction, useSharedValue, withTiming, Easing } from 'react-native-reanimated';
 
 const LYRICS_SYNC_OFFSET_STORAGE_KEY = 'lyrics-sync-offsets-v1';
 const LYRICS_MOTION_PROFILE_STORAGE_KEY = 'lyrics-motion-profile-v1';
@@ -27,6 +27,8 @@ export type UsePlayerLyricsArgs = {
   currentTrack: Track | null;
   /** Bump this to force a fresh network search (clears the track's lyrics cache first). */
   refreshNonce?: number;
+  /** Kotlin consumes the shared timeline directly; skip JS position snapshots. */
+  nativeTimeline?: boolean;
 };
 
 function normalizeLyricsOffsetKeyPart(value?: string | null) {
@@ -61,7 +63,7 @@ function getLyricsOffsetCacheKeys(track: {
   return keys;
 }
 
-export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: UsePlayerLyricsArgs) {
+export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0, nativeTimeline = false }: UsePlayerLyricsArgs) {
   const performanceProfile = usePerformanceProfile();
   const lyricsSources = useSettingsStore(state => state.lyricsSources);
   const currentTrackId = currentTrack?.id ?? null;
@@ -160,7 +162,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
 
   useAnimatedReaction(
     () => {
-      if (!visible) return -1;
+      if (!visible || nativeTimeline) return -1;
       const stepMs = lyricsMode === 'lrc' ? 32 : 48;
       return Math.floor(positionShared.value / stepMs) * stepMs;
     },
@@ -169,7 +171,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
         runOnJS(updateNativePosition)(current);
       }
     },
-    [lyricsMode, positionShared, visible]
+    [lyricsMode, positionShared, visible, nativeTimeline]
   );
 
   const applyLyricsOffsetStep = useCallback((deltaMs: number) => {
@@ -190,7 +192,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
     setIsDownloadingLrc(true);
     setLrcError(null);
     try {
-      const payload = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId);
+      const payload = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId, lyricsLookupTrack?.album);
       if (payload && Array.isArray(payload.lyrics) && payload.lyrics.length > 0) {
         setLrcLyrics(payload as KaraokeLyricsJSON);
         setLyricsMode('lrc');
@@ -385,7 +387,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
         }
 
         const [cached, cachedAppleOptions] = await Promise.all([
-          LyricsRepository.getCachedLrcLibLyrics(songTitle, artist, trackId),
+          lyricsSources.includes('lrclib') ? LyricsRepository.getCachedLrcLibLyrics(songTitle, artist, trackId) : Promise.resolve(null),
           LyricsRepository.getCachedAppleWordLyricsOptions(songTitle, artist, trackId, lyricsSources),
         ]);
         if (lyricsRequestIdRef.current !== requestId) return;
@@ -493,7 +495,7 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
           setLrcError(null);
 
           try {
-            const fallback = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId);
+            const fallback = await LyricsRepository.getLrcLibLyrics(songTitle, artist, durationSec, trackId, lyricsLookupTrack?.album);
             if (lyricsRequestIdRef.current !== requestId) return;
 
             if (fallback?.lyrics?.length) {
@@ -599,7 +601,9 @@ export function usePlayerLyrics({ visible, currentTrack, refreshNonce = 0 }: Use
       if (!hasApple) {
         await LyricsRepository.getLyrics(title, artist).catch(() => { });
       }
-      LyricsRepository.getLrcLibLyrics(title, artist, durationSec, trackId).catch(() => { });
+      if (lyricsSourcesRef.current.includes('lrclib')) {
+        await LyricsRepository.getLrcLibLyrics(title, artist, durationSec, trackId, album).catch(() => { });
+      }
     } catch {
       // best effort prefetch
     }

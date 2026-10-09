@@ -62,7 +62,6 @@ half4 main(float2 fragcoord) {
 interface PsychedelicBackgroundProps {
     colors: AlbumColors;
     isPlaying?: boolean;
-    isDark?: boolean;
 }
 
 type Rgb = [number, number, number];
@@ -88,7 +87,6 @@ function hexToRgb(value: string | undefined, fallback: Rgb): Rgb {
 export const PsychedelicBackground = React.memo(function PsychedelicBackground({
     colors,
     isPlaying = false,
-    isDark = true,
 }: PsychedelicBackgroundProps) {
     const effect = useMemo(() => Skia.RuntimeEffect.Make(SKSL), []);
 

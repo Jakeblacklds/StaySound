@@ -2,13 +2,14 @@
  * Lyrics source registry — the single source of truth for which providers the
  * app can pull lyrics from, how to query each one, and how to label it in the UI.
  *
+ * - `lrc-red` serves word-timed TTML by ISRC or validated metadata.
  * - `apple` is the Apple Music word-by-word path (binimum TTML cache).
  * - `lyricsplus` / `musixmatch` / `spotify` are KPoe (LyricsPlus backend) sources,
  *   queried one source at a time so we can offer "una versión por fuente".
- * - `lrclib` is the line-level LRC fallback (handled by the repository layer).
+ * - `lrclib` serves word-timed Lyricsfiles, with LRC as the line fallback.
  */
 
-export type LyricsSourceId = 'apple' | 'lyricsplus' | 'musixmatch' | 'spotify' | 'lrclib';
+export type LyricsSourceId = 'lrc-red' | 'apple' | 'lyricsplus' | 'musixmatch' | 'spotify' | 'lrclib';
 
 export interface LyricsSourceMeta {
     id: LyricsSourceId;
@@ -27,11 +28,12 @@ export interface LyricsSourceMeta {
  * selection, the rest stay available in the picker.
  */
 export const LYRICS_SOURCES: LyricsSourceMeta[] = [
+    { id: 'lrc-red', label: 'lrc.red', icon: 'music-note', granularity: 'word' },
     { id: 'apple', label: 'Apple Music', icon: 'apple', granularity: 'word' },
     { id: 'lyricsplus', label: 'LyricsPlus', icon: 'text-box-multiple-outline', kpoeSource: 'lyricsplus', granularity: 'word' },
     { id: 'musixmatch', label: 'Musixmatch', icon: 'music-box-outline', kpoeSource: 'musixmatch', granularity: 'word' },
     { id: 'spotify', label: 'Spotify', icon: 'spotify', kpoeSource: 'spotify', granularity: 'line' },
-    { id: 'lrclib', label: 'LRCLIB', icon: 'file-music-outline', granularity: 'line' },
+    { id: 'lrclib', label: 'LRCLIB', icon: 'file-music-outline', granularity: 'word' },
 ];
 
 export const DEFAULT_LYRICS_SOURCE_IDS: LyricsSourceId[] = LYRICS_SOURCES.map(source => source.id);

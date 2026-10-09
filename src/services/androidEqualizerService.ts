@@ -1,4 +1,5 @@
-import { NativeModules, Platform } from 'react-native';
+import { requireOptionalNativeModule } from 'expo-modules-core';
+import { Platform } from 'react-native';
 import { useSettingsStore } from '../stores';
 import type {
     EqualizerBand,
@@ -52,8 +53,11 @@ type NativeEqualizerCapabilities = {
 
 type RawNativeBand = NonNullable<NativeEqualizerCapabilities['bands']>[number];
 
+// The engine lives in modules/equalizer-view (EqualizerModule.kt). It remembers the levels it is
+// given and replays them on whatever audio session is current, so levels are pushed to it even
+// before anything is playing.
 const nativeEqualizerModule: NativeEqualizerModule | null =
-    Platform.OS === 'android' ? NativeModules.StaySoundEqualizer ?? null : null;
+    Platform.OS === 'android' ? requireOptionalNativeModule<NativeEqualizerModule>('StaySoundEqualizer') : null;
 
 let syncInFlightPromise: Promise<EqualizerCapabilities | null> | null = null;
 let lastSyncedAudioSessionId: number | null = null;
@@ -107,7 +111,7 @@ export async function syncAndroidEqualizerFromSettings(): Promise<EqualizerCapab
         const attached = normalizeCapabilities(await nativeEqualizerModule.attachToCurrentSession());
         store.setEqualizerCapabilities(attached);
 
-        if (!attached.attached || attached.audioSessionId == null || attached.bands.length === 0) {
+        if (attached.bands.length === 0) {
             return attached;
         }
 
@@ -125,8 +129,10 @@ export async function syncAndroidEqualizerFromSettings(): Promise<EqualizerCapab
 
         await nativeEqualizerModule.setEnabled(true);
         await applyBandLevelsToNative(attached.bands, mergedBandLevels);
-        lastSyncedAudioSessionId = attached.audioSessionId;
-        lastAppliedBandsSignature = nextBandsSignature;
+        // Only a real session counts as synced: levels sent while nothing plays are replayed
+        // against the device's actual bands on the first sync after playback starts.
+        lastSyncedAudioSessionId = attached.attached ? attached.audioSessionId : null;
+        lastAppliedBandsSignature = attached.attached ? nextBandsSignature : '';
 
         return refreshAndroidEqualizerCapabilities(false);
     })()
@@ -172,7 +178,7 @@ export async function setAndroidEqualizerBandLevel(band: EqualizerBand, level: n
     if (!capabilities?.attached) {
         capabilities = await syncAndroidEqualizerFromSettings();
     }
-    if (!capabilities?.attached) return capabilities;
+    if (!capabilities) return capabilities;
 
     await nativeEqualizerModule.setBandLevel(band.index, safeLevel);
 
@@ -195,9 +201,11 @@ export async function applyAndroidEqualizerPreset(presetId: string, nativePreset
     store.setEqualizerMode('app');
 
     const attached = await syncAndroidEqualizerFromSettings();
-    if (!attached?.attached || attached.bands.length === 0) return attached;
+    if (!attached || attached.bands.length === 0) return attached;
 
     if (typeof nativePresetIndex === 'number') {
+        // The device's own presets only exist on a live effect.
+        if (!attached.attached) return attached;
         await nativeEqualizerModule.usePreset(String(nativePresetIndex));
         const refreshed = await refreshAndroidEqualizerCapabilities(false);
         if (refreshed?.bands.length) {
@@ -235,7 +243,7 @@ export async function resetAndroidEqualizerToFlat(): Promise<EqualizerCapabiliti
     if (!nativeEqualizerModule) return null;
 
     const attached = await syncAndroidEqualizerFromSettings();
-    if (!attached?.attached) return attached;
+    if (!attached) return attached;
 
     useSettingsStore.getState().setEqualizerPresetId('flat');
     useSettingsStore.getState().setEqualizerBandLevels(createFlatBandLevels(attached.bands));

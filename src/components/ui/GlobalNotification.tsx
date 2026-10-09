@@ -4,7 +4,7 @@ import React from 'react';
 import { Portal, Snackbar } from 'react-native-paper';
 
 export const GlobalNotification = () => {
-    const { visible, message, type, hideNotification } = useNotificationStore();
+    const { visible, message, type, queue, hideNotification } = useNotificationStore();
     const { theme } = useTheme();
 
     const getBackgroundColor = () => {
@@ -16,19 +16,12 @@ export const GlobalNotification = () => {
         }
     };
 
-    const getTextColor = () => {
-        switch (type) {
-            case 'success': return theme.colors.onPrimary;
-            case 'error': return theme.colors.onError;
-            default: return theme.colors.onSecondary;
-        }
-    };
-
     return (
         <Portal>
             <Snackbar
+                key={queue[0]?.id ?? 0}
                 visible={visible}
-                onDismiss={hideNotification}
+                onDismiss={() => hideNotification(queue[0]?.id)}
                 duration={3000}
                 style={{
                     backgroundColor: getBackgroundColor(),

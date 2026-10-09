@@ -4,6 +4,7 @@ import android.graphics.*
 import kotlin.math.PI
 import kotlin.math.abs
 import kotlin.math.cos
+import kotlin.math.exp
 import kotlin.math.hypot
 import kotlin.math.max
 import kotlin.math.min
@@ -71,6 +72,23 @@ internal class KaraokeSpectrumRenderer(
     private var bassVel = 0f
     private var midDisplay = 0f
     private var trebleDisplay = 0f
+    // Dot matrix musical envelope — a port of web/src/audio/dotMatrixReactor.ts so
+    // Android and Tauri breathe the same way. Audio bends the noise *velocity* and the
+    // surface tension, never the field's position, so nothing can jump between frames.
+    private var mxBass = 0f
+    private var mxMid = 0f
+    private var mxTreble = 0f
+    private var mxLevel = 0f
+    /** Slow running peak: maps the PCM bands (0..1.8) onto the web engine's 0..1 scale. */
+    private var mxGain = 0.35f
+    private var mxBaseline = 0f
+    private var mxPreviousOnset = 0f
+    private var mxPulse = 0f
+    private var mxSwell = 0f
+    private var mxPulseAge = 4f
+    private var mxPhase = 0f
+    private var mxDriftX = 0f
+    private var mxDriftY = 0f
 
     // Per-ray smoothed levels for the mid god-rays (one envelope per ray).
     private val midBeamDisplay = FloatArray(MID_BEAMS)
@@ -201,6 +219,8 @@ internal class KaraokeSpectrumRenderer(
         midDisplay = ease(midDisplay, mid, dt, attack = 0.05f, release = 0.006f)
         trebleDisplay = ease(trebleDisplay, treble, dt, attack = 0.06f, release = 0.014f)
 
+        advanceMatrix(bass, mid, treble, dt / 1000f, isPlaying)
+
         // --- Draw order: horizon → bloom → mids/agudos → (lyrics veil) ---------------
         // GRAVES stay the hero (horizon + bloom). In ARTWORK mode the medios+agudos are
         // one cohesive AGSL AURORA field framing that core; in LYRICS mode they remain the
@@ -225,8 +245,13 @@ internal class KaraokeSpectrumRenderer(
                     drawShimmerVeil(canvas, w, h, t, alpha)
                 }
                 Theme.AURORA, Theme.CAUSTICS -> {
-                    drawHorizon(canvas, w, h, alpha)
-                    drawBloom(canvas, alpha)
+                    // Aurora is composited over the album-color Skia field in
+                    // FullPlayer, so it only contributes translucent audio-led
+                    // dot highlights. Caustics remains a complete standalone theme.
+                    if (theme == Theme.CAUSTICS) {
+                        drawHorizon(canvas, w, h, alpha)
+                        drawBloom(canvas, alpha)
+                    }
                     val style = if (theme == Theme.CAUSTICS) {
                         KaraokeAuroraShader.STYLE_CAUSTICS
                     } else {
@@ -394,8 +419,16 @@ internal class KaraokeSpectrumRenderer(
             width = w,
             height = h,
             timeSec = t / 1000f,
+            bass = bassDisplay.coerceIn(0f, 1f),
             mid = mid,
             treble = tre,
+            flowX = mxDriftX,
+            flowY = mxDriftY,
+            phase = mxPhase,
+            level = mxLevel,
+            pulse = mxPulse,
+            swell = mxSwell,
+            pulseAge = mxPulseAge,
             master = alpha,
             topFrac = AURORA_TOP_FRAC,
             focusY = focusYNorm,
@@ -409,7 +442,7 @@ internal class KaraokeSpectrumRenderer(
         ) ?: return false
         auroraPaint.shader = shader
         auroraPaint.alpha = 255 // intensity baked into the uniforms (premultiplied)
-        auroraPaint.xfermode = addXfer
+        auroraPaint.xfermode = if (style == KaraokeAuroraShader.STYLE_DOT_MATRIX) null else addXfer
         canvas.drawRect(0f, 0f, w, h, auroraPaint)
         auroraPaint.xfermode = null
         return true
@@ -560,6 +593,55 @@ internal class KaraokeSpectrumRenderer(
         var sum = 0f
         for (i in lo until hi) sum += bands[i].coerceAtLeast(0f)
         return (sum / (hi - lo)).coerceIn(0f, 1.5f)
+    }
+
+    private fun advanceMatrix(rawBass: Float, rawMid: Float, rawTreble: Float, dtSec: Float, isPlaying: Boolean) {
+        val dt = dtSec.coerceIn(1f / 240f, 0.1f)
+        // Automatic gain: a fast-rising, ~6s-decaying peak so a quiet master and a
+        // brickwalled one both land in the range the onset thresholds were tuned for.
+        val loudest = max(rawBass, max(rawMid, rawTreble))
+        mxGain = if (loudest > mxGain) approach(mxGain, loudest, dt, 0.25f) else approach(mxGain, loudest, dt, 6f)
+        mxGain = mxGain.coerceAtLeast(0.35f)
+        val norm = 1f / mxGain
+        val bass = if (isPlaying) (rawBass * norm).coerceIn(0f, 1f) else 0f
+        val mid = if (isPlaying) (rawMid * norm).coerceIn(0f, 1f) else 0f
+        val treble = if (isPlaying) (rawTreble * norm).coerceIn(0f, 1f) else 0f
+        val level = min(1f, bass * 0.5f + mid * 0.35f + treble * 0.15f)
+
+        // Visual smoothing: attached to the music, but nothing strobes.
+        mxBass = approach(mxBass, bass, dt, if (bass > mxBass) 0.06f else 0.30f)
+        mxMid = approach(mxMid, mid, dt, if (mid > mxMid) 0.07f else 0.34f)
+        mxTreble = approach(mxTreble, treble, dt, if (treble > mxTreble) 0.07f else 0.38f)
+        mxLevel = approach(mxLevel, level, dt, if (level > mxLevel) 0.10f else 0.42f)
+
+        // Onsets are what rises *above* the running bass floor, so a sustained low end
+        // reads as calm and only the hits pull the dots together.
+        mxBaseline = approach(mxBaseline, bass, dt, 1.1f)
+        val flux = max(0f, bass - mxBaseline)
+        val onset = ((flux - 0.012f) * 4.2f).coerceIn(0f, 1f)
+        mxPulseAge = if (onset > 0.28f && onset > mxPreviousOnset + 0.015f && mxPulseAge > 0.2f) {
+            0f
+        } else {
+            min(8f, mxPulseAge + dt)
+        }
+        mxPreviousOnset = onset
+        mxPulse = approach(mxPulse, onset, dt, if (onset > mxPulse) 0.045f else 0.38f)
+        mxSwell = approach(mxSwell, level, dt, if (level > mxSwell) 0.55f else 1.4f)
+
+        // speed=2.4 -> 0.12 noise units/s; the music only warps that velocity.
+        val warp = 1f + mxLevel * 0.22f + mxPulse * 0.42f
+        mxPhase += dt * 0.12f * warp
+
+        // Leaky integration: bands push the current, it always eases back to rest.
+        val decay = exp(-dt / 6f)
+        mxDriftX = (mxDriftX + (mxTreble - mxBass * 0.55f) * 0.09f * dt) * decay
+        mxDriftY = (mxDriftY + (mxMid - mxBass * 0.42f) * 0.075f * dt) * decay
+    }
+
+    /** Time-constant follower (seconds): frame-rate independent. */
+    private fun approach(current: Float, target: Float, dt: Float, tau: Float): Float {
+        if (tau <= 0f) return target
+        return current + (target - current) * (1f - exp(-dt / tau))
     }
 
     private fun ease(cur: Float, target: Float, dt: Float, attack: Float, release: Float): Float {

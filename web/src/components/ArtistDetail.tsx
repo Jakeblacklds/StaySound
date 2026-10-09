@@ -1,8 +1,11 @@
 import { formatDuration } from '@staysound/services/metadataService';
+import { balancedShuffle } from '@staysound/services/shuffle';
 import type { Album, Artist, Track } from '@staysound/types/audio';
 import { useEffect, useMemo, useState, type CSSProperties } from 'react';
 import { getWebArtistInfo, type WebArtistInfo } from '../library/webArtistInfo';
 import { useIsDesktopViewport } from '../hooks/useIsDesktopViewport';
+import { hueFromId } from './circulo/CircleArt';
+import { PlayIcon, ShuffleIcon } from './icons';
 
 interface ArtistDetailProps {
   artist: Artist;
@@ -13,6 +16,10 @@ interface ArtistDetailProps {
   onPlay: (track: Track, queue: Track[], origin?: HTMLElement) => void;
   onSelectAlbum: (album: Album) => void;
   onBack: () => void;
+}
+
+function countLabel(count: number, singular: string, plural: string): string {
+  return `${count} ${count === 1 ? singular : plural}`;
 }
 
 export function ArtistDetail({
@@ -64,10 +71,20 @@ export function ArtistDetail({
     }
   }
 
+  function handleShuffle() {
+    const shuffled = balancedShuffle(playableTracks);
+    if (shuffled[0]) onPlay(shuffled[0], shuffled);
+  }
+
+  function albumArtworkOf(album: Album): string | undefined {
+    return album.artwork
+      || tracks.find(t => album.tracks.includes(t.id) && t.artwork)?.artwork;
+  }
+
   return (
     <section className={`detail-view ${isDesktopViewport ? 'circ' : ''}`}>
       <button className="back-btn" onClick={onBack}>
-        ← Artistas
+        <span>Artistas</span><span aria-hidden="true">/</span><strong>{artist.name}</strong>
       </button>
       <div className="artist-mural">
         {artwork && <img className="artist-mural-bg" src={artwork} alt="" />}
@@ -90,54 +107,106 @@ export function ArtistDetail({
             style={{ viewTransitionName: `artist-title-${transitionKey}` } as CSSProperties}
           >{artistInfo?.name || artist.name}</h2>
           <div className="detail-stats">
-            <span>{artist.trackCount} canciones</span>
-            <span>{artist.albumCount} álbumes</span>
+            <span>{countLabel(artist.trackCount, 'canción', 'canciones')}</span>
+            <span>{countLabel(artist.albumCount, 'álbum', 'álbumes')}</span>
             {artistInfo?.source && <span>{artistInfo.source}</span>}
           </div>
           {biography && <p className="artist-bio">{biography}</p>}
+          <div className="detail-actions">
+            <button
+              className="btn btn-primary"
+              onClick={handlePlayAll}
+              disabled={playableTracks.length === 0}
+            >
+              <PlayIcon size={17} />
+              Reproducir
+            </button>
+            <button
+              className="btn btn-ghost"
+              onClick={handleShuffle}
+              disabled={playableTracks.length === 0}
+            >
+              <ShuffleIcon size={16} />
+              Aleatorio
+            </button>
+          </div>
         </div>
-      </div>
-
-      <div className="detail-actions">
-        <button
-          className="btn btn-primary"
-          onClick={handlePlayAll}
-          disabled={playableTracks.length === 0}
-        >
-          ▶ Reproducir todo
-        </button>
       </div>
 
       {/* Albums section */}
       {artistAlbums.length > 0 && (
         <div className="artist-albums-section">
           <h3>Álbumes</h3>
-          <div className="card-grid">
-            {artistAlbums.map(album => {
-              const albumArtwork = album.artwork
-                || tracks.find(t => album.tracks.includes(t.id) && t.artwork)?.artwork;
-
-              return (
-                <button
-                  key={album.id}
-                  className="library-card"
-                  onClick={() => onSelectAlbum(album)}
-                >
-                  <div className="card-artwork">
-                    {albumArtwork ? (
-                      <img src={albumArtwork} alt={album.name} loading="lazy" />
-                    ) : (
-                      <span className="card-artwork-letter">
-                        {album.name.slice(0, 1).toUpperCase()}
+          {/* Círculo usa los mismos discos que la rejilla de Biblioteca; el skin
+              antiguo conserva sus tarjetas rectangulares. */}
+          {isDesktopViewport ? (
+            <div className="circ-tile-grid inline">
+              {artistAlbums.map(album => {
+                const albumArtwork = albumArtworkOf(album);
+                const albumKey = album.id.replace(/[^a-zA-Z0-9_-]/g, '-');
+                return (
+                  <div key={album.id} className="circ-tile">
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="circ-art"
+                      data-motion-role="artwork"
+                      data-motion-id={`album-card-art-${albumKey}`}
+                      style={{ viewTransitionName: `album-art-${albumKey}` } as CSSProperties}
+                      onClick={() => onSelectAlbum(album)}
+                      onKeyDown={event => { if (event.key === 'Enter') onSelectAlbum(album); }}
+                    >
+                      <span className="circ-art-disc">
+                        {albumArtwork ? <img src={albumArtwork} alt="" loading="lazy" /> : (
+                          <span
+                            className="circ-art-letter"
+                            style={{ background: `oklch(0.3 0.12 ${hueFromId(album.id)})` } as CSSProperties}
+                          >
+                            {(album.name || artist.name).slice(0, 1).toUpperCase()}
+                          </span>
+                        )}
                       </span>
-                    )}
+                    </span>
+                    <strong>{album.name || 'Álbum sin título'}</strong>
+                    <small>
+                      {countLabel(album.trackCount, 'canción', 'canciones')}
+                      {album.year ? ` · ${album.year}` : ''}
+                    </small>
                   </div>
-                  <strong>{album.name}</strong>
-                  <small>{album.trackCount} canciones{album.year ? ` · ${album.year}` : ''}</small>
-                </button>
-              );
-            })}
-          </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="card-grid">
+              {artistAlbums.map(album => {
+                const albumArtwork = albumArtworkOf(album);
+                return (
+                  <button
+                    key={album.id}
+                    className="library-card"
+                    onClick={() => onSelectAlbum(album)}
+                  >
+                    <div className="card-artwork">
+                      {albumArtwork ? (
+                        <img src={albumArtwork} alt={album.name} loading="lazy" />
+                      ) : (
+                        <span className="card-artwork-letter">
+                          {(album.name || artist.name).slice(0, 1).toUpperCase()}
+                        </span>
+                      )}
+                    </div>
+                    <span className="card-copy">
+                      <strong>{album.name || 'Álbum sin título'}</strong>
+                      <small>
+                        {countLabel(album.trackCount, 'canción', 'canciones')}
+                        {album.year ? ` · ${album.year}` : ''}
+                      </small>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 

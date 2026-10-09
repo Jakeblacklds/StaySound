@@ -4,6 +4,8 @@ import java.io.Closeable
 import java.io.EOFException
 import java.io.File
 import java.io.FileOutputStream
+import java.io.InputStream
+import java.net.Socket
 import java.net.SocketTimeoutException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -20,6 +22,9 @@ internal class SoulseekTransferClient(
   private val pumpIncomingPeerSocket: () -> Unit,
   private val pumpServerPackets: () -> Unit,
   private val pollIncomingTransferRequest: () -> IncomingTransferRequest?,
+  private val pollIncomingTransferFailure: () -> String?,
+  private val pollIncomingFileSocket: () -> Socket?,
+  private val pollIncomingFileConnectRequest: () -> ConnectToPeerInfo?,
   private val handleUnhandledServerCode: (Int, SlskMessageParser) -> Unit,
 ) {
   fun download(match: SoulseekMatch, outputPath: String): DownloadResult {
@@ -35,105 +40,32 @@ internal class SoulseekTransferClient(
       targetFile.delete()
     }
 
-    val modernTransfer = runCatching {
-      requestModernQueuedTransfer(
-        username = match.username,
-        address = address,
-        filename = match.filename,
-        timeoutMs = 15_000,
-      )
-    }.getOrNull()
-
-    if (modernTransfer != null) {
-      val modernExpectedSize = listOf(
-        modernTransfer.expectedSize,
-        match.size.takeIf { it > 0L },
-      ).firstOrNull { it != null && it > 0L } ?: 0L
-
-      sendQueuedTransferAcceptance(
-        reply = modernTransfer.reply,
-        token = modernTransfer.token,
-        expectedSize = modernExpectedSize,
-      )
-
-      try {
-        downloadFileWithFallback(
-          host = address.host,
-          port = address.port,
-          token = modernTransfer.token,
-          targetFile = targetFile,
-          expectedSize = modernExpectedSize,
-        )
-
-        return DownloadResult(
-          path = targetFile.absolutePath,
-          bytesWritten = targetFile.length(),
-        )
-      } catch (_: Exception) {
-        // The queue handshake worked but this peer could not complete the F
-        // connection. Restart cleanly with the compatibility flow below.
-        if (targetFile.exists()) targetFile.delete()
-      }
-    }
-
-    val token = randomTokenBytes()
-
-    val transferHandshake = requestTransferWithFallback(
-      host = address.host,
-      port = address.port,
-      token = token,
+    val queuedTransfer = requestModernQueuedTransfer(
+      username = match.username,
+      address = address,
       filename = match.filename,
+      // A peer that advertised a free slot offers the file within seconds;
+      // when it doesn't, the next candidate is a better bet than waiting.
+      // Queued peers get longer, but Seeker's experience is that peers with
+      // no free slot rarely start at all, so they are ranked last anyway.
+      timeoutMs = if (match.slotsFree == true) 25_000 else 60_000,
     )
-
-    val transferResponse = transferHandshake.response
-
-    ensureNotCancelled(cancelled)
-
     val expectedSize = listOf(
-      transferResponse.expectedSize,
+      queuedTransfer.expectedSize,
       match.size.takeIf { it > 0L },
     ).firstOrNull { it != null && it > 0L } ?: 0L
 
-    if (transferResponse.allowed) {
-      downloadFileWithFallback(
-        host = address.host,
-        port = address.port,
-        token = token,
-        targetFile = targetFile,
-        expectedSize = expectedSize,
-      )
-    } else if (isQueuedReason(transferResponse.reason)) {
-      val queuedSocket = transferHandshake.peerSocket
-        ?: throw IllegalStateException("El peer dejo la descarga en cola. Reintenta en unos segundos.")
-
-      val queuedTransfer = waitForQueuedTransferStartRequest(
-        peerSocket = queuedSocket,
-        expectedFilename = match.filename,
-        timeoutMs = 90_000,
-      )
-
-      val queuedExpectedSize = listOf(
-        queuedTransfer.expectedSize,
-        expectedSize.takeIf { it > 0L },
-      ).firstOrNull { it != null && it > 0L } ?: 0L
-
-      sendQueuedTransferAcceptance(
-        reply = queuedTransfer.reply,
-        token = queuedTransfer.token,
-        expectedSize = queuedExpectedSize,
-      )
-
-      downloadFileWithFallback(
-        host = address.host,
-        port = address.port,
-        token = queuedTransfer.token,
-        targetFile = targetFile,
-        expectedSize = queuedExpectedSize,
-      )
-    } else {
-      val reason = transferResponse.reason?.takeIf { it.isNotBlank() } ?: "Peer rechazo la descarga."
-      throw IllegalStateException(reason)
-    }
+    sendQueuedTransferAcceptance(
+      reply = queuedTransfer.reply,
+      token = queuedTransfer.token,
+    )
+    receiveQueuedFileLikeDesktop(
+      username = match.username,
+      address = address,
+      token = queuedTransfer.token,
+      targetFile = targetFile,
+      expectedSize = expectedSize,
+    )
 
     return DownloadResult(
       path = targetFile.absolutePath,
@@ -168,6 +100,10 @@ internal class SoulseekTransferClient(
       pumpIncomingPeerSocket()
       pumpServerPackets()
 
+      pollIncomingTransferFailure()?.let { failure ->
+        throw IllegalStateException(failure)
+      }
+
       while (true) {
         val incoming = pollIncomingTransferRequest() ?: break
         val incomingFilename = incoming.filename.trim().lowercase(Locale.US)
@@ -197,7 +133,7 @@ internal class SoulseekTransferClient(
     filename: String,
   ): TransferHandshakeResult {
     val attemptErrors = ArrayList<String>()
-    val modes = listOf("peer-init-p", "pierce-fw")
+    val modes = listOf("plain", "peer-init-p", "pierce-fw")
 
     for (mode in modes) {
       ensureNotCancelled(cancelled)
@@ -360,20 +296,124 @@ internal class SoulseekTransferClient(
   private fun sendQueuedTransferAcceptance(
     reply: (ByteArray) -> Unit,
     token: ByteArray,
-    expectedSize: Long,
   ) {
-    val low = expectedSize and 0xFFFFFFFFL
-    val high = (expectedSize ushr 32) and 0xFFFFFFFFL
-
+    // This mirrors the desktop client: TransferResponse for an uploader's
+    // direction=1 request contains only token + allowed. The file size belongs
+    // to TransferRequest and must not be echoed back.
     reply(
       SlskMessageBuilder()
         .writeUInt32(41)
         .writeBytes(token)
         .writeUInt8(1)
-        .writeUInt32(low)
-        .writeUInt32(high)
         .toPacket(),
     )
+  }
+
+  private fun receiveQueuedFileLikeDesktop(
+    username: String,
+    address: PeerAddress,
+    token: ByteArray,
+    targetFile: File,
+    expectedSize: Long,
+  ) {
+    val errors = ArrayList<String>()
+    val secondChanceAt = System.currentTimeMillis() + 3_000L
+    // True once the uploader answered on an F channel with our token: from
+    // then on a stall is the peer's doing, and dialing it again won't help.
+    var engaged = false
+
+    // Tauri first lets the uploader create the F connection. This may arrive
+    // directly on our listen socket or as a server-assisted ConnectToPeer F.
+    while (System.currentTimeMillis() < secondChanceAt) {
+      ensureNotCancelled(cancelled)
+      pumpIncomingPeerSocket()
+      pumpServerPackets()
+
+      while (true) {
+        val socket = pollIncomingFileSocket() ?: break
+        try {
+          val fileSocket = SlskSocket(socket)
+          closeables.add(fileSocket)
+          val receivedToken = readRawToken(fileSocket.input())
+          if (!receivedToken.contentEquals(token)) {
+            fileSocket.close()
+            continue
+          }
+          engaged = true
+          val startOffset = sendFileOffset(fileSocket, targetFile)
+          android.util.Log.i(LOG_TAG, "F entrante de $username listo, offset=$startOffset")
+          receiveFilePayload(fileSocket, targetFile, expectedSize, startOffset)
+          return
+        } catch (error: Exception) {
+          android.util.Log.w(LOG_TAG, "incoming-f $username: ${error.message}")
+          errors.add("incoming-f: ${error.message ?: error::class.java.simpleName}")
+          runCatching { socket.close() }
+        }
+      }
+
+      while (true) {
+        val request = pollIncomingFileConnectRequest() ?: break
+        if (!request.type.equals("F", ignoreCase = true) || request.user != username) continue
+        try {
+          val fileSocket = SlskSocket.connect(request.host, request.port)
+          closeables.add(fileSocket)
+          fileSocket.send(
+            SlskMessageBuilder()
+              .writeUInt8(0)
+              .writeBytes(request.token)
+              .toPacket(),
+          )
+          val receivedToken = readRawToken(fileSocket.input())
+          if (!receivedToken.contentEquals(token)) {
+            fileSocket.close()
+            continue
+          }
+          engaged = true
+          val startOffset = sendFileOffset(fileSocket, targetFile)
+          android.util.Log.i(LOG_TAG, "F indirecto con $username listo, offset=$startOffset")
+          receiveFilePayload(fileSocket, targetFile, expectedSize, startOffset)
+          return
+        } catch (error: Exception) {
+          android.util.Log.w(LOG_TAG, "connect-to-peer-f $username: ${error.message}")
+          errors.add("connect-to-peer-f: ${error.message ?: error::class.java.simpleName}")
+        }
+      }
+
+      Thread.sleep(20)
+    }
+
+    if (engaged) {
+      // The peer took the transfer and then stopped sending: move on to the
+      // next source now instead of spending another stall timeout here.
+      throw EOFException("El peer dejo de enviar datos (${errors.joinToString(" | ")})")
+    }
+
+    // Same second chance as Tauri: if the uploader could not reach our phone,
+    // connect to its advertised port with PeerInit F, then raw token + offset.
+    try {
+      downloadFileOnce(
+        host = address.host,
+        port = address.port,
+        token = token,
+        targetFile = targetFile,
+        expectedSize = expectedSize,
+        mode = "peer-init-f",
+      )
+    } catch (error: Exception) {
+      errors.add("second-chance-f: ${error.message ?: error::class.java.simpleName}")
+      throw EOFException("No se pudo abrir el canal F (${errors.joinToString(" | ")})")
+    }
+  }
+
+  private fun readRawToken(input: InputStream): ByteArray {
+    val token = ByteArray(4)
+    var offset = 0
+    while (offset < token.size) {
+      val read = input.read(token, offset, token.size - offset)
+      if (read < 0) throw EOFException("El peer cerro el canal F antes del token")
+      offset += read
+    }
+    return token
   }
 
   private fun downloadFileWithFallback(
@@ -425,6 +465,7 @@ internal class SoulseekTransferClient(
     val startOffset = if (targetFile.exists()) targetFile.length() else 0L
     if (expectedSize in 1..startOffset) return 0L
 
+    if (port <= 0 || host.isBlank()) throw IllegalStateException("sin direccion directa del peer")
     val fileSocket = SlskSocket.connect(host, port)
     closeables.add(fileSocket)
 
@@ -437,7 +478,7 @@ internal class SoulseekTransferClient(
             .writeUInt8(1)
             .writeString(config.username)
             .writeString("F")
-            .writeBytes(token)
+            .writeBytes(ByteArray(4))
             .toPacket(),
         )
       }
@@ -462,6 +503,16 @@ internal class SoulseekTransferClient(
     }
     fileSocket.send(offsetBytes)
 
+    return receiveFilePayload(fileSocket, targetFile, expectedSize, startOffset)
+  }
+
+  private fun receiveFilePayload(
+    fileSocket: SlskSocket,
+    targetFile: File,
+    expectedSize: Long,
+    startOffset: Long = if (targetFile.exists()) targetFile.length() else 0L,
+  ): Long {
+    val input = fileSocket.input()
     FileOutputStream(targetFile, true).use { output ->
       val buffer = ByteArray(64 * 1024)
       var totalBytes = startOffset
@@ -476,7 +527,8 @@ internal class SoulseekTransferClient(
           input.read(buffer)
         } catch (_: SocketTimeoutException) {
           if (expectedSize > 0L && totalBytes >= expectedSize) break
-          if (System.currentTimeMillis() - lastDataAtMs > 45_000L) {
+          if (System.currentTimeMillis() - lastDataAtMs > 30_000L) {
+            android.util.Log.w(LOG_TAG, "Transferencia estancada tras ${totalBytes - startOffset} bytes nuevos")
             throw SocketTimeoutException("Transferencia estancada")
           }
           continue
@@ -496,6 +548,16 @@ internal class SoulseekTransferClient(
     }
   }
 
+  private fun sendFileOffset(fileSocket: SlskSocket, targetFile: File): Long {
+    val startOffset = if (targetFile.exists()) targetFile.length() else 0L
+    val offsetBytes = ByteArray(8)
+    for (i in 0 until 8) {
+      offsetBytes[i] = ((startOffset ushr (i * 8)) and 0xFFL).toByte()
+    }
+    fileSocket.send(offsetBytes)
+    return startOffset
+  }
+
   private fun resolvePeerAddress(username: String, hostHint: String?, portHint: Int?): PeerAddress {
     if (!hostHint.isNullOrBlank() && portHint != null && portHint > 0) {
       return PeerAddress(hostHint, portHint)
@@ -513,15 +575,22 @@ internal class SoulseekTransferClient(
         .toPacket(),
     )
 
-    val deadline = System.currentTimeMillis() + 12000L
+    val deadline = System.currentTimeMillis() + 8_000L
+    val seenCodes = ArrayList<Int>()
+    android.util.Log.i(LOG_TAG, "GetPeerAddress($username) enviado; socket abierto=${serverSocket.isOpen()}")
     while (System.currentTimeMillis() < deadline) {
       ensureNotCancelled(cancelled)
 
       pumpIncomingPeerSocket()
+      // Another pump (search, uploads) may already have stored the answer.
+      peerAddresses[username]?.let { return it }
 
-      val packet = serverSocket.readPacket(600) ?: continue
+      // Drain quickly: the answer may be queued behind a flood of
+      // ConnectToPeer requests from the search that just finished.
+      val packet = serverSocket.readPacket(if (seenCodes.isEmpty()) 600 else 20) ?: continue
       val parser = SlskMessageParser(packet)
       val code = parser.readUInt32().toInt()
+      if (seenCodes.size < 40) seenCodes.add(code)
 
       if (code == 3) {
         val user = parser.readStringSafe()
@@ -538,6 +607,7 @@ internal class SoulseekTransferClient(
         val address = PeerAddress(host, port)
         peerAddresses[user] = address
 
+        android.util.Log.i(LOG_TAG, "PeerAddress($user) = $host:$port")
         if (user == username) {
           return address
         }
@@ -546,7 +616,16 @@ internal class SoulseekTransferClient(
       }
     }
 
-    throw IllegalStateException("No se pudo resolver la direccion del peer en Soulseek.")
+    android.util.Log.w(LOG_TAG, "GetPeerAddress($username) sin respuesta en 8 s; codigos recibidos=$seenCodes")
+    // Not fatal: without an address the direct attempts simply fail fast and
+    // the transfer continues over the server-brokered (indirect) connections,
+    // which is also what works for most peers behind NAT.
+    return UNKNOWN_ADDRESS
+  }
+
+  private companion object {
+    val UNKNOWN_ADDRESS = PeerAddress("", 0)
+    const val LOG_TAG = "StaySoundSoulseek"
   }
 
   private fun waitForTransferResponse(peerSocket: SlskSocket): TransferResponse {

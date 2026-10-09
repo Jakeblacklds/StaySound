@@ -18,13 +18,12 @@ interface ThemeBackgroundProps {
         text: SharedValue<string>;
     };
     artwork?: string;
-    isVisible?: boolean;
     expansion?: SharedValue<number>;
     lightweight?: boolean;
     isDark?: boolean;
 }
 
-export function ThemeBackground({ colors, animColors, artwork, isVisible, expansion, lightweight, isDark = true }: ThemeBackgroundProps) {
+export function ThemeBackground({ colors, animColors, artwork, expansion, lightweight, isDark = true }: ThemeBackgroundProps) {
     const bgStyle = useAnimatedStyle(() => ({
         opacity: interpolate(expansion?.value ?? 1, [0, 0.35, 1], [0, 0.2, 1], 'clamp'),
     }));
@@ -59,10 +58,14 @@ export function ThemeBackground({ colors, animColors, artwork, isVisible, expans
                             cachePolicy="memory-disk"
                         />
                     </Animated.View>
+                    {/* Cover wash. The blurred artwork alone keeps the album's
+                        full lightness, which reads as a vivid poster behind the
+                        controls — this pulls it down to a lit-room level so the
+                        cover itself stays the brightest thing on screen. */}
                     <View
                         style={[
                             StyleSheet.absoluteFill,
-                            { backgroundColor: isDark ? 'rgba(0,0,0,0.38)' : 'rgba(255,255,255,0.44)' },
+                            { backgroundColor: isDark ? 'rgba(0,0,0,0.50)' : 'rgba(255,255,255,0.44)' },
                         ]}
                     />
                 </View>
@@ -78,7 +81,7 @@ export function ThemeBackground({ colors, animColors, artwork, isVisible, expans
             <View
                 style={[
                     StyleSheet.absoluteFill,
-                    { backgroundColor: isDark ? 'rgba(0,0,0,0.10)' : 'rgba(255,255,255,0.08)' },
+                    { backgroundColor: isDark ? 'rgba(0,0,0,0.14)' : 'rgba(255,255,255,0.08)' },
                 ]}
             />
         </Animated.View>
@@ -101,7 +104,7 @@ interface SubComponentProps {
 function ColorFog({ colors, animColors, isDark = true, lightweight }: SubComponentProps) {
 
     const fog1Style = useAnimatedStyle(() => ({
-        opacity: isDark ? 0.55 : 0.45,
+        opacity: isDark ? 0.4 : 0.45,
         backgroundColor: animColors ? animColors.primary.value : colors.primary,
         transform: [
             { translateX: lightweight ? -4 : -8 },
@@ -111,7 +114,7 @@ function ColorFog({ colors, animColors, isDark = true, lightweight }: SubCompone
     }));
 
     const fog2Style = useAnimatedStyle(() => ({
-        opacity: isDark ? 0.42 : 0.32,
+        opacity: isDark ? 0.3 : 0.32,
         backgroundColor: animColors ? animColors.secondary.value : colors.secondary,
         transform: [
             { translateX: lightweight ? 4 : 10 },

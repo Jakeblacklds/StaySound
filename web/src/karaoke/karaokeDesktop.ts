@@ -18,6 +18,10 @@ export interface KaraokeProgress {
   stage: 'runtime' | 'separation' | string;
   progress: number;
   detail: string;
+  /** Live technical line straight from the tool that is running. */
+  note?: string;
+  /** Remaining time for the current stage when the tool reports one. */
+  etaMs?: number;
 }
 
 export interface KaraokeStems {
@@ -28,6 +32,7 @@ export interface KaraokeStems {
 }
 
 export type LocalLyricsLanguage = 'auto' | 'en-es' | 'es' | 'en';
+export type LyricsAlignmentEngine = 'mfa' | 'qwen-sofa';
 
 export interface LyricsLanguageHint {
   text: string;
@@ -41,6 +46,10 @@ export interface GeneratedLyricsWord {
   endMs: number;
   confidence: number;
   syllables?: GeneratedLyricsSyllable[];
+  /** A backing vocal ("coro"), rendered small under the lead line. */
+  background?: boolean;
+  /** Split into syllables by hand: always filled syllable by syllable. */
+  syllabic?: boolean;
 }
 
 export interface GeneratedLyricsSyllable {
@@ -76,6 +85,7 @@ export interface GeneratedLyrics {
   textSource?: string | null;
   textMatch?: number | null;
   acousticModel?: string | null;
+  alignmentNotes?: string[];
   lines: GeneratedLyricsLine[];
 }
 
@@ -87,6 +97,12 @@ export interface GeneratedLyrics {
  */
 export function generatedWordDisplayParts(word: GeneratedLyricsWord): GeneratedLyricsSyllable[] {
   const syllables = word.syllables ?? [];
+  // A word the user split by hand is shown exactly as split.
+  if (word.syllabic && syllables.length > 1 && syllables.every(syllable => (
+    syllable.endMs > syllable.startMs && syllable.startMs >= word.startMs && syllable.endMs <= word.endMs
+  ))) {
+    return syllables;
+  }
   const wordDuration = word.endMs - word.startMs;
   const hasReliableMelodicParts = wordDuration >= 1_100
     && syllables.length > 1
@@ -103,6 +119,20 @@ export function generatedWordDisplayParts(word: GeneratedLyricsWord): GeneratedL
     endMs: word.endMs,
     phones: syllables.flatMap(syllable => syllable.phones),
   }];
+}
+
+/**
+ * Splits a line into what the lead sings and the backing echo under it. A
+ * line with only backing words is what is sung at that moment, so it is
+ * rendered as the lead rather than as an echo of nothing.
+ */
+export function generatedLineLayers(line: GeneratedLyricsLine): {
+  lead: GeneratedLyricsWord[];
+  backing: GeneratedLyricsWord[];
+} {
+  const backing = line.words.filter(word => word.background);
+  if (!backing.length || backing.length === line.words.length) return { lead: line.words, backing: [] };
+  return { lead: line.words.filter(word => !word.background), backing };
 }
 
 export interface KaraokeGenreResult {
@@ -221,6 +251,11 @@ export async function prepareKaraokeStems(path: string): Promise<KaraokeStems> {
   return invoke<KaraokeStems>('prepare_karaoke_stems', { path });
 }
 
+/** Stems Demucs already produced for this file; never starts a separation. */
+export async function getCachedKaraokeStems(path: string): Promise<KaraokeStems | null> {
+  return invoke<KaraokeStems | null>('cached_karaoke_stems', { path });
+}
+
 export async function transcribeKaraokeVocals(
   path: string,
   language: LocalLyricsLanguage,
@@ -232,8 +267,9 @@ export async function transcribeKaraokeVocals(
 export async function saveLocalGeneratedLyrics(
   path: string,
   lyrics: GeneratedLyrics,
+  engine: LyricsAlignmentEngine = 'mfa',
 ): Promise<GeneratedLyrics> {
-  return invoke<GeneratedLyrics>('save_local_generated_lyrics', { path, lyrics });
+  return invoke<GeneratedLyrics>('save_local_generated_lyrics', { path, lyrics, engine });
 }
 
 export async function persistLocalGeneratedLyrics(
@@ -268,4 +304,14 @@ export async function listenToKaraokeProgress(
 
 export function karaokeStemUrl(path: string): string {
   return convertFileSrc(path);
+}
+
+export async function publishLrclibLyricsfile(input: {
+  title: string;
+  artist: string;
+  album: string;
+  durationMs: number;
+  lyricsfile: string;
+}): Promise<void> {
+  return invoke<void>('publish_lrclib_lyricsfile', input);
 }

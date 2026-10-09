@@ -327,7 +327,7 @@ export const PlayerOptionsModal = React.memo(function PlayerOptionsModal({
                                         Sincronía del espectro
                                     </Text>
                                     <Text style={[modalStyles.tunerHint, { color: textColor + 'AA' }]}>
-                                        Ajusta el desfase del visualizador
+                                        Ajusta el desfase del visualizador. Con Bluetooth se añaden 200 ms automáticamente.
                                     </Text>
                                 </View>
                             </View>

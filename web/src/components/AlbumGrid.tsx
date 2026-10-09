@@ -2,7 +2,12 @@ import type { Album, Track } from '@staysound/types/audio';
 import type { CSSProperties } from 'react';
 import { PlayIcon } from './icons';
 import { hueFromId } from './circulo/CircleArt';
+import { MotionArtwork } from './MotionArtwork';
 import { useIsDesktopViewport } from '../hooks/useIsDesktopViewport';
+
+// Tiles paint at 118px (Círculo) to ~150px (collections); 360 is both the
+// smallest rendition Apple publishes and enough for those at 2x.
+const TILE_MOTION_WIDTH = 360;
 
 function isRelinkNeeded(track: Track): boolean {
   return !track.uri || (track as Track & { needsRelink?: boolean }).needsRelink === true;
@@ -32,7 +37,7 @@ export function AlbumGrid({ albums, tracks, onSelectAlbum }: AlbumGridProps) {
   // depends on them for the shared-element open animation into AlbumDetail.
   if (isDesktopViewport) {
     return (
-      <section className="circ-tile-grid">
+      <section className="circ-tile-grid collection-albums">
         {albums.map(album => {
           const albumArtwork = album.artwork
             || tracks.find(t => album.tracks.includes(t.id) && t.artwork)?.artwork;
@@ -47,10 +52,25 @@ export function AlbumGrid({ albums, tracks, onSelectAlbum }: AlbumGridProps) {
                 data-motion-id={`album-card-art-${transitionKey}`}
                 style={{ viewTransitionName: `album-art-${transitionKey}` } as CSSProperties}
                 onClick={event => onSelectAlbum(album, event.currentTarget)}
-                onKeyDown={event => { if (event.key === 'Enter') onSelectAlbum(album, event.currentTarget); }}
+                aria-label={`Abrir ${album.name}, ${album.artist}`}
+                onKeyDown={event => {
+                  if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onSelectAlbum(album, event.currentTarget);
+                  }
+                }}
               >
                 <span className="circ-art-disc">
-                  {albumArtwork ? <img src={albumArtwork} alt="" loading="lazy" /> : (
+                  {albumArtwork ? (
+                    <MotionArtwork
+                      title={album.name}
+                      artist={album.artist}
+                      album={album.name}
+                      size={TILE_MOTION_WIDTH}
+                    >
+                      <img src={albumArtwork} alt="" loading="lazy" />
+                    </MotionArtwork>
+                  ) : (
                     <span style={{ background: `oklch(0.3 0.12 ${hueFromId(album.id)})`, width: '100%', height: '100%', display: 'grid', placeItems: 'center', color: 'var(--text-primary)', fontWeight: 700, fontSize: '1.4rem' }}>
                       {album.name.slice(0, 1).toUpperCase()}
                     </span>

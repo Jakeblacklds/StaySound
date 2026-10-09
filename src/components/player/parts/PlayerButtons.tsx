@@ -1,117 +1,17 @@
-import React, { useCallback, useEffect } from 'react';
-import { Pressable, StyleProp, StyleSheet, View, ViewStyle } from 'react-native';
+import React from 'react';
+import { View } from 'react-native';
 import { IconButton } from 'react-native-paper';
 import Animated, {
-    Easing,
     interpolate,
     useAnimatedStyle,
     useSharedValue,
     withSequence,
     withSpring,
     withTiming,
-    type SharedValue
+    type SharedValue,
 } from 'react-native-reanimated';
 
-export type PlayerButtonKind = 'primary' | 'nav' | 'secondary';
-export type PlayerVariant = 'immersive';
-
-const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
-
-export function AnimatedPlayerButton({
-    variant,
-    kind,
-    onPress,
-    style,
-    children,
-    active = false,
-    activeColor,
-    accessibilityLabel,
-    accessibilityRole,
-    accessibilityState,
-    accessibilityHint,
-}: {
-    variant: PlayerVariant;
-    kind: PlayerButtonKind;
-    onPress: () => void;
-    style?: StyleProp<ViewStyle>;
-    children: React.ReactNode;
-    /** When true, paints an animated selection pill behind the icon (Material 3 expressive). */
-    active?: boolean;
-    activeColor?: string;
-    accessibilityLabel?: string;
-    accessibilityRole?: 'button' | 'togglebutton';
-    accessibilityState?: { selected?: boolean; disabled?: boolean };
-    accessibilityHint?: string;
-}) {
-    const pressed = useSharedValue(0);
-    const activeProgress = useSharedValue(active ? 1 : 0);
-
-    useEffect(() => {
-        activeProgress.value = withSpring(active ? 1 : 0, {
-            damping: 18,
-            stiffness: 260,
-            mass: 0.6,
-        });
-    }, [active, activeProgress]);
-
-    const handlePressIn = useCallback(() => {
-        pressed.value = withTiming(1, {
-            duration: 90,
-            easing: Easing.out(Easing.quad),
-        });
-    }, [pressed]);
-
-    const handlePressOut = useCallback(() => {
-        pressed.value = withTiming(0, {
-            duration: 140,
-            easing: Easing.out(Easing.cubic),
-        });
-    }, [pressed]);
-
-    const pressStyle = useAnimatedStyle(() => {
-        const p = pressed.value;
-
-        const downScale = kind === 'primary' ? 0.94 : 0.97;
-        return {
-            transform: [
-                { scale: interpolate(p, [0, 1], [1, downScale]) },
-                { translateY: interpolate(p, [0, 1], [0, 2]) },
-            ],
-        };
-    });
-
-    const pillStyle = useAnimatedStyle(() => ({
-        opacity: interpolate(activeProgress.value, [0, 1], [0, 0.18]),
-        transform: [{ scale: interpolate(activeProgress.value, [0, 1], [0.55, 1]) }],
-    }));
-
-    return (
-        <AnimatedPressable
-            onPress={onPress}
-            onPressIn={handlePressIn}
-            onPressOut={handlePressOut}
-            style={[style, pressStyle]}
-            accessibilityLabel={accessibilityLabel}
-            accessibilityRole={accessibilityRole ?? 'button'}
-            accessibilityState={accessibilityState}
-            accessibilityHint={accessibilityHint}
-        >
-            {activeColor ? (
-                <Animated.View
-                    pointerEvents="none"
-                    style={[
-                        StyleSheet.absoluteFill,
-                        { borderRadius: 999, backgroundColor: activeColor },
-                        pillStyle,
-                    ]}
-                />
-            ) : null}
-            {children}
-        </AnimatedPressable>
-    );
-}
-
-export function Particle({ index, count, progress, color }: { index: number; count: number; progress: SharedValue<number>; color: string }) {
+function Particle({ index, count, progress, color }: { index: number; count: number; progress: SharedValue<number>; color: string }) {
     const angle = (index * (360 / count)) * (Math.PI / 180);
     const distance = 35;
 
@@ -122,17 +22,13 @@ export function Particle({ index, count, progress, color }: { index: number; cou
         const translateY = Math.sin(angle) * distance * progress.value;
 
         return {
-            position: 'absolute',
+            position: 'absolute' as const,
             width: 6,
             height: 6,
             borderRadius: 3,
             backgroundColor: color,
             opacity,
-            transform: [
-                { translateX },
-                { translateY },
-                { scale }
-            ],
+            transform: [{ translateX }, { translateY }, { scale }],
         };
     });
 
@@ -168,7 +64,7 @@ export function AnimatedFavoriteButton({
         if (becomingFavorite) {
             scale.value = withSequence(
                 withTiming(1.8, { duration: 200 }),
-                withSpring(1.1, { damping: 30, stiffness: 600, mass: 0.8 })
+                withSpring(1.1, { damping: 30, stiffness: 600, mass: 0.8 }),
             );
 
             particleProgress.value = 0;
@@ -183,12 +79,11 @@ export function AnimatedFavoriteButton({
     return (
         <View
             style={[style, { alignItems: 'center', justifyContent: 'center' }]}
-            accessible={true}
+            accessible
             accessibilityRole="button"
             accessibilityLabel={isFavorite ? 'Quitar de favoritos' : 'Añadir a favoritos'}
             accessibilityState={{ selected: isFavorite }}
         >
-            {/* Particles are decorative — hidden from accessibility tree */}
             <View accessibilityElementsHidden importantForAccessibility="no-hide-descendants">
                 {particles.map((_, i) => (
                     <Particle

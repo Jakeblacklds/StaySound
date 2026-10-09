@@ -2,6 +2,8 @@ import '@uimaxbai/am-lyrics/am-lyrics.js';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { Track } from '@staysound/types/audio';
 import { webAudioEngine } from '../audio/webAudioEngine';
+import { perfProbe } from '../debug/perfProbe';
+import { getKaraokeTrackPath } from '../karaoke/karaokeDesktop';
 import type { WebDynamicPalette } from '../library/dynamicColors';
 import {
   getLyricsFont,
@@ -12,7 +14,7 @@ import {
   buildLyricsLookupQuery,
   cleanLyricsLookupMetadata,
 } from '../library/lyricsLookupMetadata';
-import { lyricsSourcesStore } from '../library/lyricsSources';
+import { loadLocalGeneratedLyricsFor, lyricsSourcesStore } from '../library/lyricsSources';
 import {
   getLyricsTheme,
   LYRICS_THEME_HOST_VARS,
@@ -168,24 +170,42 @@ function getTrackDuration(currentTrack: Track, duration: number): number {
  * longhands whenever the shorthand comes in empty. If upstream renames the
  * method the patch silently no-ops, which just leaves upstream behavior.
  */
-function patchCharMeasurement(element: AmLyricsElement): void {
+function patchCharMeasurement(element: AmLyricsElement, fontKey: string): void {
   const internal = element as unknown as {
     _getTextWidth?: (text: string, font: string) => number;
     __ssMeasurePatched?: boolean;
+    __ssFontKey?: string;
+    __ssEffectiveFont?: string;
   };
+
+  // The resolved shorthand belongs to a font, not to a call: switching fonts
+  // is the only thing that can invalidate it.
+  if (internal.__ssFontKey !== fontKey) {
+    internal.__ssFontKey = fontKey;
+    internal.__ssEffectiveFont = undefined;
+  }
   if (internal.__ssMeasurePatched || typeof internal._getTextWidth !== 'function') return;
 
   const original = internal._getTextWidth.bind(element);
   internal._getTextWidth = (text: string, font: string) => {
-    let effective = font;
-    if (!effective || !effective.trim()) {
+    if (font && font.trim()) return original(text, font);
+
+    // The engine calls this once per character of the song. Resolving the
+    // font here with getComputedStyle — as this patch first did — forced a
+    // style and layout flush on every one of those calls, so a single
+    // measurement pass over a normal lyric could run hundreds of synchronous
+    // reflows back to back and freeze the picture for the length of it.
+    // Reading it once per font turns that into one flush.
+    if (internal.__ssEffectiveFont === undefined) {
       const syllable = element.shadowRoot?.querySelector('.lyrics-syllable');
-      if (syllable) {
-        const style = getComputedStyle(syllable);
-        effective = `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
-      }
+      // Nothing rendered yet: fall through untouched rather than caching a
+      // shorthand measured against the wrong element.
+      if (!syllable) return original(text, font);
+      const style = getComputedStyle(syllable);
+      internal.__ssEffectiveFont =
+        `${style.fontStyle} ${style.fontWeight} ${style.fontSize} ${style.fontFamily}`;
     }
-    return original(text, effective);
+    return original(text, internal.__ssEffectiveFont);
   };
   internal.__ssMeasurePatched = true;
 }
@@ -209,6 +229,18 @@ function recalibrateFillMetrics(
     _updateCharTimingData?: () => void;
   };
 
+  // This pass walks every character in the song, so it is the one place in the
+  // lyrics that can block long enough to be seen. Timing it keeps the claim
+  // honest.
+  const remeasure = () => {
+    const startedAt = performance.now();
+    internal._updateCharTimingData?.();
+    const elapsed = performance.now() - startedAt;
+    if (elapsed >= 50) {
+      perfProbe.note(`letra remedida en ${Math.round(elapsed)}ms · ${font.id}`);
+    }
+  };
+
   const fontReady = font.loadFamily
     ? // Lyrics render at font-weight: bold; load that face specifically.
       document.fonts.load(`bold 32px "${font.loadFamily}"`).then(() => true, () => false)
@@ -220,7 +252,7 @@ function recalibrateFillMetrics(
     if (!loaded || cancelled || !element.isConnected) return;
 
     if (Array.isArray(internal.lyrics) && element.shadowRoot?.querySelector('.lyrics-syllable')) {
-      internal._updateCharTimingData?.();
+      remeasure();
       return;
     }
 
@@ -234,7 +266,7 @@ function recalibrateFillMetrics(
       }
       if (Array.isArray(internal.lyrics) && element.shadowRoot?.querySelector('.lyrics-syllable')) {
         window.clearInterval(watchTimer);
-        internal._updateCharTimingData?.();
+        remeasure();
       }
     }, 250);
   });
@@ -275,8 +307,11 @@ function installLyricsPolish(element: AmLyricsElement, themeCss: string): void {
     }
 
     .lyrics-line {
-      /* Keep the stanza rhythm without adding a second vertical container. */
-      padding-block: clamp(16px, 2.8vh, 30px);
+      /* Keep the stanza rhythm without adding a second vertical container.
+         The gap between verses has to be clearly larger than the leading
+         between the lines one verse wraps onto, or a two-line verse reads as
+         two verses. */
+      padding-block: clamp(18px, 3.4vh, 46px);
       /* Avoid a permanent compositor layer for every verse. */
       mix-blend-mode: normal;
       will-change: auto;
@@ -466,7 +501,9 @@ function installLyricsPolish(element: AmLyricsElement, themeCss: string): void {
     .lyrics-line-container {
       width: 100%;
       max-width: min(100%, 32ch);
-      text-wrap: pretty;
+      /* A verse that has to wrap splits into even halves rather than a full
+         line plus a stray word or two. */
+      text-wrap: balance;
     }
 
     .lyrics-footer {
@@ -486,13 +523,16 @@ function installLyricsPolish(element: AmLyricsElement, themeCss: string): void {
     }
 
     @media (min-width: 1800px) and (min-height: 900px) {
+      /* 4.8vh put a 1440px-tall screen at ~69px, where even the widened column
+         held a dozen characters per line. ~56px keeps the lyric the largest
+         thing on screen and lets an ordinary verse fit in one or two lines. */
       .lyrics-container {
-        --lyplus-font-size-base: clamp(48px, 4.8vh, 72px);
+        --lyplus-font-size-base: clamp(44px, 3.9vh, 60px);
         padding-inline: clamp(22px, 2vw, 42px);
       }
 
       .lyrics-line {
-        padding-block: clamp(22px, 3.1vh, 38px);
+        padding-block: clamp(26px, 3.7vh, 56px);
       }
 
       .lyrics-line-container {
@@ -516,8 +556,11 @@ function installLyricsPolish(element: AmLyricsElement, themeCss: string): void {
       filter: none !important;
     }
 
+    /* These are the verses you read ahead. At .34 they fell to ~2.5:1 against
+       the field; .46 clears 3.5:1 and still leaves the active line alone at
+       full strength. */
     .lyrics-line:not(.active):not(.pre-active) {
-      opacity: .34 !important;
+      opacity: .46 !important;
     }
 
     .lyrics-line.active,
@@ -578,6 +621,10 @@ function installTailCompletionGuard(element: AmLyricsElement): () => void {
       if (record.type !== 'attributes' || record.attributeName !== 'class') continue;
       const line = record.target as HTMLElement;
       const wasActive = (record.oldValue ?? '').split(/\s+/).includes('active');
+      // A line becoming active is when the engine scrolls the verse window —
+      // restyling the neighbouring lines and forcing a synchronous reflow. The
+      // probe blames a stall on it only if the two actually coincide.
+      if (!wasActive && line.classList.contains('active')) perfProbe.mark('cambio de línea');
       if (!wasActive || line.classList.contains('active') || line.classList.contains('lyrics-gap')) {
         continue;
       }
@@ -623,14 +670,46 @@ function installTailCompletionGuard(element: AmLyricsElement): () => void {
     }
   });
 
-  observer.observe(root, {
-    subtree: true,
-    attributes: true,
-    attributeFilter: ['class'],
-    attributeOldValue: true,
-  });
+  /*
+   * Only `.lyrics-line` ever carries `active`, but this used to observe the
+   * whole shadow tree, so the engine's per-syllable and per-character class
+   * work — every word of every line, for the length of the song — produced a
+   * MutationRecord (with a copy of the old class string) that this callback
+   * then threw away. Observing the line elements themselves, without
+   * `subtree`, leaves only the records that can actually mean something.
+   */
+  const observedLines = new WeakSet<HTMLElement>();
+  const attachLines = () => {
+    for (const line of root.querySelectorAll<HTMLElement>('.lyrics-line')) {
+      if (observedLines.has(line)) continue;
+      observedLines.add(line);
+      observer.observe(line, {
+        attributes: true,
+        attributeFilter: ['class'],
+        attributeOldValue: true,
+      });
+    }
+  };
+
+  // Lines appear when the song's lyrics land or the source is switched, which
+  // is rare and never urgent — so the rescan is debounced rather than run per
+  // notification. That keeps the cost of this second observer bounded even if
+  // the engine turns out to touch the tree more often than expected.
+  let scanTimer = 0;
+  const scheduleScan = () => {
+    if (scanTimer) return;
+    scanTimer = window.setTimeout(() => {
+      scanTimer = 0;
+      attachLines();
+    }, 200);
+  };
+  const structureObserver = new MutationObserver(scheduleScan);
+  structureObserver.observe(root, { childList: true, subtree: true });
+  attachLines();
 
   return () => {
+    if (scanTimer) window.clearTimeout(scanTimer);
+    structureObserver.disconnect();
     observer.disconnect();
     for (const [line, timer] of releaseTimers) {
       window.clearTimeout(timer);
@@ -657,6 +736,19 @@ export function SyncedLyricsView({
   // render whose effect dependencies haven't changed. Storing it in state
   // re-runs every configuration effect the moment the element actually exists.
   const [lyricsElement, setLyricsElement] = useState<AmLyricsElement | null>(null);
+  // A locally generated letter has to be in hand *before* the element mounts:
+  // am-lyrics starts its provider chain from connectedCallback() and only ever
+  // checks that chain's abort signal once, so a chain begun while the file was
+  // still being read overwrites the rendered lyrics when it lands — which is
+  // how a word-by-word letter reverted to whatever line-synced fallback the
+  // providers happened to return. Mounting with `ttml` already set makes the
+  // element take its local branch and never start the chain.
+  const localTrackPath = useMemo(() => getKaraokeTrackPath(currentTrack), [currentTrack]);
+  const [localLyrics, setLocalLyrics] = useState<{ trackId: string; ttml: string | null } | null>(
+    null,
+  );
+  const localTtml = localLyrics?.trackId === currentTrack.id ? localLyrics.ttml : undefined;
+  const awaitingLocalLyrics = Boolean(localTrackPath) && localTtml === undefined;
   const safeDuration = getTrackDuration(currentTrack, duration);
   const query = useMemo(() => buildLyricsQuery(currentTrack), [currentTrack]);
   const searchMetadata = useMemo(() => ({
@@ -738,6 +830,17 @@ export function SyncedLyricsView({
   ]);
 
   useEffect(() => {
+    if (!localTrackPath) return undefined;
+    let cancelled = false;
+    void loadLocalGeneratedLyricsFor(currentTrack).then(local => {
+      if (!cancelled) setLocalLyrics({ trackId: currentTrack.id, ttml: local?.ttml ?? null });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [currentTrack, localTrackPath]);
+
+  useEffect(() => {
     if (!lyricsElement) return;
     return installTailCompletionGuard(lyricsElement);
   }, [lyricsElement, currentTrack.id]);
@@ -747,11 +850,18 @@ export function SyncedLyricsView({
     if (!element || !onAvailabilityChange) return;
     const internal = element as unknown as { isLoading?: boolean; lyrics?: unknown[] };
     let lastValue: boolean | null = null;
+    let settled = false;
     const report = () => {
-      if (internal.isLoading) return;
+      // The engine mutates its shadow tree on every line change; without this
+      // guard the answer keeps being recomputed — subtree query included —
+      // for the length of the song after it stopped being able to change.
+      if (settled || internal.isLoading) return;
       const hasLyrics = Array.isArray(internal.lyrics) && internal.lyrics.length > 0;
       const showsEmptyState = Boolean(element.shadowRoot?.querySelector('.no-lyrics'));
       if (!hasLyrics && !showsEmptyState) return;
+      settled = true;
+      observer?.disconnect();
+      window.clearInterval(timer);
       if (lastValue === hasLyrics) return;
       lastValue = hasLyrics;
       onAvailabilityChange(hasLyrics);
@@ -784,7 +894,7 @@ export function SyncedLyricsView({
     // recalibration below) reads the new computed font.
     element.fontFamily = activeFont.stack;
     element.style.fontFamily = activeFont.stack;
-    patchCharMeasurement(element);
+    patchCharMeasurement(element, activeFont.id);
     return recalibrateFillMetrics(element, activeFont);
   }, [lyricsElement, activeFont, currentTrack]);
 
@@ -871,11 +981,17 @@ export function SyncedLyricsView({
     setLyricsTime(element, position + timingOffsetMs, true);
   }, [lyricsElement, isPlaying, position, currentTrack.id, timingOffsetMs]);
 
+  // One IPC round trip on the desktop build, nothing at all on the web one.
+  // Mounting the element first and correcting it afterwards is what the
+  // provider chain wins the race against.
+  if (awaitingLocalLyrics) return <div className="synced-lyrics-view" />;
+
   return (
     <div className="synced-lyrics-view">
       <am-lyrics
         key={currentTrack.id}
         ref={attachLyricsElement}
+        ttml={localTtml ?? undefined}
         song-title={searchMetadata.title}
         song-artist={searchMetadata.artist}
         song-album={searchMetadata.album}

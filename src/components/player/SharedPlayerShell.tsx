@@ -1,11 +1,12 @@
 import { useDynamicColors } from '@/src/hooks';
-import { pickReadableColor } from '@/src/utils/colorContrast';
+import { ensureColorContrast, mixHexColors, pickReadableColor } from '@/src/utils/colorContrast';
 import { usePlayerStore } from '@/src/stores';
 import { useUIStore } from '@/src/stores/uiStore';
 import { useAnimatedColors, usePerformanceProfile, useTheme } from '@/src/theme';
+import * as Haptics from 'expo-haptics';
 import { usePathname } from 'expo-router';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Dimensions, StyleSheet } from 'react-native';
+import { Dimensions, Platform, StyleSheet } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import Animated, {
     Easing,
@@ -19,11 +20,16 @@ import Animated, {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { MiniPlayerShell } from './parts/MiniPlayerShell';
+import { AndroidMiniPlayer } from './parts/AndroidMiniPlayer';
+import { hasNativePlayerChrome } from '@/modules/player-chrome/src';
 import {
     DETAIL_EXTRA_BOTTOM,
     DETAIL_HEIGHT,
     MINI_HEIGHT,
     TAB_BAR_HEIGHT,
+    ANDROID_DOCK_INSET,
+    ANDROID_MINI_RADIUS,
+    ANDROID_MINI_OFFSET,
     isPlayerDetailRoute,
 } from './playerLayout';
 
@@ -73,6 +79,7 @@ function SharedPlayerShellInner() {
     const shellArtworkUri = pendingTrackPreview?.artwork || currentTrack?.artwork || currentTrack?.artworkThumb;
     const { colors: albumColors, animated: animColors } = useDynamicColors(shellArtworkUri, {
         enabled: performanceProfile.enableDynamicColors,
+        deepenDarkBackground: true,
     });
     const shouldUseThemePlayerColors = !performanceProfile.enableDynamicColors;
     const playerColors = shouldUseThemePlayerColors
@@ -104,10 +111,24 @@ function SharedPlayerShellInner() {
         theme.colors.onSurface,
         theme.colors.onBackground,
     ]);
+    // The skip controls sit on the BAR, not inside the pill — tinting them with
+    // the pill's on-color made them read as flat white and ignore the album
+    // palette. Carry the accent, then guarantee contrast against the bar.
+    const skipIconColor = useMemo(() => {
+        const tinted = mixHexColors(theme.colors.onSurface, theme.colors.primary, 0.45);
+        return ensureColorContrast(tinted, theme.colors.surface, {
+            minRatio: 4.5,
+            targetColor: theme.colors.onSurface,
+            fallbackColor: theme.colors.onSurface,
+        });
+    }, [theme.colors.onSurface, theme.colors.primary, theme.colors.surface]);
     const routeProgress = useSharedValue(0);
     const isVertical = useSharedValue(false);
     const playPress = useSharedValue(0);
-    const collapsedBottom = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom;
+    const floatingDock = Platform.OS === 'android' && config.style === 'material3';
+    const dockLeft = floatingDock ? Math.max(ANDROID_DOCK_INSET, insets.left + 8) : 0;
+    const dockRight = floatingDock ? Math.max(ANDROID_DOCK_INSET, insets.right + 8) : 0;
+    const collapsedBottom = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom + (floatingDock ? ANDROID_MINI_OFFSET : 0);
     const isDetailRoute = isPlayerDetailRoute(pathname);
 
     useEffect(() => {
@@ -149,17 +170,18 @@ function SharedPlayerShellInner() {
     const shellContainerStyle = useAnimatedStyle(() => {
         const routeP = routeProgress.value;
         const detailBottom = Math.max(insets.bottom + DETAIL_EXTRA_BOTTOM, DETAIL_EXTRA_BOTTOM);
-        const collapseBtm = (config.style === 'material3' ? TAB_BAR_HEIGHT : 85) + insets.bottom;
+        const collapseBtm = collapsedBottom;
+        const radius = floatingDock ? ANDROID_MINI_RADIUS * (1 - routeP) : 0;
 
         return {
             bottom: interpolate(routeP, [0, 1], [collapseBtm, detailBottom], Extrapolation.CLAMP),
-            left: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
-            right: interpolate(routeP, [0, 1], [0, 0], Extrapolation.CLAMP),
+            left: interpolate(routeP, [0, 1], [dockLeft, 0], Extrapolation.CLAMP),
+            right: interpolate(routeP, [0, 1], [dockRight, 0], Extrapolation.CLAMP),
             height: interpolate(routeP, [0, 1], [MINI_HEIGHT, DETAIL_HEIGHT], Extrapolation.CLAMP),
-            borderTopLeftRadius: 0,
-            borderTopRightRadius: 0,
-            borderBottomLeftRadius: 0,
-            borderBottomRightRadius: 0,
+            borderTopLeftRadius: radius,
+            borderTopRightRadius: radius,
+            borderBottomLeftRadius: radius,
+            borderBottomRightRadius: radius,
         };
     });
 
@@ -259,6 +281,16 @@ function SharedPlayerShellInner() {
         togglePlayPause();
     }, [shouldShowTidalLoading, togglePlayPause]);
 
+    const handlePrevious = useCallback(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        previous();
+    }, [previous]);
+
+    const handleNext = useCallback(() => {
+        Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+        next();
+    }, [next]);
+
     const handlePlayPressIn = useCallback(() => {
         playPress.value = withTiming(1, {
             duration: 90,
@@ -281,19 +313,35 @@ function SharedPlayerShellInner() {
                 pointerEvents={playerVisible ? 'none' : 'auto'}
                 style={[styles.container, shellContainerStyle]}
             >
-                <MiniPlayerShell
+                {hasNativePlayerChrome ? (
+                    <AndroidMiniPlayer
+                        track={displayTrack}
+                        expansion={expansion}
+                        titleColor={playerAnimColors.text}
+                        playInk={playPillIcon}
+                        controlInk={skipIconColor}
+                        playFill={playPillFill}
+                        loading={shouldShowTidalLoading}
+                        showPause={shouldHoldPauseAffordance}
+                        onOpen={handleTap}
+                        onToggle={handleToggle}
+                        onPrevious={previous}
+                        onNext={next}
+                    />
+                ) : <MiniPlayerShell
                     variant="row"
                     track={displayTrack}
                     showArtwork={false}
                     textColor={playPillIcon}
+                    controlColor={skipIconColor}
                     buttonFillColor={playPillFill}
                     buttonBorderColor="transparent"
                     showLoading={shouldShowTidalLoading}
                     showPause={shouldHoldPauseAffordance}
                     onPress={handleTap}
                     onToggle={handleToggle}
-                    onPrevious={previous}
-                    onNext={next}
+                    onPrevious={handlePrevious}
+                    onNext={handleNext}
                     onPressIn={handlePlayPressIn}
                     onPressOut={handlePlayPressOut}
                     contentStyle={shellContentStyle}
@@ -301,7 +349,7 @@ function SharedPlayerShellInner() {
                     titleStyle={titleAnimatedStyle}
                     artistStyle={artistAnimatedStyle}
                     playButtonStyle={playFadeStyle}
-                />
+                />}
             </Animated.View>
         </GestureDetector>
     );

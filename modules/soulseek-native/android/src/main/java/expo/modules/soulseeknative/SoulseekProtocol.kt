@@ -26,17 +26,41 @@ internal class SlskSocket(private val socket: Socket) : Closeable {
     }
   }
 
+  /** Set once any read/write fails, so a pooled session knows to re-login. */
+  @Volatile
+  private var failed = false
+
+  fun isOpen(): Boolean = !failed && socket.isConnected && !socket.isClosed
+
   fun send(payload: ByteArray) {
-    synchronized(output) {
-      output.write(payload)
-      output.flush()
+    try {
+      synchronized(output) {
+        output.write(payload)
+        output.flush()
+      }
+    } catch (error: java.io.IOException) {
+      failed = true
+      throw error
     }
   }
 
+  /** When the last complete packet arrived; a quiet server may be a dead route. */
+  @Volatile
+  var lastPacketAtMs = System.currentTimeMillis()
+    private set
+
   fun readPacket(timeoutMs: Int): ByteArray? {
-    socket.soTimeout = timeoutMs
-    return packetReader.readPacket(timeoutMs)
+    return try {
+      socket.soTimeout = timeoutMs
+      packetReader.readPacket(timeoutMs)?.also { lastPacketAtMs = System.currentTimeMillis() }
+    } catch (error: java.io.IOException) {
+      failed = true
+      throw error
+    }
   }
+
+  /** Mobile NATs drop idle TCP silently; the owner marks such a route dead. */
+  fun markFailed() { failed = true }
 
   fun input(): InputStream = input
 
@@ -49,46 +73,77 @@ internal class SlskSocket(private val socket: Socket) : Closeable {
   }
 }
 
+/**
+ * Reads length-prefixed packets without ever losing bytes: a timeout in the
+ * middle of a header or payload keeps what already arrived and resumes on the
+ * next call. (Dropping partial bytes desynchronises the stream for good, which
+ * a long-lived server session eventually hits.) It also reads exactly the
+ * packet's bytes, never beyond, so raw file data that follows stays in the
+ * socket for whoever takes it over.
+ */
 internal class SlskPacketReader(
   private val socket: Socket,
   private val input: InputStream,
 ) {
+  private val header = ByteArray(4)
+  private var headerRead = 0
+  private var payload: ByteArray? = null
+  private var payloadRead = 0
+
   fun readPacket(timeoutMs: Int): ByteArray? {
-    val header = try {
-      readFully(4)
-    } catch (_: SocketTimeoutException) {
-      return null
-    }
-
-    val payloadSize = readUInt32LE(header).toInt()
-    if (payloadSize <= 0) {
-      return ByteArray(0)
-    }
-
+    // Callers rely on the socket's own timeout for raw reads afterwards.
     val previousTimeout = socket.soTimeout
-    socket.soTimeout = max(timeoutMs, 2500)
-    return try {
-      readFully(payloadSize)
-    } catch (_: SocketTimeoutException) {
-      null
+    try {
+      return readPacketUntil(System.currentTimeMillis() + max(timeoutMs, 1))
     } finally {
-      socket.soTimeout = previousTimeout
+      runCatching { socket.soTimeout = previousTimeout }
     }
   }
 
-  private fun readFully(length: Int): ByteArray {
-    val buffer = ByteArray(length)
-    var offset = 0
-
-    while (offset < length) {
-      val read = input.read(buffer, offset, length - offset)
-      if (read < 0) {
-        throw EOFException("Socket cerrado")
+  private fun readPacketUntil(initialDeadline: Long): ByteArray? {
+    var deadline = initialDeadline
+    while (true) {
+      if (headerRead < 4) {
+        headerRead += readSome(header, headerRead, 4 - headerRead, deadline) ?: return null
+        if (headerRead < 4) continue
+        val payloadSize = readUInt32LE(header)
+        if (payloadSize <= 0L) {
+          headerRead = 0
+          return ByteArray(0)
+        }
+        if (payloadSize > MAX_PACKET_BYTES) throw java.io.IOException("Paquete Soulseek invalido ($payloadSize bytes)")
+        payload = ByteArray(payloadSize.toInt())
+        payloadRead = 0
+        // Once a packet has started, give its body a fair chance to arrive.
+        deadline = max(deadline, System.currentTimeMillis() + 2_500L)
       }
-      offset += read
+      val body = payload ?: return null
+      if (payloadRead < body.size) {
+        payloadRead += readSome(body, payloadRead, body.size - payloadRead, deadline) ?: return null
+      }
+      if (payloadRead == body.size) {
+        headerRead = 0; payload = null; payloadRead = 0
+        return body
+      }
     }
+  }
 
-    return buffer
+  /** Bytes read, or null when the deadline passes first. */
+  private fun readSome(buffer: ByteArray, offset: Int, length: Int, deadline: Long): Int? {
+    val remaining = deadline - System.currentTimeMillis()
+    if (remaining <= 0) return null
+    socket.soTimeout = remaining.coerceAtMost(Int.MAX_VALUE.toLong()).toInt().coerceAtLeast(1)
+    val read = try {
+      input.read(buffer, offset, length)
+    } catch (_: SocketTimeoutException) {
+      return null
+    }
+    if (read < 0) throw EOFException("Socket cerrado")
+    return read
+  }
+
+  private companion object {
+    const val MAX_PACKET_BYTES = 64L * 1024 * 1024
   }
 }
 
@@ -124,6 +179,14 @@ internal class SlskMessageBuilder {
     output.write(value)
     return this
   }
+
+  fun writeUInt64(value: Long): SlskMessageBuilder {
+    writeUInt32(value and 0xFFFFFFFFL)
+    return writeUInt32((value ushr 32) and 0xFFFFFFFFL)
+  }
+
+  /** Body without the length prefix, e.g. to compress it first. */
+  fun toBytes(): ByteArray = output.toByteArray()
 
   fun toPacket(): ByteArray {
     val body = output.toByteArray()

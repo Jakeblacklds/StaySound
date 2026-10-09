@@ -1,0 +1,2758 @@
+{
+ "cases": [
+  {
+   "fn": "artworkUrl",
+   "input": [
+    "ab12cd34-0000-1111-2222-333344445555"
+   ],
+   "expected": "https://resources.tidal.com/images/ab12cd34/0000/1111/2222/333344445555/640x640.jpg"
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    "https://cdn.example/a.jpg"
+   ],
+   "expected": "https://cdn.example/a.jpg"
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    "http://cdn.example/a.jpg"
+   ],
+   "expected": "http://cdn.example/a.jpg"
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    null
+   ],
+   "expected": null
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    ""
+   ],
+   "expected": null
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    "null"
+   ],
+   "expected": null
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    "00000000-0000-0000-0000-000000000000"
+   ],
+   "expected": null
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    "plainhash"
+   ],
+   "expected": "https://resources.tidal.com/images/plainhash/640x640.jpg"
+  },
+  {
+   "fn": "artworkUrl",
+   "input": [
+    null
+   ],
+   "expected": null
+  },
+  {
+   "fn": "playlistArtworkUrl",
+   "input": [
+    "a-b-c"
+   ],
+   "expected": "https://resources.tidal.com/images/a/b/c/640x640.jpg"
+  },
+  {
+   "fn": "playlistArtworkUrl",
+   "input": [
+    "squarehash"
+   ],
+   "expected": "https://resources.tidal.com/images/squarehash/640x640.jpg"
+  },
+  {
+   "fn": "playlistArtworkUrl",
+   "input": [
+    ""
+   ],
+   "expected": null
+  },
+  {
+   "fn": "playlistArtworkUrl",
+   "input": [
+    null
+   ],
+   "expected": null
+  },
+  {
+   "fn": "withVersion",
+   "input": [
+    "DtMF",
+    "Live"
+   ],
+   "expected": "DtMF (Live)"
+  },
+  {
+   "fn": "withVersion",
+   "input": [
+    "DtMF (Live)",
+    "live"
+   ],
+   "expected": "DtMF (Live)"
+  },
+  {
+   "fn": "withVersion",
+   "input": [
+    "Song",
+    "  "
+   ],
+   "expected": "Song"
+  },
+  {
+   "fn": "withVersion",
+   "input": [
+    "Song",
+    null
+   ],
+   "expected": "Song"
+  },
+  {
+   "fn": "withVersion",
+   "input": [
+    "",
+    "Live"
+   ],
+   "expected": ""
+  },
+  {
+   "fn": "withVersion",
+   "input": [
+    "Song",
+    " Remix "
+   ],
+   "expected": "Song (Remix)"
+  },
+  {
+   "fn": "withVersion",
+   "input": [
+    "Ünï",
+    "ÜNÏ"
+   ],
+   "expected": "Ünï"
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 7,
+     "title": "Song",
+     "version": "Remix",
+     "duration": 200.6,
+     "audioQuality": "LOSSLESS",
+     "mediaMetadata": {
+      "tags": [
+       "HIRES_LOSSLESS"
+      ]
+     },
+     "album": {
+      "id": 9,
+      "title": "LP",
+      "cover": "aa-bb"
+     },
+     "artist": {
+      "id": 3,
+      "name": "Main"
+     },
+     "artists": [
+      {
+       "name": "Other"
+      }
+     ],
+     "isrc": "X",
+     "trackNumber": 4,
+     "explicit": true,
+     "popularity": 51.5
+    }
+   ],
+   "expected": {
+    "id": 7,
+    "title": "Song (Remix)",
+    "artist": "Main",
+    "album": "LP",
+    "durationMs": 200600,
+    "quality": "LOSSLESS",
+    "isHiRes": true,
+    "coverUuid": "aa-bb",
+    "artworkUrl": "https://resources.tidal.com/images/aa/bb/640x640.jpg",
+    "trackNumber": 4,
+    "isrc": "X",
+    "explicit": true,
+    "popularity": 51.5,
+    "artistId": 3,
+    "albumId": 9
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 1,
+     "title": "T",
+     "duration": -5
+    }
+   ],
+   "expected": {
+    "id": 1,
+    "title": "T",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 0,
+    "quality": "LOSSLESS",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 2,
+     "title": "T",
+     "duration": 1,
+     "artists": [
+      {
+       "name": "First"
+      }
+     ]
+    }
+   ],
+   "expected": {
+    "id": 2,
+    "title": "T",
+    "artist": "First",
+    "album": "Unknown Album",
+    "durationMs": 1000,
+    "quality": "LOSSLESS",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 3,
+     "title": "T",
+     "duration": 1,
+     "audioQuality": "HI_RES_LOSSLESS",
+     "album": {
+      "cover": null
+     }
+    }
+   ],
+   "expected": {
+    "id": 3,
+    "title": "T",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 1000,
+    "quality": "HI_RES_LOSSLESS",
+    "isHiRes": true,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 4,
+     "title": "T",
+     "duration": 0.0004
+    }
+   ],
+   "expected": {
+    "id": 4,
+    "title": "T",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 0,
+    "quality": "LOSSLESS",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 8,
+     "title": "T",
+     "duration": 0.0005
+    }
+   ],
+   "expected": {
+    "id": 8,
+    "title": "T",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 1,
+    "quality": "LOSSLESS",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 9,
+     "title": "T",
+     "duration": 0.0025
+    }
+   ],
+   "expected": {
+    "id": 9,
+    "title": "T",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 3,
+    "quality": "LOSSLESS",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 10,
+     "title": "T",
+     "duration": 1.0015
+    }
+   ],
+   "expected": {
+    "id": 10,
+    "title": "T",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 1002,
+    "quality": "LOSSLESS",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 5,
+     "title": "T",
+     "duration": 2.5,
+     "mediaMetadata": {
+      "tags": []
+     },
+     "audioQuality": "HIGH"
+    }
+   ],
+   "expected": {
+    "id": 5,
+    "title": "T",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 2500,
+    "quality": "HIGH",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeTrack",
+   "input": [
+    {
+     "id": 123456789012,
+     "title": "Big id",
+     "duration": 3
+    }
+   ],
+   "expected": {
+    "id": 123456789012,
+    "title": "Big id",
+    "artist": "Unknown Artist",
+    "album": "Unknown Album",
+    "durationMs": 3000,
+    "quality": "LOSSLESS",
+    "isHiRes": false,
+    "coverUuid": null
+   }
+  },
+  {
+   "fn": "normalizeArtist",
+   "input": [
+    {
+     "id": 1,
+     "name": "A",
+     "picture": "",
+     "popularity": 5
+    }
+   ],
+   "expected": {
+    "id": 1,
+    "name": "A",
+    "popularity": 5
+   }
+  },
+  {
+   "fn": "normalizeArtist",
+   "input": [
+    {
+     "id": 2,
+     "name": "B",
+     "picture": "aa-bb-cc"
+    }
+   ],
+   "expected": {
+    "id": 2,
+    "name": "B",
+    "picture": "aa-bb-cc",
+    "artworkUrl": "https://resources.tidal.com/images/aa/bb/cc/640x640.jpg"
+   }
+  },
+  {
+   "fn": "normalizeArtist",
+   "input": [
+    {
+     "id": 3,
+     "name": "C",
+     "picture": "https://x/y.jpg"
+    }
+   ],
+   "expected": {
+    "id": 3,
+    "name": "C",
+    "picture": "https://x/y.jpg",
+    "artworkUrl": "https://x/y.jpg"
+   }
+  },
+  {
+   "fn": "normalizeArtist",
+   "input": [
+    {
+     "id": 4,
+     "name": "D"
+    }
+   ],
+   "expected": {
+    "id": 4,
+    "name": "D"
+   }
+  },
+  {
+   "fn": "normalizeAlbum",
+   "input": [
+    {
+     "id": 4,
+     "title": "X",
+     "version": "Deluxe",
+     "releaseDate": "2020-05-01",
+     "artists": [
+      {
+       "id": 8,
+       "name": "B"
+      }
+     ],
+     "cover": "c-d",
+     "numberOfTracks": 12,
+     "explicit": false,
+     "type": "ALBUM",
+     "popularity": 3
+    }
+   ],
+   "expected": {
+    "id": 4,
+    "title": "X (Deluxe)",
+    "type": "ALBUM",
+    "popularity": 3,
+    "artistId": 8,
+    "artistName": "B",
+    "releaseDate": "2020-05-01",
+    "year": 2020,
+    "numberOfTracks": 12,
+    "explicit": false,
+    "artworkUrl": "https://resources.tidal.com/images/c/d/640x640.jpg"
+   }
+  },
+  {
+   "fn": "normalizeAlbum",
+   "input": [
+    {
+     "id": 5,
+     "title": "Y"
+    }
+   ],
+   "expected": {
+    "id": 5,
+    "title": "Y",
+    "artistName": "Artista Desconocido"
+   }
+  },
+  {
+   "fn": "normalizeAlbum",
+   "input": [
+    {
+     "id": 6,
+     "title": "Z",
+     "releaseDate": "not a date",
+     "artist": {
+      "id": 1,
+      "name": "Solo"
+     }
+    }
+   ],
+   "expected": {
+    "id": 6,
+    "title": "Z",
+    "artistId": 1,
+    "artistName": "Solo",
+    "releaseDate": "not a date",
+    "year": null
+   }
+  },
+  {
+   "fn": "normalizeAlbum",
+   "input": [
+    {
+     "id": 7,
+     "title": "Q",
+     "releaseDate": "1999-12-31",
+     "cover": null
+    }
+   ],
+   "expected": {
+    "id": 7,
+    "title": "Q",
+    "artistName": "Artista Desconocido",
+    "releaseDate": "1999-12-31",
+    "year": 1999
+   }
+  },
+  {
+   "fn": "normalizePlaylist",
+   "input": [
+    {
+     "uuid": "u",
+     "title": "P",
+     "image": "https://x/y.jpg",
+     "numberOfTracks": 3,
+     "description": "d"
+    }
+   ],
+   "expected": {
+    "uuid": "u",
+    "title": "P",
+    "description": "d",
+    "numberOfTracks": 3,
+    "artworkUrl": "https://x/y.jpg"
+   }
+  },
+  {
+   "fn": "normalizePlaylist",
+   "input": [
+    {
+     "uuid": "u2",
+     "title": "P2",
+     "squareImage": "e-f"
+    }
+   ],
+   "expected": {
+    "uuid": "u2",
+    "title": "P2",
+    "artworkUrl": "https://resources.tidal.com/images/e/f/640x640.jpg"
+   }
+  },
+  {
+   "fn": "normalizePlaylist",
+   "input": [
+    {
+     "uuid": "u3",
+     "title": "P3",
+     "cover": "g-h",
+     "picture": "ignored"
+    }
+   ],
+   "expected": {
+    "uuid": "u3",
+    "title": "P3",
+    "artworkUrl": "https://resources.tidal.com/images/g/h/640x640.jpg"
+   }
+  },
+  {
+   "fn": "normalizePlaylist",
+   "input": [
+    {
+     "uuid": "u4",
+     "title": "P4"
+    }
+   ],
+   "expected": {
+    "uuid": "u4",
+    "title": "P4"
+   }
+  },
+  {
+   "fn": "normalizeTopHit",
+   "input": [
+    null
+   ],
+   "expected": null
+  },
+  {
+   "fn": "normalizeTopHit",
+   "input": [
+    {
+     "type": "ARTISTS",
+     "value": {
+      "id": 1
+     }
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "normalizeTopHit",
+   "input": [
+    {
+     "type": "ARTISTS",
+     "value": {
+      "id": 1,
+      "name": "A"
+     }
+    }
+   ],
+   "expected": {
+    "kind": "artist",
+    "artist": {
+     "id": 1,
+     "name": "A"
+    }
+   }
+  },
+  {
+   "fn": "normalizeTopHit",
+   "input": [
+    {
+     "type": "TRACKS",
+     "value": {
+      "id": 1,
+      "title": "T",
+      "duration": 1
+     }
+    }
+   ],
+   "expected": {
+    "kind": "track",
+    "track": {
+     "id": 1,
+     "title": "T",
+     "artist": "Unknown Artist",
+     "album": "Unknown Album",
+     "durationMs": 1000,
+     "quality": "LOSSLESS",
+     "isHiRes": false,
+     "coverUuid": null
+    }
+   }
+  },
+  {
+   "fn": "normalizeTopHit",
+   "input": [
+    {
+     "type": "ALBUMS",
+     "value": {
+      "id": 1,
+      "title": "T"
+     }
+    }
+   ],
+   "expected": {
+    "kind": "album",
+    "album": {
+     "id": 1,
+     "title": "T",
+     "artistName": "Artista Desconocido"
+    }
+   }
+  },
+  {
+   "fn": "normalizeTopHit",
+   "input": [
+    {
+     "type": "PLAYLISTS",
+     "value": {
+      "id": 1,
+      "title": "T"
+     }
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "normalizeTopHit",
+   "input": [
+    {
+     "type": "TRACKS",
+     "value": {
+      "title": "no id"
+     }
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "extractAlbums",
+   "input": [
+    [
+     {
+      "id": 1,
+      "title": "t",
+      "artist": "a",
+      "album": "al10",
+      "albumId": 10,
+      "artistId": 1,
+      "artworkUrl": "u1",
+      "coverUuid": "c1"
+     },
+     {
+      "id": 2,
+      "title": "t",
+      "artist": "a",
+      "album": "other name",
+      "albumId": 10,
+      "artistId": 1
+     },
+     {
+      "id": 3,
+      "title": "t",
+      "artist": "a",
+      "album": "none"
+     },
+     {
+      "id": 4,
+      "title": "t",
+      "artist": "b",
+      "album": "al11",
+      "albumId": 11,
+      "artistId": 2
+     }
+    ]
+   ],
+   "expected": [
+    {
+     "id": 10,
+     "title": "al10",
+     "artistId": 1,
+     "artistName": "a",
+     "coverUuid": "c1",
+     "artworkUrl": "u1"
+    },
+    {
+     "id": 11,
+     "title": "al11",
+     "artistId": 2,
+     "artistName": "b"
+    }
+   ]
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://custom.example",
+    429,
+    ""
+   ],
+   "expected": true
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://custom.example",
+    503,
+    ""
+   ],
+   "expected": true
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://music.binimum.org",
+    404,
+    ""
+   ],
+   "expected": true
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://custom.example",
+    404,
+    ""
+   ],
+   "expected": false
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://custom.example",
+    401,
+    ""
+   ],
+   "expected": false
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://arran.monochrome.tf",
+    403,
+    ""
+   ],
+   "expected": true
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://arran.monochrome.tf",
+    400,
+    "Upstream API error"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://arran.monochrome.tf",
+    400,
+    "requiresAuth"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://x.qqdl.site",
+    400,
+    "Logged-in users only"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://arran.monochrome.tf",
+    400,
+    "bad request"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://custom.example",
+    400,
+    "upstream error"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "shouldFallback",
+   "input": [
+    "https://hifi.geeked.wtf",
+    200,
+    "INTERNAL SERVER ERROR"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isHtml",
+   "input": [
+    "text/html; charset=utf-8",
+    "{}"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isHtml",
+   "input": [
+    null,
+    "  <!doctype html><html>"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isHtml",
+   "input": [
+    null,
+    "<html lang=\"en\">"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isHtml",
+   "input": [
+    "application/json",
+    "{\"a\":1}"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "isHtml",
+   "input": [
+    null,
+    "<!DOCTYPE html>"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "isHtml",
+   "input": [
+    "TEXT/HTML",
+    ""
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    200
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    404
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    405
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    401
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    403
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    499
+   ],
+   "expected": true
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    500
+   ],
+   "expected": false
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    502
+   ],
+   "expected": false
+  },
+  {
+   "fn": "isReachable",
+   "input": [
+    301
+   ],
+   "expected": true
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    " https://a.example/// "
+   ],
+   "expected": "https://a.example"
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    {
+     "url": "http://b.example/x/"
+    }
+   ],
+   "expected": "http://b.example/x"
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    "ftp://c.example"
+   ],
+   "expected": null
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    "https://api.squid.wtf"
+   ],
+   "expected": null
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    42
+   ],
+   "expected": null
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    {
+     "url": 5
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    null
+   ],
+   "expected": null
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    {}
+   ],
+   "expected": null
+  },
+  {
+   "fn": "catalogUrl",
+   "input": [
+    "HTTPS://Upper.example/"
+   ],
+   "expected": "HTTPS://Upper.example"
+  },
+  {
+   "fn": "staticCatalog",
+   "input": [],
+   "expected": {
+    "api": [
+     {
+      "baseUrl": "https://hifi.geeked.wtf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://eu-central.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 110,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://arran.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 120,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://tidal.kinoplus.online",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 130,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://api.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 140,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://us-west.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 150,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://monochrome-api.samidy.com",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 160,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://wolf.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 170,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://katze.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 180,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://hund.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 190,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://maus.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 200,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://vogel.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 210,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     }
+    ],
+    "streaming": [
+     {
+      "baseUrl": "https://hifi.geeked.wtf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://arran.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 120,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://wolf.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 170,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://katze.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 180,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://hund.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 190,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://maus.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 200,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://vogel.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 210,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://hifi.p1nkhamster.xyz",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 270,
+      "supportsSearch": false,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     }
+    ],
+    "all": [
+     {
+      "baseUrl": "https://hifi.geeked.wtf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://eu-central.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 110,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://arran.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 120,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://tidal.kinoplus.online",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 130,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://api.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 140,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://us-west.monochrome.tf",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 150,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://monochrome-api.samidy.com",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 160,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://wolf.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 170,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://katze.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 180,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://hund.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 190,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://maus.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 200,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://vogel.qqdl.site",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 210,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     },
+     {
+      "baseUrl": "https://hifi.p1nkhamster.xyz",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 270,
+      "supportsSearch": false,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "static"
+     }
+    ],
+    "source": "static"
+   }
+  },
+  {
+   "fn": "remoteCatalog",
+   "input": [
+    null
+   ],
+   "expected": null
+  },
+  {
+   "fn": "remoteCatalog",
+   "input": [
+    {
+     "api": []
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "remoteCatalog",
+   "input": [
+    {
+     "api": [
+      {
+       "url": "https://off.example",
+       "online": false
+      }
+     ]
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "remoteCatalog",
+   "input": [
+    "text"
+   ],
+   "expected": null
+  },
+  {
+   "fn": "remoteCatalog",
+   "input": [
+    {
+     "api": [
+      "https://a.example",
+      {
+       "url": "https://both.example",
+       "ms": 120
+      }
+     ],
+     "streaming": [
+      "https://both.example/",
+      {
+       "url": "https://s.example",
+       "supportsSearch": true
+      }
+     ],
+     "instances": [
+      {
+       "url": "https://i.example",
+       "status": "down"
+      },
+      "https://j.example"
+     ]
+    }
+   ],
+   "expected": {
+    "api": [
+     {
+      "baseUrl": "https://a.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://both.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 110,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://j.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 110,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://s.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 210,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "streaming": [
+     {
+      "baseUrl": "https://both.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 110,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://s.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 210,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "all": [
+     {
+      "baseUrl": "https://a.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://both.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 110,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://j.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 110,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://s.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 210,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "source": "remote"
+   }
+  },
+  {
+   "fn": "remoteCatalog",
+   "input": [
+    {
+     "mirrors": [
+      {
+       "url": "https://m.example",
+       "supportsStream": true,
+       "supportsDownload": true,
+       "ok": true
+      },
+      {
+       "url": "https://n.example",
+       "enabled": false
+      }
+     ]
+    }
+   ],
+   "expected": {
+    "api": [
+     {
+      "baseUrl": "https://m.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "streaming": [
+     {
+      "baseUrl": "https://m.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "all": [
+     {
+      "baseUrl": "https://m.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": true,
+      "supportsDownload": true,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "source": "remote"
+   }
+  },
+  {
+   "fn": "remoteCatalog",
+   "input": [
+    {
+     "data": [
+      "https://d1.example",
+      "https://d2.example"
+     ],
+     "api": [
+      "https://d2.example"
+     ]
+    }
+   ],
+   "expected": {
+    "api": [
+     {
+      "baseUrl": "https://d2.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://d1.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "streaming": [],
+    "all": [
+     {
+      "baseUrl": "https://d2.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     },
+     {
+      "baseUrl": "https://d1.example",
+      "provider": "tidal",
+      "enabled": true,
+      "priority": 100,
+      "supportsSearch": true,
+      "supportsStream": false,
+      "supportsDownload": false,
+      "status": "available",
+      "lastError": null,
+      "source": "remote"
+     }
+    ],
+    "source": "remote"
+   }
+  },
+  {
+   "fn": "capability",
+   "input": [
+    null,
+    "download"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "capability",
+   "input": [
+    {
+     "supportsSearch": true,
+     "supportsStream": false,
+     "supportsDownload": false
+    },
+    "search"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "capability",
+   "input": [
+    {
+     "supportsSearch": true,
+     "supportsStream": false,
+     "supportsDownload": false
+    },
+    "stream"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "capability",
+   "input": [
+    {
+     "supportsSearch": true,
+     "supportsStream": true,
+     "supportsDownload": false
+    },
+    "download"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "capability",
+   "input": [
+    {
+     "supportsSearch": false,
+     "supportsStream": true,
+     "supportsDownload": true
+    },
+    "search"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "capabilityMessage",
+   "input": [
+    "download"
+   ],
+   "expected": "El mirror seleccionado no soporta descargas en este momento."
+  },
+  {
+   "fn": "capabilityMessage",
+   "input": [
+    "stream"
+   ],
+   "expected": "El mirror seleccionado no soporta reproduccion en este momento."
+  },
+  {
+   "fn": "capabilityMessage",
+   "input": [
+    "search"
+   ],
+   "expected": "El mirror seleccionado no soporta busqueda y metadata en este momento."
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": true,
+     "mimeType": "audio/mp4"
+    },
+    "https://x/seg.flac"
+   ],
+   "expected": "m4a"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false
+    },
+    "https://x/a.flac?token=1"
+   ],
+   "expected": "flac"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false,
+     "mimeType": "audio/flac"
+    },
+    "https://x/a.bin"
+   ],
+   "expected": "flac"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false
+    },
+    "https://x/a.M4A"
+   ],
+   "expected": "m4a"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false,
+     "manifestUrl": "https://x/b.mp3"
+    },
+    null
+   ],
+   "expected": "mp3"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false,
+     "mimeType": "audio/mpeg"
+    },
+    "https://x/none"
+   ],
+   "expected": "mp3"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false,
+     "codecs": "mp4a.40.2"
+    },
+    "https://x/none"
+   ],
+   "expected": "m4a"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false
+    },
+    "https://x/none"
+   ],
+   "expected": "flac"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false,
+     "codecs": "flac"
+    },
+    "not a url.mp3"
+   ],
+   "expected": "flac"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false
+    },
+    "weird.mp4?x=1"
+   ],
+   "expected": "m4a"
+  },
+  {
+   "fn": "resolveExtension",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": true,
+     "mimeType": "audio/flac"
+    },
+    "https://x/a.flac"
+   ],
+   "expected": "flac"
+  },
+  {
+   "fn": "requiresFlac",
+   "input": [
+    "LOSSLESS"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "requiresFlac",
+   "input": [
+    "HI_RES_LOSSLESS"
+   ],
+   "expected": true
+  },
+  {
+   "fn": "requiresFlac",
+   "input": [
+    "HIGH"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "requiresFlac",
+   "input": [
+    "MP3"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "requiresFlac",
+   "input": [
+    "LOW"
+   ],
+   "expected": false
+  },
+  {
+   "fn": "directUrl",
+   "input": [
+    {
+     "urls": [
+      "https://x/a.flac"
+     ],
+     "isSegmented": false
+    }
+   ],
+   "expected": "https://x/a.flac"
+  },
+  {
+   "fn": "directUrl",
+   "input": [
+    {
+     "urls": [
+      "https://x/a",
+      "https://x/b"
+     ],
+     "isSegmented": false
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "directUrl",
+   "input": [
+    {
+     "urls": [
+      "https://x/a"
+     ],
+     "isSegmented": true
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "directUrl",
+   "input": [
+    {
+     "urls": [
+      "file:///x"
+     ],
+     "isSegmented": false
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "directUrl",
+   "input": [
+    {
+     "urls": [
+      "file:///x",
+      "HTTP://x/y"
+     ],
+     "isSegmented": false
+    }
+   ],
+   "expected": "HTTP://x/y"
+  },
+  {
+   "fn": "playableUrl",
+   "input": [
+    {
+     "urls": [
+      "https://x/a",
+      "https://x/b"
+     ],
+     "isSegmented": false,
+     "manifestUrl": "https://x/m.mpd"
+    }
+   ],
+   "expected": "https://x/m.mpd"
+  },
+  {
+   "fn": "playableUrl",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false,
+     "manifestUrl": "data:application/dash+xml;base64,AAA"
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "playableUrl",
+   "input": [
+    {
+     "urls": [
+      "https://x/a.flac"
+     ],
+     "isSegmented": false,
+     "manifestUrl": "https://x/m"
+    }
+   ],
+   "expected": "https://x/a.flac"
+  },
+  {
+   "fn": "playableUrl",
+   "input": [
+    {
+     "urls": [],
+     "isSegmented": false
+    }
+   ],
+   "expected": null
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "HI_RES_LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "HIGH"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOW"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "UNKNOWN"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4",
+     "https://cdn.example/t/seg-1.m4s",
+     "https://cdn.example/t/seg-2.m4s",
+     "https://cdn.example/t/seg-3.m4s",
+     "https://cdn.example/t/seg-4.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "/rel/path/i.mp4",
+     "/rel/path/x-1.m4s",
+     "/rel/path/x-2.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 96000
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "HI_RES_LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "/rel/path/i.mp4",
+     "/rel/path/x-1.m4s",
+     "/rel/path/x-2.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 96000
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "HIGH"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/hi/i.mp4",
+     "https://cdn.example/hi/h-1.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "mp4a.40.2",
+    "sampleRate": 44100
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "LOW"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/lo/i.mp4",
+     "https://cdn.example/lo/l-00007.m4s",
+     "https://cdn.example/lo/l-00008.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "mp4a.40.5",
+    "sampleRate": 22050
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>",
+    "MP3"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/lo/i.mp4",
+     "https://cdn.example/lo/l-00007.m4s",
+     "https://cdn.example/lo/l-00008.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "mp4a.40.5",
+    "sampleRate": 22050
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "https://cdn.example/t/init.mp4"
+    ],
+    "mimeType": "",
+    "codecs": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"audio/mp4\" codecs=\"flac\" audioSamplingRate=\"48000\"><SegmentTemplate initialization=\"i.mp4\" media=\"s$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate><Representation id=\"FLAC,48000,24\"/></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "i.mp4",
+     "s1.m4s",
+     "s2.m4s"
+    ],
+    "mimeType": "",
+    "codecs": "",
+    "bitDepth": 24
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"A\" codecs=\"flac\"><SegmentTemplate initialization=\"only-init.mp4\"/></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "expected": {
+    "urls": [
+     "only-init.mp4"
+    ],
+    "mimeType": "",
+    "codecs": "flac"
+   }
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "error": "Error"
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "this is not xml",
+    "LOSSLESS"
+   ],
+   "error": "Error"
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "",
+    "LOSSLESS"
+   ],
+   "error": "TypeError"
+  },
+  {
+   "fn": "dashForQuality",
+   "input": [
+    "<MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"A\"><SegmentTemplate initialization=\"\" media=\"\"/></Representation></AdaptationSet></Period></MPD>",
+    "LOSSLESS"
+   ],
+   "error": "Error"
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/t/init.mp4",
+    "https://cdn.example/t/seg-1.m4s",
+    "https://cdn.example/t/seg-2.m4s",
+    "https://cdn.example/t/seg-3.m4s",
+    "https://cdn.example/t/seg-4.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<?xml version=\"1.0\"?><MPD><Period><AdaptationSet mimeType=\"audio/mp4\"><Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/t/</BaseURL><SegmentTemplate initialization=\"init.mp4\" media=\"seg-$Number$.m4s\"><SegmentTimeline><S d=\"100\" r=\"2\"/><S d=\"50\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet></Period></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/t/init.mp4",
+    "https://cdn.example/t/seg-1.m4s",
+    "https://cdn.example/t/seg-2.m4s",
+    "https://cdn.example/t/seg-3.m4s",
+    "https://cdn.example/t/seg-4.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><Period>\n  <AdaptationSet mimeType=\"audio/mp4\" codecs=\"mp4a.40.2\">\n    <Representation id=\"HEAACV1\" codecs=\"mp4a.40.5\" audioSamplingRate=\"22050\"><BaseURL>https://cdn.example/lo/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"l-$Number%05d$.m4s\" startNumber=\"7\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"AACLC\" codecs=\"mp4a.40.2\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/hi/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"h-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"-1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC,44100,16\" codecs=\"flac\" audioSamplingRate=\"44100\"><BaseURL>https://cdn.example/f16/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"f-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n    <Representation id=\"FLAC_HIRES,96000,24\" codecs=\"flac\" audioSamplingRate=\"96000\"><BaseURL>/rel/path/</BaseURL><SegmentTemplate initialization=\"/i.mp4\" media=\"x-$Number$.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\" r=\"1\"/></SegmentTimeline></SegmentTemplate></Representation>\n  </AdaptationSet>\n  <AdaptationSet mimeType=\"video/mp4\"><Representation id=\"V\" codecs=\"avc1\"><SegmentTemplate media=\"v.m4s\" startNumber=\"1\"><SegmentTimeline><S d=\"1\"/></SegmentTimeline></SegmentTemplate></Representation></AdaptationSet>\n</Period></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/lo/i.mp4",
+    "https://cdn.example/lo/l-00007.m4s",
+    "https://cdn.example/lo/l-00008.m4s",
+    "https://cdn.example/lo/l-00009.m4s",
+    "https://cdn.example/lo/l-00010.m4s",
+    "https://cdn.example/lo/l-00011.m4s",
+    "https://cdn.example/lo/l-00012.m4s",
+    "https://cdn.example/lo/l-00013.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "this is not xml"
+   ],
+   "expected": []
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    ""
+   ],
+   "expected": []
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><BaseURL>https://cdn.example/x</BaseURL><SegmentList initialization=\"init.mp4\"><SegmentURL media=\"a.m4s\"/><SegmentURL media=\"/b.m4s\"/></SegmentList></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/x/init.mp4",
+    "https://cdn.example/x/a.m4s",
+    "https://cdn.example/x/b.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><SegmentList><SegmentURL media=\"https://abs.example/1.m4s\"/></SegmentList></MPD>"
+   ],
+   "expected": [
+    "https://abs.example/1.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><BaseURL>https://cdn.example/</BaseURL><SegmentTemplate initialization=\"i.mp4\" media=\"n-$Number%03d$.m4s\"><SegmentTimeline><S d=\"1\" r=\"2\"/><S d=\"1\"/></SegmentTimeline></SegmentTemplate></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/i.mp4",
+    "https://cdn.example/n-001.m4s",
+    "https://cdn.example/n-002.m4s",
+    "https://cdn.example/n-003.m4s",
+    "https://cdn.example/n-004.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><SegmentTemplate media=\"m$Number$.m4s\" startNumber=\"10\"><SegmentTimeline><S r=\"1\"/></SegmentTimeline></SegmentTemplate></MPD>"
+   ],
+   "expected": [
+    "m10.m4s",
+    "m11.m4s"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "#EXTM3U\nhttps://cdn.example/a.flac?token=1\n\"http://cdn.example/b.flac\""
+   ],
+   "expected": [
+    "https://cdn.example/a.flac?token=1",
+    "http://cdn.example/b.flac"
+   ]
+  },
+  {
+   "fn": "dashUrls",
+   "input": [
+    "<MPD><BaseURL>  https://cdn.example/spaced/  </BaseURL><SegmentList><SegmentURL media=\"s.m4s\"/></SegmentList></MPD>"
+   ],
+   "expected": [
+    "https://cdn.example/spaced/s.m4s"
+   ]
+  },
+  {
+   "fn": "baseFilename",
+   "input": [
+    {
+     "id": 1,
+     "title": "Who?",
+     "artist": "AC/DC",
+     "album": "LP"
+    }
+   ],
+   "expected": "AC_DC - LP - Who_"
+  },
+  {
+   "fn": "baseFilename",
+   "input": [
+    {
+     "id": 5,
+     "title": "",
+     "artist": "",
+     "album": ""
+    }
+   ],
+   "expected": "- -"
+  },
+  {
+   "fn": "baseFilename",
+   "input": [
+    {
+     "id": 2,
+     "title": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+     "artist": "b",
+     "album": "c"
+    }
+   ],
+   "expected": "b - c - aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+  },
+  {
+   "fn": "baseFilename",
+   "input": [
+    {
+     "id": 3,
+     "title": "Tab\tand   spaces",
+     "artist": "A|B",
+     "album": "<x>:\"y\""
+    }
+   ],
+   "expected": "A_B - _x___y_ - Tab and spaces"
+  },
+  {
+   "fn": "safEntityName",
+   "input": [
+    "content://x/tree/primary%3ADownload%2FStaySound"
+   ],
+   "expected": "StaySound"
+  },
+  {
+   "fn": "safEntityName",
+   "input": [
+    "content://x/document/primary%3ADownload%2FStaySound%2Fa.flac"
+   ],
+   "expected": "a.flac"
+  },
+  {
+   "fn": "safEntityName",
+   "input": [
+    "plain"
+   ],
+   "expected": "plain"
+  },
+  {
+   "fn": "safEntityName",
+   "input": [
+    "a:b:c"
+   ],
+   "expected": "c"
+  },
+  {
+   "fn": "safEntityName",
+   "input": [
+    "x/y/"
+   ],
+   "expected": ""
+  },
+  {
+   "fn": "libraryTrack",
+   "input": [
+    {
+     "id": 12,
+     "title": "T",
+     "artist": "A",
+     "album": "L",
+     "durationMs": 1000,
+     "quality": "LOSSLESS",
+     "albumId": 4,
+     "artworkUrl": "u",
+     "trackNumber": 2,
+     "year": 2020,
+     "sampleRate": 44100,
+     "bitDepth": 16
+    },
+    "file:///a/b.flac"
+   ],
+   "expected": {
+    "id": "tidal_12",
+    "uri": "file:///a/b.flac",
+    "title": "T",
+    "artist": "A",
+    "album": "L",
+    "duration": 1000,
+    "artwork": "u",
+    "trackNumber": 2,
+    "year": 2020,
+    "format": "FLAC",
+    "codec": "flac",
+    "sampleRate": 44100,
+    "bitDepth": 16,
+    "quality": "LOSSLESS",
+    "source": "tidal",
+    "tidalId": 12,
+    "tidalAlbumId": 4
+   }
+  },
+  {
+   "fn": "libraryTrack",
+   "input": [
+    {
+     "id": 12,
+     "title": "T",
+     "artist": "A",
+     "album": "L",
+     "durationMs": 1000,
+     "quality": "LOSSLESS"
+    },
+    "file:///a/b.m4a"
+   ],
+   "expected": {
+    "id": "tidal_12",
+    "uri": "file:///a/b.m4a",
+    "title": "T",
+    "artist": "A",
+    "album": "L",
+    "duration": 1000,
+    "format": "AAC",
+    "codec": "m4a",
+    "quality": "LOSSLESS",
+    "source": "tidal",
+    "tidalId": 12
+   }
+  },
+  {
+   "fn": "libraryTrack",
+   "input": [
+    {
+     "id": 12,
+     "title": "T",
+     "artist": "A",
+     "album": "L",
+     "durationMs": 1000,
+     "quality": "LOSSLESS",
+     "codec": "alac"
+    },
+    "file:///a/b.mp3"
+   ],
+   "expected": {
+    "id": "tidal_12",
+    "uri": "file:///a/b.mp3",
+    "title": "T",
+    "artist": "A",
+    "album": "L",
+    "duration": 1000,
+    "format": "MP3",
+    "codec": "alac",
+    "quality": "LOSSLESS",
+    "source": "tidal",
+    "tidalId": 12
+   }
+  },
+  {
+   "fn": "libraryTrack",
+   "input": [
+    {
+     "id": 12,
+     "title": "T",
+     "artist": "A",
+     "album": "L",
+     "durationMs": 1000,
+     "quality": "LOSSLESS"
+    },
+    "file:///a/noext"
+   ],
+   "expected": {
+    "id": "tidal_12",
+    "uri": "file:///a/noext",
+    "title": "T",
+    "artist": "A",
+    "album": "L",
+    "duration": 1000,
+    "format": "FLAC",
+    "codec": "file:///a/noext",
+    "quality": "LOSSLESS",
+    "source": "tidal",
+    "tidalId": 12
+   }
+  },
+  {
+   "fn": "libraryTrack",
+   "input": [
+    {
+     "id": 12,
+     "title": "T",
+     "artist": "A",
+     "album": "L",
+     "durationMs": 1000,
+     "quality": "LOSSLESS"
+    },
+    "content://x/y.WAV"
+   ],
+   "expected": {
+    "id": "tidal_12",
+    "uri": "content://x/y.WAV",
+    "title": "T",
+    "artist": "A",
+    "album": "L",
+    "duration": 1000,
+    "format": "FLAC",
+    "codec": "wav",
+    "quality": "LOSSLESS",
+    "source": "tidal",
+    "tidalId": 12
+   }
+  }
+ ]
+}

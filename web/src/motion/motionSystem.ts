@@ -37,7 +37,8 @@ function copyForFlight(source: Element, kind: 'surface' | 'text') {
   const clone = source.cloneNode(true) as HTMLElement;
   Object.assign(clone.style, {
     position: 'fixed',
-    zIndex: '10000',
+    // Desktop flights stay below the persistent player (40).
+    zIndex: document.querySelector('.circ-app-shell') ? '30' : '10000',
     left: `${rect.left}px`,
     top: `${rect.top}px`,
     width: `${rect.width}px`,
@@ -145,4 +146,118 @@ export function runMotionTransition(
       });
     }
   }));
+}
+
+/** Position of an element ignoring every transform on it and its ancestors, so a
+    destination that is still mid-reveal (the player bar slides up on first play)
+    can be targeted at the place it is about to settle. */
+function layoutRect(element: HTMLElement) {
+  let left = 0;
+  let top = 0;
+  let node: HTMLElement | null = element;
+  while (node) {
+    left += node.offsetLeft;
+    top += node.offsetTop;
+    node = node.offsetParent as HTMLElement | null;
+  }
+  return { left, top, width: element.offsetWidth, height: element.offsetHeight };
+}
+
+/**
+ * Lifts the artwork of `source` off the page and lands it on `destinationSelector`
+ * once `update` has rendered it. The destination is expected to be a *new* element
+ * (the player bar keys its art on the track), which is how we know the update landed.
+ * Always WAAPI, never a View Transition: WKWebView's shared-element support is
+ * unreliable and this has to look the same everywhere.
+ */
+export function flyArtwork(
+  source: HTMLElement | null,
+  destinationSelector: string,
+  update: () => void,
+): void {
+  const disc = source?.querySelector<HTMLElement>('.circ-art-disc') ?? null;
+  if (!disc || !disc.isConnected || reduceMotion()) {
+    update();
+    return;
+  }
+
+  const barExisted = Boolean(document.querySelector('.circ-player-bar'));
+  const previousDestination = document.querySelector(destinationSelector);
+  const rect = disc.getBoundingClientRect();
+  const clone = disc.cloneNode(true) as HTMLElement;
+  Object.assign(clone.style, {
+    position: 'fixed',
+    zIndex: '60',
+    left: `${rect.left}px`,
+    top: `${rect.top}px`,
+    width: `${rect.width}px`,
+    height: `${rect.height}px`,
+    margin: '0',
+    borderRadius: '50%',
+    overflow: 'hidden',
+    pointerEvents: 'none',
+    transformOrigin: 'top left',
+    willChange: 'transform',
+  });
+  clone.setAttribute('aria-hidden', 'true');
+  document.body.appendChild(clone);
+  document.documentElement.dataset.artFlight = '1';
+
+  let finished = false;
+  let destination: HTMLElement | null = null;
+  const finish = () => {
+    if (finished) return;
+    finished = true;
+    clone.remove();
+    delete document.documentElement.dataset.artFlight;
+    if (destination) {
+      destination.style.visibility = '';
+      destination.animate(
+        [
+          { transform: 'scale(1.14)', filter: 'brightness(1.25)' },
+          { transform: 'scale(1)', filter: 'brightness(1)' },
+        ],
+        { duration: 420, easing: MOTION.easeEnter },
+      );
+    }
+  };
+
+  update();
+
+  const startedAt = performance.now();
+  const poll = () => {
+    if (finished) return;
+    const candidate = document.querySelector<HTMLElement>(destinationSelector);
+    if (candidate && candidate !== previousDestination) {
+      destination = candidate;
+      destination.style.visibility = 'hidden';
+      const target = barExisted ? destination.getBoundingClientRect() : layoutRect(destination);
+      const scale = rect.width > 0 ? target.width / rect.width : 1;
+      const translateX = target.left - rect.left;
+      const translateY = target.top - rect.top;
+      const animation = clone.animate(
+        [
+          { transform: 'translate3d(0, 0, 0) scale(1)', boxShadow: '0 0 0 rgba(0,0,0,0)' },
+          {
+            offset: 0.16,
+            transform: 'translate3d(0, -8px, 0) scale(1.07)',
+            boxShadow: '0 18px 34px rgba(0,0,0,0.55)',
+          },
+          {
+            transform: `translate3d(${translateX}px, ${translateY}px, 0) scale(${scale})`,
+            boxShadow: '0 4px 10px rgba(0,0,0,0.25)',
+          },
+        ],
+        { duration: barExisted ? 560 : 780, easing: 'cubic-bezier(.3, 0, .15, 1)', fill: 'forwards' },
+      );
+      animation.finished.catch(() => undefined).finally(finish);
+      return;
+    }
+    if (performance.now() - startedAt > 1400) {
+      finish();
+      return;
+    }
+    requestAnimationFrame(poll);
+  };
+  requestAnimationFrame(poll);
 }

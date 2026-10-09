@@ -14,6 +14,7 @@ import { FileSystemStorage } from '../services/storage';
 import { getPerformanceProfile } from '../theme/performanceProfile';
 import { balancedShuffle } from '../services/shuffle';
 import { RepeatMode, Track } from '../types/audio';
+import { useNotificationStore } from './notificationStore';
 import { useLibraryStore } from './libraryStore';
 
 const MAX_RECENT = 50;
@@ -23,6 +24,7 @@ const ENGINE_TRACK_GUARD_MS = 5000; // Increased significantly for slow Android 
 
 let expectedEngineTrackId: string | null = null;
 let expectedEngineTrackUntil = 0;
+let pendingQueueAddition: Promise<unknown> = Promise.resolve();
 let linearPlaybackContextQueue: Track[] = [];
 
 function armExpectedEngineTrack(id: string) {
@@ -185,7 +187,7 @@ function moveQueueItem<T>(items: T[], fromIndex: number, toIndex: number): T[] {
     return nextItems;
 }
 
-function shouldAcceptEngineTrackId(nextTrackId: string | undefined, currentQueue: Track[]): boolean {
+function shouldAcceptEngineTrackId(nextTrackId: string | undefined): boolean {
     if (!nextTrackId) return true;
 
     // If the reported track IS the currently playing track in the store, always accept.
@@ -560,6 +562,7 @@ async function hydrateAlbumArtworkOnDemand(track: Track): Promise<void> {
 interface PlayerActions {
     // Playback control
     play: (track: Track, queue?: Track[]) => Promise<void>;
+    adoptNativeLibraryPlayback: (snapshot: import('../services/nativeLibraryPlayback').NativeLibraryPlaybackSnapshot) => void;
     pause: () => Promise<void>;
     resume: () => Promise<void>;
     togglePlayPause: () => Promise<void>;
@@ -568,7 +571,7 @@ interface PlayerActions {
 
     // Queue management
     setQueue: (tracks: Track[], startIndex?: number) => void;
-    addToQueue: (track: Track) => void;
+    addToQueue: (track: Track) => Promise<boolean>;
     removeFromQueue: (index: number) => void;
     clearQueue: () => void;
     replaceQueue: (tracks: Track[], startIndex?: number) => Promise<void>;
@@ -657,6 +660,25 @@ const initialState: PlayerStoreState = {
 
 export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     ...initialState,
+
+    // Kotlin has already selected and started audio. Adopt its exact order without
+    // calling playQueue again or doing file/metadata work in the tap path.
+    adoptNativeLibraryPlayback: (snapshot) => {
+        const library = useLibraryStore.getState().tracks;
+        const resolve = (ids: string[]) => ids.map(id => library.get(id)).filter((track): track is Track => !!track);
+        const queue = resolve(snapshot.queueIds);
+        const track = library.get(snapshot.trackId);
+        if (!track) return;
+        linearPlaybackContextQueue = resolve(snapshot.linearIds);
+        armExpectedEngineTrack(track.id);
+        get().positionShared.value = 0;
+        set(state => ({
+            currentTrack: track, queue, queueIndex: queue.findIndex(item => item.id === track.id),
+            position: 0, duration: track.duration, pendingTrackPreview: null,
+            isPlaying: true, isLoading: true,
+            recentlyPlayed: [track, ...state.recentlyPlayed.filter(item => item.id !== track.id)].slice(0, MAX_RECENT),
+        }));
+    },
 
     play: async (track, queue) => {
         const effectiveTrack = mergeWithLibraryTrack(track);
@@ -788,37 +810,45 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
     },
 
     addToQueue: (track) => {
-        if (!isTrackPlayable(track)) {
-            console.warn('[PlayerStore] Ignored non-playable track added to queue:', {
-                id: track.id,
-                uri: track.uri,
-                source: track.source,
-                cloudOnly: track.cloudOnly,
-            });
-            return;
-        }
-
-        const { queue, queueIndex } = get();
-        const maxLinearContextItems = getLinearContextLimit();
-        linearPlaybackContextQueue = [...linearPlaybackContextQueue, track];
-        if (linearPlaybackContextQueue.length > maxLinearContextItems) {
-            linearPlaybackContextQueue = linearPlaybackContextQueue.slice(linearPlaybackContextQueue.length - maxLinearContextItems);
-        }
-
-        if (queue.length < MAX_QUEUE_ITEMS) {
-            set({ queue: [...queue, track] });
-            return;
-        }
-
-        // Keep queue bounded to reduce rendering/processing cost.
-        const dropIndex = queueIndex === queue.length - 1 ? 0 : queue.length - 1;
-        const nextQueue = queue.filter((_, i) => i !== dropIndex);
-        const nextQueueIndex = dropIndex < queueIndex ? queueIndex - 1 : queueIndex;
-
-        set({
-            queue: [...nextQueue, track],
-            queueIndex: nextQueueIndex,
+        // Serialize additions so rapid taps use the latest native and store queue.
+        const operation = pendingQueueAddition.then(async () => {
+            try {
+                if (!isTrackPlayable(track)) throw new Error('Track is not playable');
+                const { queue, queueIndex } = get();
+                // Prefer discarding played history. If there is none, retain the existing
+                // bounded-queue policy of replacing the last upcoming entry.
+                const dropIndex = queue.length < MAX_QUEUE_ITEMS ? -1
+                    : queueIndex > 0 ? 0 : queue.length - 1;
+                await AudioEngine.appendToQueue(track, queue.map(item => item.id), dropIndex);
+                if (get().queue !== queue) throw new Error('Playback queue changed');
+                const nextQueue = dropIndex < 0 ? [...queue, track]
+                    : [...queue.filter((_, index) => index !== dropIndex), track];
+                const currentIndex = get().queueIndex;
+                const nextIndex = dropIndex >= 0 && dropIndex < currentIndex ? currentIndex - 1 : currentIndex;
+                linearPlaybackContextQueue = [...linearPlaybackContextQueue, track];
+                if (dropIndex >= 0) {
+                    const removed = queue[dropIndex];
+                    const at = linearPlaybackContextQueue.findIndex(item => item === removed);
+                    if (at >= 0) linearPlaybackContextQueue.splice(at, 1);
+                }
+                const limit = getLinearContextLimit();
+                if (linearPlaybackContextQueue.length > limit) {
+                    linearPlaybackContextQueue = linearPlaybackContextQueue.slice(-limit);
+                }
+                set({ queue: nextQueue, queueIndex: nextIndex });
+                return true;
+            } catch (error) {
+                console.error('[PlayerStore] Could not add track to queue:', error);
+                const { useSettingsStore } = require('./settingsStore');
+                const english = useSettingsStore.getState().language === 'en';
+                useNotificationStore.getState().showNotification(english
+                    ? 'Could not add this song to the queue. Please try again.'
+                    : 'No se pudo agregar esta canción a la cola. Inténtalo de nuevo.', 'error');
+                return false;
+            }
         });
+        pendingQueueAddition = operation.catch(() => undefined);
+        return operation;
     },
 
     removeFromQueue: (index) => {
@@ -1153,7 +1183,7 @@ export const usePlayerStore = create<PlayerStore>()(persist((set, get) => ({
             // CRITICAL BUG FIX: Never let the engine "downgrade" our current track
             // if we already have one and the engine reports null or the same ID (avoid unnecessary re-renders).
             // Passing the current queue to help validate the incoming track.
-            if (shouldAcceptEngineTrackId(nextTrack?.id, currentState.queue)) {
+            if (shouldAcceptEngineTrackId(nextTrack?.id)) {
                 // If we have a track in store, but engine says null, ignore it unless we are not playing.
                 if (currentStoreTrack && !nextTrack && currentState.isPlaying) {
                     // Ignore empty track report while playing (likely a brief transition state in native)

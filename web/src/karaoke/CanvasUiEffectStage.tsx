@@ -1,4 +1,4 @@
-import { type CSSProperties, useEffect, useRef } from 'react';
+import { type CSSProperties, useCallback, useEffect, useRef, useState } from 'react';
 import {
   createAsciify,
   type AsciifyOptions,
@@ -701,6 +701,7 @@ function makeEffectSlot(
   root: HTMLDivElement,
   effect: CanvasUiEffectName,
   palette: CanvasUiPalette,
+  onContextLost?: () => void,
 ): EffectSlot | null {
   const source = root.querySelector<HTMLCanvasElement>('[data-canvasui-source]');
   const content = root.querySelector<HTMLDivElement>('[data-canvasui-content]');
@@ -715,8 +716,18 @@ function makeEffectSlot(
     cleanupCapture();
     return null;
   }
+  // None of the CanvasUI effects handle a lost GL context: WebKit takes the
+  // context back under GPU pressure and the effect stays frozen on its last
+  // frame until the next section change swaps slots. preventDefault() asks the
+  // browser to restore, and the stage rebuilds this slot on a fresh canvas.
+  const handleContextLost = (event: Event) => {
+    event.preventDefault();
+    onContextLost?.();
+  };
+  output.addEventListener('webglcontextlost', handleContextLost);
   const destroyInstance = instance.destroy.bind(instance);
   instance.destroy = () => {
+    output.removeEventListener('webglcontextlost', handleContextLost);
     cleanupCapture();
     destroyInstance();
   };
@@ -734,6 +745,11 @@ export function CanvasUiEffectStage({
   const rootsRef = useRef<Array<HTMLDivElement | null>>([]);
   const slotsRef = useRef<Array<EffectSlot | null>>([null, null]);
   const activeIndexRef = useRef(0);
+  // Bumping this re-keys the slots so React hands the effects brand new
+  // canvases: a canvas whose context was lost keeps handing back that same
+  // dead context, so the element itself has to be replaced.
+  const [glEpoch, setGlEpoch] = useState(0);
+  const glRecoveryRef = useRef({ attempts: 0, lastLostAt: 0, timer: 0 });
   const transitionTimerRef = useRef(0);
   const audioFrameRef = useRef(0);
   const effectRef = useRef(effect);
@@ -743,12 +759,35 @@ export function CanvasUiEffectStage({
   paletteRef.current = palette;
   sampleAudioRef.current = sampleAudio;
 
+  const requestGlRebuild = useCallback(() => {
+    const recovery = glRecoveryRef.current;
+    if (recovery.timer) return;
+    // A context that dies again straight after a rebuild means the GPU is
+    // still under pressure, so each loss inside five seconds of the last one
+    // backs the retry off instead of spinning.
+    const now = performance.now();
+    recovery.attempts = now - recovery.lastLostAt < 5_000 ? recovery.attempts + 1 : 0;
+    recovery.lastLostAt = now;
+    const delay = Math.min(1_500, 120 * Math.pow(3, recovery.attempts));
+    recovery.timer = window.setTimeout(() => {
+      recovery.timer = 0;
+      setGlEpoch(epoch => epoch + 1);
+    }, delay);
+  }, []);
+
+  useEffect(() => () => {
+    if (glRecoveryRef.current.timer) window.clearTimeout(glRecoveryRef.current.timer);
+  }, []);
+
   useEffect(() => {
     const root = rootsRef.current[0];
     if (!root) return;
-    const slot = makeEffectSlot(root, effectRef.current, paletteRef.current);
+    const slot = makeEffectSlot(root, effectRef.current, paletteRef.current, requestGlRebuild);
     if (!slot) return;
     slotsRef.current[0] = slot;
+    // A rebuild restarts from slot 0, so the other slot must not stay lit.
+    activeIndexRef.current = 0;
+    rootsRef.current[1]?.classList.remove('is-active');
     root.classList.add('is-active');
     let previousOptionsUpdate = 0;
 
@@ -784,7 +823,7 @@ export function CanvasUiEffectStage({
       for (const liveSlot of slotsRef.current) liveSlot?.instance.destroy();
       slotsRef.current = [null, null];
     };
-  }, []);
+  }, [glEpoch, requestGlRebuild]);
 
   useEffect(() => {
     if (effectRef.current === effect) return;
@@ -796,7 +835,7 @@ export function CanvasUiEffectStage({
     if (!nextRoot) return;
 
     slotsRef.current[nextIndex]?.instance.destroy();
-    const nextSlot = makeEffectSlot(nextRoot, effect, paletteRef.current);
+    const nextSlot = makeEffectSlot(nextRoot, effect, paletteRef.current, requestGlRebuild);
     if (!nextSlot) return;
     slotsRef.current[nextIndex] = nextSlot;
     activeIndexRef.current = nextIndex;
@@ -822,7 +861,7 @@ export function CanvasUiEffectStage({
       {[0, 1].map(index => (
         <div
           className="canvasui-effect-slot"
-          key={index}
+          key={`${index}-${glEpoch}`}
           ref={node => {
             rootsRef.current[index] = node;
           }}

@@ -1,5 +1,11 @@
 import { requireOptionalNativeModule } from 'expo-modules-core';
 
+export type SoulseekSearchIdentity = {
+  titleWords: string[];
+  artistWords: string[];
+  extensions?: string[];
+};
+
 export type SoulseekNativeConfig = {
   username: string;
   password: string;
@@ -9,6 +15,10 @@ export type SoulseekNativeConfig = {
   searchTimeoutMs?: number;
   maxResults?: number;
   clientVersion?: number;
+  /** Folder shared to the network while a session is open. */
+  shareDir?: string;
+  /** Per-search filtering; does not change or reconnect the saved session. */
+  searchIdentity?: SoulseekSearchIdentity;
 };
 
 export type SoulseekNativeMatch = {

@@ -85,7 +85,7 @@ export function useTidalDownload(
 
         const allTracks = Array.from(nextTracks.values());
         const albums = organizeIntoAlbums(allTracks);
-        const artists = organizeIntoArtists(allTracks, albums, state.artists);
+        const artists = organizeIntoArtists(allTracks, state.artists);
 
         useLibraryStore.setState({
             tracks: nextTracks,
@@ -346,7 +346,7 @@ export function useTidalDownload(
         nextTracks.delete(key);
         const allTracks = Array.from(nextTracks.values());
         const albums = organizeIntoAlbums(allTracks);
-        const artists = organizeIntoArtists(allTracks, albums, store.artists);
+        const artists = organizeIntoArtists(allTracks, store.artists);
 
         useLibraryStore.setState({
             tracks: nextTracks,

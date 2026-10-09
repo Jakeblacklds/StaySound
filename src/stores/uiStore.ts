@@ -18,6 +18,8 @@ interface ConfirmationModalConfig {
 }
 
 interface UIState {
+    actionSheetId: number;
+    confirmModalId: number;
     actionSheetVisible: boolean;
     actionSheetTitle: string;
     actionSheetSubtitle?: string;
@@ -41,6 +43,8 @@ interface UIState {
 }
 
 export const useUIStore = create<UIState>((set) => ({
+    actionSheetId: 0,
+    confirmModalId: 0,
     actionSheetVisible: false,
     actionSheetTitle: '',
     actionSheetSubtitle: undefined,
@@ -50,20 +54,22 @@ export const useUIStore = create<UIState>((set) => ({
     confirmModalVisible: false,
     confirmModalConfig: null,
 
-    openActionSheet: (config) => set({
+    openActionSheet: (config) => set(state => ({
+        actionSheetId: state.actionSheetId + 1,
         actionSheetVisible: true,
         actionSheetTitle: config.title,
         actionSheetSubtitle: config.subtitle,
         actionSheetActions: config.actions,
         actionSheetTrack: config.track,
-    }),
+    })),
 
     closeActionSheet: () => set({ actionSheetVisible: false }),
 
-    openConfirmModal: (config) => set({
+    openConfirmModal: (config) => set(state => ({
+        confirmModalId: state.confirmModalId + 1,
         confirmModalVisible: true,
         confirmModalConfig: config,
-    }),
+    })),
 
     closeConfirmModal: () => set({ confirmModalVisible: false }),
 }));

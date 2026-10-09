@@ -419,8 +419,6 @@ function DefaultTrackListItemInner({
         opacity: optionsBusy ? 1 : 0.95,
     }));
 
-    const dividerInset = (trackStyles.artworkSize || 58) + contentPaddingHorizontal + 12;
-
     return (
         <Animated.View style={[containerBaseStyle, animatedContainerStyle]}>
             {/* Playing highlight â€” at Animated.View level so it fills the full container */}

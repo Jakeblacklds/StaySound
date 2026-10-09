@@ -19,7 +19,14 @@ import {
   type PersistedWebTrack,
 } from '../storage/webPersistence';
 import { cacheRemoteArtwork, clearArtworkCache, loadArtworkUrls, saveArtworkBlob } from '../storage/webArtworkCache';
-import { desktopMusicFileUrl, isTauriDesktop, readDesktopMusicFile } from '../desktop/tauriMusicLibrary';
+import {
+  desktopMusicFileUrl,
+  desktopPrecisePlaybackUrl,
+  isTauriDesktop,
+  migrateDesktopFlacToAlac,
+  readDesktopMusicFile,
+  scanDesktopMusicFolder,
+} from '../desktop/tauriMusicLibrary';
 import {
   clearTrackFileHandles,
   getAllTrackHandleKeys,
@@ -29,6 +36,15 @@ import {
 } from '../storage/webFileHandles';
 import { getFileHandleByRelativePath, getFolderHandle, verifyPermission } from './webFolderSync';
 import { webAudioEngine, type WebAudioState } from '../audio/webAudioEngine';
+
+export interface AlacMigrationProgress {
+  processed: number;
+  total: number;
+  converted: number;
+  /** Failed downloads with no audio, sent to the Trash. */
+  removedEmpty: number;
+  failed: Array<{ name: string; reason: string }>;
+}
 
 export interface ArtworkRecoveryProgress {
   processed: number;
@@ -69,6 +85,8 @@ interface WebLibraryState {
   toggleShuffle: () => void;
   hydrateAudio: (audio: WebAudioState) => void;
   recoverMissingArtwork: (onProgress?: (progress: ArtworkRecoveryProgress) => void) => Promise<number>;
+  /** Moves every FLAC of the desktop library to ALAC; see src-tauri/src/alac.rs. */
+  migrateLibraryToAlac: (onProgress?: (progress: AlacMigrationProgress) => void) => Promise<AlacMigrationProgress>;
   hydrateArtistPhotos: () => Promise<number>;
   hydrateLibrary: () => Promise<void>;
 }
@@ -109,6 +127,31 @@ function exactMetadataKey(track: Track): string {
 
 function titleArtistKey(track: Track): string {
   return [comparableTrackText(track.title), comparableTrackText(track.artist)].join('|');
+}
+
+/**
+ * The same song, now backed by its ALAC file. The id is kept on purpose:
+ * playlists and recents point at it, and the next folder sync folds the
+ * rescanned file into this entry by path.
+ */
+function withAlacFile(track: Track, newPath: string): Track {
+  const url = desktopMusicFileUrl(newPath);
+  const imported = track as ImportedWebTrack;
+  return {
+    ...track,
+    uri: url,
+    objectUrl: url,
+    nativePath: newPath,
+    fileName: newPath.split('/').pop() ?? imported.fileName,
+    fileType: 'audio/mp4',
+    format: 'M4A',
+    codec: track.codec && /flac/i.test(track.codec) ? 'ALAC' : track.codec,
+    relativePath: imported.relativePath?.replace(/\.flac$/i, '.m4a'),
+  } as Track;
+}
+
+function isFlacPath(path: string | undefined): path is string {
+  return !!path && /\.flac$/i.test(path);
 }
 
 function pathKey(track: Track): string | undefined {
@@ -420,7 +463,16 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
     });
   },
 
-  addTrack: async (track, message) => {
+  addTrack: async (incoming, message) => {
+    let track = incoming;
+    // New downloads arrive as whatever the source shares; FLAC is moved to
+    // ALAC right away so the whole library seeks exactly. If that fails the
+    // FLAC stays, and the precise-playback copy covers it.
+    const downloadedPath = (incoming as ImportedWebTrack).nativePath;
+    if (isTauriDesktop() && isFlacPath(downloadedPath)) {
+      const migration = await migrateDesktopFlacToAlac(downloadedPath).catch(() => null);
+      if (migration?.newPath) track = withAlacFile(incoming, migration.newPath);
+    }
     const nextTracks = new Map(get().tracks);
     // addTrack is only used by completed downloads in the desktop/web shell.
     // Keep a separate timestamp so imported files are not mislabeled as downloads.
@@ -442,6 +494,74 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
       playlists: nextPlaylists,
       importMessage: message ?? `Listo: ${track.title} agregado a tu biblioteca.`,
     });
+  },
+
+  migrateLibraryToAlac: async (onProgress) => {
+    const files = (await scanDesktopMusicFolder()).filter(file => isFlacPath(file.path));
+    const progress: AlacMigrationProgress = {
+      processed: 0,
+      total: files.length,
+      converted: 0,
+      removedEmpty: 0,
+      failed: [],
+    };
+    onProgress?.({ ...progress });
+
+    let pending: Track[] = [];
+    let removedIds = new Set<string>();
+    // Written every few songs, so a closed app never leaves the library
+    // pointing at files that are already in the Trash.
+    const flush = () => {
+      if (!pending.length && !removedIds.size) return;
+      const tracks = new Map(get().tracks);
+      for (const track of pending) tracks.set(track.id, track);
+      for (const id of removedIds) tracks.delete(id);
+      const playlists = removedIds.size
+        ? get().playlists.map(playlist => (
+          playlist.trackIds.some(id => removedIds.has(id))
+            ? { ...playlist, trackIds: playlist.trackIds.filter(id => !removedIds.has(id)), updatedAt: Date.now() }
+            : playlist
+        ))
+        : get().playlists;
+      const recentlyPlayedIds = get().recentlyPlayedIds.filter(id => !removedIds.has(id));
+      void saveImportedLibrary(Array.from(tracks.values()).map(toPersistedTrack), []);
+      if (playlists !== get().playlists) savePersistedPlaylists(playlists);
+      if (recentlyPlayedIds.length !== get().recentlyPlayedIds.length) saveRecentlyPlayed(recentlyPlayedIds);
+      webAudioEngine.replaceTrackSources(pending);
+      const collections = rebuildCollections(tracks, get().artists);
+      set({ tracks, playlists, recentlyPlayedIds, albums: collections.albums, artists: collections.artists });
+      pending = [];
+      removedIds = new Set();
+    };
+
+    const playingPath = (webAudioEngine.getState().currentTrack as ImportedWebTrack | null)?.nativePath;
+    // The song playing is done last and swapped in at once, so it is never
+    // left reading a file that has just gone to the Trash.
+    files.sort((a, b) => Number(a.path === playingPath) - Number(b.path === playingPath));
+
+    for (const file of files) {
+      const owners = Array.from(get().tracks.values())
+        .filter(track => (track as ImportedWebTrack).nativePath === file.path);
+      try {
+        const result = await migrateDesktopFlacToAlac(file.path);
+        if (result.newPath) {
+          progress.converted += 1;
+          pending.push(...owners.map(track => withAlacFile(track, result.newPath!)));
+        } else if (result.outcome === 'trashed-empty') {
+          progress.removedEmpty += 1;
+          for (const track of owners) removedIds.add(track.id);
+        } else {
+          progress.failed.push({ name: file.name, reason: result.reason ?? 'Omitido.' });
+        }
+      } catch (error) {
+        progress.failed.push({ name: file.name, reason: error instanceof Error ? error.message : String(error) });
+      }
+      progress.processed += 1;
+      if (file.path === playingPath || progress.processed % 12 === 0) flush();
+      onProgress?.({ ...progress, failed: [...progress.failed] });
+    }
+    flush();
+    return progress;
   },
 
   recoverMissingArtwork: async (onProgress) => {
@@ -758,6 +878,17 @@ export const useWebLibraryStore = create<WebLibraryState>((set, get) => ({
 webAudioEngine.subscribe(audio => {
   useWebLibraryStore.getState().hydrateAudio(audio);
 });
+
+// FLAC seeks by estimate in WKWebView — seconds off, while currentTime claims
+// the exact time — so desktop keeps an exactly-seekable copy ready for the
+// first seek. Only FLAC is sent: the native side answers null for the rest.
+if (isTauriDesktop()) {
+  webAudioEngine.setPreciseSourceResolver(async track => {
+    const nativePath = (track as ImportedWebTrack).nativePath;
+    if (!nativePath || !/\.flac$/i.test(nativePath)) return null;
+    return desktopPrecisePlaybackUrl(nativePath);
+  });
+}
 
 // Lazy re-link: when a track's blob: URL didn't survive the session, resolve a
 // fresh one from its persisted file handle the moment it's played — no rescan.

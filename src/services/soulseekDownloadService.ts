@@ -7,9 +7,11 @@ import {
   isSoulseekNativeAvailable,
   type SoulseekNativeConfig,
   type SoulseekNativeMatch,
+  type SoulseekSearchIdentity,
   searchSoulseekNative,
 } from 'soulseek-native';
 
+import { isSoulseekTrackCandidate, soulseekMatchIdentity, soulseekSearchQueries } from './soulseekSearch';
 import { TidalQuality, TidalTrack, Track } from '../types/audio';
 import { FileSystemStorage } from './storage';
 import { isValidAudioFile } from './tidalService';
@@ -28,6 +30,18 @@ type SoulseekStoredCredentials = {
 };
 
 type SoulseekBackend = 'native' | 'bridge';
+
+class SoulseekBridgeError extends Error {
+  readonly retryable: boolean;
+  readonly status: number;
+
+  constructor(message: string, status: number, retryable: boolean) {
+    super(message);
+    this.name = 'SoulseekBridgeError';
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
 
 const SOULSEEK_CREDENTIALS_STORAGE_KEY = 'soulseek-native-credentials';
 let soulseekCredentialsCache: SoulseekStoredCredentials | null = null;
@@ -64,10 +78,20 @@ type SoulseekDownloadOptions = {
   signal?: AbortSignal;
 };
 
-const PEER_RETRY_LIMIT = 6;
+// Every peer tried leaves a queue entry at that peer until it offers the file
+// and we answer "Cancelled". Ranking puts free-slot peers first, so a few
+// candidates are enough without littering many strangers' queues.
+const PEER_RETRY_LIMIT = 4;
 const MIN_SOULSEEK_MATCH_SCORE = 68;
-// Soulseek peers appear and disappear quickly. Avoid retrying stale users.
-const SOULSEEK_MATCH_CACHE_TTL_MS = 30 * 1000;
+// Peers come and go, but re-searching costs far more: the Soulseek server
+// bans clients that search in bursts. Reuse a track's matches for a while.
+const SOULSEEK_MATCH_CACHE_TTL_MS = 5 * 60 * 1000;
+// Global spacing between searches on either backend (native or bridge).
+const SOULSEEK_MIN_SEARCH_GAP_MS = 4_000;
+let soulseekSearchQueue: Promise<unknown> = Promise.resolve();
+let lastSoulseekSearchAt = 0;
+/** How many files the network returned per track search, to explain misses. */
+const soulseekRawResultCounts = new Map<string, number>();
 const soulseekTrackMatchCache = new Map<string, {
   expiresAt: number;
   promise: Promise<SoulseekTrackMatch[]>;
@@ -160,7 +184,12 @@ function mapNativeConfig(raw: unknown): SoulseekRuntimeConfig {
     listenPort: Math.min(65535, Math.max(0, toInt(source.listenPort, 2234))),
     clientVersion: Math.min(9999, Math.max(1, toInt(source.clientVersion, 160))),
     searchTimeoutMs: Math.min(30_000, Math.max(2_500, toInt(source.searchTimeoutMs, 9_000))),
-    maxResults: Math.min(40, Math.max(1, toInt(source.maxResults, 24))),
+    // The native module accepts up to 120 results. Keeping the JS cap at 40
+    // discarded useful matches before ranking, especially for popular titles.
+    maxResults: Math.min(120, Math.max(1, toInt(source.maxResults, 24))),
+    // Re-shared to the network only while a native session is open (15 min
+    // after the last search/download). Just StaySound's own Soulseek files.
+    shareDir: normalizeFileUriToPath(SOULSEEK_DOWNLOADS_DIR),
   };
 }
 
@@ -244,6 +273,14 @@ function normalizeExtension(value?: string): string {
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, ' ').trim();
+}
+
+function normalizeSoulseekSearchTerms(value: string): string {
+  // Soulseek treats punctuation as search syntax in some clients (notably a
+  // hyphen can exclude the following term). Send plain positive terms only.
+  return normalizeWhitespace(
+    value.replace(/[\\/_()[\]{}.,;:!?"'`~@#$%^&*+=|<>-]+/g, ' '),
+  );
 }
 
 function stripFileExtension(value: string): string {
@@ -453,6 +490,7 @@ function scoreSoulseekMatch(
   qualityPreference: TidalQuality,
   allowCompressedFallback = false,
 ): number {
+  if (!isSoulseekTrackCandidate(tidalTrack, match.filename)) return -1_000;
   if (!isCompatibleSoulseekFormat(match, qualityPreference, allowCompressedFallback)) return -1_000;
 
   const inferred = inferTrackTextFromMatch(match, {
@@ -486,6 +524,9 @@ function scoreSoulseekMatch(
     else if (delta >= 12_000) score -= 30;
   }
 
+  // Files inside the right album folder are more likely the right master.
+  if (tidalTrack.album) score += tokenOverlapScore(tidalTrack.album, match.filename, 12);
+
   if (isLosslessMatch(match)) score += wantsLossless(qualityPreference) ? 28 : -10;
   if (isMp3Match(match)) score += wantsLossless(qualityPreference) ? -18 : 24;
   if ((match.size ?? 0) > 0) score += 4;
@@ -515,6 +556,17 @@ function scoreSoulseekMatch(
   return score;
 }
 
+/**
+ * Hard ordering before the score: a speed bonus must never let an MP3 beat
+ * any FLAC when the user asked for lossless, and (as Seeker learned) peers
+ * without a free upload slot rarely start, so they only come after every
+ * peer that can send right away.
+ */
+function soulseekMatchTier(match: SoulseekTrackMatch, qualityPreference: TidalQuality): number {
+  const formatTier = wantsLossless(qualityPreference) && !isLosslessMatch(match) ? 2 : 0;
+  return formatTier + (match.slotsFree === false ? 1 : 0);
+}
+
 function rankSoulseekMatches(
   tidalTrack: TidalTrack,
   matches: SoulseekTrackMatch[],
@@ -522,29 +574,19 @@ function rankSoulseekMatches(
   allowCompressedFallback = false,
 ): SoulseekTrackMatch[] {
   return matches
-    .map(match => ({ match, score: scoreSoulseekMatch(tidalTrack, match, qualityPreference, allowCompressedFallback) }))
+    .map(match => ({
+      match,
+      score: scoreSoulseekMatch(tidalTrack, match, qualityPreference, allowCompressedFallback),
+      tier: soulseekMatchTier(match, qualityPreference),
+    }))
     .filter(entry => entry.score >= MIN_SOULSEEK_MATCH_SCORE)
-    .sort((a, b) => b.score - a.score)
+    .sort((a, b) => a.tier - b.tier || b.score - a.score)
     .map(entry => entry.match);
 }
 
-function buildTrackSearchQueries(
-  tidalTrack: TidalTrack,
-  qualityPreference: TidalQuality,
-  allowCompressedFallback = false,
-): string[] {
-  const base = `${tidalTrack.artist} - ${tidalTrack.title}`.trim();
-  const plain = normalizeWhitespace(base || `${tidalTrack.artist} ${tidalTrack.title}`);
-  const formats = wantsLossless(qualityPreference)
-    ? (allowCompressedFallback ? ['flac', 'mp3'] : ['flac'])
-    : ['mp3'];
-  const queries = formats.flatMap(format => [
-    `${plain} ${format}`,
-    `${tidalTrack.artist} ${tidalTrack.title} ${format}`.trim(),
-  ]);
-  queries.push(plain);
-
-  return Array.from(new Set(queries.map(normalizeWhitespace).filter(Boolean)));
+/** Found something the user can download without being asked about MP3. */
+function hasPreferredFormat(matches: SoulseekTrackMatch[], qualityPreference: TidalQuality): boolean {
+  return matches.some(match => !wantsLossless(qualityPreference) || isLosslessMatch(match));
 }
 
 async function searchRankedMatchesForTrackUncached(
@@ -561,14 +603,22 @@ async function searchRankedMatchesForTrackUncached(
     qualityPreference,
     allowCompressedFallback,
   });
-  for (const query of buildTrackSearchQueries(tidalTrack, qualityPreference, allowCompressedFallback)) {
+  // The first extension is the one the user asked for; the native collector
+  // only ends a search early once peers can serve that one.
+  const identity: SoulseekSearchIdentity = {
+    ...soulseekMatchIdentity(tidalTrack),
+    extensions: wantsLossless(qualityPreference)
+      ? (allowCompressedFallback ? ['flac', 'mp3'] : ['flac'])
+      : ['mp3'],
+  };
+  for (const { query } of soulseekSearchQueries(tidalTrack)) {
     ensureNotAborted(signal, 'Busqueda cancelada');
     console.log(`${SOULSEEK_SERVICE_LOG} query`, {
       query,
       qualityPreference,
       allowCompressedFallback,
     });
-    const matches = await searchSoulseekMatches(query, signal).catch((error: unknown) => {
+    const matches = await searchSoulseekMatches(query, signal, identity).catch((error: unknown) => {
       const message = error instanceof Error ? error.message : String(error);
       console.log(`${SOULSEEK_SERVICE_LOG} query error`, {
         query,
@@ -599,7 +649,10 @@ async function searchRankedMatchesForTrackUncached(
         durationMs: ranked[0].durationMs,
       } : null,
     });
-    if (ranked.length >= PEER_RETRY_LIMIT) return ranked.slice(0, PEER_RETRY_LIMIT);
+    // A verified candidate in the requested format is enough; the fallback
+    // query only runs when the first found nothing, or only MP3 for a
+    // lossless download (so the user isn't offered MP3 while FLAC exists).
+    if (hasPreferredFormat(ranked, qualityPreference)) return ranked;
   }
 
   const finalRanked = rankSoulseekMatches(
@@ -607,7 +660,11 @@ async function searchRankedMatchesForTrackUncached(
     dedupeMatches(collected),
     qualityPreference,
     allowCompressedFallback,
-  ).slice(0, PEER_RETRY_LIMIT);
+  );
+  soulseekRawResultCounts.set(
+    getSoulseekTrackCacheKey(tidalTrack, qualityPreference, allowCompressedFallback),
+    dedupeMatches(collected).length,
+  );
   console.log(`${SOULSEEK_SERVICE_LOG} ranked search final`, {
     collected: collected.length,
     ranked: finalRanked.length,
@@ -651,7 +708,12 @@ async function searchRankedMatchesForTrack(
     qualityPreference,
     allowCompressedFallback,
     signal,
-  ).catch(error => {
+  ).then(matches => {
+    // A miss must not stick: "try again" has to actually search again (the
+    // global search spacing still keeps retries polite).
+    if (!matches.length) soulseekTrackMatchCache.delete(key);
+    return matches;
+  }, error => {
     soulseekTrackMatchCache.delete(key);
     throw error;
   });
@@ -661,17 +723,6 @@ async function searchRankedMatchesForTrack(
     promise,
   });
   return promise;
-}
-
-export function prefetchSoulseekTrack(
-  tidalTrack: TidalTrack,
-  qualityPreference: TidalQuality,
-): void {
-  void searchRankedMatchesForTrack(
-    tidalTrack,
-    qualityPreference,
-    wantsLossless(qualityPreference),
-  ).catch(() => undefined);
 }
 
 function inferTrackTextFromMatch(
@@ -818,11 +869,23 @@ function canContinueAfterSearchError(error: unknown): boolean {
   return message.includes('tardo demasiado') || message.includes('timed out') || message.includes('timeout');
 }
 
+/** Peer-side upload caps ("Too many megabytes/files"), not a network problem. */
+function isPeerQueueLimitError(error: unknown): boolean {
+  const message = normalizeSoulseekErrorMessage(error);
+  return message.includes('too many megabytes') || message.includes('too many files') || message.includes('limite de cola');
+}
+
 function isRetryablePeerError(error: unknown): boolean {
   const message = normalizeSoulseekErrorMessage(error);
   return (
     message.includes('socket cerrado') ||
     message.includes('peer cerro') ||
+    // A peer that accepted and then stalled, or whose file channel never
+    // opened, is a peer problem: the next candidate may well work.
+    message.includes('estancada') ||
+    message.includes('dejo de enviar') ||
+    message.includes('canal f') ||
+    message.includes('sin direccion') ||
     // Node's Soulseek client reports a peer-side reset as `read ECONNRESET`.
     // Treat it the same as the more human-readable reset messages so the
     // caller can try the next verified match instead of failing the download.
@@ -830,6 +893,16 @@ function isRetryablePeerError(error: unknown): boolean {
     message.includes('connection reset') ||
     message.includes('connection closed') ||
     message.includes('connection refused') ||
+    message.includes('connection abort') ||
+    message.includes('software caused abort') ||
+    message.includes('eof') ||
+    message.includes('unexpected end of stream') ||
+    message.includes('se reinicio') ||
+    message.includes('se reinició') ||
+    message.includes('fallo de subida') ||
+    message.includes('uploadfailed') ||
+    message.includes('queuefailed') ||
+    message.includes('file not shared') ||
     message.includes('broken pipe') ||
     message.includes('user not exist') ||
     message.includes('canal p directo ni indirecto') ||
@@ -863,10 +936,13 @@ async function buildFallbackMatches(
   signal?: AbortSignal,
   allowCompressedFallback = false,
 ): Promise<SoulseekTrackMatch[]> {
+  // Same cache key as searchSoulseekTrack (lossless searches always collect
+  // MP3 too), so a failed first peer reuses the search instead of repeating
+  // it; the MP3 ones are dropped by ranking unless the user allowed them.
   const extras = await searchRankedMatchesForTrack(
     tidalTrack,
     qualityPreference,
-    allowCompressedFallback,
+    wantsLossless(qualityPreference),
     signal,
   ).catch((error: unknown) => {
     if (canContinueAfterSearchError(error)) return [] as SoulseekTrackMatch[];
@@ -1005,36 +1081,52 @@ async function readSoulseekBridgeResponse<T>(response: Response): Promise<T> {
   }
 
   if (!response.ok) {
-    const error = payload && typeof payload === 'object' && 'error' in payload
-      ? String((payload as { error?: unknown }).error ?? '')
+    const bridgePayload = payload && typeof payload === 'object'
+      ? payload as { error?: unknown; retryable?: unknown }
+      : {};
+    const error = 'error' in bridgePayload
+      ? String(bridgePayload.error ?? '')
       : '';
-    throw new Error(error || `Soulseek bridge respondio ${response.status}.`);
+    throw new SoulseekBridgeError(
+      error || `Soulseek bridge respondio ${response.status}.`,
+      response.status,
+      bridgePayload.retryable === true,
+    );
   }
 
   return payload as T;
 }
 
+async function fetchSoulseekBridgeResponse<T>(
+  url: string,
+  init: RequestInit,
+): Promise<T> {
+  const response = await fetch(url, init);
+  return readSoulseekBridgeResponse<T>(response);
+}
+
 async function searchBridgeMatches(
   query: string,
   signal?: AbortSignal,
+  identity?: SoulseekSearchIdentity,
 ): Promise<SoulseekTrackMatch[]> {
   const bridgeUrl = getSoulseekBridgeUrl();
   if (!bridgeUrl) throw new Error('No hay un bridge Soulseek configurado.');
   const config = await getSoulseekNativeConfigAsync();
   ensureNotAborted(signal, 'Busqueda cancelada');
 
-  const response = await fetch(`${bridgeUrl}/search`, {
+  const payload = await fetchSoulseekBridgeResponse<{ results?: unknown[] }>(`${bridgeUrl}/search`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       query,
       timeoutMs: config.searchTimeoutMs,
       maxResults: config.maxResults,
+      identity,
       credentials: { username: config.username, password: config.password },
     }),
     signal,
   });
-  const payload = await readSoulseekBridgeResponse<{ results?: unknown[] }>(response);
   ensureNotAborted(signal, 'Busqueda cancelada');
   return (payload.results ?? [])
     .map(fromBridgeMatch)
@@ -1044,6 +1136,7 @@ async function searchBridgeMatches(
 async function searchNativeMatches(
   query: string,
   signal?: AbortSignal,
+  identity?: SoulseekSearchIdentity,
 ): Promise<SoulseekTrackMatch[]> {
   ensureNotAborted(signal, 'Busqueda cancelada');
 
@@ -1056,7 +1149,7 @@ async function searchNativeMatches(
   });
 
   try {
-    const matches = await searchSoulseekNative(config, query, config.searchTimeoutMs, config.maxResults);
+    const matches = await searchSoulseekNative({ ...config, searchIdentity: identity }, query, config.searchTimeoutMs, config.maxResults);
     ensureNotAborted(signal, 'Busqueda cancelada');
     console.log(`${SOULSEEK_SERVICE_LOG} native search done`, {
       query,
@@ -1080,13 +1173,38 @@ async function searchNativeMatches(
   }
 }
 
-async function searchSoulseekMatches(
+function waitForSoulseekSearchSlot(ms: number, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0) return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = () => {
+      clearTimeout(timer);
+      reject(new Error('Busqueda cancelada'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/** Serialises searches and spaces them out so Soulseek never sees a burst. */
+function searchSoulseekMatches(
   query: string,
   signal?: AbortSignal,
+  identity?: SoulseekSearchIdentity,
 ): Promise<SoulseekTrackMatch[]> {
-  return getSoulseekBackend() === 'native'
-    ? searchNativeMatches(query, signal)
-    : searchBridgeMatches(query, signal);
+  const run = async () => {
+    ensureNotAborted(signal, 'Busqueda cancelada');
+    await waitForSoulseekSearchSlot(lastSoulseekSearchAt + SOULSEEK_MIN_SEARCH_GAP_MS - Date.now(), signal);
+    lastSoulseekSearchAt = Date.now();
+    return getSoulseekBackend() === 'native'
+      ? searchNativeMatches(query, signal, identity)
+      : searchBridgeMatches(query, signal, identity);
+  };
+  const result = soulseekSearchQueue.then(run, run);
+  soulseekSearchQueue = result.catch(() => undefined);
+  return result;
 }
 
 export async function searchSoulseekTrack(
@@ -1103,7 +1221,14 @@ export async function searchSoulseekTrack(
 
   if (!matches.length) {
     const format = wantsLossless(qualityPreference) ? 'FLAC' : 'MP3';
-    throw new Error(`No hay una fuente ${format} confiable en Soulseek para esta cancion.`);
+    // "The network returned nothing" and "nothing matched" need different
+    // fixes, so say which one happened.
+    const raw = soulseekRawResultCounts.get(
+      getSoulseekTrackCacheKey(tidalTrack, qualityPreference, wantsLossless(qualityPreference)),
+    ) ?? 0;
+    throw new Error(raw === 0
+      ? `Soulseek no encontro archivos que coincidan con "${tidalTrack.title}". Intenta de nuevo en un momento o con otra cancion.`
+      : `Soulseek devolvio ${raw} archivos, pero ninguno es una fuente ${format} confiable para "${tidalTrack.artist} - ${tidalTrack.title}".`);
   }
 
   return matches[0];
@@ -1117,19 +1242,19 @@ export async function searchSoulseekTracksByQuery(
   const parsed = parseSoulseekQuery(query);
   if (!parsed.title && !parsed.artist) return [];
 
-  const baseQuery = `${parsed.artist ? `${parsed.artist} - ` : ''}${parsed.title || query.trim()}`.trim();
-  const formats = wantsLossless(qualityPreference) ? ['flac', 'mp3'] : ['mp3', 'flac'];
-  const collected: SoulseekTrackMatch[] = [];
+  const baseQuery = normalizeSoulseekSearchTerms(
+    `${parsed.artist} ${parsed.title || query.trim()}`,
+  );
+  // One search; format preference is applied when ranking, not by re-querying.
+  const matches = await searchSoulseekMatches(baseQuery, signal).catch((error: unknown) => {
+    if (canContinueAfterSearchError(error)) return [] as SoulseekTrackMatch[];
+    throw error;
+  });
 
-  for (const format of formats) {
-    const matches = await searchSoulseekMatches(`${baseQuery} ${format}`, signal).catch((error: unknown) => {
-      if (canContinueAfterSearchError(error)) return [] as SoulseekTrackMatch[];
-      throw error;
-    });
-    collected.push(...matches.filter(isSupportedSoulseekFormat));
-  }
-
-  return dedupeMatches(collected).map(match => ({
+  const preferLossless = wantsLossless(qualityPreference);
+  return dedupeMatches(matches.filter(isSupportedSoulseekFormat))
+    .sort((a, b) => Number(isLosslessMatch(b) === preferLossless) - Number(isLosslessMatch(a) === preferLossless))
+    .map(match => ({
     match,
     track: toSoulseekVirtualTrack(match, parsed, qualityPreference),
   }));
@@ -1157,17 +1282,19 @@ async function downloadSoulseekBridgeFile(
   };
 
   ensureNotAborted(options.signal);
-  const response = await fetch(`${bridgeUrl}/download`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      match: bridgeMatch,
-      filename,
-      credentials: { username: config.username, password: config.password },
-    }),
-    signal: options.signal,
-  });
-  const payload = await readSoulseekBridgeResponse<{ url?: string }>(response);
+  const payload = await fetchSoulseekBridgeResponse<{ url?: string }>(
+    `${bridgeUrl}/download`,
+    {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        match: bridgeMatch,
+        filename,
+        credentials: { username: config.username, password: config.password },
+      }),
+      signal: options.signal,
+    },
+  );
   if (!payload.url) throw new Error('El bridge Soulseek no devolvio el archivo descargado.');
   ensureNotAborted(options.signal);
 
@@ -1302,6 +1429,10 @@ async function downloadSoulseekTrackWithMatch(
     if (message.toUpperCase().includes('INVALIDPASS')) {
       throw new Error('Soulseek rechazo el login: usuario o password incorrectos.');
     }
+    if (isPeerQueueLimitError(error)) {
+      // Keep "QueueFailed" so the caller still moves on to another peer.
+      throw new Error('QueueFailed: este usuario ya no acepta mas descargas tuyas por ahora (limite de cola).');
+    }
     if (message.toLowerCase().includes('queued') || message.toLowerCase().includes('cola')) {
       throw new Error('El archivo quedo en cola del peer. Espera un poco y vuelve a intentar.');
     }
@@ -1342,29 +1473,47 @@ export async function downloadSoulseekTrackFromMatch(
     }
   }
 
-  const triedKey = `${match.username}::${match.filename}::${match.size ?? 0}`;
+  // Upload limits are per user, so another file from a peer that already
+  // failed would fail the same way (and pile more MB into its queue).
+  const triedUsers = new Set([match.username.toLocaleLowerCase()]);
   const candidates = (await buildFallbackMatches(
     tidalTrack,
     match,
     qualityPreference,
     options.signal,
     options.allowCompressedFallback,
-  )).filter(candidate => `${candidate.username}::${candidate.filename}::${candidate.size ?? 0}` !== triedKey);
+  )).filter(candidate => {
+    const user = candidate.username.toLocaleLowerCase();
+    if (triedUsers.has(user)) return false;
+    triedUsers.add(user);
+    return true;
+  });
 
   for (let index = 0; index < candidates.length; index += 1) {
     const candidate = candidates[index];
+    console.log(`${SOULSEEK_SERVICE_LOG} trying candidate`, {
+      index: index + 1,
+      of: candidates.length,
+      username: candidate.username,
+      filename: candidate.filename,
+    });
     try {
       const progressBase = 0.02 + (index / Math.max(candidates.length, 1)) * 0.18;
       options.onProgress?.(progressBase);
       return await downloadSoulseekTrackWithMatch(tidalTrack, qualityPreference, candidate, options);
     } catch (error) {
       lastError = error;
-      if (!isRetryablePeerError(error) || index >= candidates.length - 1) {
-        throw error;
-      }
+      console.log(`${SOULSEEK_SERVICE_LOG} candidate failed`, {
+        username: candidate.username,
+        message: error instanceof Error ? error.message : String(error),
+      });
+      if (!isRetryablePeerError(error)) throw error;
     }
   }
 
+  if (isPeerQueueLimitError(lastError)) {
+    throw new Error('Las fuentes de esta cancion tienen su cola llena para ti. Intenta mas tarde o en calidad MP3.');
+  }
   throw lastError instanceof Error ? lastError : new Error('No se pudo descargar desde los peers probados.');
 }
 

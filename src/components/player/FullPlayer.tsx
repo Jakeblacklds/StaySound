@@ -21,6 +21,7 @@ import React, { useCallback, useRef, useState } from "react";
 import {
   BackHandler,
   Dimensions,
+  Platform,
   processColor,
   Share,
   StyleSheet,
@@ -65,6 +66,9 @@ import {
   MINI_ARTWORK_SIZE,
   MINI_HEIGHT,
   TAB_BAR_HEIGHT,
+  ANDROID_DOCK_INSET,
+  ANDROID_MINI_RADIUS,
+  ANDROID_MINI_OFFSET,
   isPlayerDetailRoute,
 } from "./playerLayout";
 import { playerStyles as styles } from "./playerStyles";
@@ -74,6 +78,8 @@ import {
   getTrackTechLabel,
 } from "./playerUtils";
 import { ImmersiveVariant } from "./variants/ImmersiveVariant";
+import { hasNativeFullPlayer } from '@/modules/player-chrome/src';
+import { AndroidFullPlayer } from './AndroidFullPlayer';
 
 const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get("window");
 
@@ -108,6 +114,10 @@ function normalizeArtistSearchValue(value?: string | null) {
 }
 
 export function FullPlayer() {
+  return hasNativeFullPlayer ? <AndroidFullPlayer /> : <LegacyFullPlayer />;
+}
+
+function LegacyFullPlayer() {
   const { theme, config, isDark } = useTheme();
   const performanceProfile = usePerformanceProfile();
   const themeAnimatedColors = useAnimatedColors();
@@ -120,13 +130,9 @@ export function FullPlayer() {
   const artistNavigationInFlightRef = useRef(false);
   const lastArtistRouteRef = useRef<string | null>(null);
 
-  const playerVariant = usePlayerStore((state) => state.playerVariant);
   const currentTrack = usePlayerStore((state) => state.currentTrack);
   const isPlaying = usePlayerStore((state) => state.isPlaying);
   const isLoading = usePlayerStore((state) => state.isLoading);
-  const pendingTrackPreview = usePlayerStore(
-    (state) => state.pendingTrackPreview,
-  );
   const shuffleEnabled = usePlayerStore((state) => state.shuffleEnabled);
   const repeatMode = usePlayerStore((state) => state.repeatMode);
   const [showOptions, setShowOptions] = useState(false);
@@ -162,8 +168,6 @@ export function FullPlayer() {
     currentTrackId ? !!state.tracks.get(currentTrackId)?.favorite : false,
   );
 
-  const activeVariant =
-    (theme.components?.player?.variant as any) || playerVariant;
   const lightweightMode = config.lightweightMode;
   const shouldResolveDynamicColors = isVisible;
   const playerArtworkUri = currentTrack?.artwork || currentTrack?.artworkThumb;
@@ -171,6 +175,9 @@ export function FullPlayer() {
     useDynamicColorsWithOptions(playerArtworkUri, {
       enabled:
         shouldResolveDynamicColors && performanceProfile.enableDynamicColors,
+      // The player surface is chrome, not a poster: take the artwork's hue but
+      // not its full lightness/chroma, so the room stays dark around the cover.
+      deepenDarkBackground: true,
     });
   const shouldUseThemePlayerColors = !performanceProfile.enableDynamicColors;
   const playerColors = shouldUseThemePlayerColors
@@ -202,11 +209,6 @@ export function FullPlayer() {
     "#05070D",
     "#FFFFFF",
   ]);
-  const shouldShowTidalLoading =
-    Boolean(pendingTrackPreview) ||
-    (isLoading &&
-      (currentTrack?.source === "tidal" ||
-        currentTrack?.source === "tidal_stream"));
   const {
     playerSurfaceColor,
     protectedSpectrumGlowColor,
@@ -224,7 +226,6 @@ export function FullPlayer() {
     textColor,
   });
 
-  const playerIcons = theme.components?.player?.icons;
   const playIcon: IconName = "Play";
   const pauseIcon: IconName = "Pause";
   const nextIcon: IconName = "Next";
@@ -245,13 +246,15 @@ export function FullPlayer() {
   const miniCollapsedBottom =
     (config.style === "material3" ? TAB_BAR_HEIGHT : 85) + insets.bottom;
 
-  const miniLeft = 0;
+  const floatingMini = Platform.OS === "android" && config.style === "material3" && !isDetailRoute;
+  const miniLeft = floatingMini ? Math.max(ANDROID_DOCK_INSET, insets.left + 8) : 0;
+  const miniRight = floatingMini ? Math.max(ANDROID_DOCK_INSET, insets.right + 8) : 0;
   const miniBottom = isDetailRoute
     ? Math.max(insets.bottom + DETAIL_EXTRA_BOTTOM, DETAIL_EXTRA_BOTTOM)
-    : miniCollapsedBottom;
+    : miniCollapsedBottom + (floatingMini ? ANDROID_MINI_OFFSET : 0);
   const miniHeight = isDetailRoute ? DETAIL_HEIGHT : MINI_HEIGHT;
-  const miniWidth = SCREEN_WIDTH - miniLeft * 2;
-  const miniRadius = 0;
+  const miniWidth = SCREEN_WIDTH - miniLeft - miniRight;
+  const miniRadius = floatingMini ? ANDROID_MINI_RADIUS : 0;
 
   // Expansion & Breathing
   const expansion = useSharedValue(0);
@@ -344,7 +347,10 @@ export function FullPlayer() {
   }, [cdSpin, currentTrack?.id, lightweightMode]);
 
   useFrameCallback((frameInfo) => {
-    if (!isVisible || !isPlayingVisual || lightweightMode) return;
+    // This artwork is also the mini player's artwork at p=0. Keeping the
+    // clock alive while collapsed makes the container transform continuous:
+    // opening the full player never restarts or jumps the disc rotation.
+    if (!isPlayingVisual || lightweightMode) return;
     const deltaMs = frameInfo.timeSincePreviousFrame ?? 16.67;
     cdSpin.value = (cdSpin.value + deltaMs * CD_SPIN_DEGREES_PER_MS) % 360;
   }, true);
@@ -593,8 +599,8 @@ export function FullPlayer() {
       left: interpolate(p, [0, 1], [miniLeft, 0], Extrapolation.CLAMP),
       borderTopLeftRadius: radius,
       borderTopRightRadius: radius,
-      borderBottomLeftRadius: 0,
-      borderBottomRightRadius: 0,
+      borderBottomLeftRadius: radius,
+      borderBottomRightRadius: radius,
       opacity: 1,
       pointerEvents: isVisible && p > 0.18 ? "auto" : "none",
       elevation: 0,
@@ -609,10 +615,12 @@ export function FullPlayer() {
   // collapses, the transport rises, and the absolute cover ends up painted on
   // top of the title + favorite button. We size the cover from the real
   // vertical budget so it can never overlap the lower stack.
-  const playerTopInset = Math.max(insets.top + 22, 42);
+  // Lift the header and disc as a single zone. The lower stack gets its own
+  // reserved clearance below, so the spectrum ring cannot run into the title.
+  const playerTopInset = Math.max(insets.top + 10, 30);
   const HEADER_ZONE = 58; // close chevron + whisper context label
-  const LOWER_STACK_ZONE = 388; // metadata + lyric rail + progress + transport + footer
-  const playerBottomPad = Math.max(insets.bottom + 18, 40);
+  const LOWER_STACK_ZONE = 414; // includes a safety gutter below the spectrum ring
+  const playerBottomPad = Math.max(insets.bottom + 8, 26);
   const artworkVerticalAvail =
     SCREEN_HEIGHT -
     playerTopInset -
@@ -645,11 +653,17 @@ export function FullPlayer() {
     !showQueue &&
     performanceProfile.enableAnimatedBackgrounds &&
     performanceProfile.mode !== "lite";
-  // The "aurora" slot is now a full psychedelic album-color field (Skia), not the
-  // native spectrum. The native renderer drives every OTHER theme.
+  // Aurora combines the album-color Skia field with the native PCM-driven matrix
+  // layer. Keeping audio analysis native avoids per-frame JS bridge traffic.
   const isPsychedelicTheme = spectrumTheme === "aurora";
   const psychedelicEnabled = spectrumEnabled && isPsychedelicTheme;
-  const nativeSpectrumEnabled = spectrumEnabled && !isPsychedelicTheme;
+  const nativeOriginKitAvailable =
+    Platform.OS === "android" && Number(Platform.Version) >= 33;
+  const psychedelicSkiaEnabled =
+    psychedelicEnabled && !nativeOriginKitAvailable;
+  // One renderer only: AGSL owns Android 13+, Skia is the exact fallback.
+  const nativeSpectrumEnabled =
+    spectrumEnabled && (!isPsychedelicTheme || nativeOriginKitAvailable);
   const refractionEnabled = spectrumEnabled && spectrumTheme === "refractionVeil";
 
   const artworkShadowStyle = useAnimatedStyle(() => {
@@ -711,15 +725,22 @@ export function FullPlayer() {
 
   const artworkContainerStyle = useAnimatedStyle(() => {
     const p = expansion.value;
-    const radius = interpolate(
+    const artworkProgress = interpolate(
       p,
-      [0, 0.35, 1],
-      [12, 20, ARTWORK_SIZE / 2],
+      [0, 0.22, 0.72, 1],
+      [0, 0.18, 0.82, 1],
+      Extrapolation.CLAMP,
+    );
+    const size = interpolate(
+      artworkProgress,
+      [0, 1],
+      [MINI_ARTWORK_SIZE, ARTWORK_SIZE],
       Extrapolation.CLAMP,
     );
     return {
       flex: 1,
-      borderRadius: radius,
+      // A true disc at every stage, including the 48 px mini player state.
+      borderRadius: size / 2,
       overflow: "hidden",
     };
   });
@@ -735,12 +756,7 @@ export function FullPlayer() {
   const artworkCdSpinStyle = useAnimatedStyle(() => ({
     transform: [
       {
-        rotate: `${cdSpin.value * interpolate(
-          expansion.value,
-          [0, 0.62, 1],
-          [0, 0, 1],
-          Extrapolation.CLAMP,
-        )}deg`,
+        rotate: `${cdSpin.value}deg`,
       },
     ],
   }));
@@ -830,7 +846,12 @@ export function FullPlayer() {
       interpolate(
         expansion.value,
         [0, 0.64, 0.9, 1],
-        [0, 0, isDark ? 0.26 : 0.22, isDark ? 0.38 : 0.32],
+        [
+          0,
+          0,
+          isPsychedelicTheme ? (isDark ? 0.44 : 0.31) : (isDark ? 0.32 : 0.22),
+          isPsychedelicTheme ? (isDark ? 0.60 : 0.44) : (isDark ? 0.46 : 0.32),
+        ],
         Extrapolation.CLAMP,
       ),
   }));
@@ -1001,9 +1022,9 @@ export function FullPlayer() {
                   left: 0,
                   right: 0,
                   bottom: 0,
-                  borderTopWidth: StyleSheet.hairlineWidth,
-                  borderLeftWidth: StyleSheet.hairlineWidth,
-                  borderRightWidth: StyleSheet.hairlineWidth,
+                  borderTopWidth: floatingMini ? 0 : StyleSheet.hairlineWidth,
+                  borderLeftWidth: floatingMini ? 0 : StyleSheet.hairlineWidth,
+                  borderRightWidth: floatingMini ? 0 : StyleSheet.hairlineWidth,
                   borderBottomWidth: 0,
                   borderTopLeftRadius: miniRadius,
                   borderTopRightRadius: miniRadius,
@@ -1021,13 +1042,23 @@ export function FullPlayer() {
                   colors={playerColors}
                   animColors={playerAnimColors}
                   artwork={playerArtworkUri}
-                  isVisible={isVisible}
                   expansion={expansion}
                   lightweight={lightweightMode}
-                  isDark={isDark}
                 />
               </Animated.View>
             ) : null}
+            {psychedelicSkiaEnabled ? (
+              <Animated.View
+                style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
+                pointerEvents="none"
+              >
+                <PsychedelicBackground
+                  colors={playerColors}
+                  isPlaying={isPlaying}
+                />
+              </Animated.View>
+            ) : null}
+
             {nativeSpectrumEnabled ? (
               <Animated.View
                 style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
@@ -1041,22 +1072,9 @@ export function FullPlayer() {
                   spectrumTheme={spectrumTheme}
                   focusY={spectrumFocusY}
                   artworkSize={ARTWORK_SIZE}
-                  particleIntensity={0.62}
+                  particleIntensity={isPsychedelicTheme ? 0.42 : 0.62}
                   renderDelayMs={spectrumDelayMs}
                   glowColor={processColor(protectedSpectrumGlowColor)}
-                />
-              </Animated.View>
-            ) : null}
-
-            {psychedelicEnabled ? (
-              <Animated.View
-                style={[StyleSheet.absoluteFill, themeBackgroundFadeStyle]}
-                pointerEvents="none"
-              >
-                <PsychedelicBackground
-                  colors={playerColors}
-                  isPlaying={isPlaying}
-                  isDark={isDark}
                 />
               </Animated.View>
             ) : null}
@@ -1176,7 +1194,6 @@ export function FullPlayer() {
           shuffleEnabled={shuffleEnabled}
           repeatMode={repeatMode}
           qualityBadge={qualityBadge}
-          trackTechLabel={trackTechLabel}
           onPrimaryColor={onPrimaryColor}
           animStyle={lyricsContentAnimStyle}
           onClose={() => {

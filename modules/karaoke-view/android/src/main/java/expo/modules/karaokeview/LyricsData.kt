@@ -1,5 +1,7 @@
 package expo.modules.karaokeview
 
+import java.text.BreakIterator
+
 /**
  * Data classes for karaoke lyrics
  */
@@ -60,7 +62,6 @@ data class LyricLine(
 
 internal object LyricsVisualWords {
     private val punctuationRegex = Regex("^[,.;:!?)]")
-    private val cjkRegex = Regex("[\\u4e00-\\u9fff\\u3040-\\u309f\\u30a0-\\u30ff\\uac00-\\ud7af]")
     private val rtlRegex = Regex("[\\u0600-\\u06FF\\u0750-\\u077F\\u08A0-\\u08FF\\u0590-\\u05FF]")
 
     fun shouldInsertSpacing(previous: LyricWord?, current: LyricWord): Boolean {
@@ -104,23 +105,44 @@ internal object LyricsVisualWords {
         if (combinedText.isEmpty()) return false
 
         val durationMs = (endMs - startMs).coerceAtLeast(0L)
-        val isCjk = cjkRegex.containsMatchIn(combinedText)
         val isRtl = rtlRegex.containsMatchIn(combinedText)
-        val hasHyphen = combinedText.contains('-')
-        val length = combinedText.length
+        val graphemeCount = countGraphemes(combinedText)
 
-        // Binimum/Apple Music: apply the sustained glow to any note that lasts long enough.
-        // Old limit (length <= 7) silently excluded most multi-syllable words like
-        // "beautiful", "together", "forever", "running", etc. Removed.
-        // Per-character penalty relaxed: 200ms/char instead of 300ms (too aggressive).
-        // Short words (1-3 chars) still need a higher per-char threshold to avoid
-        // turning tiny filler words into glowing notes.
-        return !isCjk &&
-            !isRtl &&
-            !hasHyphen &&
-            durationMs >= 850 &&
-            durationMs >= length * 200L &&
-            (length >= 4 || durationMs / length >= 550L)
+        // am-lyrics / desktop only promotes compact, held visual words. Keeping this
+        // gate identical matters: growable words switch to per-grapheme scale, delay
+        // and glow, so a broader Android heuristic changes the whole line's rhythm.
+        return !isRtl && graphemeCount in 1..7 && durationMs >= 1_000L
+    }
+
+    private fun countGraphemes(text: String): Int {
+        val iterator = BreakIterator.getCharacterInstance()
+        iterator.setText(text)
+        var count = 0
+        var end = iterator.next()
+        while (end != BreakIterator.DONE) {
+            count += 1
+            end = iterator.next()
+        }
+        return count
+    }
+}
+
+internal object LyricsSweepPhysics {
+    /** Desktop pre-wipe distance: exactly 0.375em at the source fragment's velocity. */
+    fun preHighlightProgress(
+        sourceWidthPx: Float,
+        fontSizePx: Float,
+        sourceStartMs: Long,
+        sourceEndMs: Long,
+        currentTimeMs: Long,
+        preWipeDistanceEm: Float = 0.375f,
+    ): Float {
+        val durationMs = (sourceEndMs - sourceStartMs).coerceAtLeast(1L).toFloat()
+        if (sourceWidthPx <= 0.1f || fontSizePx <= 0f) return 0f
+        val preDurationMs = (durationMs * (preWipeDistanceEm * fontSizePx) / sourceWidthPx)
+            .coerceIn(1f, durationMs)
+        val preStartMs = sourceEndMs.toFloat() - preDurationMs
+        return ((currentTimeMs.toFloat() - preStartMs) / preDurationMs).coerceIn(0f, 1f)
     }
 }
 

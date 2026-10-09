@@ -5,7 +5,7 @@ Local-first web MVP for StaySound. It runs as a separate Vite app inside this re
 ## Player visuals
 
 - `web/src/audio/spectrumEngine.ts` taps the shared `<audio>` element with a Web Audio `AnalyserNode` and publishes smoothed bass / mid / treble energies — the web counterpart of the Android `KaraokePcmSpectrumBridge`.
-- `web/src/components/AtmosphereCanvas.tsx` renders the full-player background: three drifting radial orbs (port of `KaraokeAmbientBackgroundRenderer`) whose size and glow breathe with bass, drift speed follows mids, and treble triggers short-lived sparks. It also writes `--atmo-bass/mid/treble` CSS vars per frame so the artwork pulses with the music.
+- `web/src/components/AtmosphereCanvas.tsx` renders an OriginKit-inspired Dot Matrix from the album palette. Bass gently breathes the cell radius, mids steer a high-inertia flow field, and treble adds restrained luminance; it also writes `--atmo-bass/mid/treble` CSS vars per frame so the surrounding player chrome stays synchronized.
 - `web/src/library/dynamicColors.ts` extracts a hue-bucketed palette from the artwork and builds a multi-stop background gradient (`--fp-gradient`) plus accent colors used across the full player and the mini player bar.
 
 ## Commands

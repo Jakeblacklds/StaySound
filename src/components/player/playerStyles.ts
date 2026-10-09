@@ -1,7 +1,5 @@
 import { typeScale } from '@/src/theme';
-import { Dimensions, StyleSheet } from 'react-native';
-
-const { width: SCREEN_WIDTH, height: SCREEN_HEIGHT } = Dimensions.get('window');
+import { StyleSheet } from 'react-native';
 
 export const playerStyles = StyleSheet.create({
     root: {
@@ -225,6 +223,9 @@ export const playerStyles = StyleSheet.create({
         flex: 1,
         paddingHorizontal: 34,
     },
+    topChromeMinimal: {
+        transform: [{ translateY: -10 }],
+    },
     playerCloseButton: {
         height: 28,
         alignItems: 'center',
@@ -288,14 +289,15 @@ export const playerStyles = StyleSheet.create({
     lyricRail: {
         marginTop: 12,
         height: 105,
-        justifyContent: 'space-between',
+        justifyContent: 'flex-start',
         alignItems: 'center',
         overflow: 'hidden',
+        gap: 4,
     },
     lyricRailRule: {
         width: '100%',
         height: StyleSheet.hairlineWidth,
-        marginBottom: 3,
+        marginBottom: 0,
         alignItems: 'center',
     },
     lyricRailMarker: {
@@ -313,11 +315,21 @@ export const playerStyles = StyleSheet.create({
         letterSpacing: -0.25,
         textAlign: 'center',
     },
+    lyricCurrentStage: {
+        width: '100%',
+        height: 46,
+        justifyContent: 'center',
+    },
+    lyricLineLayer: {
+        position: 'absolute',
+        left: 0,
+        right: 0,
+    },
     lyricRailGhost: {
         width: '100%',
         fontFamily: 'StaySound',
-        fontSize: 14,
-        lineHeight: 19,
+        fontSize: 12,
+        lineHeight: 16,
         fontWeight: '500',
         letterSpacing: 0,
         textAlign: 'center',
@@ -1098,6 +1110,21 @@ export const playerStyles = StyleSheet.create({
         gap: 7,
         paddingHorizontal: 14,
         height: 42,
+    },
+    lyricsToolbarFontRow: {
+        flexDirection: 'row',
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 7,
+        paddingHorizontal: 12,
+        height: 42,
+        maxWidth: 164,
+    },
+    lyricsToolbarFontText: {
+        ...typeScale.micro,
+        fontWeight: '700',
+        letterSpacing: 0.2,
+        maxWidth: 122,
     },
     lyricsToolbarMotionColumn: {
         alignItems: 'center',

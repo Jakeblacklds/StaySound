@@ -8,6 +8,8 @@ internal data class SoulseekConfig(
   val serverPort: Int,
   val listenPort: Int,
   val clientVersion: Int,
+  /** Folder re-shared to the network while a session is open; null = share nothing. */
+  val shareDir: String?,
 ) {
   companion object {
     fun from(config: Map<String, Any?>): SoulseekConfig {
@@ -30,6 +32,7 @@ internal data class SoulseekConfig(
         serverPort = serverPort,
         listenPort = listenPort,
         clientVersion = clientVersion,
+        shareDir = mapOptionalString(config, "shareDir")?.let(::normalizeOutputPath)?.takeIf { it.isNotBlank() },
       )
     }
   }

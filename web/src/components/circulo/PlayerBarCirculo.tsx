@@ -1,11 +1,10 @@
 import type { CSSProperties } from 'react';
-import type { Track } from '@staysound/types/audio';
+import type { Playlist, Track } from '@staysound/types/audio';
 import { formatDuration } from '@staysound/services/metadataService';
 import {
-  LyricsIcon,
   NextIcon,
-  PauseIcon,
-  PlayIcon,
+  PlayPauseIcon,
+  PlaylistIcon,
   PreviousIcon,
   QueueIcon,
   RepeatIcon,
@@ -20,6 +19,7 @@ import { CircleArt, hueFromId } from './CircleArt';
 import { Waveform } from './Waveform';
 import { QualityChip } from './QualityChip';
 import { formatQualitySpecs } from '../../library/formatQuality';
+import { useTrackWaveform } from '../../hooks/useTrackWaveform';
 
 interface PlayerBarCirculoProps {
   currentTrack: Track | null;
@@ -41,12 +41,20 @@ interface PlayerBarCirculoProps {
   onStartRadio: () => void;
   isRadioLoading?: boolean;
   queueOpen: boolean;
+  playlists: Playlist[];
+  onAddToPlaylist?: (playlistId: string, trackId: string) => void;
+  /** The full player is covering the app, so the bar drops what it duplicates. */
+  fullPlayerOpen: boolean;
 }
 
 /** Círculo's persistent 150px black player bar: obra (art + copy) / transporte (shuffle-prev-
     PLAY-next-repeat over the waveform) / utilidades (quality · letras · radio · cola). Ported
     from the design kit's PlayerBarCirculo.jsx, using the app's real audio state and its real
-    getDynamicPalette-driven --dyn-accent instead of the mock's per-album hue. */
+    getDynamicPalette-driven --dyn-accent instead of the mock's per-album hue.
+
+    With the full player open the bar sheds everything that screen already shows —
+    the disc, the title/artist/format, "Letras" (which would reopen what is open)
+    and "Cola" (the overlay carries its own) — and centres on playback alone. */
 export function PlayerBarCirculo({
   currentTrack,
   isPlaying,
@@ -67,7 +75,11 @@ export function PlayerBarCirculo({
   onStartRadio,
   isRadioLoading = false,
   queueOpen,
+  playlists,
+  onAddToPlaylist,
+  fullPlayerOpen,
 }: PlayerBarCirculoProps) {
+  const { waveform, analysing } = useTrackWaveform(currentTrack);
   if (!currentTrack) return null;
 
   const quality = formatQualitySpecs(currentTrack);
@@ -76,21 +88,55 @@ export function PlayerBarCirculo({
   const durationSeconds = duration / 1000;
   const volumePercent = Math.round(Math.max(0, Math.min(1, volume)) * 100);
   const VolumeIcon = volume === 0 ? VolumeMuteIcon : volume < 0.5 ? VolumeLowIcon : VolumeHighIcon;
+  const availablePlaylists = playlists.filter(
+    playlist => !playlist.readonly && !playlist.trackIds.includes(currentTrack.id),
+  );
+  const hasPlaylistAction = playlists.length > 0 && Boolean(onAddToPlaylist);
+
+  const volumeControl = (
+    <div className="circ-pb-volume">
+      <button
+        type="button"
+        aria-label={volume > 0 ? 'Silenciar' : 'Activar sonido'}
+        onClick={() => onVolume(volume > 0 ? 0 : 0.9)}
+      >
+        <VolumeIcon size={20} />
+      </button>
+      <input
+        type="range"
+        min={0}
+        max={100}
+        step={1}
+        value={volumePercent}
+        onChange={event => onVolume(event.currentTarget.valueAsNumber / 100)}
+        aria-label="Volumen"
+        style={{ '--val': `${volumePercent}%` } as CSSProperties}
+      />
+    </div>
+  );
 
   return (
-    <footer className="circ-player-bar">
-      <div className="circ-pb-obra" onClick={onOpenFullPlayer} role="button" tabIndex={0}
-        onKeyDown={event => { if (event.key === 'Enter') onOpenFullPlayer(); }}>
-        <CircleArt size={64} src={currentTrack.artwork} hue={hue} className="circ-pb-art" />
-        <span className="circ-pb-copy">
-          <strong>{currentTrack.title}</strong>
-          <small>{currentTrack.artist}</small>
-          {/* The format sits with the track it describes (as on Home and the detail
-              views) rather than in the utilities zone — that zone has to carry four
-              actions plus volume, and the stacked chip was wrapping into the scrubber. */}
-          <QualityChip quality={quality} />
-        </span>
-      </div>
+    <footer className={`circ-player-bar ${fullPlayerOpen ? 'is-immersive' : ''}`}>
+      {/* With the full player open the disc and copy are on screen above, so
+          this zone holds the volume instead: it balances Radio and Playlist on
+          the right, which is what lets the transport sit on the window's
+          centre rather than on the centre of what the utilities leave over. */}
+      {fullPlayerOpen ? (
+        <div className="circ-pb-lado">{volumeControl}</div>
+      ) : (
+        <div className="circ-pb-obra" onClick={onOpenFullPlayer} role="button" tabIndex={0}
+          onKeyDown={event => { if (event.key === 'Enter') onOpenFullPlayer(); }}>
+          <CircleArt key={`art-${currentTrack.id}`} size={64} src={currentTrack.artwork} hue={hue} className="circ-pb-art" />
+          <span className="circ-pb-copy" key={`copy-${currentTrack.id}`}>
+            <strong>{currentTrack.title}</strong>
+            <small>{currentTrack.artist}</small>
+            {/* The format sits with the track it describes (as on Home and the detail
+                views) rather than in the utilities zone — that zone has to carry four
+                actions plus volume, and the stacked chip was wrapping into the scrubber. */}
+            <QualityChip quality={quality} />
+          </span>
+        </div>
+      )}
 
       <div className="circ-pb-transporte">
         <div className="circ-pb-controls">
@@ -101,7 +147,7 @@ export function PlayerBarCirculo({
             <PreviousIcon size={22} />
           </button>
           <button type="button" aria-label={isPlaying ? 'Pausar' : 'Reproducir'} className="circ-pb-play" onClick={onToggle}>
-            {isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+            <PlayPauseIcon playing={isPlaying} size={24} />
           </button>
           <button type="button" aria-label="Siguiente" onClick={onNext}>
             <NextIcon size={22} />
@@ -112,48 +158,69 @@ export function PlayerBarCirculo({
         </div>
         <div className="circ-pb-scrub">
           <span>{formatDuration(position)}</span>
-          <Waveform value={positionSeconds} max={Math.max(durationSeconds, 1)} seed={currentTrack.duration} onSeek={value => onSeek(value * 1000)} />
+          <Waveform
+            value={positionSeconds}
+            max={Math.max(durationSeconds, 1)}
+            waveform={waveform}
+            analysing={analysing}
+            isPlaying={isPlaying}
+            seed={currentTrack.duration}
+            onSeek={value => onSeek(value * 1000)}
+          />
           <span>{formatDuration(duration)}</span>
         </div>
       </div>
 
       <div className="circ-pb-utilidades">
-        {/* Labels sit in their own span so narrow windows can drop to icon-only
+        {/* No "Letras" button: it only ever opened the full player, which is what
+            the artwork and copy to the left already do — and once that player is
+            open it pointed at the screen you were looking at.
+            Labels sit in their own span so narrow windows can drop to icon-only
             without losing the accessible name. */}
-        <button type="button" className="circ-pb-utility" onClick={onOpenFullPlayer} aria-label="Letras">
-          <LyricsIcon size={22} />
-          <span className="circ-pb-utility-label">Letras</span>
-        </button>
-        <span className="circ-pb-divider" />
         <button type="button" className={`circ-pb-utility ${isRadioLoading ? 'busy' : ''}`} onClick={onStartRadio} disabled={isRadioLoading} aria-label="Radio">
           <SyncIcon size={22} />
           <span className="circ-pb-utility-label">Radio</span>
         </button>
-        <span className="circ-pb-divider" />
-        <button type="button" className={`circ-pb-utility ${queueOpen ? 'active' : ''}`} onClick={onOpenQueue} aria-label="Cola">
-          <QueueIcon size={22} />
-          <span className="circ-pb-utility-label">Cola</span>
-        </button>
-        <span className="circ-pb-divider" />
-        <div className="circ-pb-volume">
-          <button
-            type="button"
-            aria-label={volume > 0 ? 'Silenciar' : 'Activar sonido'}
-            onClick={() => onVolume(volume > 0 ? 0 : 0.9)}
-          >
-            <VolumeIcon size={20} />
-          </button>
-          <input
-            type="range"
-            min={0}
-            max={100}
-            step={1}
-            value={volumePercent}
-            onChange={event => onVolume(event.currentTarget.valueAsNumber / 100)}
-            aria-label="Volumen"
-            style={{ '--val': `${volumePercent}%` } as CSSProperties}
-          />
-        </div>
+        {/* A divider separates two things; in the immersive bar volume has moved
+            left, so nothing may follow the last utility. */}
+        {hasPlaylistAction || !fullPlayerOpen ? <span className="circ-pb-divider" /> : null}
+        {playlists.length > 0 && onAddToPlaylist ? (
+          <>
+            {/* A native <select> under an invisible overlay: the chrome matches the
+                buttons beside it, and picking a playlist gets the platform's own
+                menu instead of a popover with its own focus and dismiss rules. */}
+            <label
+              className={`circ-pb-utility circ-pb-playlist ${availablePlaylists.length === 0 ? 'busy' : ''}`}
+            >
+              <PlaylistIcon size={22} />
+              <span className="circ-pb-utility-label">Playlist</span>
+              <select
+                value=""
+                disabled={availablePlaylists.length === 0}
+                onChange={event => onAddToPlaylist(event.currentTarget.value, currentTrack.id)}
+                aria-label={`Agregar ${currentTrack.title} a playlist`}
+              >
+                <option value="">
+                  {availablePlaylists.length > 0 ? 'Agregar a playlist' : 'Ya está en tus playlists'}
+                </option>
+                {availablePlaylists.map(playlist => (
+                  <option key={playlist.id} value={playlist.id}>{playlist.name}</option>
+                ))}
+              </select>
+            </label>
+            {fullPlayerOpen ? null : <span className="circ-pb-divider" />}
+          </>
+        ) : null}
+        {fullPlayerOpen ? null : (
+          <>
+            <button type="button" className={`circ-pb-utility ${queueOpen ? 'active' : ''}`} onClick={onOpenQueue} aria-label="Cola">
+              <QueueIcon size={22} />
+              <span className="circ-pb-utility-label">Cola</span>
+            </button>
+            <span className="circ-pb-divider" />
+          </>
+        )}
+        {fullPlayerOpen ? null : volumeControl}
       </div>
     </footer>
   );

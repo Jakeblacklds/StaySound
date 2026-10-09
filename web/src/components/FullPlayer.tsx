@@ -11,9 +11,12 @@ import {
 } from '../library/lyricsFonts';
 import {
   describeSyncKind,
+  loadLocalGeneratedLyricsFor,
+  LOCAL_GENERATED_CANDIDATE_ID,
   lyricsSourcesStore,
   useLyricsSources,
 } from '../library/lyricsSources';
+import type { GeneratedLyrics } from '../karaoke/karaokeDesktop';
 import {
   LYRICS_THEMES,
   readStoredLyricsTheme,
@@ -21,15 +24,15 @@ import {
   type LyricsThemeId,
 } from '../library/lyricsThemes';
 import { AtmosphereCanvas } from './AtmosphereCanvas';
+import { OriginKitDotMatrixBackground } from './OriginKitDotMatrixBackground';
 import {
   ChevronDownIcon,
   CloseIcon,
   MicrophoneIcon,
   MusicNoteIcon,
   NextIcon,
-  PauseIcon,
+  PlayPauseIcon,
   PlaylistIcon,
-  PlayIcon,
   PreviousIcon,
   QueueIcon,
   RepeatIcon,
@@ -126,6 +129,12 @@ export function FullPlayer({
 }: FullPlayerProps) {
   const isDesktopViewport = useIsDesktopViewport();
   const overlayRef = useRef<HTMLDivElement | null>(null);
+  // The beat reactor writes eight `--atmo-*` custom properties every frame.
+  // Custom properties inherit — into am-lyrics' shadow tree too — so writing
+  // them on the overlay root invalidated style for the entire player, every
+  // lyric span included, sixty times a second. The only rule that reads them
+  // is the edge glow, which lives in here.
+  const backgroundRef = useRef<HTMLDivElement | null>(null);
   const paletteRef = useRef<WebDynamicPalette | null>(null);
   const closeButtonRef = useRef<HTMLButtonElement | null>(null);
   const [closing, setClosing] = useState(false);
@@ -139,6 +148,9 @@ export function FullPlayer({
   const [lyricsFont, setLyricsFont] = useState<LyricsFontId>(() => readStoredLyricsFont());
   const [lyricsSettingsOpen, setLyricsSettingsOpen] = useState(false);
   const [localLyricsGeneratorOpen, setLocalLyricsGeneratorOpen] = useState(false);
+  /** Set when the generator opens on an existing letter to adjust its timing. */
+  const [localLyricsToAdjust, setLocalLyricsToAdjust] = useState<GeneratedLyrics | null>(null);
+  const [localLyricsAdjustError, setLocalLyricsAdjustError] = useState('');
   const [lyricsMissing, setLyricsMissing] = useState(false);
   const [timingAdjustmentEnabled, setTimingAdjustmentEnabled] = useState(false);
   const lyricsSources = useLyricsSources();
@@ -191,16 +203,20 @@ export function FullPlayer({
     setAnimatedArtworkReady(false);
     setLyricsMissing(false);
     setLocalLyricsGeneratorOpen(false);
+    setLocalLyricsToAdjust(null);
+    setLocalLyricsAdjustError('');
   }, [currentTrack?.id]);
 
-  // The desktop Live Artwork API is intentionally separate from the visual
-  // effects experiments: if Apple Music has a matching motion cover, show that
-  // actual video above the static album art; otherwise the ordinary cover stays
-  // in place. No CanvasUI processing is involved in this path.
+  // The Live Artwork lookup is intentionally separate from the visual effects
+  // experiments: if Apple Music has a matching motion cover, show that actual
+  // video above the static album art; otherwise the ordinary cover stays in
+  // place. No CanvasUI processing is involved in this path. Desktop plays a
+  // locally cached copy, the web build a rendition sized to the stage below
+  // (min(44vh, 68%, 420px), so 840 covers it at 2x).
   useEffect(() => {
     if (!currentTrack) return;
     const controller = new AbortController();
-    void getAnimatedArtwork(currentTrack, controller.signal).then(url => {
+    void getAnimatedArtwork(currentTrack, controller.signal, { size: 840 }).then(url => {
       if (!controller.signal.aborted) setAnimatedArtworkUrl(url);
     });
     return () => controller.abort();
@@ -280,8 +296,30 @@ export function FullPlayer({
   const handleOpenLocalLyricsGenerator = useCallback(() => {
     setLyricsSettingsOpen(false);
     setLyricsSettingsClosing(false);
+    setLocalLyricsToAdjust(null);
     setLocalLyricsGeneratorOpen(true);
   }, []);
+
+  const currentTrackIdRef = useRef(currentTrack?.id);
+  currentTrackIdRef.current = currentTrack?.id;
+  const hasLocalLyrics = lyricsSources.candidates.some(candidate => candidate.id === LOCAL_GENERATED_CANDIDATE_ID);
+
+  const handleOpenLyricsTimingEditor = useCallback(() => {
+    if (!currentTrack) return;
+    const trackId = currentTrack.id;
+    setLocalLyricsAdjustError('');
+    void loadLocalGeneratedLyricsFor(currentTrack).then(local => {
+      if (currentTrackIdRef.current !== trackId) return;
+      if (!local) {
+        setLocalLyricsAdjustError('No encontré la letra local de esta canción.');
+        return;
+      }
+      setLyricsSettingsOpen(false);
+      setLyricsSettingsClosing(false);
+      setLocalLyricsToAdjust(local.lyrics);
+      setLocalLyricsGeneratorOpen(true);
+    });
+  }, [currentTrack]);
 
   const handleLyricsAvailability = useCallback((hasLyrics: boolean) => {
     setLyricsMissing(!hasLyrics);
@@ -331,7 +369,7 @@ export function FullPlayer({
       className={`full-player-overlay immersive track-swap-${trackSwapDirection > 0 ? 'forward' : 'backward'} ${closing ? 'closing' : ''} ${isDesktopViewport ? 'circ' : ''}`}
       style={paletteStyle}
     >
-      <div className="fp-bg" aria-hidden="true">
+      <div ref={backgroundRef} className="fp-bg" aria-hidden="true">
         {previousPalette ? (
           <div
             key={`previous-${paletteTransitionKey}`}
@@ -340,12 +378,21 @@ export function FullPlayer({
           />
         ) : null}
         <div key={`current-${paletteTransitionKey}`} className="fp-bg-base current" />
-        <AtmosphereCanvas
-          palette={palette}
-          isPlaying={isPlaying}
-          motionKey={trackKey}
-          reactiveTarget={overlayRef}
-        />
+        {isDesktopApp && palette ? (
+          <OriginKitDotMatrixBackground
+            palette={palette}
+            isPlaying={isPlaying}
+            motionKey={trackKey}
+            reactiveTarget={backgroundRef}
+          />
+        ) : (
+          <AtmosphereCanvas
+            palette={palette}
+            isPlaying={isPlaying}
+            motionKey={trackKey}
+            reactiveTarget={backgroundRef}
+          />
+        )}
         {previousPalette ? (
           <div
             key={`edge-previous-${paletteTransitionKey}`}
@@ -362,8 +409,11 @@ export function FullPlayer({
           <button ref={closeButtonRef} className="fp-chip-btn" onClick={handleClose} aria-label="Cerrar" title="Cerrar (Esc)">
             <ChevronDownIcon size={20} />
           </button>
+          {/* A breadcrumb says where you are, not what you already see: the
+              track title is set in display type under the disc, so repeating it
+              here just made the same words appear twice on one screen. */}
           <span key={`breadcrumb-${trackKey}`} className="fp-breadcrumb fp-breadcrumb-incoming">
-            {currentTrack ? `${currentTrack.album} / ${currentTrack.title}` : 'StaySound'}
+            {currentTrack ? currentTrack.album : 'StaySound'}
           </span>
         </div>
         {/* Bound to real playback state. This used to be the literal string
@@ -442,7 +492,11 @@ export function FullPlayer({
                     loop
                     muted
                     playsInline
-                    preload="metadata"
+                    // On desktop the source is already a local file; on the
+                    // web it is a few hundred KB. Either way it is worth having
+                    // fully ready before the first loop wrap, which is where
+                    // partially buffered playback used to stall.
+                    preload="auto"
                     onCanPlay={() => setAnimatedArtworkReady(true)}
                     onError={() => {
                       setAnimatedArtworkReady(false);
@@ -623,7 +677,7 @@ export function FullPlayer({
               aria-label="Play / Pause"
               title="Play / Pause (Espacio)"
             >
-              {isLoading ? <SpinnerIcon size={22} /> : isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+              {isLoading ? <SpinnerIcon size={22} /> : <PlayPauseIcon playing={isPlaying} size={24} />}
             </button>
             <button className="fp-skip-btn" onClick={handleNext} aria-label="Siguiente" title="Siguiente (N)">
               <NextIcon size={23} />
@@ -807,11 +861,28 @@ export function FullPlayer({
               <div className="fp-lyrics-settings-group fp-local-lyrics-group">
                 <div>
                   <span className="fp-lyrics-settings-label">Letra local</span>
+                  {localLyricsAdjustError ? (
+                    <span className="fp-lyrics-timing-help">{localLyricsAdjustError}</span>
+                  ) : hasLocalLyrics ? (
+                    <span className="fp-lyrics-timing-help">Ajusta a mano cuándo entra cada palabra.</span>
+                  ) : null}
                 </div>
-                <button type="button" className="fp-local-lyrics-button" onClick={handleOpenLocalLyricsGenerator}>
-                  <MicrophoneIcon size={16} />
-                  Crear
-                </button>
+                <div className="fp-local-lyrics-actions">
+                  {hasLocalLyrics ? (
+                    <button type="button" className="fp-local-lyrics-button" onClick={handleOpenLyricsTimingEditor}>
+                      <SlidersIcon size={16} />
+                      Ajustar
+                    </button>
+                  ) : null}
+                  <button
+                    type="button"
+                    className={`fp-local-lyrics-button ${hasLocalLyrics ? 'secondary' : ''}`}
+                    onClick={handleOpenLocalLyricsGenerator}
+                  >
+                    <MicrophoneIcon size={16} />
+                    {hasLocalLyrics ? 'Rehacer' : 'Crear'}
+                  </button>
+                </div>
               </div>
             ) : null}
 
@@ -864,8 +935,13 @@ export function FullPlayer({
 
       {localLyricsGeneratorOpen && currentTrack && isDesktopApp ? (
         <LocalLyricsGenerator
+          key={localLyricsToAdjust ? 'adjust' : 'create'}
           track={currentTrack}
-          onClose={() => setLocalLyricsGeneratorOpen(false)}
+          initialLyrics={localLyricsToAdjust}
+          onClose={() => {
+            setLocalLyricsGeneratorOpen(false);
+            setLocalLyricsToAdjust(null);
+          }}
         />
       ) : null}
     </div>

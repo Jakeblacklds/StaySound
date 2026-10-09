@@ -9,6 +9,7 @@ import { getArtistInfo } from '../services/artistApi';
 import { getArtworkThumbUri } from '../services/artworkThumbnails';
 import { extractMetadata, MUSIC_FOLDERS, runConcurrent, scanMusicLibraryFast, withTimeout } from '../services/fileScanner';
 import { enrichTrackFromUri, generateAlbumId, generateArtistId, organizeIntoAlbums, organizeIntoArtists } from '../services/metadataService';
+import { buildExistingByFilename, hasMeaningfulLibraryValue, isLikelyJunkStaySoundTrack, isMediaStoreAlbumArtUri, reconcileScannedTrack } from '../services/scanReconcile';
 import { hydrateArtworkForLocalTracks, hydrateDeferredTidalMetadata } from '../services/nativeLibraryIndexer';
 import { FileSystemStorage } from '../services/storage';
 import { Album, Artist, LibraryState, Playlist, ScanProgress, Track } from '../types/audio';
@@ -21,7 +22,7 @@ let isHydratingArtworkThumbs = false;
 function rebuildDerivedLibraryCollections(tracksMap: Map<string, Track>, existingArtists?: Map<string, Artist>) {
     const trackList = Array.from(tracksMap.values());
     const albums = organizeIntoAlbums(trackList);
-    const artists = organizeIntoArtists(trackList, albums, existingArtists);
+    const artists = organizeIntoArtists(trackList, existingArtists);
 
     return { albums, artists };
 }
@@ -33,13 +34,6 @@ function queuePlaylistSync() {
 const isRemoteArtworkUri = (uri?: string) =>
     typeof uri === 'string' && (uri.startsWith('http://') || uri.startsWith('https://'));
 
-const GENERIC_LIBRARY_VALUES = new Set(['unknown', 'unknown title', 'unknown artist', 'unknown album', 'media', 'external', 'staysound']);
-
-const hasMeaningfulLibraryValue = (value?: string) => {
-    const normalized = value?.trim().toLowerCase();
-    return !!normalized && !GENERIC_LIBRARY_VALUES.has(normalized);
-};
-
 const trackNeedsMetadataRepair = (track: Track) =>
     !hasMeaningfulLibraryValue(track.title)
     || !hasMeaningfulLibraryValue(track.artist);
@@ -48,9 +42,6 @@ const normalizeRequestedScanPath = (value?: unknown) =>
     typeof value === 'string' && value.trim().length > 0
         ? value.trim()
         : MUSIC_FOLDERS.download;
-
-const isMediaStoreAlbumArtUri = (uri?: string) =>
-    typeof uri === 'string' && uri.startsWith('content://media/external/audio/albumart/');
 
 const MEDIASTORE_AUDIO_URI_PATTERN = /content:\/\/media\/[^/]+\/audio\/media\/(\d+)/i;
 
@@ -77,30 +68,6 @@ const resolveMediaLibraryAssetId = (trackId: string, trackUri?: string): string 
 const isDirectFileUri = (uri?: string) =>
     typeof uri === 'string' && (uri.startsWith('file://') || uri.startsWith('/'));
 
-const normalizePathForJunkCheck = (value?: string) =>
-    decodeURIComponent(value ?? '').toLowerCase().replace(/\\/g, '/');
-
-const isCacheDownloadUri = (uri?: string) => {
-    const normalized = normalizePathForJunkCheck(uri);
-    return normalized.includes('/cache/staysound/downloads/')
-        || (normalized.includes('/android/data/') && normalized.includes('/cache/'));
-};
-
-const isLikelyJunkStaySoundTrack = (track: Track) => {
-    const combined = [
-        track.uri,
-        track.relativePath,
-        track._filename,
-    ].map(normalizePathForJunkCheck).join('/');
-
-    const looksLikeStaySound = combined.includes('staysound') || track.source === 'tidal';
-    if (!looksLikeStaySound) return false;
-    if (isCacheDownloadUri(track.uri) || isCacheDownloadUri(track.relativePath)) return true;
-
-    const looksLikeAudio = /\.(flac|mp3|m4a|aac|wav|ogg|opus)(?:$|\?)/i.test(track._filename ?? track.uri ?? '');
-    return looksLikeAudio && (track.duration ?? 0) <= 0;
-};
-
 const removeTrackIdsFromPlaylists = (playlists: Map<string, Playlist>, removedIds: Set<string>) => {
     if (removedIds.size === 0) return { playlists, changed: false };
 
@@ -119,15 +86,6 @@ const removeTrackIdsFromPlaylists = (playlists: Map<string, Playlist>, removedId
     });
 
     return { playlists: changed ? nextPlaylists : playlists, changed };
-};
-
-const resolveArtworkFromScan = (scannedArtwork?: string, existingArtwork?: string) => {
-    if (!existingArtwork) return scannedArtwork;
-    if (!scannedArtwork) return existingArtwork;
-    if (isMediaStoreAlbumArtUri(scannedArtwork) && !isMediaStoreAlbumArtUri(existingArtwork)) {
-        return existingArtwork;
-    }
-    return scannedArtwork;
 };
 
 const normalizeTrackMatchValue = (value?: string) =>
@@ -303,40 +261,7 @@ export const useLibraryStore = create<LibraryStore>()(
                     const collectedTracks = new Map<string, Track>();
                     const currentTracks = get().tracks;
 
-                    // Build a filename â†’ existing track lookup.
-                    // WHY: Downloaded tracks use SAF URIs (content://com.android.externalstorage.documents/...)
-                    // but MediaStore gives the SAME file a completely different URI (content://media/external/...).
-                    // So matching by URI never works. Matching by filename (without extension) is reliable.
-                    const existingByFilename = new Map<string, Track>(); // filename_no_ext (lowercase) â†’ track
-                    const { sanitizeFilename: sanitize } = require('../services/audioUtils');
-
-                    currentTracks.forEach((t) => {
-                        if (!t.uri) return;
-
-                        // Strategy 1: Extract filename from the URI (works for SAF URIs)
-                        // SAF URIs: content://...primary%3ADownload%2FStaySound%2FArtist+-+Album+-+Title.flac
-                        // Decoding and splitting gives "Artist - Album - Title.flac"
-                        const uriFilename = decodeURIComponent(t.uri)
-                            .split('/').pop()
-                            ?.replace(/\.[^/.]+$/, '')  // strip extension
-                            ?.toLowerCase()
-                            .trim();
-                        if (uriFilename && uriFilename.length > 5 && !/^\d+$/.test(uriFilename)) {
-                            // Reject pure numeric strings like "12345" (MediaStore IDs)
-                            existingByFilename.set(uriFilename, t);
-                        }
-
-                        // Strategy 2: Reconstruct expected filename from metadata (covers Tidal downloads)
-                        // Tidal saves files as: sanitize("Artist - Album - Title")
-                        // So we can reverse-engineer the expected filename key from stored metadata.
-                        if (t.artist && t.album && t.title
-                            && t.artist !== 'Unknown Artist' && t.album !== 'Unknown Album') {
-                            const reconstructed = sanitize(`${t.artist} - ${t.album} - ${t.title}`)
-                                .toLowerCase()
-                                .trim();
-                            if (reconstructed) existingByFilename.set(reconstructed, t);
-                        }
-                    });
+                    const existingByFilename = buildExistingByFilename(currentTracks.values());
 
                     let batchCount = 0;
                     let lastUiFlush = 0;
@@ -350,69 +275,8 @@ export const useLibraryStore = create<LibraryStore>()(
                         (newTracks: Track[]) => {
                             batchCount++;
                             newTracks.forEach(track => {
-                                if (isLikelyJunkStaySoundTrack(track)) {
-                                    return;
-                                }
-
-                                const enrichmentSource = track._filename || track.uri;
-                                const enriched = enrichTrackFromUri(track, enrichmentSource);
-                                if (isLikelyJunkStaySoundTrack(enriched)) {
-                                    return;
-                                }
-
-                                // Build the filename key for matching:
-                                // 1. Prefer track._filename (set by NativeLibraryIndexer from MediaStore DISPLAY_NAME)
-                                //    This is necessary because MediaStore URIs like content://media/external/audio/media/12345
-                                //    don't contain the actual filename - extracting the last segment gives just "12345".
-                                // 2. Fall back to URI decoding (works for SAF URIs from the non-native path)
-                                const rawFilenameSource = track._filename
-                                    || decodeURIComponent(track.uri).split('/').pop()
-                                    || '';
-                                const filenameKey = rawFilenameSource
-                                    .replace(/\.[^/.]+$/, '') // strip extension
-                                    .toLowerCase()
-                                    .trim();
-
-                                const existingTrack = filenameKey ? existingByFilename.get(filenameKey) : undefined;
-
-                                // Keep _filename on stored local tracks.
-                                // Playback fallback for MediaStore content:// IDs needs it to rebuild
-                                // a concrete file:///storage/... URI when the extractor fails on content://.
-                                const cleanEnriched = enriched;
-
-                                if (existingTrack) {
-                                    // Found a match by filename -> fully restore metadata from the stored track.
-                                    // WHY we always prefer stored title/artist/album:
-                                    // - MediaStore title: often the full filename ("SZA - SOS - Kill Bill") for untagged files
-                                    // - MediaStore album: often the folder name ("StaySound") for untagged files
-                                    // We also protect good Tidal artwork from being overwritten by a generic MediaStore albumart URI.
-                                    const resolvedArtwork = resolveArtworkFromScan(cleanEnriched.artwork, existingTrack.artwork);
-                                    const resolvedArtworkThumb = resolvedArtwork === existingTrack.artwork
-                                        ? existingTrack.artworkThumb
-                                        : undefined;
-
-                                    collectedTracks.set(cleanEnriched.id, {
-                                        ...cleanEnriched,            // base: uri, duration, format, dateAdded from scanner
-                                        title: hasMeaningfulLibraryValue(existingTrack.title) ? existingTrack.title : cleanEnriched.title,
-                                        artist: hasMeaningfulLibraryValue(existingTrack.artist) ? existingTrack.artist : cleanEnriched.artist,
-                                        album: hasMeaningfulLibraryValue(existingTrack.album) ? existingTrack.album : cleanEnriched.album,
-                                        artwork: resolvedArtwork,
-                                        artworkThumb: resolvedArtworkThumb,
-                                        year: cleanEnriched.year || existingTrack.year,
-                                        trackNumber: cleanEnriched.trackNumber || existingTrack.trackNumber,
-                                        genre: cleanEnriched.genre || existingTrack.genre,
-                                        quality: cleanEnriched.quality || existingTrack.quality,
-                                        sampleRate: cleanEnriched.sampleRate || existingTrack.sampleRate,
-                                        bitDepth: cleanEnriched.bitDepth || existingTrack.bitDepth,
-                                        codec: cleanEnriched.codec || existingTrack.codec,
-                                        source: cleanEnriched.source || existingTrack.source,
-                                        tidalId: cleanEnriched.tidalId || existingTrack.tidalId,
-                                        tidalAlbumId: cleanEnriched.tidalAlbumId || existingTrack.tidalAlbumId,
-                                        favorite: existingTrack.favorite,
-                                    });
-                                } else {
-                                    collectedTracks.set(cleanEnriched.id, cleanEnriched);
-                                }
+                                const reconciled = reconcileScannedTrack(track, existingByFilename);
+                                if (reconciled) collectedTracks.set(reconciled.id, reconciled);
                             });
 
                             const now = Date.now();
@@ -429,7 +293,7 @@ export const useLibraryStore = create<LibraryStore>()(
                     // PHASE 3: Final Organization
                     const finalTracks = Array.from(collectedTracks.values());
                     const initialAlbums = organizeIntoAlbums(finalTracks);
-                    const initialArtists = organizeIntoArtists(finalTracks, initialAlbums, get().artists);
+                    const initialArtists = organizeIntoArtists(finalTracks, get().artists);
 
                     set({
                         tracks: collectedTracks,
@@ -962,7 +826,7 @@ export const useLibraryStore = create<LibraryStore>()(
                 // Re-organize to maintain consistency in albums/artists
                 const tracksArray = Array.from(newTracks.values());
                 const nextAlbums = organizeIntoAlbums(tracksArray);
-                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums, get().artists);
+                const nextArtists = organizeIntoArtists(tracksArray, get().artists);
 
                 set({
                     tracks: newTracks,
@@ -1032,7 +896,7 @@ export const useLibraryStore = create<LibraryStore>()(
                 // 4. Re-organize Albums and Artists
                 const tracksArray = Array.from(nextTracks.values());
                 const nextAlbums = organizeIntoAlbums(tracksArray);
-                const nextArtists = organizeIntoArtists(tracksArray, nextAlbums, get().artists);
+                const nextArtists = organizeIntoArtists(tracksArray, get().artists);
 
                 set({
                     tracks: nextTracks,
@@ -1410,6 +1274,8 @@ export const useLibraryStore = create<LibraryStore>()(
             // Custom serialization for Maps
             partialize: (state: LibraryStore) => ({
                 tracks: state.isScanning ? [] : Array.from(state.tracks.entries()),
+                // Kotlin storage keeps its rows while a scan runs instead of reading the empty list as a wipe.
+                ...(state.isScanning ? { scanInProgress: true } : {}),
                 playlists: Array.from(state.playlists.entries()),
                 cloudPlaylistTracks: Array.from(state.cloudPlaylistTracks.entries()).map(([playlistId, tracks]) => [playlistId, Array.from(tracks.entries())]),
                 recentSearches: state.recentSearches,

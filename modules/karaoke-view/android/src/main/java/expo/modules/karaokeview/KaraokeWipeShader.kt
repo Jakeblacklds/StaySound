@@ -22,23 +22,43 @@ internal object KaraokeWipeShader {
 
     // ── AGSL source for the color wipe (regular words) ──────────────────
     // Uniforms: sweepX, fadeLeft (start of fade zone), fadeRight (end),
-    //           highlightColor (premultiplied RGBA).
+    //           highlightColor (straight RGBA; premultiplied in the shader).
     private const val WIPE_COLOR_AGSL = """
         uniform float sweepX;
         uniform float fadeLeft;
         uniform float fadeRight;
         uniform float4 highlightColor;
+        uniform float invert;
 
-        // GLSL-style smoothstep
-        float smooth(float edge0, float edge1, float x) {
+        float smoother(float edge0, float edge1, float x) {
             float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
-            return t * t * (3.0 - 2.0 * t);
+            return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+        }
+
+        float liquidAlpha(float2 coord) {
+            float width = max(fadeRight - fadeLeft, 1.0);
+            float center = (fadeLeft + fadeRight) * 0.5;
+            float y = coord.y / width;
+            float phase = sweepX / width;
+            float warp = (
+                sin(y * 1.45 + phase * 0.72) * 0.13
+                + sin(y * 3.35 - phase * 0.41 + 1.7) * 0.045
+            ) * width;
+            float widthBreath = width * (
+                0.92 + 0.08 * sin(y * 2.15 + phase * 0.31 + 0.8)
+            );
+            return 1.0 - smoother(
+                center + warp - widthBreath * 0.5,
+                center + warp + widthBreath * 0.5,
+                coord.x
+            );
         }
 
         half4 main(float2 coord) {
-            // Fully opaque to the left of fadeLeft, fully transparent past fadeRight
-            float alpha = 1.0 - smooth(fadeLeft, fadeRight, coord.x);
-            return half4(highlightColor.rgb * alpha, highlightColor.a * alpha);
+            float alpha = liquidAlpha(coord);
+            alpha = mix(alpha, 1.0 - alpha, invert);
+            float finalAlpha = highlightColor.a * alpha;
+            return half4(highlightColor.rgb * finalAlpha, finalAlpha);
         }
     """
 
@@ -46,14 +66,34 @@ internal object KaraokeWipeShader {
     private const val WIPE_MASK_AGSL = """
         uniform float fadeLeft;
         uniform float fadeRight;
+        uniform float sweepX;
 
-        float smooth(float edge0, float edge1, float x) {
+        float smoother(float edge0, float edge1, float x) {
             float t = clamp((x - edge0) / (edge1 - edge0), 0.0, 1.0);
-            return t * t * (3.0 - 2.0 * t);
+            return t * t * t * (t * (t * 6.0 - 15.0) + 10.0);
+        }
+
+        float liquidAlpha(float2 coord) {
+            float width = max(fadeRight - fadeLeft, 1.0);
+            float center = (fadeLeft + fadeRight) * 0.5;
+            float y = coord.y / width;
+            float phase = sweepX / width;
+            float warp = (
+                sin(y * 1.45 + phase * 0.72) * 0.13
+                + sin(y * 3.35 - phase * 0.41 + 1.7) * 0.045
+            ) * width;
+            float widthBreath = width * (
+                0.92 + 0.08 * sin(y * 2.15 + phase * 0.31 + 0.8)
+            );
+            return 1.0 - smoother(
+                center + warp - widthBreath * 0.5,
+                center + warp + widthBreath * 0.5,
+                coord.x
+            );
         }
 
         half4 main(float2 coord) {
-            float alpha = 1.0 - smooth(fadeLeft, fadeRight, coord.x);
+            float alpha = liquidAlpha(coord);
             return half4(0.0, 0.0, 0.0, alpha);
         }
     """
@@ -115,11 +155,39 @@ internal object KaraokeWipeShader {
         fadeWidth: Float,
         color: Int,
         alpha: Int,
+    ): Shader? = configureWipeColorShader(
+        sweepX = sweepX,
+        fadeWidth = fadeWidth,
+        color = color,
+        alpha = alpha,
+        inverted = false,
+    )
+
+    /** Complementary liquid tail used by the dim text beneath the highlight. */
+    fun getWipeTailColorShader(
+        sweepX: Float,
+        fadeWidth: Float,
+        color: Int,
+        alpha: Int,
+    ): Shader? = configureWipeColorShader(
+        sweepX = sweepX,
+        fadeWidth = fadeWidth,
+        color = color,
+        alpha = alpha,
+        inverted = true,
+    )
+
+    private fun configureWipeColorShader(
+        sweepX: Float,
+        fadeWidth: Float,
+        color: Int,
+        alpha: Int,
+        inverted: Boolean,
     ): Shader? {
         ensureInitialized()
         val shader = wipeColorShader ?: return null
-        val fadeLeft = sweepX - fadeWidth * 0.15f
-        val fadeRight = sweepX + fadeWidth * 0.45f
+        val fadeLeft = sweepX - fadeWidth * 0.5f
+        val fadeRight = sweepX + fadeWidth * 0.5f
         if (Build.VERSION.SDK_INT >= 33) {
             shader.setFloatUniform("sweepX", sweepX)
             shader.setFloatUniform("fadeLeft", fadeLeft)
@@ -129,6 +197,7 @@ internal object KaraokeWipeShader {
             val b = Color.blue(color) / 255f
             val a = alpha / 255f
             shader.setFloatUniform("highlightColor", r, g, b, a)
+            shader.setFloatUniform("invert", if (inverted) 1f else 0f)
         }
         return shader
     }
@@ -142,9 +211,10 @@ internal object KaraokeWipeShader {
     ): Shader? {
         ensureInitialized()
         val shader = wipeMaskShader ?: return null
-        val fadeLeft = sweepX - fadeWidth * 0.15f
-        val fadeRight = sweepX + fadeWidth * 0.45f
+        val fadeLeft = sweepX - fadeWidth * 0.5f
+        val fadeRight = sweepX + fadeWidth * 0.5f
         if (Build.VERSION.SDK_INT >= 33) {
+            shader.setFloatUniform("sweepX", sweepX)
             shader.setFloatUniform("fadeLeft", fadeLeft)
             shader.setFloatUniform("fadeRight", fadeRight)
         }

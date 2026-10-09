@@ -1,3 +1,4 @@
+import { hasNativeTidalDetails, NativeTidalDetail } from '@/src/features/tidal/details/NativeTidalDetail';
 import { EmptyState, Skeleton } from '@/src/components/ui';
 import {
     DetailTopBar,
@@ -16,7 +17,7 @@ import { useTheme, typeScale, withAlpha, radius } from '@/src/theme';
 import { TidalTrack, TidalPlaylist } from '@/src/types/audio';
 import { Image } from 'expo-image';
 import { LinearGradient } from 'expo-linear-gradient';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from '@/src/navigation/navigation';
 import React, { useCallback, useEffect, useState, useMemo } from 'react';
 import { Pressable, StatusBar, StyleSheet, View } from 'react-native';
 import { Text } from 'react-native-paper';
@@ -186,7 +187,7 @@ const MasonryGridCard = React.memo(function MasonryGridCard({ item, colIndex, is
     );
 });
 
-export default function TidalGenreScreen() {
+function TidalGenreController() {
     const { id, name } = useLocalSearchParams<{ id: string; name: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
@@ -335,6 +336,16 @@ export default function TidalGenreScreen() {
         );
     };
 
+    if (hasNativeTidalDetails) return <NativeTidalDetail
+        kind="genre" id={id} loading={isLoading} error={error} title={name || 'Género'} kicker="GÉNERO"
+        artwork={atmosphereUri}
+        grid={mergedResults.map(item => ({ kind: item.type === 'playlists' ? 'playlist' : 'album',
+            id: String(item.data.id || item.data.uuid), title: item.data.title,
+            subtitle: item.type === 'playlists' ? 'Playlist' : item.data.artistName,
+            artwork: normalizeCardImageUri(item.data.artworkUrl),
+        }))}
+    />;
+
     if (isLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
@@ -454,3 +465,9 @@ const styles = StyleSheet.create({
         marginTop: 4,
     },
 });
+
+export function TidalGenreScreen() {
+    const { id, name, source } = useLocalSearchParams<{ id: string; name?: string; source?: string }>();
+    return <TidalGenreController key={`${id}:${name ?? ''}:${source ?? ''}`} />;
+}
+export default TidalGenreScreen;

@@ -12,6 +12,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Event, State } from 'react-native-track-player';
 import { Track } from '../types/audio';
+import { getNativeLibraryPlayback, type NativeLibraryPlaybackSnapshot } from './nativeLibraryPlayback';
 import * as TrackPlayerService from './trackPlayerService';
 
 export interface AudioEngineState {
@@ -163,6 +164,26 @@ class AudioEngineClass {
         // Clear any existing subscriptions to avoid duplicate event calls
         this.subscriptions.forEach(s => s.remove());
         this.subscriptions = [];
+
+        const nativeLibrary = getNativeLibraryPlayback();
+        if (nativeLibrary) {
+            this.subscriptions.push(nativeLibrary.addListener('onPlaybackStarted', (snapshot: NativeLibraryPlaybackSnapshot) => {
+                const { usePlayerStore } = require('../stores/playerStore');
+                usePlayerStore.getState().adoptNativeLibraryPlayback(snapshot);
+                const state = usePlayerStore.getState();
+                this.currentState = {
+                    ...this.currentState, currentTrack: state.currentTrack, queueIndex: state.queueIndex,
+                    position: 0, duration: state.duration, isPlaying: true, isLoading: true,
+                };
+                this.callbacks.onTrackChange?.(state.currentTrack);
+                // Read the service's actual state in case READY preceded this notification.
+                void this.syncInitialState();
+            }));
+            this.subscriptions.push(nativeLibrary.addListener('onPlaybackFailed', (event: { message: string }) => {
+                this.callbacks.onError?.(new Error(event.message));
+                void this.syncInitialState();
+            }));
+        }
 
         // Listen for playback state changes
         const stateSub = TrackPlayerService.addEventListener(Event.PlaybackState, async (event) => {
@@ -435,10 +456,14 @@ class AudioEngineClass {
 
         try {
             await TrackPlayerService.playQueue(tracks, startIndex);
-            this.currentState.isLoading = false;
+            if (this.currentState.currentTrack?.id !== tracks[startIndex].id) return;
+            // Native READY/BUFFERING events own loading state; issuing play is not
+            // evidence that a stream has finished buffering.
+            if (!getNativeLibraryPlayback()) this.currentState.isLoading = false;
             this.callbacks.onStateChange?.(this.currentState);
             console.log('[AudioEngine] Playing queue, starting at:', tracks[startIndex]?.title);
         } catch (error) {
+            if (this.currentState.currentTrack?.id !== tracks[startIndex].id) return;
             this.currentState = backupState;
             this.callbacks.onStateChange?.(this.currentState);
             this.callbacks.onError?.(error as Error);
@@ -557,8 +582,12 @@ class AudioEngineClass {
     }
 
     /**
-     * Remove tracks from the native queue by index
+     * Append to the native queue without interrupting playback.
      */
+    async appendToQueue(track: Track, expectedIds: string[], dropIndex = -1): Promise<void> {
+        await TrackPlayerService.appendToNativeQueue(track, expectedIds, dropIndex);
+    }
+
     async removeTracks(indices: number[]): Promise<void> {
         await TrackPlayerService.removeTracks(indices);
     }

@@ -31,7 +31,40 @@ class LyricsVisualWordsTest {
     @Test
     fun `matches binimum growable heuristic for short latin visual words`() {
         assertTrue(LyricsVisualWords.isGrowableVisualWord("alive", 0, 1800))
-        assertFalse(LyricsVisualWords.isGrowableVisualWord("state-of-mind", 0, 1800))
-        assertFalse(LyricsVisualWords.isGrowableVisualWord("愛", 0, 1800))
+        assertTrue(LyricsVisualWords.isGrowableVisualWord("愛", 0, 1800))
+        assertFalse(LyricsVisualWords.isGrowableVisualWord("beautiful", 0, 1800))
+        assertFalse(LyricsVisualWords.isGrowableVisualWord("alive", 0, 999))
+        assertFalse(LyricsVisualWords.isGrowableVisualWord("سلام", 0, 1800))
+    }
+
+    @Test
+    fun `pre highlight covers point three seven five em at source velocity`() {
+        // 100px over 1000ms => 0.1px/ms. A 20px font yields a 7.5px lead,
+        // therefore the pre-wipe lasts 75ms and begins at t=925ms.
+        assertEquals(
+            0f,
+            LyricsSweepPhysics.preHighlightProgress(100f, 20f, 0, 1000, 925),
+            0.0001f,
+        )
+        assertEquals(
+            0.5f,
+            LyricsSweepPhysics.preHighlightProgress(100f, 20f, 0, 1000, 962),
+            0.01f,
+        )
+        assertEquals(
+            1f,
+            LyricsSweepPhysics.preHighlightProgress(100f, 20f, 0, 1000, 1000),
+            0.0001f,
+        )
+    }
+
+    @Test
+    fun `resolves every Tauri font with calibrated sweep and lift metrics`() {
+        val ids = listOf("newsreader", "classic", "syne", "grotesk", "fraunces", "nunito")
+
+        assertEquals(ids, ids.map { LyricsTypography.from(it).id })
+        assertTrue(ids.map { LyricsTypography.from(it).wipeWidthEm }.distinct().size > 1)
+        assertTrue(ids.map { LyricsTypography.from(it).foregroundLiftRatio }.distinct().size > 1)
+        assertEquals(LyricsTypography.CLASSIC, LyricsTypography.from("unknown"))
     }
 }

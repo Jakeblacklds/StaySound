@@ -134,6 +134,12 @@ function localApiProxy(): Plugin {
 export default defineConfig({
   root: __dirname,
   plugins: [react(), localApiProxy()],
+  // Stamped into the bundle so the perf probe can say which build is running —
+  // without it, "the fix did not work" and "you are on the old build" look
+  // identical in a log.
+  define: {
+    __BUILD_STAMP__: JSON.stringify(new Date().toISOString().slice(5, 16).replace('T', ' ')),
+  },
   resolve: {
     alias: {
       '@staysound': path.resolve(__dirname, '../src'),

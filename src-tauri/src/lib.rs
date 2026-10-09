@@ -1,5 +1,8 @@
+mod alac;
 mod karaoke;
+mod lrclib;
 mod music_library;
+mod playback;
 
 use std::{
     net::{SocketAddr, TcpStream},
@@ -88,16 +91,23 @@ pub fn run() {
             karaoke::install_demucs_runtime,
             karaoke::install_local_lyrics_runtime,
             karaoke::prepare_karaoke_stems,
+            karaoke::cached_karaoke_stems,
+            playback::precise_playback_path,
+            alac::migrate_flac_to_alac,
             karaoke::transcribe_karaoke_vocals,
             karaoke::save_local_generated_lyrics,
             karaoke::persist_local_generated_lyrics,
             karaoke::load_local_generated_lyrics,
+            lrclib::publish_lrclib_lyricsfile,
             karaoke::classify_karaoke_genre,
             music_library::remember_music_folder,
             music_library::get_music_folder,
             music_library::scan_music_folder,
             music_library::read_music_file,
             music_library::fetch_tidal_artwork,
+            music_library::search_tidal_catalog,
+            music_library::tidal_catalog_request,
+            music_library::cache_animated_artwork,
             ensure_soulseek_bridge,
         ])
         .build(tauri::generate_context!())

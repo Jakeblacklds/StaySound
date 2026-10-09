@@ -17,7 +17,7 @@
 const DEFAULT_RELEASES_REPO = 'Jakeblacklds/staysound-releases';
 
 const DEFAULT_ANDROID_MANIFEST_URL =
-  'https://yuoaayhogopuzkjttmzr.supabase.co/storage/v1/object/public/staysound-releases/android/prod/manifest.json';
+  'https://ucrtwqwaaadgjoerhgwg.supabase.co/storage/v1/object/public/staysound-releases/android/prod/manifest.json';
 
 const env = (import.meta as { env?: Record<string, string | undefined> }).env ?? {};
 
@@ -25,6 +25,8 @@ const RELEASES_REPO = env.VITE_RELEASES_REPO || DEFAULT_RELEASES_REPO;
 const ANDROID_MANIFEST_URL = env.VITE_APP_RELEASES_MANIFEST_URL || DEFAULT_ANDROID_MANIFEST_URL;
 
 export const RELEASES_PAGE_URL = `https://github.com/${RELEASES_REPO}/releases`;
+/** Where "star us" points: the public repo. The source repo is private. */
+export const GITHUB_REPO_URL = `https://github.com/${RELEASES_REPO}`;
 
 export type ReleasePlatform = 'android' | 'windows' | 'macos';
 

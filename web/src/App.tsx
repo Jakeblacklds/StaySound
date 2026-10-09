@@ -1,5 +1,6 @@
 import type { Album, Artist, Playlist, TidalTrack, Track } from '@staysound/types/audio';
-import { ChangeEvent, type CSSProperties, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { GITHUB_REPO_URL } from './appDownload';
+import { ChangeEvent, Children, type CSSProperties, isValidElement, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { formatDuration } from '@staysound/services/metadataService';
 import {
@@ -19,7 +20,7 @@ import {
   importRememberedDesktopFolder,
 } from './library/importLocalFiles';
 import { getFolderHandle, saveFolderHandle, verifyPermission } from './library/webFolderSync';
-import { useWebLibraryStore, type ArtworkRecoveryProgress } from './library/webLibraryStore';
+import { useWebLibraryStore, type AlacMigrationProgress, type ArtworkRecoveryProgress } from './library/webLibraryStore';
 import {
   buildTidalRadio,
   buildPersonalizedTidalMix,
@@ -32,37 +33,22 @@ import {
 } from './library/tidalDiscovery';
 import { KEYBOARD_SHORTCUTS, useKeyboardShortcuts } from './hooks/useKeyboardShortcuts';
 import {
-  configureSoulseekShares,
-  isSoulseekBridgeAvailable,
-  invalidateSoulseekMatches,
-  loadSoulseekCredentials,
   monochromeDownloadProvider,
-  rescanSoulseekShares,
-  saveSoulseekCredentials,
   soulseekDownloadProvider,
-  type DownloadActivity,
+  startSoulseekDesktopSharing,
   type DownloadSearchResult,
-  type DownloadSource,
-  type SoulseekShareStatus,
   warmSoulseekBridge,
 } from './downloads/downloadProvider';
-import {
-  canPickDownloadFolder,
-  getDownloadFolderHandle,
-  pickDownloadFolder,
-  verifyDownloadFolderPermission,
-} from './downloads/webDownloadFolder';
 import { isTauriDesktop, pickDesktopMusicFolder } from './desktop/tauriMusicLibrary';
 import { checkDesktopUpdate, relaunchDesktop, type DesktopUpdate } from './desktop/tauriUpdater';
 
 import { Sidebar } from './components/Sidebar';
 import { GetAppPanel } from './components/GetAppPanel';
-import { DesktopRequiredNotice } from './components/DesktopRequiredNotice';
+import { DownloadsPanel } from './components/downloads/DownloadsPanel';
 import { TopNav } from './components/circulo/TopNav';
 import { PlayerBarCirculo } from './components/circulo/PlayerBarCirculo';
 import { CircleArt, hueFromId } from './components/circulo/CircleArt';
 import { CircleTile } from './components/circulo/CircleTile';
-import { CarouselChevron } from './components/circulo/CarouselChevron';
 import { SegmentedTabs } from './components/circulo/SegmentedTabs';
 import { SearchPanel } from './components/circulo/SearchPanel';
 import { QualityChip } from './components/circulo/QualityChip';
@@ -77,6 +63,7 @@ import { PlayerBar } from './components/PlayerBar';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { FullPlayer } from './components/FullPlayer';
 import { AtmosphereCanvas } from './components/AtmosphereCanvas';
+import { OriginKitDotMatrixBackground } from './components/OriginKitDotMatrixBackground';
 import { QueueDrawer } from './components/QueueDrawer';
 import { KaraokeExperience } from './components/KaraokeExperience';
 import { webAudioEngine } from './audio/webAudioEngine';
@@ -88,6 +75,7 @@ import {
   DownloadIcon,
   FolderIcon,
   GearIcon,
+  GitHubIcon,
   HomeIcon,
   MusicNoteIcon,
   PlaylistIcon,
@@ -100,7 +88,8 @@ import {
   TrashIcon,
 } from './components/icons';
 import type { Tab } from './components/types';
-import { runMotionTransition } from './motion/motionSystem';
+import { flyArtwork, runMotionTransition } from './motion/motionSystem';
+import { useFlipRow } from './motion/useFlipRow';
 
 export function normalize(value: string): string {
   return value
@@ -151,15 +140,15 @@ function shuffleForHome<T>(items: T[], seedText: string): T[] {
   return shuffled;
 }
 
-const TAB_ORDER: Tab[] = ['home', 'songs', 'albums', 'artists', 'playlists', 'downloads', 'radio', 'get-app'];
+const TAB_ORDER: Tab[] = ['home', 'songs', 'artists', 'albums', 'radio', 'playlists', 'downloads', 'get-app'];
 
 // The Círculo desktop nav merges these four into one "Biblioteca" destination — see TopNav's
 // navDestinationForTab — surfaced here as an underline sub-nav (SegmentedTabs).
-const LIBRARY_TABS: Tab[] = ['albums', 'songs', 'artists', 'radio'];
+const LIBRARY_TABS: Tab[] = ['songs', 'artists', 'albums', 'radio'];
 const LIBRARY_SEGMENTS: { id: 'albums' | 'songs' | 'artists' | 'radio'; label: string }[] = [
-  { id: 'albums', label: 'Álbumes' },
   { id: 'songs', label: 'Canciones' },
   { id: 'artists', label: 'Artistas' },
+  { id: 'albums', label: 'Álbumes' },
   { id: 'radio', label: 'Radio' },
 ];
 
@@ -217,7 +206,7 @@ export function App() {
   const [tab, setTab] = useState<Tab>('home');
   // The Círculo desktop nav merges songs/albums/artists/radio into one "Biblioteca" entry;
   // clicking it should return to whichever of those the user was last looking at.
-  const lastLibraryTabRef = useRef<Tab>('albums');
+  const lastLibraryTabRef = useRef<Tab>('songs');
   const [librarySort, setLibrarySort] = useState<'recent' | 'az'>('recent');
   const [showFullPlayer, setShowFullPlayer] = useState(false);
   const [ambientPalette, setAmbientPalette] = useState<WebDynamicPalette | null>(null);
@@ -241,6 +230,8 @@ export function App() {
   const [selectedArtist, setSelectedArtist] = useState<Artist | null>(null);
   const [isRecoveringArtwork, setIsRecoveringArtwork] = useState(false);
   const [artworkRecoveryProgress, setArtworkRecoveryProgress] = useState<ArtworkRecoveryProgress | null>(null);
+  const [alacProgress, setAlacProgress] = useState<AlacMigrationProgress | null>(null);
+  const [isMigratingAlac, setIsMigratingAlac] = useState(false);
   const [radioBusy, setRadioBusy] = useState(false);
   const [radioMessage, setRadioMessage] = useState('');
   const [availableUpdate, setAvailableUpdate] = useState<DesktopUpdate | null>(null);
@@ -282,6 +273,7 @@ export function App() {
     seek,
     setVolume,
     recoverMissingArtwork,
+    migrateLibraryToAlac,
     hydrateArtistPhotos,
     hydrateLibrary,
     recordRecentlyPlayed,
@@ -316,6 +308,7 @@ export function App() {
     seek: state.seek,
     setVolume: state.setVolume,
     recoverMissingArtwork: state.recoverMissingArtwork,
+    migrateLibraryToAlac: state.migrateLibraryToAlac,
     hydrateArtistPhotos: state.hydrateArtistPhotos,
     hydrateLibrary: state.hydrateLibrary,
     recordRecentlyPlayed: state.recordRecentlyPlayed,
@@ -364,6 +357,8 @@ export function App() {
     // library shows instantly with artwork, without waiting for a folder rescan.
     void restoreLibrary();
     void checkSavedFolder();
+    // Desktop shares with Soulseek for as long as the app is open.
+    void startSoulseekDesktopSharing().catch(() => undefined);
   }, [hydrateLibrary]);
 
   useEffect(() => {
@@ -698,6 +693,8 @@ export function App() {
     playFromList(libraryTrack, trackList);
   }, [playFromList, trackList, tracks]);
 
+  const getLibraryTrack = useCallback((id: string) => tracks.get(id), [tracks]);
+
   const playHomeAlbum = useCallback((album: Album) => {
     const firstAlbumTrack = album.tracks
       .map(id => tracks.get(id))
@@ -931,6 +928,24 @@ export function App() {
     setInstallPrompt(null);
   }
 
+  async function handleMigrateAlac() {
+    if (isMigratingAlac) return;
+    setIsMigratingAlac(true);
+    try {
+      setAlacProgress(await migrateLibraryToAlac(setAlacProgress));
+    } catch (error) {
+      setAlacProgress(current => ({
+        processed: current?.processed ?? 0,
+        total: current?.total ?? 0,
+        converted: current?.converted ?? 0,
+        removedEmpty: current?.removedEmpty ?? 0,
+        failed: [...(current?.failed ?? []), { name: 'Biblioteca', reason: error instanceof Error ? error.message : String(error) }],
+      }));
+    } finally {
+      setIsMigratingAlac(false);
+    }
+  }
+
   async function handleRecoverArtwork() {
     const total = Array.from(useWebLibraryStore.getState().tracks.values())
       .filter(track => !track.artwork).length;
@@ -965,13 +980,13 @@ export function App() {
     (selectedAlbum && tab === 'albums') || (selectedArtist && tab === 'artists'),
   );
   const sectionCount = tab === 'songs'
-    ? `${filteredTracks.length} canciones`
+    ? `${filteredTracks.length} ${filteredTracks.length === 1 ? 'canción' : 'canciones'}`
     : tab === 'albums'
-      ? `${filteredAlbums.length} discos`
+      ? `${filteredAlbums.length} ${filteredAlbums.length === 1 ? 'disco' : 'discos'}`
       : tab === 'artists'
-        ? `${filteredArtists.length} artistas`
+        ? `${filteredArtists.length} ${filteredArtists.length === 1 ? 'artista' : 'artistas'}`
         : tab === 'playlists'
-          ? `${playlists.length} playlists`
+          ? `${playlists.length} ${playlists.length === 1 ? 'playlist' : 'playlists'}`
           : tabCopy.subtitle;
 
   // --- Determine content ---
@@ -1030,6 +1045,7 @@ export function App() {
             onDownloadRecommendation={downloadTidalRecommendationWithSoulseek}
             onImport={() => setShowLibrarySettings(true)}
             onPlayAlbum={playHomeAlbum}
+            getTrack={getLibraryTrack}
           />
         );
       case 'songs':
@@ -1131,7 +1147,6 @@ export function App() {
           tab={tab}
           onSelectHome={() => handleTabChange('home')}
           onSelectLibrary={() => handleTabChange(lastLibraryTabRef.current)}
-          onSelectSearch={() => handleTabChange('search')}
           onSelectPlaylists={() => handleTabChange('playlists')}
           onSelectDownloads={() => handleTabChange('downloads')}
           onSelectGetApp={() => handleTabChange('get-app')}
@@ -1160,6 +1175,15 @@ export function App() {
                   Instalar app
                 </button>
               )}
+              <a
+                href={GITHUB_REPO_URL}
+                target="_blank"
+                rel="noreferrer noopener"
+                aria-label="Dale una estrella a StaySound en GitHub"
+                title="Dale una estrella en GitHub"
+              >
+                <GitHubIcon size={18} />
+              </a>
               <button
                 onClick={() => setShowLibrarySettings(true)}
                 aria-label="Ajustes de biblioteca"
@@ -1171,6 +1195,29 @@ export function App() {
           }
         />
         <section className="circ-content">
+          {(LIBRARY_TABS.includes(tab) || tab === 'playlists') && !isDetailView && (
+            <header className="collection-header">
+              <div>
+                <h1>{tab === 'playlists' ? 'Playlists' : 'Biblioteca'}</h1>
+                <p>{sectionCount}</p>
+              </div>
+              {LIBRARY_TABS.includes(tab) && (
+                <div className="collection-tools">
+                  <label className="collection-search">
+                    <SearchIcon size={18} />
+                    <input value={query} onChange={event => setQuery(event.target.value)}
+                      placeholder="Buscar en tu biblioteca" aria-label="Buscar en biblioteca" />
+                  </label>
+                  <select value={librarySort}
+                    onChange={event => setLibrarySort(event.target.value as 'recent' | 'az')}
+                    aria-label="Ordenar biblioteca">
+                    <option value="recent">Más recientes</option>
+                    <option value="az">Nombre A–Z</option>
+                  </select>
+                </div>
+              )}
+            </header>
+          )}
           {LIBRARY_TABS.includes(tab) && !isDetailView && (
             <SegmentedTabs
               items={LIBRARY_SEGMENTS}
@@ -1274,19 +1321,20 @@ export function App() {
           </header>}
 
           {/* Library sub-navigation on mobile. Primary destinations live in the bottom navbar. */}
-          {(tab === 'songs' || tab === 'albums' || tab === 'artists') && (
+          {(tab === 'songs' || tab === 'artists' || tab === 'albums' || tab === 'radio') && (
             <div className="mobile-tabs" aria-label="Vistas de biblioteca">
-              {(['songs', 'albums', 'artists'] as Tab[]).map(item => (
+              {(['songs', 'artists', 'albums', 'radio'] as Tab[]).map(item => (
                 <button
                   key={item}
                   className={tab === item ? 'active' : ''}
                   onClick={() => handleTabChange(item)}
-                  aria-label={item === 'songs' ? 'Canciones' : item === 'albums' ? 'Álbumes' : 'Artistas'}
+                  aria-label={item === 'songs' ? 'Canciones' : item === 'artists' ? 'Artistas' : item === 'albums' ? 'Álbumes' : 'Radio'}
                 >
                   {item === 'songs' ? <MusicNoteIcon size={18} />
+                    : item === 'artists' ? <ArtistIcon size={18} />
                     : item === 'albums' ? <DiscIcon size={18} />
-                    : <ArtistIcon size={18} />}
-                  <span>{item === 'songs' ? 'Canciones' : item === 'albums' ? 'Álbumes' : 'Artistas'}</span>
+                    : <MusicNoteIcon size={18} />}
+                  <span>{item === 'songs' ? 'Canciones' : item === 'artists' ? 'Artistas' : item === 'albums' ? 'Álbumes' : 'Radio'}</span>
                 </button>
               ))}
             </div>
@@ -1307,18 +1355,35 @@ export function App() {
 
   return (
     <>
-      {!showFullPlayer && ambientPalette ? (
+      {ambientPalette ? (
         <div
-          className="global-listening-atmosphere"
+          className={`global-listening-atmosphere ${showFullPlayer ? 'player-is-open' : ''}`}
           style={paletteToCssVars(ambientPalette) as CSSProperties}
           aria-hidden="true"
         >
           <div className="global-listening-gradient" />
-          <AtmosphereCanvas
-            palette={ambientPalette}
-            isPlaying={audio.isPlaying}
-            motionKey={audio.currentTrack?.id ?? 'staysound-idle'}
-          />
+          {/* The desktop build gets the same OriginKit field the full player
+              runs, one step quieter — so opening the player is a zoom into the
+              background you were already looking at, not a change of scenery. */}
+          {isTauriDesktop() ? (
+            <OriginKitDotMatrixBackground
+              palette={ambientPalette}
+              isPlaying={audio.isPlaying}
+              motionKey={audio.currentTrack?.id ?? 'staysound-idle'}
+              variant="ambient"
+              /* The overlay fades this layer to zero opacity, which stops it
+                 being seen but not being drawn: two full-screen shader passes
+                 per frame kept running underneath the player's own field, and
+                 that is the budget the lyrics were losing. */
+              paused={showFullPlayer}
+            />
+          ) : (
+            <AtmosphereCanvas
+              palette={ambientPalette}
+              isPlaying={audio.isPlaying}
+              motionKey={audio.currentTrack?.id ?? 'staysound-idle'}
+            />
+          )}
           <div className="global-listening-scrim" />
         </div>
       ) : null}
@@ -1357,6 +1422,10 @@ export function App() {
           isRecoveringArtwork={isRecoveringArtwork}
           artworkRecoveryProgress={artworkRecoveryProgress}
           missingArtworkCount={Array.from(tracks.values()).filter(track => !track.artwork).length}
+          flacCount={Array.from(tracks.values()).filter(track => /\.flac$/i.test((track as Track & { nativePath?: string }).nativePath ?? '')).length}
+          isMigratingAlac={isMigratingAlac}
+          alacProgress={alacProgress}
+          onMigrateAlac={isTauriDesktop() ? handleMigrateAlac : undefined}
           hasTracks={trackList.length > 0}
           onClose={() => setShowLibrarySettings(false)}
           onShowShortcuts={() => { setShowLibrarySettings(false); setShowShortcutHelp(true); }}
@@ -1467,6 +1536,9 @@ function PlaybackSurface({
           onStartRadio={() => void onStartRadio(audio.currentTrack)}
           isRadioLoading={radioBusy}
           queueOpen={showQueue}
+          playlists={playlists}
+          onAddToPlaylist={onAddToPlaylist}
+          fullPlayerOpen={showFullPlayer}
         />
       ) : (
         <PlayerBar
@@ -1673,6 +1745,10 @@ function LibrarySettingsModal({
   isRecoveringArtwork,
   artworkRecoveryProgress,
   missingArtworkCount,
+  flacCount,
+  isMigratingAlac,
+  alacProgress,
+  onMigrateAlac,
   hasTracks,
   onClose,
   onShowShortcuts,
@@ -1689,6 +1765,11 @@ function LibrarySettingsModal({
   isRecoveringArtwork: boolean;
   artworkRecoveryProgress: ArtworkRecoveryProgress | null;
   missingArtworkCount: number;
+  flacCount: number;
+  isMigratingAlac: boolean;
+  alacProgress: AlacMigrationProgress | null;
+  /** Desktop only: move the library from FLAC to ALAC. */
+  onMigrateAlac?: () => void;
   hasTracks: boolean;
   onClose: () => void;
   onShowShortcuts: () => void;
@@ -1699,11 +1780,14 @@ function LibrarySettingsModal({
   onClear: () => void;
 }) {
   const [closing, setClosing] = useState(false);
+  const [confirmAlac, setConfirmAlac] = useState(false);
   const handleClose = useCallback(() => {
-    if (closing) return;
+    if (closing || isMigratingAlac) return;
     setClosing(true);
     window.setTimeout(onClose, 220);
-  }, [closing, onClose]);
+  }, [closing, isMigratingAlac, onClose]);
+
+  const alacDone = !isMigratingAlac && alacProgress && alacProgress.processed === alacProgress.total;
 
   return (
     <div className={`settings-modal-overlay ${closing ? 'closing' : ''}`} role="presentation" onClick={handleClose}>
@@ -1781,6 +1865,56 @@ function LibrarySettingsModal({
               )}
             </span>
           </button>
+          {onMigrateAlac && (flacCount > 0 || isMigratingAlac || alacProgress) ? (
+            <button
+              className={`settings-action artwork ${confirmAlac && !isMigratingAlac ? 'primary' : ''}`}
+              onClick={() => {
+                if (isMigratingAlac || alacDone && flacCount === 0) return;
+                if (!confirmAlac) {
+                  setConfirmAlac(true);
+                  return;
+                }
+                setConfirmAlac(false);
+                onMigrateAlac();
+              }}
+              disabled={isImporting || isMigratingAlac}
+            >
+              {isMigratingAlac ? <SpinnerIcon size={18} /> : <SyncIcon size={18} />}
+              <span className="settings-action-copy">
+                <strong>
+                  {isMigratingAlac && alacProgress
+                    ? `Convirtiendo ${alacProgress.processed}/${alacProgress.total}`
+                    : alacDone
+                      ? `Listo: ${alacProgress!.converted} en ALAC`
+                      : confirmAlac
+                        ? `Convertir ${flacCount} a ALAC`
+                        : 'Pasar la biblioteca a ALAC'}
+                </strong>
+                <small>
+                  {isMigratingAlac
+                    ? 'Cada copia se verifica antes de mandar el FLAC a la Papelera.'
+                    : alacDone
+                      ? [
+                        alacProgress!.removedEmpty ? `${alacProgress!.removedEmpty} vacías a la Papelera` : '',
+                        alacProgress!.failed.length ? `${alacProgress!.failed.length} sin convertir` : 'sin errores',
+                      ].filter(Boolean).join(' · ')
+                      : confirmAlac
+                        ? 'Mismo audio, sin pérdida. Los FLAC irán a la Papelera. Toca otra vez para empezar.'
+                        : `${flacCount} canción${flacCount === 1 ? '' : 'es'} en FLAC · saltos exactos en la letra`}
+                </small>
+                {isMigratingAlac && alacProgress && alacProgress.total > 0 && (
+                  <span className="artwork-progress" aria-hidden="true">
+                    <span style={{ width: `${(alacProgress.processed / alacProgress.total) * 100}%` }} />
+                  </span>
+                )}
+                {alacDone && alacProgress!.failed.length ? (
+                  <small className="settings-action-details">
+                    {alacProgress!.failed.slice(0, 4).map(item => `${item.name}: ${item.reason}`).join(' · ')}
+                  </small>
+                ) : null}
+              </span>
+            </button>
+          ) : null}
           <button className="settings-action" onClick={onShowShortcuts}>
             <KeyboardIcon size={18} />
             <span>Atajos de teclado</span>
@@ -1927,6 +2061,51 @@ function timeOfDayGreeting(): string {
   return 'Buenas noches';
 }
 
+/** Untagged files land in the library as "Unknown Album", and Home was printing that
+    placeholder as the largest type on the screen. Fall back to something that is
+    actually about the music — the track we would play, then the artist. */
+const PLACEHOLDER_ALBUM_NAMES = new Set([
+  'unknown album',
+  'unknown',
+  'untitled',
+  'álbum desconocido',
+  'album desconocido',
+]);
+
+function heroCopy(album: Album, track?: Track | null): { title: string; subtitle: string } {
+  const name = album.name?.trim() ?? '';
+  const artist = album.artist?.trim() ?? '';
+  if (name && !PLACEHOLDER_ALBUM_NAMES.has(name.toLowerCase())) return { title: name, subtitle: artist };
+  const trackTitle = track?.title?.trim();
+  if (trackTitle) return { title: trackTitle, subtitle: artist };
+  return { title: artist || 'Tu música', subtitle: 'En tu biblioteca' };
+}
+
+/** A rail on Círculo's home: section title on the left, its "see everything" action on
+    the right, and the scroller underneath. The action used to be a lone grey circle
+    parked after the last tile, where it read as a tile with broken artwork. */
+function CircHomeRail({ title, actionLabel, onAction, className, flip = false, children }: {
+  title: string;
+  actionLabel: string;
+  onAction: () => void;
+  className?: string;
+  /** Slide tiles to their new slot when the order changes (the history rail). */
+  flip?: boolean;
+  children: ReactNode;
+}) {
+  const orderSignature = Children.toArray(children).map(child => (isValidElement(child) ? String(child.key) : '')).join('|');
+  const rowRef = useFlipRow<HTMLDivElement>(orderSignature, flip);
+  return (
+    <div className={`circ-home-rail ${className ?? ''}`.trim()}>
+      <div className="circ-section-head">
+        <h2 className="circ-section-title">{title}</h2>
+        <button type="button" className="circ-section-more" onClick={onAction}>{actionLabel}</button>
+      </div>
+      <div className="circ-home-rail-row" ref={rowRef}>{children}</div>
+    </div>
+  );
+}
+
 function HomePanel({
   recentTracks,
   recentlyPlayedTracks,
@@ -1946,6 +2125,7 @@ function HomePanel({
   onDownloadRecommendation,
   onImport,
   onPlayAlbum,
+  getTrack,
 }: {
   recentTracks: Track[];
   recentlyPlayedTracks: Track[];
@@ -1965,12 +2145,15 @@ function HomePanel({
   onDownloadRecommendation: (track: TidalTrack) => Promise<void>;
   onImport: () => void;
   onPlayAlbum: (album: Album) => void;
+  getTrack: (id: string) => Track | undefined;
 }) {
   const isDesktopViewport = useIsDesktopViewport();
   const recommendationAlbums = useMemo(() => {
     const day = new Date().toISOString().slice(0, 10);
     const listeningSignal = [currentTrack?.id, ...recentlyPlayedTracks.map(track => track.id)].filter(Boolean).join('|');
-    return shuffleForHome(albums, `${day}|${listeningSignal}`).slice(0, 6);
+    // Nine, not six: the desktop rail is wide enough for seven tiles at 1650px, and the
+    // extra ones are what give its horizontal scroll somewhere to go.
+    return shuffleForHome(albums, `${day}|${listeningSignal}`).slice(0, 9);
   }, [albums, currentTrack?.id, recentlyPlayedTracks]);
   const featuredAlbums = recommendationAlbums;
   const featuredArtists = artists.slice(0, 5);
@@ -1979,6 +2162,88 @@ function HomePanel({
     ...(currentTrack ? [currentTrack] : []),
     ...recentTracks.filter(track => track.id !== currentTrack?.id),
   ].slice(0, 4), [currentTrack, recentTracks]);
+
+  // Hoisted above the early returns below so the hero's palette hook can depend on it.
+  /* The hero never repeats what the player already shows. While something plays it
+     becomes a suggestion — another album by the same artist, one you played lately,
+     or a stable pick from the library — seeded by the playing album so it holds
+     still across that album's tracks and only changes when the album does. With
+     nothing playing it resumes the last thing you listened to. */
+  const heroPick = useMemo(() => {
+    const albumOf = (track: Track | null | undefined) =>
+      (track && albums.find(item => item.tracks.includes(track.id))) || null;
+    const firstTrackOf = (album: Album | null) => album
+      ? album.tracks
+        .map(getTrack)
+        .filter((track): track is Track => Boolean(track))
+        .sort((a, b) => (a.trackNumber ?? 0) - (b.trackNumber ?? 0))[0] ?? null
+      : null;
+
+    const playingAlbum = albumOf(currentTrack);
+    let album: Album | null;
+    let reason: string | null = null;
+    if (currentTrack && playingAlbum) {
+      const others = albums.filter(item => item.id !== playingAlbum.id);
+      const sameArtist = others.filter(item => item.artist && item.artist === playingAlbum.artist);
+      const recent: Album[] = [];
+      for (const track of recentlyPlayedTracks) {
+        const candidate = albumOf(track);
+        if (candidate && candidate.id !== playingAlbum.id && !recent.includes(candidate)) recent.push(candidate);
+        if (recent.length >= 3) break;
+      }
+      const pool = [...sameArtist, ...recent.filter(item => !sameArtist.includes(item))];
+      const day = new Date().toISOString().slice(0, 10);
+      const picked = shuffleForHome(pool.length > 0 ? pool : others, `${day}|hero|${playingAlbum.id}`)[0] ?? null;
+      album = picked ?? playingAlbum;
+      if (picked) {
+        reason = sameArtist.includes(picked)
+          ? `Más de ${picked.artist}`
+          : recent.includes(picked) ? 'Vuelve a escucharlo' : 'Para descubrir';
+      }
+    } else {
+      const seedTrack = recentlyPlayedTracks[0] ?? recentTracks[0] ?? null;
+      album = albumOf(seedTrack) || albums[0] || null;
+      if (album && recentlyPlayedTracks.length > 0) reason = 'Sigue donde lo dejaste';
+    }
+    return { album, track: firstTrackOf(album), reason };
+  }, [albums, currentTrack, getTrack, recentlyPlayedTracks, recentTracks]);
+
+  /* The accent used to come from --dyn-accent, which is extracted from whatever is
+     *playing* — not from the cover the hero is actually showing. When those differ you
+     get a pink play button over a green sleeve. Home now tints itself from its own hero,
+     while the nav and player bar keep tracking playback. Keyed on primitives so the seed
+     object stays referentially stable across renders. */
+  const heroAlbumId = heroPick.album?.id ?? null;
+  const heroAlbumArtwork = heroPick.album?.artwork ?? null;
+  const heroAlbumName = heroPick.album?.name ?? '';
+  const heroAlbumArtist = heroPick.album?.artist ?? '';
+  const heroPaletteSeed = useMemo<Track | null>(() => (
+    heroAlbumId && heroAlbumArtwork
+      ? {
+          id: `album:${heroAlbumId}`,
+          uri: '',
+          title: heroAlbumName,
+          artist: heroAlbumArtist,
+          album: heroAlbumName,
+          duration: 0,
+          dateAdded: 0,
+          artwork: heroAlbumArtwork,
+        }
+      : null
+  ), [heroAlbumId, heroAlbumArtwork, heroAlbumName, heroAlbumArtist]);
+  const [heroAccent, setHeroAccent] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!heroPaletteSeed) {
+      setHeroAccent(null);
+      return;
+    }
+    let cancelled = false;
+    void getDynamicPalette(heroPaletteSeed).then(palette => {
+      if (!cancelled) setHeroAccent(palette.accent);
+    });
+    return () => { cancelled = true; };
+  }, [heroPaletteSeed]);
 
   if (recentTracks.length === 0) {
     return (
@@ -1995,97 +2260,130 @@ function HomePanel({
   }
 
   if (isDesktopViewport) {
-    const latestTrack = currentTrack ?? recentlyPlayedTracks[0] ?? recentTracks[0];
-    const pickAlbum = (latestTrack && albums.find(album => album.tracks.includes(latestTrack.id))) || albums[0] || null;
-    const pickTrack = pickAlbum ? recentTracks.find(track => pickAlbum.tracks.includes(track.id)) : undefined;
+    const { album: pickAlbum, track: pickTrack, reason: heroReason } = heroPick;
     const heroHue = hueFromId(pickAlbum?.id ?? 'staysound');
+    const hero = pickAlbum ? heroCopy(pickAlbum, pickTrack) : null;
+    // Keep the featured album out of the rail immediately below it.
+    const nightAlbums = featuredAlbums.filter(album => album.id !== pickAlbum?.id).slice(0, 8);
+    // The playing track leads its own history: pressing a song elsewhere on Home
+    // slides it to the front of this rail instead of leaving it out of it.
+    const historyTracks = [
+      ...(currentTrack ? [currentTrack] : []),
+      ...recentlyPlayedTracks.filter(track => track.id !== currentTrack?.id),
+    ].slice(0, 8);
+    const playWithFlight = (source: HTMLElement | null, isCurrent: boolean, play: () => void) => {
+      if (!source || isCurrent) play();
+      else flyArtwork(source, '.circ-pb-art', play);
+    };
+    const downloadedTracks = recentlyDownloadedTracks.slice(0, 8);
 
     return (
-      <section className="circ-home">
+      <section
+        className="circ-home"
+        style={{ '--hero-accent': heroAccent ?? 'var(--dyn-accent, #f9a8d4)' } as CSSProperties}
+      >
         {pickAlbum && (
-          <div aria-hidden="true" className="circ-home-hero-art">
+          <div aria-hidden="true" className="circ-home-hero-art" key={pickAlbum.id}>
             <CircleArt size="100%" src={pickAlbum.artwork} hue={heroHue} ring />
           </div>
         )}
 
         <div className="circ-home-welcome">
-          <p className="ss-eyebrow">Bienvenido de vuelta</p>
-          <h1>{timeOfDayGreeting()}</h1>
-
-          {pickAlbum && (
+          {pickAlbum && hero ? (
             <>
-              <p className="ss-eyebrow circ-home-pick-eyebrow">StaySound te sugiere</p>
-              <h2>{pickAlbum.name}</h2>
-              <p className="circ-home-pick-artist">{pickAlbum.artist}</p>
-              <QualityChip quality={formatQualitySpecs(pickTrack)} />
-              <div className="circ-home-pick-actions">
-                <button type="button" aria-label={`Reproducir ${pickAlbum.name}`} className="circ-home-play" onClick={() => onPlayAlbum(pickAlbum)}>
-                  <PlayIcon size={26} />
-                </button>
-                <button type="button" className="circ-home-pick-link" onClick={() => onSelectAlbum(pickAlbum)}>Ver álbum</button>
+              <p className="circ-home-greeting">
+                <span className="circ-home-greeting-text">{timeOfDayGreeting()}</span>
+                {heroReason ? <span className="circ-home-reason" key={heroReason}>{heroReason}</span> : null}
+              </p>
+              <div className="circ-home-welcome-body" key={pickAlbum.id}>
+                <h1>{hero.title}</h1>
+                <p className="circ-home-pick-artist">{hero.subtitle}</p>
+                <QualityChip quality={formatQualitySpecs(pickTrack)} />
+                <div className="circ-home-pick-actions">
+                  <button
+                    type="button"
+                    aria-label={`Reproducir ${hero.title}`}
+                    className="circ-home-play"
+                    onClick={() => playWithFlight(
+                      document.querySelector<HTMLElement>('.circ-home-hero-art'),
+                      Boolean(currentTrack && pickAlbum.tracks.includes(currentTrack.id)),
+                      () => onPlayAlbum(pickAlbum),
+                    )}
+                  >
+                    <PlayIcon size={20} />
+                    <span>Reproducir</span>
+                  </button>
+                  <button type="button" className="circ-home-pick-link" onClick={() => onSelectAlbum(pickAlbum)}>Ver álbum</button>
+                </div>
               </div>
             </>
+          ) : (
+            <h1 className="circ-home-greeting-solo">{timeOfDayGreeting()}</h1>
           )}
         </div>
 
-        {featuredAlbums.length > 0 && (
-          <div className="circ-home-rail">
-            <p className="ss-eyebrow">Para esta noche</p>
-            <div className="circ-home-rail-row">
-              {featuredAlbums.map(album => (
-                <CircleTile
-                  key={album.id}
-                  src={album.artwork}
-                  hue={hueFromId(album.id)}
-                  title={album.name}
-                  subtitle={album.artist}
-                  ring={Boolean(currentTrack && album.tracks.includes(currentTrack.id))}
-                  onClick={() => onPlayAlbum(album)}
-                />
-              ))}
-              <CarouselChevron onClick={() => onOpenTab('albums')} />
-            </div>
-          </div>
+        {nightAlbums.length > 0 && (
+          <CircHomeRail title="De tu biblioteca" actionLabel="Ver todos" onAction={() => onOpenTab('albums')}>
+            {nightAlbums.map(album => (
+              <CircleTile
+                key={album.id}
+                src={album.artwork}
+                hue={hueFromId(album.id)}
+                title={album.name}
+                subtitle={album.artist}
+                ring={Boolean(currentTrack && album.tracks.includes(currentTrack.id))}
+                onClick={source => playWithFlight(
+                  source,
+                  Boolean(currentTrack && album.tracks.includes(currentTrack.id)),
+                  () => onPlayAlbum(album),
+                )}
+              />
+            ))}
+          </CircHomeRail>
         )}
 
-        {recentlyPlayedTracks.length > 0 && (
-          <div className="circ-home-rail circ-home-history-rail">
-            <p className="ss-eyebrow">Reproducidas recientemente</p>
-            <div className="circ-home-rail-row">
-              {recentlyPlayedTracks.slice(0, 6).map(track => (
-                <CircleTile
-                  key={track.id}
-                  src={track.artwork}
-                  hue={hueFromId(track.id)}
-                  title={track.title}
-                  subtitle={track.artist}
-                  ring={track.id === currentTrack?.id}
-                  onClick={() => onPlayTrack(track, recentlyPlayedTracks)}
-                />
-              ))}
-              <CarouselChevron onClick={() => onOpenTab('songs')} label="Ver canciones" />
-            </div>
-          </div>
+        {historyTracks.length > 0 && (
+          <CircHomeRail
+            className="circ-home-history-rail"
+            flip
+            title="Reproducidas recientemente"
+            actionLabel="Ver todas"
+            onAction={() => onOpenTab('songs')}
+          >
+            {historyTracks.map(track => (
+              <CircleTile
+                key={track.id}
+                flipKey={track.id}
+                src={track.artwork}
+                hue={hueFromId(track.id)}
+                title={track.title}
+                subtitle={track.artist}
+                ring={track.id === currentTrack?.id}
+                onClick={source => playWithFlight(source, track.id === currentTrack?.id, () => onPlayTrack(track, historyTracks))}
+              />
+            ))}
+          </CircHomeRail>
         )}
 
-        {recentlyDownloadedTracks.length > 0 && (
-          <div className="circ-home-rail circ-home-history-rail">
-            <p className="ss-eyebrow">Recién descargadas</p>
-            <div className="circ-home-rail-row">
-              {recentlyDownloadedTracks.slice(0, 6).map(track => (
-                <CircleTile
-                  key={track.id}
-                  src={track.artwork}
-                  hue={hueFromId(track.id)}
-                  title={track.title}
-                  subtitle={track.artist}
-                  ring={track.id === currentTrack?.id}
-                  onClick={() => onPlayTrack(track, recentlyDownloadedTracks)}
-                />
-              ))}
-              <CarouselChevron onClick={() => onOpenTab('songs')} label="Ver canciones descargadas" />
-            </div>
-          </div>
+        {downloadedTracks.length > 0 && (
+          <CircHomeRail
+            className="circ-home-history-rail"
+            title="Recién descargadas"
+            actionLabel="Ver todas"
+            onAction={() => onOpenTab('songs')}
+          >
+            {downloadedTracks.map(track => (
+              <CircleTile
+                key={track.id}
+                src={track.artwork}
+                hue={hueFromId(track.id)}
+                title={track.title}
+                subtitle={track.artist}
+                ring={track.id === currentTrack?.id}
+                onClick={source => playWithFlight(source, track.id === currentTrack?.id, () => onPlayTrack(track, downloadedTracks))}
+              />
+            ))}
+          </CircHomeRail>
         )}
       </section>
     );
@@ -2260,6 +2558,7 @@ function PlaylistsPanel({
             onChange={event => setName(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') handleCreate(); }}
             placeholder="Nombre de la playlist"
+            aria-label="Nombre de la playlist"
           />
           <button className="btn btn-primary" onClick={handleCreate}>
             <PlusIcon size={16} />
@@ -2269,7 +2568,7 @@ function PlaylistsPanel({
         <div className="empty-state compact">
           <div className="empty-state-icon"><PlaylistIcon size={48} /></div>
           <h2>Crea tu primera playlist</h2>
-          <p>Las playlists viven en este navegador y usan las canciones de tu biblioteca local.</p>
+          <p>Reúne tus canciones favoritas de la biblioteca en una lista.</p>
         </div>
       </section>
     );
@@ -2284,6 +2583,7 @@ function PlaylistsPanel({
             onChange={event => setName(event.target.value)}
             onKeyDown={event => { if (event.key === 'Enter') handleCreate(); }}
             placeholder="Nueva playlist"
+            aria-label="Nombre de la nueva playlist"
           />
           <button className="icon-btn" onClick={handleCreate} aria-label="Crear playlist" title="Crear playlist">
             <PlusIcon size={18} />
@@ -2292,14 +2592,17 @@ function PlaylistsPanel({
 
         <div className="playlist-list">
           {playlists.map(playlist => {
-            const count = getPlaylistTracks(playlist).length;
+            const tracks = getPlaylistTracks(playlist);
+            const count = tracks.length;
+            const artwork = tracks.find(track => track.artwork)?.artwork;
             return (
               <button
                 key={playlist.id}
                 className={selectedPlaylist?.id === playlist.id ? 'active' : ''}
+                aria-pressed={selectedPlaylist?.id === playlist.id}
                 onClick={() => setSelectedPlaylistId(playlist.id)}
               >
-                <span className="playlist-dot"><PlaylistIcon size={18} /></span>
+                <span className="playlist-dot">{artwork ? <img src={artwork} alt="" /> : <PlaylistIcon size={18} />}</span>
                 <span>
                   <strong>{playlist.name}</strong>
                 <small>{count} {count === 1 ? 'canción' : 'canciones'}</small>
@@ -2314,8 +2617,12 @@ function PlaylistsPanel({
         {selectedPlaylist && (
           <>
             <div className="playlist-detail-head">
-              <div>
-                <span className="eyebrow">Playlist local</span>
+              <div className="playlist-cover" aria-hidden="true">
+                {selectedTracks.find(track => track.artwork)?.artwork
+                  ? <img src={selectedTracks.find(track => track.artwork)!.artwork} alt="" />
+                  : <PlaylistIcon size={48} />}
+              </div>
+              <div className="playlist-heading">
                 <h2>{selectedPlaylist.name}</h2>
                 <p>{selectedTracks.length} {selectedTracks.length === 1 ? 'canción' : 'canciones'} · {formatDuration(selectedTracks.reduce((sum, track) => sum + track.duration, 0))}</p>
               </div>
@@ -2336,7 +2643,7 @@ function PlaylistsPanel({
             </div>
 
             <div className="playlist-add-row">
-              <select value={selectedTrackId} onChange={event => setSelectedTrackId(event.target.value)}>
+              <select aria-label="Canción para agregar a la playlist" value={selectedTrackId} onChange={event => setSelectedTrackId(event.target.value)}>
                 <option value="">Agregar canción...</option>
                 {availableTracks.map(track => (
                   <option key={track.id} value={track.id}>{track.title} - {track.artist}</option>
@@ -2657,867 +2964,6 @@ function TidalDiscoveryPanel({
           <div className="empty-state-icon"><SyncIcon size={48} /></div>
           <h2>Arranca una radio</h2>
           <p>Busca algo en TIDAL o usa una semilla de tu biblioteca para generar recomendaciones.</p>
-        </section>
-      )}
-    </section>
-  );
-}
-
-function formatBytes(value?: number): string {
-  if (!value || value <= 0) return '';
-  if (value >= 1024 * 1024 * 1024) return `${(value / (1024 * 1024 * 1024)).toFixed(1)} GB`;
-  if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
-  return `${Math.round(value / 1024)} KB`;
-}
-
-/** Circular download-progress indicator (0..1). */
-function ProgressRing({ value }: { value: number }) {
-  const radius = 7;
-  const circumference = 2 * Math.PI * radius;
-  const clamped = Math.max(0.02, Math.min(1, value));
-  return (
-    <svg className="progress-ring" viewBox="0 0 18 18" width={16} height={16} aria-hidden="true">
-      <circle className="progress-ring-track" cx="9" cy="9" r={radius} />
-      <circle
-        className="progress-ring-fill"
-        cx="9"
-        cy="9"
-        r={radius}
-        strokeDasharray={circumference}
-        strokeDashoffset={circumference * (1 - clamped)}
-      />
-    </svg>
-  );
-}
-
-type DownloadQueueStatus = 'queued' | 'resolving' | 'downloading' | 'done' | 'error';
-type DownloadCatalogFilter = 'all' | 'songs' | 'artists' | 'albums';
-const SOULSEEK_SHARE_MUSIC_KEY = 'staysound.web.soulseek.share-music-folder.v1';
-
-type DownloadQueueItem = {
-  queueId: string;
-  source: DownloadSource;
-  result: DownloadSearchResult;
-  status: DownloadQueueStatus;
-  progress: number;
-  message?: string;
-  activity?: DownloadActivity;
-  history: Array<{ at: number; message: string; detail?: string }>;
-  startedAt?: number;
-  updatedAt: number;
-  rawError?: string;
-};
-
-const DOWNLOAD_STAGE_LABELS: Record<DownloadActivity['stage'], string> = {
-  connecting: 'Conectando',
-  peer: 'Buscando fuente',
-  transfer: 'Transfiriendo',
-  reading: 'Leyendo archivo',
-  importing: 'Validando audio',
-  metadata: 'Guardando metadatos',
-  saving: 'Guardando',
-};
-
-function downloadFailureExplanation(item: DownloadQueueItem): string {
-  const raw = item.rawError || item.message || '';
-  const stage = item.activity?.stage;
-  if (/load failed|failed to fetch|fetch is aborted/i.test(raw)) {
-    if (stage === 'reading' || stage === 'importing') {
-      return 'Soulseek sí entregó el archivo, pero StaySound falló al abrirlo o importarlo en la biblioteca local.';
-    }
-    return 'StaySound perdió comunicación con el bridge local antes de recibir una respuesta completa.';
-  }
-  if (/econnreset|connection reset|socket.*closed/i.test(raw)) {
-    return 'El peer remoto cerró su conexión. No es un bloqueo global de Soulseek; conviene intentar otra fuente.';
-  }
-  if (/peer unavailable after address refresh|user not exist/i.test(raw)) {
-    return 'Soulseek actualizó la dirección del usuario, pero ese peer ya no estaba conectado. El reintento hará una búsqueda nueva.';
-  }
-  if (/banned/i.test(raw)) return 'Ese usuario de Soulseek rechazó esta cuenta. Otro peer todavía puede tener el archivo.';
-  if (/timeout|tardó demasiado|timed out/i.test(raw)) return 'La fuente no respondió dentro del límite; puede estar offline, en cola o ser muy lenta.';
-  if (stage === 'peer' || stage === 'transfer') return 'La fuente P2P seleccionada no pudo completar la transferencia.';
-  return `La operación falló durante “${stage ? DOWNLOAD_STAGE_LABELS[stage] : 'resolución'}”.`;
-}
-
-function formatDownloadElapsed(item: DownloadQueueItem): string {
-  if (!item.startedAt) return 'sin iniciar';
-  const seconds = Math.max(1, Math.round((item.updatedAt - item.startedAt) / 1000));
-  return seconds < 60 ? `${seconds} s` : `${Math.floor(seconds / 60)} min ${seconds % 60} s`;
-}
-
-function getDownloadProvider(source: DownloadSource) {
-  return source === 'soulseek' ? soulseekDownloadProvider : monochromeDownloadProvider;
-}
-
-function DownloadsPanel({
-  onDownloaded,
-  onGetApp,
-}: {
-  onDownloaded: (track: Track) => Promise<void>;
-  onGetApp: () => void;
-}) {
-  const [source] = useState<DownloadSource>('soulseek');
-  const [remoteQuery, setRemoteQuery] = useState('');
-  const [results, setResults] = useState<DownloadSearchResult[]>([]);
-  const [catalogFilter, setCatalogFilter] = useState<DownloadCatalogFilter>('all');
-  const [downloadFolder, setDownloadFolder] = useState<FileSystemDirectoryHandle | null>(null);
-  const [needsFolderPermission, setNeedsFolderPermission] = useState(false);
-  const [busyId, setBusyId] = useState<string | null>(null);
-  const [downloadQueue, setDownloadQueue] = useState<DownloadQueueItem[]>([]);
-  const [showDownloadSettings, setShowDownloadSettings] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [soulseekBridgeReady, setSoulseekBridgeReady] = useState<boolean | null>(null);
-  const [soulseekUsername, setSoulseekUsername] = useState(() => loadSoulseekCredentials()?.username ?? '');
-  const [soulseekPassword, setSoulseekPassword] = useState(() => loadSoulseekCredentials()?.password ?? '');
-  const [hasSoulseekCredentials, setHasSoulseekCredentials] = useState(() => Boolean(loadSoulseekCredentials()));
-  const [desktopMusicFolder, setDesktopMusicFolder] = useState<string | null>(null);
-  const [shareMusicFolder, setShareMusicFolder] = useState(() => (
-    window.localStorage.getItem(SOULSEEK_SHARE_MUSIC_KEY) === '1'
-  ));
-  const [shareStatus, setShareStatus] = useState<SoulseekShareStatus | null>(null);
-  const [shareBusy, setShareBusy] = useState(false);
-  const queueRef = useRef<DownloadQueueItem[]>([]);
-  const folderRef = useRef<FileSystemDirectoryHandle | null>(null);
-  const processingQueueRef = useRef(false);
-  const onDownloadedRef = useRef(onDownloaded);
-
-  const provider = getDownloadProvider(source);
-  // Soulseek needs a raw TCP peer connection, which only the bridge bundled with the
-  // desktop builds can open. Once the health check has come back negative outside
-  // Tauri, retrying is pointless — surface the app download instead of a search UI
-  // that can only ever fail. (Local `npm run web:soulseek` still reaches the bridge
-  // over http, so that development flow keeps the full panel.)
-  const needsDesktopApp = !isTauriDesktop() && soulseekBridgeReady === false;
-  const activeDownload = downloadQueue.find(item => item.status === 'resolving' || item.status === 'downloading');
-  const queuedCount = downloadQueue.filter(item => item.status === 'queued').length;
-  const finishedCount = downloadQueue.filter(item => item.status === 'done').length;
-  const failedCount = downloadQueue.filter(item => item.status === 'error').length;
-  const queuedPreview = downloadQueue.filter(item => item.status === 'queued').slice(0, 2);
-  const latestProblem = [...downloadQueue].reverse().find(item => item.status === 'error');
-  const bannerItem = activeDownload ?? queuedPreview[0] ?? latestProblem ?? [...downloadQueue].reverse().find(item => item.status === 'done');
-  const bannerProgress = activeDownload
-    ? Math.max(3, Math.round(activeDownload.progress * 100))
-    : queuedCount > 0
-      ? 0
-      : downloadQueue.length > 0 && failedCount === 0
-        ? 100
-        : 0;
-  const bannerStatus = activeDownload
-    ? activeDownload.status === 'resolving'
-      ? 'Resolviendo'
-      : `${Math.round(activeDownload.progress * 100)}%`
-    : queuedCount > 0
-      ? `${queuedCount} en espera`
-      : failedCount > 0
-        ? `${failedCount} fallida${failedCount === 1 ? '' : 's'}`
-        : 'Completado';
-  const catalogArtists = useMemo(() => {
-    const unique = new Map<string, { name: string; artwork?: string; songCount: number }>();
-    for (const result of results) {
-      const key = result.artist.trim().toLocaleLowerCase();
-      if (!key) continue;
-      const current = unique.get(key);
-      if (current) {
-        current.songCount += 1;
-        current.artwork ||= result.artwork;
-      } else {
-        unique.set(key, { name: result.artist, artwork: result.artwork, songCount: 1 });
-      }
-    }
-    return [...unique.values()];
-  }, [results]);
-  const catalogAlbums = useMemo(() => {
-    const unique = new Map<string, { title: string; artist: string; artwork?: string; songCount: number }>();
-    for (const result of results) {
-      const album = result.album?.trim();
-      if (!album) continue;
-      const key = `${result.artist.trim().toLocaleLowerCase()}::${album.toLocaleLowerCase()}`;
-      const current = unique.get(key);
-      if (current) {
-        current.songCount += 1;
-        current.artwork ||= result.artwork;
-      } else {
-        unique.set(key, {
-          title: album,
-          artist: result.artist,
-          artwork: result.artwork,
-          songCount: 1,
-        });
-      }
-    }
-    return [...unique.values()];
-  }, [results]);
-
-  useEffect(() => {
-    void getDownloadFolderHandle().then(async handle => {
-      if (!handle) return;
-      setDownloadFolder(handle);
-      setNeedsFolderPermission(!(await verifyDownloadFolderPermission(handle, false)));
-    });
-  }, []);
-
-  useEffect(() => {
-    if (!isTauriDesktop()) return;
-    void getDesktopMusicFolder().then(setDesktopMusicFolder);
-  }, []);
-
-  useEffect(() => {
-    queueRef.current = downloadQueue;
-  }, [downloadQueue]);
-
-  useEffect(() => {
-    folderRef.current = downloadFolder;
-  }, [downloadFolder]);
-
-  useEffect(() => {
-    onDownloadedRef.current = onDownloaded;
-  }, [onDownloaded]);
-
-  useEffect(() => {
-    if (source !== 'soulseek') return;
-    let cancelled = false;
-    setSoulseekBridgeReady(null);
-    void warmSoulseekBridge()
-      .then(() => isSoulseekBridgeAvailable())
-      .then(async ready => {
-        if (!cancelled) setSoulseekBridgeReady(ready);
-        if (ready && shareMusicFolder && desktopMusicFolder) {
-          const shares = await configureSoulseekShares([desktopMusicFolder]);
-          if (!cancelled) setShareStatus(shares);
-        }
-      })
-      .catch(error => {
-        if (!cancelled) setMessage(error instanceof Error ? error.message : 'No se pudo configurar la carpeta compartida.');
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [source, shareMusicFolder, desktopMusicFolder]);
-
-  function updateQueueItem(queueId: string, patch: Partial<DownloadQueueItem>) {
-    queueRef.current = queueRef.current.map(item => (
-      item.queueId === queueId ? { ...item, ...patch } : item
-    ));
-    setDownloadQueue(items => items.map(item => (
-      item.queueId === queueId ? { ...item, ...patch } : item
-    )));
-  }
-
-  async function ensureDownloadFolder(): Promise<FileSystemDirectoryHandle | null | undefined> {
-    let targetFolder = folderRef.current;
-    if (canPickDownloadFolder() && !targetFolder) {
-      try {
-        targetFolder = await pickDownloadFolder();
-        setDownloadFolder(targetFolder);
-        folderRef.current = targetFolder;
-        setNeedsFolderPermission(false);
-        setMessage(`Descargas guardadas en "${targetFolder.name}".`);
-      } catch (error) {
-        if (error instanceof DOMException && error.name === 'AbortError') return undefined;
-        setMessage(error instanceof Error ? error.message : 'No se pudo elegir la carpeta.');
-        return undefined;
-      }
-    }
-    return targetFolder;
-  }
-
-  function enqueueDownloads(items: DownloadSearchResult[]) {
-    if (items.length === 0) return;
-    const queuedItems = items.map((result, index): DownloadQueueItem => ({
-      queueId: `${source}:${result.id}:${Date.now()}:${index}`,
-      source,
-      result,
-      status: 'queued',
-      progress: 0,
-      message: 'En cola',
-      history: [{ at: Date.now(), message: 'Añadida a la cola' }],
-      updatedAt: Date.now(),
-    }));
-    queueRef.current = [...queueRef.current, ...queuedItems];
-    setDownloadQueue(queue => [...queue, ...queuedItems]);
-    setMessage(`${items.length} descarga${items.length === 1 ? '' : 's'} en cola.`);
-  }
-
-  async function processDownloadQueue() {
-    if (processingQueueRef.current) return;
-    processingQueueRef.current = true;
-    try {
-      const worker = async () => {
-        while (true) {
-          const next = queueRef.current.find(item => item.status === 'queued');
-          if (!next) return;
-          const itemProvider = getDownloadProvider(next.source);
-          // updateQueueItem mutates queueRef synchronously, so another worker
-          // cannot claim the same item.
-          updateQueueItem(next.queueId, { status: 'resolving', progress: 0.03, message: 'Buscando peer rápido...' });
-          setMessage(`Descargando cola: ${next.result.title}`);
-          try {
-            const startedAt = Date.now();
-            updateQueueItem(next.queueId, {
-              startedAt,
-              updatedAt: startedAt,
-              history: [...next.history, { at: startedAt, message: 'Buscando coincidencias y fuentes disponibles' }],
-            });
-            const resolved = await itemProvider.resolveDownload(next.result);
-            updateQueueItem(next.queueId, {
-              status: 'downloading',
-              progress: 0.08,
-              message: next.source === 'soulseek' ? 'Contactando fuentes Soulseek...' : 'Preparando servidor de audio...',
-              updatedAt: Date.now(),
-            });
-            const track = await itemProvider.download(resolved, {
-              folderHandle: folderRef.current,
-              onActivity: activity => {
-                const current = queueRef.current.find(item => item.queueId === next.queueId);
-                if (!current) return;
-                const last = current.history[current.history.length - 1];
-                const history = last?.message === activity.message && last?.detail === activity.detail
-                  ? current.history
-                  : [...current.history, { at: Date.now(), message: activity.message, detail: activity.detail }].slice(-8);
-                updateQueueItem(next.queueId, {
-                  activity,
-                  message: activity.message,
-                  history,
-                  updatedAt: Date.now(),
-                });
-              },
-              onProgress: value => updateQueueItem(next.queueId, {
-                status: 'downloading',
-                progress: value,
-                updatedAt: Date.now(),
-              }),
-            });
-            // Do not mark a download ready until its catalog entry, artwork,
-            // and file handle / native path have been committed to the library.
-            await onDownloadedRef.current(track);
-            updateQueueItem(next.queueId, { status: 'done', progress: 1, message: 'Guardada en tu biblioteca', updatedAt: Date.now() });
-            setMessage(`Descargado: ${track.title}.`);
-          } catch (error) {
-            updateQueueItem(next.queueId, {
-              status: 'error',
-              progress: 0,
-              message: error instanceof Error ? error.message : 'No se pudo descargar.',
-              rawError: error instanceof Error ? error.message : String(error),
-              updatedAt: Date.now(),
-            });
-            setMessage(error instanceof Error ? error.message : 'No se pudo descargar.');
-          }
-        }
-      };
-      const concurrency = isTauriDesktop() ? 3 : 1;
-      await Promise.all(Array.from({ length: concurrency }, () => worker()));
-    } finally {
-      processingQueueRef.current = false;
-      const pending = queueRef.current.some(item => item.status === 'queued');
-      if (pending) void processDownloadQueue();
-    }
-  }
-
-  useEffect(() => {
-    if (downloadQueue.some(item => item.status === 'queued')) {
-      void processDownloadQueue();
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [downloadQueue]);
-
-  async function handlePickDownloadFolder() {
-    if (isTauriDesktop()) {
-      try {
-        const picked = await pickDesktopMusicFolder();
-        if (picked) {
-          setDesktopMusicFolder(picked);
-          setMessage(`Las descargas se guardarán en "${picked}".`);
-        }
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : 'No se pudo elegir la carpeta.');
-      }
-      return;
-    }
-    try {
-      const handle = await pickDownloadFolder();
-      setDownloadFolder(handle);
-      setNeedsFolderPermission(false);
-      setMessage(`Descargas guardadas en "${handle.name}".`);
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') return;
-      setMessage(error instanceof Error ? error.message : 'No se pudo elegir la carpeta.');
-    }
-  }
-
-  async function handleSearch() {
-    const trimmed = remoteQuery.trim();
-    if (!trimmed) return;
-    setBusyId('search');
-    setMessage('Buscando en Monochrome...');
-    try {
-      const found = await provider.search(trimmed);
-      setResults(found);
-      setCatalogFilter('all');
-      setMessage(found.length ? `${found.length} resultado${found.length === 1 ? '' : 's'}.` : 'No encontré resultados.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'Falló la búsqueda.');
-    } finally {
-      setBusyId(null);
-    }
-  }
-
-  /**
-   * Desktop (Tauri) has no showDirectoryPicker: downloads land in the native
-   * music folder instead, so all we need is that a folder is remembered —
-   * prompting the native picker once if it isn't.
-   */
-  async function ensureDownloadTarget(): Promise<boolean> {
-    if (isTauriDesktop()) {
-      const nativeFolder = await getDesktopMusicFolder().catch(() => null);
-      if (nativeFolder) return true;
-      try {
-        const picked = await pickDesktopMusicFolder();
-        if (picked) {
-          setMessage(`Las descargas se guardarán en "${picked}".`);
-          return true;
-        }
-      } catch (error) {
-        setMessage(error instanceof Error ? error.message : 'No se pudo elegir la carpeta de música.');
-        return false;
-      }
-      setMessage('Selecciona tu carpeta de música para guardar las descargas.');
-      return false;
-    }
-
-    const targetFolder = await ensureDownloadFolder();
-    if (!targetFolder) {
-      setMessage('Elige una carpeta de descargas para que la música siga disponible al cerrar StaySound.');
-      return false;
-    }
-    return true;
-  }
-
-  async function handleDownload(result: DownloadSearchResult) {
-    if (!(await ensureDownloadTarget())) return;
-    enqueueDownloads([result]);
-  }
-
-  async function handleDownloadAll() {
-    if (!(await ensureDownloadTarget())) return;
-    enqueueDownloads(results);
-  }
-
-  function handleClearFinishedDownloads() {
-    const nextQueue = downloadQueue.filter(item => item.status !== 'done' && item.status !== 'error');
-    queueRef.current = nextQueue;
-    setDownloadQueue(nextQueue);
-  }
-
-  function handleRetryDownload(queueId: string) {
-    const item = queueRef.current.find(entry => entry.queueId === queueId);
-    if (!item) return;
-    if (item.source === 'soulseek') invalidateSoulseekMatches(item.result);
-    const at = Date.now();
-    updateQueueItem(queueId, {
-      status: 'queued',
-      progress: 0,
-      message: 'Nuevo intento en cola',
-      activity: undefined,
-      rawError: undefined,
-      startedAt: undefined,
-      updatedAt: at,
-      history: [{ at, message: 'Reintento solicitado; se volverán a evaluar las fuentes' }],
-    });
-  }
-
-  function renderDownloadResult(result: DownloadSearchResult, featured = false) {
-    const queueItem = downloadQueue.find(item => (
-      item.result.id === result.id && item.source === source && item.status !== 'done' && item.status !== 'error'
-    ));
-    const queuedForResult = Boolean(queueItem);
-    const isDownloadingResult = queueItem?.status === 'downloading' || queueItem?.status === 'resolving';
-
-    return (
-      <article className={`download-result${featured ? ' featured' : ''}`} key={`${featured ? 'featured-' : ''}${result.id}`}>
-        <span className="track-thumb">
-          {result.artwork ? <img src={result.artwork} alt="" loading="lazy" /> : (
-            <span className="track-thumb-letter">{result.title.slice(0, 1).toUpperCase()}</span>
-          )}
-        </span>
-        <span className="download-result-main">
-          <strong>{result.title}</strong>
-          <small>
-            {result.artist}{result.album ? ` · ${result.album}` : ''}
-            {result.quality ? ` · ${result.quality}` : ''}
-            {result.size ? ` · ${formatBytes(result.size)}` : ''}
-          </small>
-        </span>
-        <span className="download-result-actions">
-          <button
-            className="btn btn-primary download-action-btn"
-            onClick={() => handleDownload(result)}
-            disabled={queuedForResult}
-          >
-            {isDownloadingResult ? (
-              <>
-                <ProgressRing value={queueItem?.progress ?? 0} />
-                {Math.round((queueItem?.progress ?? 0) * 100)}%
-              </>
-            ) : queuedForResult ? (
-              'En cola'
-            ) : (
-              <>
-                <DownloadIcon size={15} />
-                Descargar
-              </>
-            )}
-          </button>
-        </span>
-      </article>
-    );
-  }
-
-  function handleSaveSoulseekCredentials() {
-    try {
-      saveSoulseekCredentials(soulseekUsername, soulseekPassword);
-      setHasSoulseekCredentials(true);
-      setMessage('Sesion de Soulseek guardada.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo guardar la sesion de Soulseek.');
-    }
-  }
-
-  async function handleToggleMusicSharing() {
-    if (!desktopMusicFolder) {
-      setMessage('Selecciona primero tu carpeta de música.');
-      return;
-    }
-    const enabled = !shareMusicFolder;
-    setShareBusy(true);
-    try {
-      const shares = await configureSoulseekShares(enabled ? [desktopMusicFolder] : []);
-      setShareMusicFolder(enabled);
-      window.localStorage.setItem(SOULSEEK_SHARE_MUSIC_KEY, enabled ? '1' : '0');
-      setShareStatus(shares);
-      setMessage(enabled
-        ? `Soulseek anuncia ${shares.files} archivos de audio en ${shares.folders} carpetas.`
-        : 'Tu carpeta de música dejó de compartirse; solo queda la carpeta administrada por StaySound.');
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo cambiar la carpeta compartida.');
-    } finally {
-      setShareBusy(false);
-    }
-  }
-
-  async function handleRescanMusicSharing() {
-    setShareBusy(true);
-    try {
-      const shares = await rescanSoulseekShares();
-      setShareStatus(shares);
-      setMessage(`Reescaneo listo: ${shares.files} archivos de audio en ${shares.folders} carpetas.`);
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : 'No se pudo reescanear la carpeta compartida.');
-    } finally {
-      setShareBusy(false);
-    }
-  }
-
-  if (needsDesktopApp) {
-    return (
-      <section className="downloads-panel">
-        <DesktopRequiredNotice onGetApp={onGetApp} />
-      </section>
-    );
-  }
-
-  return (
-    <section className="downloads-panel">
-      <header className="download-toolbar">
-        <div className="download-toolbar-copy">
-          <strong>Monochrome + Soulseek P2P</strong>
-          <small>Monochrome encuentra la canción; Soulseek descarga el archivo a tu biblioteca local.</small>
-        </div>
-        <div className="download-controls">
-          <div className="download-search">
-            <input
-              value={remoteQuery}
-              onChange={event => setRemoteQuery(event.target.value)}
-              onKeyDown={event => { if (event.key === 'Enter') void handleSearch(); }}
-              placeholder="Canción, artista o álbum"
-            />
-            <button className="btn btn-primary" onClick={handleSearch} disabled={busyId === 'search'}>
-              <SearchIcon size={16} />
-              Buscar
-            </button>
-          </div>
-
-          <button
-            className="icon-btn"
-            onClick={() => setShowDownloadSettings(open => !open)}
-            aria-label="Opciones de descargas"
-            title="Opciones de descargas"
-          >
-            <GearIcon size={18} />
-          </button>
-
-          <button className="btn btn-ghost" onClick={handleDownloadAll} disabled={results.length === 0}>
-            <DownloadIcon size={16} />
-            Encolar
-          </button>
-        </div>
-      </header>
-
-      {showDownloadSettings && (
-        <section className="download-settings">
-          <div className="download-settings-head">
-            <strong>Opciones</strong>
-            {downloadFolder && <small>{downloadFolder.name}</small>}
-          </div>
-          <button
-            className={`settings-action ${needsFolderPermission ? 'danger' : ''}`}
-            onClick={handlePickDownloadFolder}
-            disabled={!canPickDownloadFolder() && !isTauriDesktop()}
-          >
-            <FolderIcon size={18} />
-            <span>{downloadFolder ? 'Cambiar carpeta' : 'Carpeta destino'}</span>
-          </button>
-
-          {source === 'soulseek' && (
-            <div className="bridge-config">
-              <small>
-                {soulseekBridgeReady === null
-                  ? 'Conectando con Soulseek...'
-                  : soulseekBridgeReady
-                    ? 'Soulseek listo'
-                    : 'Companion Soulseek no disponible'}
-              </small>
-              <input value={soulseekUsername} onChange={event => setSoulseekUsername(event.target.value)} placeholder="Usuario Soulseek" />
-              <input value={soulseekPassword} onChange={event => setSoulseekPassword(event.target.value)} placeholder="Password Soulseek" type="password" />
-              <button className="btn btn-primary" onClick={handleSaveSoulseekCredentials}>
-                {hasSoulseekCredentials ? 'Sesion guardada' : 'Guardar sesion'}
-              </button>
-              {isTauriDesktop() && (
-                <section className={`soulseek-share-card ${shareMusicFolder ? 'is-sharing' : ''}`}>
-                  <div className="soulseek-share-copy">
-                    <strong>{shareMusicFolder ? 'Compartiendo tu música' : 'Comparte tu carpeta de música'}</strong>
-                    <small title={desktopMusicFolder ?? undefined}>
-                      {desktopMusicFolder ?? 'Todavía no seleccionaste una carpeta'}
-                    </small>
-                    <span>
-                      {shareStatus
-                        ? `${shareStatus.files} archivos de audio · ${shareStatus.folders} carpetas anunciadas`
-                        : 'Soulseek podrá comprobar que también contribuyes a la red.'}
-                    </span>
-                  </div>
-                  <div className="soulseek-share-actions">
-                    <button className="btn btn-primary" onClick={handleToggleMusicSharing} disabled={shareBusy || !hasSoulseekCredentials}>
-                      {shareBusy ? 'Escaneando…' : shareMusicFolder ? 'Dejar de compartir' : 'Compartir mi música'}
-                    </button>
-                    {shareMusicFolder && (
-                      <button className="btn btn-ghost" onClick={handleRescanMusicSharing} disabled={shareBusy}>
-                        Reescanear
-                      </button>
-                    )}
-                  </div>
-                  <small className="soulseek-share-notice">
-                    Se anuncian únicamente archivos de audio; comparte solo material que tengas permiso de distribuir.
-                  </small>
-                </section>
-              )}
-            </div>
-          )}
-
-        </section>
-      )}
-
-      {message && (
-        <section className="status">
-          {message}
-        </section>
-      )}
-
-      {results.length > 0 && (
-        <nav className="download-catalog-tabs" aria-label="Filtrar resultados de búsqueda">
-          {([
-            ['all', 'Todo'],
-            ['songs', 'Canciones'],
-            ['artists', 'Artistas'],
-            ['albums', 'Álbumes'],
-          ] as Array<[DownloadCatalogFilter, string]>).map(([filter, label]) => (
-            <button
-              key={filter}
-              className={catalogFilter === filter ? 'active' : ''}
-              onClick={() => setCatalogFilter(filter)}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      )}
-
-      {downloadQueue.length > 0 && (
-        <><section className={`download-queue-banner ${failedCount > 0 ? 'has-error' : ''}`}>
-          <div className="download-queue-icon">
-            {activeDownload ? <SpinnerIcon size={18} /> : <DownloadIcon size={18} />}
-          </div>
-          <div className="download-queue-copy">
-            <div className="download-queue-line">
-              <strong>{bannerItem?.result.title ?? 'Cola de descargas'}</strong>
-              <span>{bannerStatus}</span>
-            </div>
-            <small>
-              {bannerItem
-                ? `${bannerItem.result.artist}${bannerItem.result.album ? ` · ${bannerItem.result.album}` : ''}`
-                : 'Sin descarga activa'}
-              {queuedPreview.length > 1 ? ` · Sigue: ${queuedPreview[1].result.title}` : ''}
-              {!activeDownload && latestProblem?.message ? ` · ${latestProblem.message}` : ''}
-            </small>
-            <span className="download-queue-bar" aria-hidden="true">
-              <span style={{ width: `${bannerProgress}%` }} />
-            </span>
-          </div>
-          <div className="download-queue-meta" aria-label="Estado de la cola">
-            {queuedCount > 0 && <span>{queuedCount} espera</span>}
-            {finishedCount > 0 && <span>{finishedCount} listas</span>}
-            {failedCount > 0 && <span className="error">{failedCount} error</span>}
-          </div>
-          <button className="btn btn-ghost" onClick={handleClearFinishedDownloads} disabled={!finishedCount && !failedCount}>
-            Limpiar
-          </button>
-        </section>
-        <section className="download-diagnostics" aria-label="Detalles de las descargas">
-          {downloadQueue.slice(-5).reverse().map(item => {
-            const isFailed = item.status === 'error';
-            const activity = item.activity;
-            return (
-              <article className={`download-diagnostic ${isFailed ? 'is-error' : ''}`} key={`diagnostic-${item.queueId}`}>
-                <div className="download-diagnostic-head">
-                  <div>
-                    <strong>{item.result.title}</strong>
-                    <small>{item.result.artist} · {item.source === 'soulseek' ? 'Soulseek P2P' : 'Monochrome'}</small>
-                  </div>
-                  <span className={`download-diagnostic-state ${item.status}`}>
-                    {isFailed
-                      ? 'Falló'
-                      : item.status === 'done'
-                        ? 'Lista'
-                        : activity
-                          ? DOWNLOAD_STAGE_LABELS[activity.stage]
-                          : item.message}
-                  </span>
-                </div>
-                <div className="download-diagnostic-summary">
-                  <strong>{isFailed ? downloadFailureExplanation(item) : (activity?.message || item.message)}</strong>
-                  {activity?.detail && <span>{activity.detail}</span>}
-                  <span>
-                    {activity?.peer ? `Peer: ${activity.peer} · ` : ''}
-                    {activity?.attempt ? `intento ${activity.attempt} · ` : ''}
-                    tiempo: {formatDownloadElapsed(item)}
-                  </span>
-                  {isFailed && item.rawError && <code>Error técnico: {item.rawError}</code>}
-                </div>
-                <details className="download-diagnostic-log">
-                  <summary>Ver actividad ({item.history.length})</summary>
-                  <ol>
-                    {item.history.map((entry, index) => (
-                      <li key={`${entry.at}-${index}`}>
-                        <time>{new Date(entry.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time>
-                        <span>{entry.message}{entry.detail ? ` — ${entry.detail}` : ''}</span>
-                      </li>
-                    ))}
-                  </ol>
-                </details>
-                {isFailed && (
-                  <div className="download-diagnostic-actions">
-                    <span>Se volverán a evaluar las fuentes disponibles y sus conexiones.</span>
-                    <button className="btn btn-primary" onClick={() => handleRetryDownload(item.queueId)}>Reintentar buscando fuentes</button>
-                  </div>
-                )}
-              </article>
-            );
-          })}
-        </section></>
-      )}
-
-      {catalogFilter === 'all' && results.length > 0 && (
-        <div className="download-catalog">
-          <section className="download-catalog-section">
-            <h2>Resultado principal</h2>
-            {renderDownloadResult(results[0], true)}
-          </section>
-          <section className="download-catalog-section">
-            <h2>Canciones</h2>
-            <div className="download-results">
-              {results.slice(0, 6).map(result => renderDownloadResult(result))}
-            </div>
-          </section>
-          {catalogArtists.length > 0 && (
-            <section className="download-catalog-section">
-              <h2>Artistas</h2>
-              <div className="download-entity-grid">
-                {catalogArtists.slice(0, 8).map(artist => (
-                  <article className="download-entity-card artist" key={artist.name}>
-                    <span className="download-entity-artwork">
-                      {artist.artwork ? <img src={artist.artwork} alt="" loading="lazy" /> : artist.name.slice(0, 1).toUpperCase()}
-                    </span>
-                    <strong>{artist.name}</strong>
-                    <small>Artista · {artist.songCount} resultado{artist.songCount === 1 ? '' : 's'}</small>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
-          {catalogAlbums.length > 0 && (
-            <section className="download-catalog-section">
-              <h2>Álbumes</h2>
-              <div className="download-entity-grid">
-                {catalogAlbums.slice(0, 10).map(album => (
-                  <article className="download-entity-card" key={`${album.artist}-${album.title}`}>
-                    <span className="download-entity-artwork">
-                      {album.artwork ? <img src={album.artwork} alt="" loading="lazy" /> : album.title.slice(0, 1).toUpperCase()}
-                    </span>
-                    <strong>{album.title}</strong>
-                    <small>{album.artist} · Álbum</small>
-                  </article>
-                ))}
-              </div>
-            </section>
-          )}
-        </div>
-      )}
-
-      {catalogFilter === 'songs' && (
-        <div className="download-results">{results.map(result => renderDownloadResult(result))}</div>
-      )}
-
-      {catalogFilter === 'artists' && (
-        <div className="download-entity-grid">
-          {catalogArtists.map(artist => (
-            <article className="download-entity-card artist" key={artist.name}>
-              <span className="download-entity-artwork">
-                {artist.artwork ? <img src={artist.artwork} alt="" loading="lazy" /> : artist.name.slice(0, 1).toUpperCase()}
-              </span>
-              <strong>{artist.name}</strong>
-              <small>Artista · {artist.songCount} resultado{artist.songCount === 1 ? '' : 's'}</small>
-            </article>
-          ))}
-        </div>
-      )}
-
-      {catalogFilter === 'albums' && (
-        <div className="download-entity-grid">
-          {catalogAlbums.map(album => (
-            <article className="download-entity-card" key={`${album.artist}-${album.title}`}>
-              <span className="download-entity-artwork">
-                {album.artwork ? <img src={album.artwork} alt="" loading="lazy" /> : album.title.slice(0, 1).toUpperCase()}
-              </span>
-              <strong>{album.title}</strong>
-              <small>{album.artist} · Álbum</small>
-            </article>
-          ))}
-        </div>
-      )}
-
-      {results.length === 0 && !busyId && (
-        <section className="empty-state compact download-empty-state">
-          <div className="empty-state-icon"><DownloadIcon size={44} /></div>
-          <h2>Busca música para descargar</h2>
-          <p>Los resultados de Soulseek aparecerán aquí.</p>
         </section>
       )}
     </section>

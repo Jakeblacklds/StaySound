@@ -3,8 +3,9 @@ use std::{
     collections::hash_map::DefaultHasher,
     env, fs,
     hash::{Hash, Hasher},
+    io::{BufReader, Read},
     path::{Path, PathBuf},
-    process::Command,
+    process::{Command, Stdio},
     time::UNIX_EPOCH,
 };
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -21,7 +22,12 @@ const LYRICS_MODEL: &str = "mlx-community/whisper-large-v3-turbo";
 const MLX_WHISPER_VERSION: &str = "0.4.3";
 const MFA_VERSION: &str = "3.4.*";
 const MICROMAMBA_URL: &str = "https://micro.mamba.pm/api/micromamba/osx-arm64/latest";
+const PHONEME_TIMING_SCRIPT: &str = include_str!("../python/phoneme_timing.py");
 const ACOUSTIC_REFINER_SCRIPT: &str = include_str!("../python/refine_sustains.py");
+const EXPERIMENTAL_INSTALLER: &str = include_str!("../python/install_experimental_aligner.py");
+const EXPERIMENTAL_ALIGNER: &str = include_str!("../python/experimental_alignment.py");
+// Alignment jobs share model/runtime files. Do not race installations or outputs.
+static ALIGNMENT_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -39,6 +45,13 @@ pub struct KaraokeProgress {
     stage: String,
     progress: f32,
     detail: String,
+    /// Live technical line (model, device, package being downloaded…) so the UI
+    /// can show what the machine is really doing instead of a generic message.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    note: Option<String>,
+    /// Remaining time for the current stage when the underlying tool reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    eta_ms: Option<u64>,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -60,6 +73,12 @@ pub struct GeneratedLyricsWord {
     confidence: f32,
     #[serde(default)]
     syllables: Vec<GeneratedLyricsSyllable>,
+    /// A backing vocal, rendered small under the lead line (TTML `x-bg`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    background: bool,
+    /// Split into syllables by hand; the player fills it syllable by syllable.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    syllabic: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Serialize)]
@@ -121,6 +140,8 @@ pub struct GeneratedLyrics {
     text_match: Option<f32>,
     #[serde(default)]
     acoustic_model: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    alignment_notes: Vec<String>,
     lines: Vec<GeneratedLyricsLine>,
 }
 
@@ -418,17 +439,177 @@ fn python_version(python: &Path) -> Option<String> {
 }
 
 fn emit_progress(app: &AppHandle, stage: &str, progress: f32, detail: &str) {
+    emit_progress_detailed(app, stage, progress, detail, None, None);
+}
+
+fn emit_progress_detailed(
+    app: &AppHandle,
+    stage: &str,
+    progress: f32,
+    detail: &str,
+    note: Option<String>,
+    eta_ms: Option<u64>,
+) {
     let _ = app.emit(
         "karaoke://progress",
         KaraokeProgress {
             stage: stage.to_string(),
             progress,
             detail: detail.to_string(),
+            note,
+            eta_ms,
         },
     );
 }
 
-fn authorized_audio_path(
+/// Reads a child process stream that mixes `\n` lines with `\r`-refreshed
+/// progress bars (tqdm) and hands every finished segment to `on_segment`.
+fn stream_segments<R: Read>(reader: R, mut on_segment: impl FnMut(&str)) {
+    let mut reader = BufReader::new(reader);
+    let mut buffer: Vec<u8> = Vec::with_capacity(256);
+    let mut byte = [0u8; 1];
+    loop {
+        match reader.read(&mut byte) {
+            Ok(0) => break,
+            Ok(_) => {
+                if byte[0] == b'\n' || byte[0] == b'\r' {
+                    let segment = String::from_utf8_lossy(&buffer).trim().to_string();
+                    buffer.clear();
+                    if !segment.is_empty() {
+                        on_segment(&segment);
+                    }
+                } else {
+                    buffer.push(byte[0]);
+                    // A pathological line without separators must not grow forever.
+                    if buffer.len() > 8_192 {
+                        buffer.clear();
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    let tail = String::from_utf8_lossy(&buffer).trim().to_string();
+    if !tail.is_empty() {
+        on_segment(&tail);
+    }
+}
+
+/// Extracts the `NN%` ratio tqdm prints at the head of its bar.
+fn parse_tqdm_percent(segment: &str) -> Option<f32> {
+    let index = segment.find('%')?;
+    let digits: String = segment[..index]
+        .chars()
+        .rev()
+        .take_while(|character| character.is_ascii_digit())
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    if digits.is_empty() {
+        return None;
+    }
+    digits.parse::<f32>().ok().map(|value| value / 100.0)
+}
+
+/// Extracts the remaining time from tqdm's `[elapsed<remaining, rate]` block.
+fn parse_tqdm_eta_ms(segment: &str) -> Option<u64> {
+    let start = segment.rfind('[')?;
+    let block = &segment[start + 1..];
+    let end = block.find(']').unwrap_or(block.len());
+    let block = &block[..end];
+    let remaining = block.split('<').nth(1)?.split(',').next()?.trim();
+    parse_clock_ms(remaining)
+}
+
+/// Turns one line of pip output into a progress update. `packages` counts the
+/// dependencies seen so far, which is the only length signal pip gives before
+/// it finishes resolving, so the bar approaches — but never reaches — the end
+/// of the stage while the note carries the literal package being downloaded.
+fn pip_progress_line(
+    segment: &str,
+    packages: &mut f32,
+    current: &mut String,
+) -> Option<(f32, &'static str, Option<String>, Option<u64>)> {
+    let advance = |packages: f32| 0.22 + 0.68 * (1.0 - (-packages / 14.0).exp());
+
+    if let Some(rest) = segment.strip_prefix("Collecting ") {
+        let name = rest.split(['=', '<', '>', '!', '[', ' ']).next().unwrap_or(rest);
+        *packages += 1.0;
+        *current = name.to_string();
+        return Some((
+            advance(*packages),
+            "Descargando componentes…",
+            Some(format!("Resolviendo {name}")),
+            None,
+        ));
+    }
+
+    if let Some(rest) = segment.strip_prefix("Downloading ") {
+        let size = rest
+            .rfind('(')
+            .map(|index| rest[index + 1..].trim_end_matches(')').to_string());
+        let name = if current.is_empty() {
+            rest.split(['-', ' ']).next().unwrap_or(rest).to_string()
+        } else {
+            current.clone()
+        };
+        let note = match size {
+            Some(size) => format!("Descargando {name} · {size}"),
+            None => format!("Descargando {name}"),
+        };
+        return Some((advance(*packages), "Descargando componentes…", Some(note), None));
+    }
+
+    if segment.starts_with("Installing collected packages") {
+        return Some((
+            0.94,
+            "Instalando componentes…",
+            Some(format!("{} paquetes", *packages as u32)),
+            None,
+        ));
+    }
+
+    // pip's own bar: "   ━━━━━━━ 12.4/61.0 MB 5.1 MB/s eta 0:00:09"
+    if let Some(index) = segment.find("eta ") {
+        let eta = parse_clock_ms(segment[index + 4..].split_whitespace().next().unwrap_or(""));
+        let transferred = segment
+            .split_whitespace()
+            .find(|token| token.contains('/') && token.contains('.'))
+            .map(|token| token.to_string());
+        let unit = segment
+            .split_whitespace()
+            .find(|token| matches!(*token, "MB" | "kB" | "GB"))
+            .unwrap_or("MB");
+        let note = match transferred {
+            Some(transferred) if !current.is_empty() => {
+                Some(format!("{current} · {transferred} {unit}"))
+            }
+            Some(transferred) => Some(format!("{transferred} {unit}")),
+            None if !current.is_empty() => Some(format!("Descargando {current}")),
+            None => None,
+        };
+        return Some((advance(*packages), "Descargando componentes…", note, eta));
+    }
+
+    None
+}
+
+/// Parses `mm:ss` / `hh:mm:ss` into milliseconds.
+fn parse_clock_ms(value: &str) -> Option<u64> {
+    let parts: Vec<&str> = value.split(':').collect();
+    if parts.len() < 2 || parts.len() > 3 {
+        return None;
+    }
+    let mut seconds = 0u64;
+    for part in &parts {
+        let unit = part.trim().parse::<u64>().ok()?;
+        seconds = seconds * 60 + unit;
+    }
+    Some(seconds * 1_000)
+}
+
+pub(crate) fn authorized_audio_path(
     state: &State<'_, MusicLibraryState>,
     path: &str,
 ) -> Result<PathBuf, String> {
@@ -442,7 +623,7 @@ fn authorized_audio_path(
     Ok(source)
 }
 
-fn cache_key(source: &Path) -> Result<String, String> {
+pub(crate) fn cache_key(source: &Path) -> Result<String, String> {
     let metadata = fs::metadata(source).map_err(|error| error.to_string())?;
     let mut hasher = DefaultHasher::new();
     source.hash(&mut hasher);
@@ -483,14 +664,19 @@ fn demucs_cache_root(app: &AppHandle, source: &Path) -> Result<PathBuf, String> 
         .map_err(|error| error.to_string())
 }
 
-#[tauri::command]
-pub fn karaoke_capabilities(app: AppHandle) -> Result<KaraokeCapabilities, String> {
-    let python = find_python(&app, false);
+/// Probing the runtime runs `python -c "import demucs, torch, …"` and
+/// `python --version`: three subprocesses, and importing torch alone takes
+/// seconds. A command declared as a plain `fn` runs on the main thread, so
+/// asking this question used to stop the window painting for the whole probe.
+/// Callers that are already off the main thread use this directly; the command
+/// itself is `async` and goes through `spawn_blocking`.
+fn capabilities_snapshot(app: &AppHandle) -> Result<KaraokeCapabilities, String> {
+    let python = find_python(app, false);
     Ok(KaraokeCapabilities {
-        demucs_ready: find_python(&app, true).is_some(),
+        demucs_ready: find_python(app, true).is_some(),
         transcription_ready: python.as_deref().is_some_and(transcription_is_ready),
-        alignment_ready: mfa_is_ready(&app),
-        gemini_configured: read_settings(&app)
+        alignment_ready: mfa_is_ready(app),
+        gemini_configured: read_settings(app)
             .gemini_api_key
             .is_some_and(|value| !value.trim().is_empty()),
         python_version: python.as_deref().and_then(python_version),
@@ -498,11 +684,18 @@ pub fn karaoke_capabilities(app: AppHandle) -> Result<KaraokeCapabilities, Strin
 }
 
 #[tauri::command]
+pub async fn karaoke_capabilities(app: AppHandle) -> Result<KaraokeCapabilities, String> {
+    tauri::async_runtime::spawn_blocking(move || capabilities_snapshot(&app))
+        .await
+        .map_err(|error| error.to_string())?
+}
+
+#[tauri::command]
 pub async fn install_local_lyrics_runtime(app: AppHandle) -> Result<KaraokeCapabilities, String> {
     let python = find_python(&app, true)
         .ok_or_else(|| "Primero necesito preparar el motor vocal local de Demucs.".to_string())?;
     if transcription_is_ready(&python) && mfa_is_ready(&app) {
-        return karaoke_capabilities(app);
+        return capabilities_snapshot(&app);
     }
 
     let app_for_task = app.clone();
@@ -552,25 +745,29 @@ pub async fn install_local_lyrics_runtime(app: AppHandle) -> Result<KaraokeCapab
     .await
     .map_err(|error| error.to_string())??;
 
-    karaoke_capabilities(app)
+    capabilities_snapshot(&app)
 }
 
 #[tauri::command]
-pub fn save_gemini_api_key(app: AppHandle, api_key: String) -> Result<bool, String> {
+pub async fn save_gemini_api_key(app: AppHandle, api_key: String) -> Result<bool, String> {
     let api_key = api_key.trim().to_string();
     if !api_key.is_empty() && api_key.len() < 20 {
         return Err("La clave de Gemini no parece válida.".into());
     }
-    let mut settings = read_settings(&app);
-    settings.gemini_api_key = (!api_key.is_empty()).then_some(api_key);
-    write_settings(&app, &settings)?;
-    Ok(settings.gemini_api_key.is_some())
+    tauri::async_runtime::spawn_blocking(move || {
+        let mut settings = read_settings(&app);
+        settings.gemini_api_key = (!api_key.is_empty()).then_some(api_key);
+        write_settings(&app, &settings)?;
+        Ok(settings.gemini_api_key.is_some())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
 pub async fn install_demucs_runtime(app: AppHandle) -> Result<KaraokeCapabilities, String> {
     if find_python(&app, true).is_some() {
-        return karaoke_capabilities(app);
+        return capabilities_snapshot(&app);
     }
 
     let system_python = find_python(&app, false)
@@ -603,7 +800,7 @@ pub async fn install_demucs_runtime(app: AppHandle) -> Result<KaraokeCapabilitie
         }
 
         emit_progress(&app_for_task, "runtime", 0.22, "Descargando componentes…");
-        let install = Command::new(&runtime_python)
+        let mut install = Command::new(&runtime_python)
             .args([
                 "-m",
                 "pip",
@@ -615,13 +812,55 @@ pub async fn install_demucs_runtime(app: AppHandle) -> Result<KaraokeCapabilitie
                 "static-ffmpeg",
                 "soundfile",
             ])
-            .output()
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|error| error.to_string())?;
-        if !install.status.success() {
-            let error = String::from_utf8_lossy(&install.stderr);
+
+        let stdout = install
+            .stdout
+            .take()
+            .ok_or_else(|| "No pude leer la salida del instalador.".to_string())?;
+        let stderr = install
+            .stderr
+            .take()
+            .ok_or_else(|| "No pude leer la salida del instalador.".to_string())?;
+        // pip writes failures to stderr while the package log goes to stdout,
+        // so the error tail is collected on its own thread.
+        let error_tail = std::thread::spawn(move || {
+            let mut lines: Vec<String> = Vec::new();
+            stream_segments(stderr, |segment| {
+                lines.push(segment.to_string());
+                if lines.len() > 12 {
+                    lines.remove(0);
+                }
+            });
+            lines
+        });
+
+        let app_for_pip = app_for_task.clone();
+        let mut packages = 0f32;
+        let mut current = String::new();
+        stream_segments(stdout, |segment| {
+            if let Some(progress) = pip_progress_line(segment, &mut packages, &mut current) {
+                emit_progress_detailed(
+                    &app_for_pip,
+                    "runtime",
+                    progress.0,
+                    progress.1,
+                    progress.2,
+                    progress.3,
+                );
+            }
+        });
+
+        let status = install.wait().map_err(|error| error.to_string())?;
+        let tail = error_tail.join().unwrap_or_default();
+        if !status.success() {
             return Err(format!(
                 "No pude instalar Demucs. {}",
-                error.lines().rev().take(4).collect::<Vec<_>>().join(" ")
+                tail.iter().rev().take(4).cloned().collect::<Vec<_>>().join(" ")
             ));
         }
         install_private_ffmpeg(&runtime_python)?;
@@ -631,7 +870,32 @@ pub async fn install_demucs_runtime(app: AppHandle) -> Result<KaraokeCapabilitie
     .await
     .map_err(|error| error.to_string())??;
 
-    karaoke_capabilities(app)
+    capabilities_snapshot(&app)
+}
+
+/// The stems Demucs already wrote for this file, without ever starting it. The
+/// timing editor draws the isolated voice when it exists and simply does
+/// without it otherwise; separating a song just to draw it is not worth it.
+#[tauri::command]
+pub async fn cached_karaoke_stems(
+    app: AppHandle,
+    state: State<'_, MusicLibraryState>,
+    path: String,
+) -> Result<Option<KaraokeStems>, String> {
+    let source = authorized_audio_path(&state, &path)?;
+    let cache_root = demucs_cache_root(&app, &source)?;
+    let Some((instrumental, vocals)) = locate_stems(&cache_root, &source) else {
+        return Ok(None);
+    };
+    app.asset_protocol_scope()
+        .allow_directory(&cache_root, true)
+        .map_err(|error| error.to_string())?;
+    Ok(Some(KaraokeStems {
+        instrumental_path: instrumental.to_string_lossy().into_owned(),
+        vocals_path: vocals.to_string_lossy().into_owned(),
+        cached: true,
+        model: DEMUCS_MODEL.into(),
+    }))
 }
 
 #[tauri::command]
@@ -678,7 +942,19 @@ pub async fn prepare_karaoke_stems(
                 "import torch; raise SystemExit(0 if torch.backends.mps.is_available() else 1)",
             ],
         );
-        emit_progress(&app_for_task, "separation", 0.08, "Aislando la voz…");
+        let device_note = if use_mps {
+            format!("{DEMUCS_MODEL} · GPU Metal")
+        } else {
+            format!("{DEMUCS_MODEL} · CPU")
+        };
+        emit_progress_detailed(
+            &app_for_task,
+            "separation",
+            0.02,
+            "Cargando el modelo de separación…",
+            Some(device_note.clone()),
+            None,
+        );
         let private_bin = python
             .parent()
             .ok_or_else(|| "La ruta del motor vocal no es válida.".to_string())?;
@@ -700,21 +976,64 @@ pub async fn prepare_karaoke_stems(
         if use_mps {
             command.args(["-d", "mps"]);
         }
-        let output = command
+        let mut child = command
             .arg("-o")
             .arg(&cache_for_task)
             .arg(&source_for_task)
             .env("PATH", command_path)
-            .output()
+            // Demucs streams its tqdm bar to stderr; keeping it unbuffered lets
+            // the loader mirror the real percentage instead of guessing.
+            .env("PYTHONUNBUFFERED", "1")
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .spawn()
             .map_err(|error| error.to_string())?;
-        if !output.status.success() {
-            let error = String::from_utf8_lossy(&output.stderr);
+
+        let stderr = child
+            .stderr
+            .take()
+            .ok_or_else(|| "No pude leer la salida del separador.".to_string())?;
+        let mut tail: Vec<String> = Vec::new();
+        let mut last_percent = -1i32;
+        stream_segments(stderr, |segment| {
+            if let Some(ratio) = parse_tqdm_percent(segment) {
+                let percent = (ratio * 100.0).round() as i32;
+                if percent == last_percent {
+                    return;
+                }
+                last_percent = percent;
+                emit_progress_detailed(
+                    &app_for_task,
+                    "separation",
+                    // Model load and file writing bookend the actual inference.
+                    0.04 + ratio * 0.92,
+                    "El modelo recorre la canción bloque a bloque…",
+                    Some(format!("{device_note} · {percent} %")),
+                    parse_tqdm_eta_ms(segment),
+                );
+                return;
+            }
+            tail.push(segment.to_string());
+            if tail.len() > 12 {
+                tail.remove(0);
+            }
+        });
+
+        let status = child.wait().map_err(|error| error.to_string())?;
+        if !status.success() {
             return Err(format!(
                 "Demucs no pudo separar esta canción. {}",
-                error.lines().rev().take(5).collect::<Vec<_>>().join(" ")
+                tail.iter().rev().take(5).cloned().collect::<Vec<_>>().join(" ")
             ));
         }
-        emit_progress(&app_for_task, "separation", 0.98, "Terminando audio…");
+        emit_progress_detailed(
+            &app_for_task,
+            "separation",
+            0.98,
+            "Guardando las pistas separadas…",
+            Some(format!("{device_note} · escribiendo FLAC")),
+            None,
+        );
         Ok(())
     })
     .await
@@ -835,6 +1154,46 @@ def transcription_kwargs(language=None):
         options["language"] = language
     return options
 
+def detect_song_language(audio):
+    """Vote over the loudest vocal windows, not Whisper's first 30 seconds.
+
+    An instrumental or whispered intro used to decide the language for the
+    whole song; a Spanish song detected as English is translated, not heard.
+    """
+    import mlx.core as mx
+    import numpy as np
+    from mlx_whisper.audio import N_FRAMES, N_SAMPLES, log_mel_spectrogram, pad_or_trim
+    from mlx_whisper.transcribe import ModelHolder
+
+    whisper = ModelHolder.get_model(model, mx.float16)
+    audio = np.array(audio, dtype=np.float32)
+    starts = list(range(0, max(1, len(audio) - N_SAMPLES + 1), N_SAMPLES // 2))
+    energy = [float(np.sqrt(np.mean(np.square(audio[start:start + N_SAMPLES])))) for start in starts]
+    totals = {}
+    for index in sorted(range(len(starts)), key=energy.__getitem__, reverse=True)[:4]:
+        window = audio[starts[index]:starts[index] + N_SAMPLES]
+        mel = log_mel_spectrogram(window, n_mels=whisper.dims.n_mels, padding=N_SAMPLES)
+        _, probabilities = whisper.detect_language(pad_or_trim(mel, N_FRAMES, axis=-2).astype(mx.float16))
+        for code, probability in probabilities.items():
+            totals[code] = totals.get(code, 0.0) + probability
+    return max(totals, key=totals.get) if totals else None
+
+def without_repeated_decodes(words):
+    """Drop words a looping decode emitted again over the same audio."""
+    kept = []
+    for word in sorted(words, key=lambda item: (item["startMs"], item["endMs"])):
+        if kept:
+            previous = kept[-1]
+            overlap = min(previous["endMs"], word["endMs"]) - max(previous["startMs"], word["startMs"])
+            shortest = min(previous["endMs"] - previous["startMs"], word["endMs"] - word["startMs"])
+            # Loops often emit zero-length copies stacked on one instant.
+            if overlap >= 0 and (overlap > 0.5 * shortest or shortest == 0):
+                if word["confidence"] > previous["confidence"]:
+                    kept[-1] = word
+                continue
+        kept.append(word)
+    return kept
+
 raw_words = []
 result_language = requested_language
 segment_serial = 0
@@ -868,8 +1227,9 @@ def append_result(result, offset_seconds=0.0, core_start=None, core_end=None, la
             })
 
 if requested_language != "en-es":
-    forced_language = requested_language if requested_language in ("en", "es") else None
-    result = mlx_whisper.transcribe(audio_path, **transcription_kwargs(forced_language))
+    audio = load_audio(audio_path)
+    forced_language = requested_language if requested_language in ("en", "es") else detect_song_language(audio)
+    result = mlx_whisper.transcribe(audio, **transcription_kwargs(forced_language))
     result_language = str(result.get("language") or requested_language)
     append_result(result, language=result_language)
 else:
@@ -963,6 +1323,7 @@ else:
     raw_words.sort(key=lambda word: (word["startMs"], word["endMs"]))
     result_language = "en-es"
 
+raw_words = without_repeated_decodes(raw_words)
 lines = []
 current = []
 current_chars = 0
@@ -1092,10 +1453,21 @@ with open(output_path, "w", encoding="utf-8") as handle:
     Ok(lyrics)
 }
 
+#[derive(Clone, Copy, PartialEq)]
+enum MfaPass {
+    /// Retime words and phones, then measure sustained vowels.
+    AlignAndMeasure,
+    /// Retime words and phones for a later aligner to build on.
+    Align,
+    /// Keep the given word edges; add MFA phones only where MFA agrees.
+    PhonesOnly,
+}
+
 fn align_generated_lyrics(
     app: &AppHandle,
     source: &Path,
     lyrics: &GeneratedLyrics,
+    pass: MfaPass,
 ) -> Result<GeneratedLyrics, String> {
     if !mfa_is_ready(app) || !matches!(lyrics.language.as_str(), "es" | "en" | "en-es") {
         return Ok(lyrics.clone());
@@ -1129,7 +1501,8 @@ import shutil
 import subprocess
 import sys
 
-vocals_path, input_path, output_path, job_root, language = sys.argv[1:6]
+vocals_path, input_path, output_path, job_root, language, mode = sys.argv[1:7]
+keep_word_edges = mode == "phones-only"
 job = pathlib.Path(job_root)
 corpora = job / "corpora"
 aligned = job / "aligned"
@@ -1195,6 +1568,7 @@ for index in range(len(detected_languages) - 1, -1, -1):
         detected_languages[index] = following_language or "en"
 
 offsets = {}
+clip_ends = {}
 line_languages = {}
 for index, line in enumerate(lyrics_lines):
     words = line.get("words") or []
@@ -1202,10 +1576,15 @@ for index, line in enumerate(lyrics_lines):
         continue
     line_language = detected_languages[index] or "en"
     line["language"] = line_language
-    # Never include the previous lyric in this clip: on singing, MFA can
-    # otherwise assign a held vowel from the outgoing line to the first phone
-    # of the new line. Whisper's onset is the hard handoff boundary here.
     start_ms = max(0, int(words[0].get("startMs", line.get("startMs", 0))))
+    # Give MFA a small onset margin only where the preceding lyric leaves room.
+    # Including a previous held vowel can attach it to this line's first phone.
+    previous_words = (lyrics_lines[index - 1].get("words") or []) if index else []
+    previous_end = int(previous_words[-1]["endMs"]) if previous_words else 0
+    # A first word Whisper never heard is placed from a provider cue, and
+    # crowd-sourced cues often trail the singer; give MFA room to find it.
+    onset_margin = 180 if float(words[0].get("confidence", 0) or 0) > 0 else 900
+    start_ms = min(start_ms, max(0, start_ms - onset_margin, previous_end))
     end_ms = int(words[-1].get("endMs", line.get("endMs", start_ms + 500)))
     if index + 1 < len(lyrics["lines"]):
         following = lyrics["lines"][index + 1].get("words") or []
@@ -1228,6 +1607,7 @@ for index, line in enumerate(lyrics_lines):
         "-ac", "1", "-ar", "16000", "-sample_fmt", "s16", str(wav), "-y",
     ], check=True)
     offsets[stem] = start_ms
+    clip_ends[stem] = end_ms
     line_languages[stem] = line_language
 
 languages_used = sorted(set(line_languages.values()))
@@ -1244,52 +1624,6 @@ for current_language in languages_used:
     if current_language == "es":
         command.extend(["--dialect", "spanish_latin_america_mfa"])
     subprocess.run(command, check=True)
-
-hyphenators = {
-    "en": pyphen.Pyphen(lang="en_US"),
-    "es": pyphen.Pyphen(lang="es"),
-}
-english_vowels = ("AA", "AE", "AH", "AO", "AW", "AY", "EH", "ER", "EY", "IH", "IY", "OW", "OY", "UH", "UW")
-spanish_vowels = {"a", "e", "i", "o", "u", "ã", "ẽ", "ĩ", "õ", "ũ"}
-
-def is_vowel(label, word_language):
-    plain = re.sub(r"\d", "", label).upper()
-    return plain.startswith(english_vowels) if word_language == "en" else label in spanish_vowels
-
-def make_syllables(text, begin, end, phones, word_language):
-    match = re.match(r"^(\W*)(.*?)(\W*)$", text, flags=re.UNICODE)
-    prefix, core, suffix = match.groups() if match else ("", text, "")
-    pieces = [piece for piece in hyphenators[word_language].inserted(core).split("-") if piece] or [core]
-    pieces[0] = prefix + pieces[0]
-    pieces[-1] += suffix
-    nuclei = [phone for phone in phones if is_vowel(phone[2], word_language)]
-    if len(pieces) == len(nuclei) and len(pieces) > 1:
-        boundaries = [begin]
-        for left, right in zip(nuclei, nuclei[1:]):
-            boundaries.append((left[1] + right[0]) / 2)
-        boundaries.append(end)
-    else:
-        weights = [max(1, len(clean_token(piece))) for piece in pieces]
-        total = sum(weights)
-        boundaries = [begin]
-        cursor = begin
-        for weight in weights[:-1]:
-            cursor += (end - begin) * weight / total
-            boundaries.append(cursor)
-        boundaries.append(end)
-    syllables = []
-    for index, piece in enumerate(pieces):
-        syllable_start, syllable_end = boundaries[index], boundaries[index + 1]
-        labels = [label for phone_start, phone_end, label in phones
-                  if label not in ("sil", "spn") and (phone_start + phone_end) / 2 >= syllable_start
-                  and (phone_start + phone_end) / 2 <= syllable_end]
-        syllables.append({
-            "text": piece,
-            "startMs": round(syllable_start * 1000),
-            "endMs": max(round(syllable_start * 1000) + 1, round(syllable_end * 1000)),
-            "phones": labels,
-        })
-    return syllables
 
 def warp_syllables_to_word(word, old_start, old_end):
     """Keep every internal syllable boundary valid after moving word edges."""
@@ -1328,58 +1662,45 @@ for index, line in enumerate(lyrics.get("lines", [])):
     if len(word_entries) != len(target_words):
         continue
     offset = offsets[stem] / 1000
-    line_window_start = int(line.get("startMs", target_words[0].get("startMs", 0)))
+    line_window_start = min(offsets[stem], int(line.get("startMs", target_words[0].get("startMs", 0))))
     line_window_end = int(line.get("endMs", target_words[-1].get("endMs", line_window_start + 500)))
-    for target_index, (target, entry) in enumerate(zip(target_words, word_entries)):
+    clip_start, clip_end = offsets[stem], clip_ends[stem]
+    # Decide every word before writing any: MFA's own intervals never overlap,
+    # so a neighbour's stale Whisper time must not veto a measured edge.
+    measured = []
+    for target, entry in zip(target_words, word_entries):
         begin, end, _ = entry
         word_phones = [(p[0], p[1], p[2]) for p in phone_entries if (p[0] + p[1]) / 2 >= begin and (p[0] + p[1]) / 2 <= end]
         mfa_start = round((begin + offset) * 1000)
         mfa_end = round((end + offset) * 1000)
-        original_start = int(target.get("startMs", mfa_start))
-        original_end = int(target.get("endMs", mfa_end))
-        confidence = float(target.get("confidence", 0) or 0)
-        if confidence > 0.15:
-            # Whisper is the stable onset anchor. MFA is allowed to extend a
-            # held ending, but never to push a recognized word later/earlier.
-            anchored_start = max(line_window_start, original_start)
-            next_start = int(target_words[target_index + 1].get("startMs", line_window_end)) if target_index + 1 < len(target_words) else line_window_end
-            end_limit = max(anchored_start + 40, min(line_window_end, next_start))
-            anchored_end = min(end_limit, max(original_end, mfa_end))
-            local_begin = anchored_start / 1000 - offset
-            local_end = anchored_end / 1000 - offset
-            source_duration = max(0.001, end - begin)
-            target_duration = max(0.001, local_end - local_begin)
-            scale = target_duration / source_duration
-            word_phones = [
-                (local_begin + (phone_start - begin) * scale,
-                 local_begin + (phone_end - begin) * scale,
-                 label)
-                for phone_start, phone_end, label in word_phones
-            ]
-            begin, end = local_begin, local_end
-            target["startMs"] = anchored_start
-            target["endMs"] = anchored_end
+        original = (int(target.get("startMs", mfa_start)), int(target.get("endMs", mfa_end)))
+        interval = trusted_word_interval(
+            *original, mfa_start, mfa_end, clip_start, clip_end, word_phones, word_language,
+        ) if clean_token(entry[2]) == clean_token(target.get("text", "")) else None
+        if keep_word_edges and interval is not None:
+            # Word edges were already chosen by a stronger aligner; MFA only
+            # contributes phones where it independently agrees with them.
+            agrees = abs(interval[0] - original[0]) <= 180 and abs(interval[1] - original[1]) <= 350
+            interval = original if agrees else None
+        measured.append((interval, word_phones))
+    # An unmeasured word yields to measured neighbours; it never pushes a
+    # measured edge, and is never squeezed to a flash between two of them.
+    intervals = [list(interval) if interval is not None else None for interval, _ in measured]
+    fill_gaps(intervals, target_words)
+    widen_short_words(intervals)
+    for target, span, (interval, word_phones) in zip(target_words, intervals, measured):
+        target["startMs"], target["endMs"] = span
+        begin = target["startMs"] / 1000 - offset
+        end = target["endMs"] / 1000 - offset
+        if interval is not None:
+            target["measured"] = True
+            # Keep measured phone times. Stretching rejected MFA intervals into
+            # Whisper slots invents syllable timing even when the words agree.
+            word_phones = [(max(begin, a), min(end, b), label)
+                           for a, b, label in word_phones if b > begin and a < end]
         else:
-            # A provider-only word has no trustworthy acoustic identity. Keep
-            # its interpolated slot and use MFA only to distribute its phones;
-            # accepting MFA's word location can steal the following recognized
-            # word and invert that word's internal syllable boundaries.
-            target["startMs"] = max(line_window_start, original_start)
-            next_start = int(target_words[target_index + 1].get("startMs", line_window_end)) if target_index + 1 < len(target_words) else line_window_end
-            target["endMs"] = min(line_window_end, next_start, max(target["startMs"] + 40, original_end))
-            local_begin = target["startMs"] / 1000 - offset
-            local_end = target["endMs"] / 1000 - offset
-            source_duration = max(0.001, end - begin)
-            target_duration = max(0.001, local_end - local_begin)
-            scale = target_duration / source_duration
-            word_phones = [
-                (local_begin + (phone_start - begin) * scale,
-                 local_begin + (phone_end - begin) * scale,
-                 label)
-                for phone_start, phone_end, label in word_phones
-            ]
-            begin, end = local_begin, local_end
-        local_syllables = make_syllables(target.get("text", ""), begin, end, word_phones, word_language) if word_phones else []
+            word_phones = []
+        local_syllables = make_syllables(target.get("text", ""), begin, end, word_phones, word_language)
         for syllable in local_syllables:
             syllable["startMs"] += round(offset * 1000)
             syllable["endMs"] += round(offset * 1000)
@@ -1393,11 +1714,9 @@ for index, line in enumerate(lyrics.get("lines", [])):
             safe_low = current_word["startMs"] + 30
             safe_high = next_word["endMs"] - 30
             if safe_low <= safe_high:
-                current_confidence = float(current_word.get("confidence", 0) or 0)
-                next_confidence = float(next_word.get("confidence", 0) or 0)
-                if next_confidence > 0.15:
+                if next_word.get("measured"):
                     preferred = next_word["startMs"]
-                elif current_confidence > 0.15:
+                elif current_word.get("measured"):
                     preferred = current_word["endMs"]
                 else:
                     preferred = round((current_word["endMs"] + next_word["startMs"]) / 2)
@@ -1406,6 +1725,8 @@ for index, line in enumerate(lyrics.get("lines", [])):
                 next_word["startMs"] = boundary
                 warp_syllables_to_word(current_word, current_old_start, current_old_end)
                 warp_syllables_to_word(next_word, next_old_start, next_old_end)
+    for word in target_words:
+        word.pop("measured", None)
     line["startMs"] = min(line_window_start, target_words[0]["startMs"])
     line["endMs"] = max(line_window_end, target_words[-1]["endMs"])
 
@@ -1435,11 +1756,12 @@ for line_index in range(len(lyrics.get("lines", [])) - 1):
         last_word["syllables"][-1]["endMs"] = boundary
     if first_word.get("syllables"):
         first_word["syllables"][0]["startMs"] = boundary + 1
-lyrics["alignment"] = "mfa-bilingual-phoneme-v1" if len(languages_used) > 1 else "mfa-phoneme-v1"
+lyrics["alignment"] = "mfa-bilingual-phoneme-v3" if len(languages_used) > 1 else "mfa-phoneme-v3"
 with open(output_path, "w", encoding="utf-8") as handle:
     json.dump(lyrics, handle, ensure_ascii=False)
 "#;
 
+    let script = [PHONEME_TIMING_SCRIPT, script].join("\n");
     let mut command_path = runtime.join("bin").into_os_string();
     command_path.push(":");
     command_path.push(env::var_os("PATH").unwrap_or_default());
@@ -1451,6 +1773,7 @@ with open(output_path, "w", encoding="utf-8") as handle:
         .arg(&output_path)
         .arg(&job_root)
         .arg(&lyrics.language)
+        .arg(if pass == MfaPass::PhonesOnly { "phones-only" } else { "align" })
         .env("PATH", command_path)
         .env("MFA_ROOT_DIR", &mfa_root)
         .output()
@@ -1461,6 +1784,10 @@ with open(output_path, "w", encoding="utf-8") as handle:
             "No pude alinear los fonemas. {}",
             error.lines().rev().take(8).collect::<Vec<_>>().join(" ")
         ));
+    }
+    if pass != MfaPass::AlignAndMeasure {
+        let aligned = fs::read_to_string(&output_path).map_err(|error| error.to_string())?;
+        return serde_json::from_str(&aligned).map_err(|error| error.to_string());
     }
     emit_progress(app, "alignment", 0.72, "Midiendo la voz…");
     let refinement = Command::new(&python)
@@ -1481,13 +1808,130 @@ with open(output_path, "w", encoding="utf-8") as handle:
     serde_json::from_str(&aligned).map_err(|error| error.to_string())
 }
 
+/// `lyrics` carries the MFA word edges; `draft` is the same text before MFA,
+/// whose Whisper/provider clock breaks ties between disagreeing aligners.
+fn align_experimental_lyrics(
+    app: &AppHandle,
+    source: &Path,
+    lyrics: &GeneratedLyrics,
+    draft: &GeneratedLyrics,
+) -> Result<GeneratedLyrics, String> {
+    if !cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return Err("El motor experimental requiere un Mac con Apple Silicon.".into());
+    }
+    let root = app.path().app_local_data_dir().map_err(|e| e.to_string())?
+        .join("lyrics-experimental");
+    let bootstrap = app.path().app_cache_dir().map_err(|e| e.to_string())?
+        .join("mfa-bootstrap/bin/micromamba");
+    let marker = root.join("ready-version");
+    if fs::read_to_string(&marker).unwrap_or_default() != "qwen-sofa-v1"
+        || !root.join("runtime/bin/python").is_file()
+    {
+        emit_progress(app, "alignment", 0.30, "Instalando Qwen y SOFA (primera vez; puede tardar varios minutos)…");
+        // The normal lyrics setup already supplies this private bootstrap/Python.
+        install_mfa_runtime(app)?;
+        let result = Command::new(mfa_runtime_root(app)?.join("bin/python"))
+            .args(["-c", EXPERIMENTAL_INSTALLER]).arg(&root).arg(&bootstrap)
+            .output().map_err(|e| e.to_string())?;
+        if !result.status.success() {
+            return Err(format!("No pude instalar Qwen/SOFA: {}",
+                String::from_utf8_lossy(&result.stderr).lines().rev().take(4).collect::<Vec<_>>().join(" ")));
+        }
+    }
+    let cache = demucs_cache_root(app, source)?;
+    let (_, vocals) = locate_stems(&cache, source)
+        .ok_or_else(|| "No encontré la pista vocal.".to_string())?;
+    let job = cache.join("experimental-alignment");
+    fs::create_dir_all(&job).map_err(|e| e.to_string())?;
+    let input = job.join("lyrics-input.json");
+    let output = job.join("lyrics-aligned.json");
+    let draft_path = job.join("lyrics-draft.json");
+    fs::write(&input, serde_json::to_vec(lyrics).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::write(&draft_path, serde_json::to_vec(draft).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    fs::write(job.join("phoneme_timing.py"), PHONEME_TIMING_SCRIPT).map_err(|e| e.to_string())?;
+    fs::write(job.join("refine_sustains.py"), ACOUSTIC_REFINER_SCRIPT).map_err(|e| e.to_string())?;
+    fs::write(job.join("align.py"), EXPERIMENTAL_ALIGNER).map_err(|e| e.to_string())?;
+    emit_progress(app, "alignment", 0.45, "Contrastando alineadores palabra por palabra…");
+    let mut child = Command::new(root.join("runtime/bin/python"))
+        .arg(job.join("align.py")).arg(vocals).arg(input).arg(&output).arg(root.join("assets"))
+        .arg("defer-refinement").arg(&draft_path)
+        .env("HF_HUB_OFFLINE", "1").env("PYTHONUNBUFFERED", "1")
+        .stdout(Stdio::piped()).stderr(Stdio::piped())
+        .spawn().map_err(|e| e.to_string())?;
+    let stderr = child.stderr.take().ok_or("No pude leer errores del alineador.")?;
+    let errors = std::thread::spawn(move || {
+        let mut tail = Vec::new();
+        stream_segments(stderr, |line| {
+            tail.push(line.to_string());
+            if tail.len() > 8 { tail.remove(0); }
+        });
+        tail.join(" ")
+    });
+    let stdout = child.stdout.take().ok_or("No pude leer el progreso del alineador.")?;
+    stream_segments(stdout, |line| {
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(line) {
+            if let (Some(progress), Some(detail)) = (value["progress"].as_f64(), value["detail"].as_str()) {
+                emit_progress(app, "alignment", progress as f32, detail);
+            }
+        }
+    });
+    let status = child.wait().map_err(|e| e.to_string())?;
+    let error = errors.join().unwrap_or_default();
+    if !status.success() { return Err(format!("Qwen/SOFA no terminó: {error}")); }
+    let mut aligned: GeneratedLyrics = serde_json::from_slice(&fs::read(&output).map_err(|e| e.to_string())?)
+        .map_err(|e| e.to_string())?;
+    validate_generated_lyrics(&aligned)?;
+    // Align Spanish phones against the accepted Qwen edges. Keep English SOFA
+    // evidence untouched; MFA's per-line conservative gate still applies.
+    let spanish_indices: Vec<usize> = aligned.lines.iter().enumerate()
+        .filter(|(_, line)| line.language.as_deref().unwrap_or(&aligned.language) == "es")
+        .map(|(index, _)| index).collect();
+    if !spanish_indices.is_empty() {
+        emit_progress(app, "alignment", 0.95, "Refinando fonemas en español con MFA…");
+        let mut spanish = aligned.clone();
+        spanish.language = "es".into();
+        spanish.lines = spanish_indices.iter().map(|&index| aligned.lines[index].clone()).collect();
+        match align_generated_lyrics(app, source, &spanish, MfaPass::PhonesOnly) {
+            Ok(refined) if validate_generated_lyrics(&refined).is_ok()
+                && refined.lines.len() == spanish_indices.len() => {
+                for (&index, line) in spanish_indices.iter().zip(refined.lines) {
+                    aligned.lines[index] = line;
+                }
+                aligned.alignment_notes.push("Fonemas en español refinados con MFA.".into());
+            }
+            _ => aligned.alignment_notes.push("No se pudieron refinar los fonemas en español; se conservaron los tiempos de palabras.".into()),
+        }
+    }
+    // pYIN runs once, after both languages have their final word/phone edges.
+    emit_progress(app, "alignment", 0.96, "Midiendo vocales sostenidas…");
+    fs::write(&output, serde_json::to_vec(&aligned).map_err(|e| e.to_string())?).map_err(|e| e.to_string())?;
+    let refinement = Command::new(root.join("runtime/bin/python"))
+        .arg(job.join("refine_sustains.py")).arg(locate_stems(&cache, source).ok_or("Falta la pista vocal.")?.1)
+        .arg(&output).output().map_err(|e| e.to_string())?;
+    if refinement.status.success() {
+        let refined: GeneratedLyrics = serde_json::from_slice(&fs::read(&output).map_err(|e| e.to_string())?)
+            .map_err(|e| e.to_string())?;
+        if validate_generated_lyrics(&refined).is_ok() { aligned = refined; }
+    } else {
+        aligned.alignment_notes.push("Se conservaron palabras y fonemas; no se pudieron medir las notas sostenidas.".into());
+    }
+    validate_generated_lyrics(&aligned)?;
+    Ok(aligned)
+}
+
 #[tauri::command]
 pub async fn save_local_generated_lyrics(
     app: AppHandle,
     state: State<'_, MusicLibraryState>,
     path: String,
     lyrics: GeneratedLyrics,
+    engine: Option<String>,
 ) -> Result<GeneratedLyrics, String> {
+    let experimental = match engine.as_deref().unwrap_or("mfa") {
+        "mfa" => false,
+        "qwen-sofa" => true,
+        _ => return Err("Motor de sincronización desconocido.".into()),
+    };
     let source = authorized_audio_path(&state, &path)?;
     if lyrics.lines.is_empty() || lyrics.lines.iter().all(|line| line.words.is_empty()) {
         return Err("La letra está vacía.".into());
@@ -1497,10 +1941,20 @@ pub async fn save_local_generated_lyrics(
     let source_for_task = source.clone();
     let lyrics =
         tauri::async_runtime::spawn_blocking(move || -> Result<GeneratedLyrics, String> {
+            let _guard = ALIGNMENT_LOCK.lock().map_err(|_| "El alineador no está disponible.")?;
             let mut fallback = lyrics.clone();
-            let aligned = align_generated_lyrics(&app_for_task, &source_for_task, &lyrics)?;
-            if validate_generated_lyrics(&aligned).is_ok() {
-                return Ok(aligned);
+            let pass = if experimental { MfaPass::Align } else { MfaPass::AlignAndMeasure };
+            let baseline = align_generated_lyrics(&app_for_task, &source_for_task, &lyrics, pass);
+            if let Ok(mut aligned) = baseline {
+                if validate_generated_lyrics(&aligned).is_ok() {
+                    if experimental {
+                        match align_experimental_lyrics(&app_for_task, &source_for_task, &aligned, &lyrics) {
+                            Ok(result) => return Ok(result),
+                            Err(error) => aligned.alignment_notes.push(format!("Se usó el respaldo MFA. {error}")),
+                        }
+                    }
+                    return Ok(aligned);
+                }
             }
             // An internal phoneme/syllable refinement must never trap the user in
             // a modal that can only repeat the same failure. The reviewed word
@@ -1514,6 +1968,12 @@ pub async fn save_local_generated_lyrics(
                 }
             }
             validate_generated_lyrics(&fallback)?;
+            if experimental {
+                match align_experimental_lyrics(&app_for_task, &source_for_task, &fallback, &fallback) {
+                    Ok(result) => return Ok(result),
+                    Err(error) => fallback.alignment_notes.push(format!("Se conservaron los tiempos originales. {error}")),
+                }
+            }
             Ok(fallback)
         })
         .await
@@ -1593,7 +2053,7 @@ fn validate_generated_lyrics(lyrics: &GeneratedLyrics) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub fn persist_local_generated_lyrics(
+pub async fn persist_local_generated_lyrics(
     app: AppHandle,
     state: State<'_, MusicLibraryState>,
     path: String,
@@ -1602,29 +2062,39 @@ pub fn persist_local_generated_lyrics(
     let source = authorized_audio_path(&state, &path)?;
     validate_generated_lyrics(&lyrics)?;
     let destination = lyrics_file_path(&app, &source)?;
-    if let Some(parent) = destination.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let contents = serde_json::to_vec(&lyrics).map_err(|error| error.to_string())?;
-    fs::write(destination, contents).map_err(|error| error.to_string())?;
-    Ok(lyrics)
+    tauri::async_runtime::spawn_blocking(move || {
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+        }
+        let contents = serde_json::to_vec(&lyrics).map_err(|error| error.to_string())?;
+        fs::write(destination, contents).map_err(|error| error.to_string())?;
+        Ok(lyrics)
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 #[tauri::command]
-pub fn load_local_generated_lyrics(
+pub async fn load_local_generated_lyrics(
     app: AppHandle,
     state: State<'_, MusicLibraryState>,
     path: String,
 ) -> Result<Option<GeneratedLyrics>, String> {
+    // Asked once per track the moment the lyrics view mounts, so it sits right
+    // on the path the user is looking at: read and parse it off the main thread.
     let source = authorized_audio_path(&state, &path)?;
     let file = lyrics_file_path(&app, &source)?;
-    if !file.is_file() {
-        return Ok(None);
-    }
-    let contents = fs::read_to_string(file).map_err(|error| error.to_string())?;
-    serde_json::from_str(&contents)
-        .map(Some)
-        .map_err(|_| "La letra local guardada está dañada.".to_string())
+    tauri::async_runtime::spawn_blocking(move || {
+        if !file.is_file() {
+            return Ok(None);
+        }
+        let contents = fs::read_to_string(file).map_err(|error| error.to_string())?;
+        serde_json::from_str(&contents)
+            .map(Some)
+            .map_err(|_| "La letra local guardada está dañada.".to_string())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 fn fallback_genre(metadata_genre: &str, title: &str, artist: &str) -> KaraokeGenre {
@@ -1837,4 +2307,73 @@ pub async fn classify_karaoke_genre(
     result.confidence = result.confidence.clamp(0.0, 1.0);
     result.source = "gemini".into();
     Ok(result)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reads_the_percentage_out_of_a_demucs_bar() {
+        let bar = " 42%|████▏     | 116.0/275.0 [00:24<00:33, 4.8seconds/s]";
+        assert_eq!(parse_tqdm_percent(bar), Some(0.42));
+        assert_eq!(parse_tqdm_percent("  0%|          | 0/275 [00:00<?, ?it/s]"), Some(0.0));
+        assert_eq!(parse_tqdm_percent("Separated tracks will be stored in /tmp"), None);
+    }
+
+    #[test]
+    fn reads_the_remaining_time_out_of_a_demucs_bar() {
+        let bar = " 42%|████▏     | 116.0/275.0 [00:24<01:33, 4.8seconds/s]";
+        assert_eq!(parse_tqdm_eta_ms(bar), Some(93_000));
+        // An unknown remaining time must not be reported as zero.
+        assert_eq!(parse_tqdm_eta_ms("  0%|          | 0/275 [00:00<?, ?it/s]"), None);
+    }
+
+    #[test]
+    fn parses_clock_values() {
+        assert_eq!(parse_clock_ms("01:30"), Some(90_000));
+        assert_eq!(parse_clock_ms("0:00:09"), Some(9_000));
+        assert_eq!(parse_clock_ms("?"), None);
+    }
+
+    #[test]
+    fn turns_pip_output_into_progress() {
+        let mut packages = 0f32;
+        let mut current = String::new();
+
+        let collecting = pip_progress_line("Collecting demucs==4.0.1", &mut packages, &mut current)
+            .expect("a Collecting line reports progress");
+        assert_eq!(current, "demucs");
+        assert_eq!(collecting.2.as_deref(), Some("Resolviendo demucs"));
+        assert!(collecting.0 > 0.22);
+
+        let downloading = pip_progress_line(
+            "Downloading torch-2.2.0-cp311-none-macosx_11_0_arm64.whl (61.0 MB)",
+            &mut packages,
+            &mut current,
+        )
+        .expect("a Downloading line reports progress");
+        assert_eq!(downloading.2.as_deref(), Some("Descargando demucs · 61.0 MB"));
+
+        let bar = pip_progress_line(
+            "   ━━━━━━━━ 12.4/61.0 MB 5.1 MB/s eta 0:00:09",
+            &mut packages,
+            &mut current,
+        )
+        .expect("a pip bar reports progress");
+        assert_eq!(bar.2.as_deref(), Some("demucs · 12.4/61.0 MB"));
+        assert_eq!(bar.3, Some(9_000));
+
+        assert!(pip_progress_line("Using cached wheel", &mut packages, &mut current).is_none());
+    }
+
+    #[test]
+    fn splits_carriage_returns_and_newlines_into_segments() {
+        let payload = "first line\n 10%|# | 1/10\r 20%|## | 2/10\rtail";
+        let mut segments: Vec<String> = Vec::new();
+        stream_segments(payload.as_bytes(), |segment| segments.push(segment.to_string()));
+        assert_eq!(segments.len(), 4);
+        assert_eq!(segments[0], "first line");
+        assert_eq!(segments[3], "tail");
+    }
 }

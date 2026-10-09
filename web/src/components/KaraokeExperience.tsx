@@ -11,7 +11,6 @@ import {
   saveGeminiApiKey,
   type KaraokeGenre,
   type KaraokeGenreResult,
-  type KaraokeProgress,
 } from '../karaoke/karaokeDesktop';
 import {
   fetchKaraokeLyrics,
@@ -26,12 +25,22 @@ import {
   resolveKaraokeStageEffect,
   type KaraokeStageMoment,
 } from '../karaoke/karaokeStageDirection';
+import {
+  annotateStep,
+  applyStageProgress,
+  completeStep,
+  createPreparationState,
+  skipStep,
+  startStep,
+  type PreparationState,
+} from '../karaoke/karaokePreparation';
 import { KaraokeCanvasUiStage } from './KaraokeCanvasUiStage';
+import { KaraokeInterludeField } from './KaraokeInterludeField';
+import { KaraokePreparingStage } from './KaraokePreparingStage';
 import {
   CloseIcon,
   MicrophoneIcon,
-  PauseIcon,
-  PlayIcon,
+  PlayPauseIcon,
   SeekBackIcon,
   SeekForwardIcon,
   SpinnerIcon,
@@ -71,7 +80,10 @@ const EMPTY_PALETTE: WebDynamicPalette = {
 
 const TRUE_INTERLUDE_MIN_MS = 6_000;
 const INTERLUDE_HANDOFF_MS = 2_000;
-const SHORT_ENTRY_CUE_MIN_MS = 1_500;
+/** How early the next line starts warming up before it is due. */
+const ENTRY_APPROACH_MS = 1_100;
+/** Fade the OriginKit field out before unmounting its WebGL context. */
+const INTERLUDE_FIELD_FADE_MS = 900;
 
 function clamp(value: number, min = 0, max = 1): number {
   return Math.max(min, Math.min(max, value));
@@ -83,9 +95,10 @@ interface KaraokeDisplayState {
   moment: KaraokeStageMoment;
   visibleLines: Array<{ line: KaraokeLine; variant: KaraokeLineVariant }>;
   nextLine: KaraokeLine | null;
+  /** Milliseconds until the next line is due. */
   waitMs: number;
+  /** Length of the whole silence the singer is sitting inside. */
   gapMs: number;
-  countdown: number | null;
 }
 
 function findDisplayState(
@@ -99,7 +112,6 @@ function findDisplayState(
       nextLine: null,
       waitMs: 0,
       gapMs: 0,
-      countdown: null,
     };
   }
 
@@ -116,8 +128,7 @@ function findDisplayState(
       ],
       nextLine,
       waitMs,
-      gapMs: 0,
-      countdown: nextLine && waitMs > 0 && waitMs <= 4_000 ? Math.ceil(waitMs / 1_000) : null,
+      gapMs: nextLine ? Math.max(0, nextLine.begin - activeLine.end) : 0,
     };
   }
 
@@ -131,7 +142,6 @@ function findDisplayState(
       nextLine: null,
       waitMs: 0,
       gapMs: 0,
-      countdown: null,
     };
   }
 
@@ -140,7 +150,8 @@ function findDisplayState(
   const waitMs = Math.max(0, nextLine.begin - position);
   const isIntro = nextIndex === 0;
   const keepPreviousLine = Boolean(previousLine && position - previousLine.end < 900);
-  const totalGapMs = previousLine ? nextLine.begin - previousLine.end : 0;
+  // An intro is a gap too: it runs from the top of the song to the first line.
+  const totalGapMs = previousLine ? nextLine.begin - previousLine.end : nextLine.begin;
   const isTrueInterlude = totalGapMs >= TRUE_INTERLUDE_MIN_MS;
   const moment: KaraokeStageMoment = isIntro
     ? 'intro'
@@ -159,7 +170,6 @@ function findDisplayState(
     nextLine,
     waitMs,
     gapMs: totalGapMs,
-    countdown: waitMs > 0 && waitMs <= 4_000 ? Math.ceil(waitMs / 1_000) : null,
   };
 }
 
@@ -255,11 +265,7 @@ export function KaraokeExperience({
   exitRef.current = onExit;
   const [phase, setPhase] = useState<KaraokePhase>('checking');
   const [error, setError] = useState('');
-  const [progress, setProgress] = useState<KaraokeProgress>({
-    stage: 'checking',
-    progress: 0.02,
-    detail: 'Preparando el escenario…',
-  });
+  const [preparation, setPreparation] = useState<PreparationState>(() => createPreparationState());
   const [apiKey, setApiKey] = useState('');
   const [savingKey, setSavingKey] = useState(false);
   const [genreResult, setGenreResult] = useState<KaraokeGenreResult>({
@@ -281,10 +287,10 @@ export function KaraokeExperience({
   const [karaokeDuration, setKaraokeDuration] = useState(duration);
   const [isPlaying, setIsPlaying] = useState(false);
   const [playbackMode, setPlaybackMode] = useState<KaraokePlaybackMode>('instrumental');
-  const [displayedProgress, setDisplayedProgress] = useState(0.02);
   const [lyricsTimingOffsetMs, setLyricsTimingOffsetMs] = useState(
     () => getStoredLyricsTimingOffset(track),
   );
+  const [interludeFieldMounted, setInterludeFieldMounted] = useState(false);
 
   const prepare = useCallback(async () => {
     const preparationToken = ++preparationTokenRef.current;
@@ -297,27 +303,73 @@ export function KaraokeExperience({
     }
     setPhase('preparing');
     setError('');
+    setPreparation(createPreparationState());
     const controller = new AbortController();
     let unlisten: (() => void) | null = null;
+    const updatePreparation = (updater: (state: PreparationState) => PreparationState) => {
+      if (isCancelled()) return;
+      setPreparation(updater);
+    };
     try {
-      unlisten = await listenToKaraokeProgress(setProgress);
-      setProgress({ stage: 'analysis', progress: 0.04, detail: 'Eligiendo el escenario y cargando la letra…' });
+      unlisten = await listenToKaraokeProgress(event => {
+        updatePreparation(state => applyStageProgress(state, event));
+      });
+      updatePreparation(state => applyStageProgress(state, {
+        stage: 'analysis',
+        progress: 0.15,
+        detail: 'Eligiendo el escenario y buscando la letra…',
+      }));
       const capabilities = await getKaraokeCapabilities();
       if (isCancelled()) return;
+      updatePreparation(state => (
+        capabilities.demucsReady
+          ? skipStep(state, 'runtime', 'El motor vocal ya está instalado')
+          : state
+      ));
+
+      // Both land while Demucs runs, so each one reports itself the moment it
+      // resolves instead of waiting for the whole batch.
+      const facts = { direction: '', lyrics: '' };
+      const reportAnalysis = () => {
+        const summary = [facts.direction, facts.lyrics].filter(Boolean).join(' · ');
+        if (!summary) return;
+        const settled = [facts.direction, facts.lyrics].filter(Boolean).length;
+        updatePreparation(state => annotateStep(state, 'analysis', summary, settled / 2));
+      };
+
       const genrePromise = classifyKaraokeGenre(track);
+      void genrePromise
+        .then(result => {
+          const label = GENRE_LABELS[result.genre] ?? result.genre;
+          facts.direction = `${label} · ${result.source === 'gemini' ? 'Gemini' : 'análisis local'}`;
+          reportAnalysis();
+        })
+        .catch(() => undefined);
       const lyricsPromise = fetchKaraokeLyrics(track, duration, controller.signal);
+      void lyricsPromise
+        .then(nextStanzas => {
+          const lines = nextStanzas.reduce((total, stanza) => total + stanza.lines.length, 0);
+          facts.lyrics = lines > 0 ? `letra de ${lines} líneas` : 'sin letra sincronizada';
+          reportAnalysis();
+        })
+        .catch(() => undefined);
 
       if (!capabilities.demucsReady) {
-        setProgress({
+        updatePreparation(state => applyStageProgress(state, {
           stage: 'runtime',
-          progress: 0.08,
+          progress: 0.02,
           detail: 'Instalando el motor vocal local por única vez…',
-        });
+        }));
         await installDemucsRuntime();
         if (isCancelled()) return;
+        updatePreparation(state => completeStep(state, 'runtime', 'Motor vocal instalado'));
       }
 
-      setProgress({ stage: 'separation', progress: 0.26, detail: 'Separando la voz de la música…' });
+      updatePreparation(state => applyStageProgress(state, {
+        stage: 'separation',
+        progress: 0.01,
+        detail: 'Preparando el separador de pistas…',
+      }));
       const [stems, nextGenre, nextStanzas, nextPalette] = await Promise.all([
         prepareKaraokeStems(nativePath),
         genrePromise,
@@ -325,7 +377,18 @@ export function KaraokeExperience({
         getDynamicPalette(track),
       ]);
       if (isCancelled()) return;
-      setProgress({ stage: 'mix', progress: 0.94, detail: 'Encendiendo el escenario…' });
+      updatePreparation(state => completeStep(state, 'analysis'));
+      updatePreparation(state => completeStep(
+        startStep(state, 'mix'),
+        'separation',
+        stems.cached ? `Pistas ya separadas · ${stems.model}` : `Voz e instrumental listos · ${stems.model}`,
+      ));
+      updatePreparation(state => applyStageProgress(state, {
+        stage: 'mix',
+        progress: 0.4,
+        detail: 'Cargando las dos pistas…',
+        note: 'Sincronizando audio, letra y color',
+      }));
       const mixer = new KaraokeMixer();
       await mixer.load(stems, initialPosition);
       if (isCancelled()) {
@@ -342,7 +405,7 @@ export function KaraokeExperience({
       setGenreResult(nextGenre);
       setStanzas(nextStanzas);
       setPalette(nextPalette);
-      setDisplayedProgress(1);
+      updatePreparation(state => completeStep(state, 'mix', 'Escenario listo'));
       setPhase('ready');
       await mixer.play();
       setIsPlaying(true);
@@ -383,21 +446,6 @@ export function KaraokeExperience({
       mixerRef.current = null;
     };
   }, []);
-
-  useEffect(() => {
-    if (phase !== 'preparing') return;
-    const timer = window.setInterval(() => {
-      setDisplayedProgress(current => {
-        const target = progress.stage === 'runtime'
-          ? Math.max(0.16, progress.progress * 0.48)
-          : progress.stage === 'separation'
-            ? Math.max(0.34, 0.3 + progress.progress * 0.58)
-            : progress.progress;
-        return current + (Math.min(0.96, target) - current) * 0.08;
-      });
-    }, 80);
-    return () => window.clearInterval(timer);
-  }, [phase, progress]);
 
   useEffect(() => {
     if (phase !== 'ready' || playbackMode !== 'original') return;
@@ -519,18 +567,41 @@ export function KaraokeExperience({
   ]);
   const paletteStyle = paletteToCssVars(palette) as CSSProperties;
   const timelineProgress = karaokeDuration > 0 ? clamp(position / karaokeDuration) : 0;
-  const isWaitingForVoice = displayState.moment === 'intro'
-    || displayState.moment === 'interlude'
-    || (
-      displayState.moment === 'handoff'
-      && displayState.gapMs >= SHORT_ENTRY_CUE_MIN_MS
-      && displayState.countdown !== null
+  // A breath between two phrases is part of the song, not a loading screen: it
+  // gets no card and no count, only the next line warming up as it approaches.
+  const entryApproach = displayState.nextLine
+    ? clamp(1 - displayState.waitMs / ENTRY_APPROACH_MS)
+    : 0;
+  // Only a real silence earns its own scene — a long intro, an instrumental
+  // break, or an outro the band is still playing — and it hands the screen
+  // back two seconds before the voice returns.
+  const isBreakScene = displayState.moment === 'outro'
+    ? karaokeDuration - position >= TRUE_INTERLUDE_MIN_MS
+    : (displayState.moment === 'intro' || displayState.moment === 'interlude')
+      && displayState.gapMs >= TRUE_INTERLUDE_MIN_MS
+      && displayState.waitMs > INTERLUDE_HANDOFF_MS;
+  // The runway measures the break itself, not the whole silence: it completes
+  // at the handoff, the moment the scene starts giving the screen back to the
+  // lyric, so the cue is finished before the line begins to glow.
+  const interludeProgress = clamp(
+    1 - (displayState.waitMs - INTERLUDE_HANDOFF_MS)
+      / Math.max(1, displayState.gapMs - INTERLUDE_HANDOFF_MS),
+  );
+  // The field owns a WebGL context, so it only exists while a break is running
+  // plus the length of its own fade-out.
+  useEffect(() => {
+    if (isBreakScene) {
+      setInterludeFieldMounted(true);
+      return;
+    }
+    if (!interludeFieldMounted) return;
+    const timer = window.setTimeout(
+      () => setInterludeFieldMounted(false),
+      INTERLUDE_FIELD_FADE_MS,
     );
-  const entryCueLabel = displayState.moment === 'intro'
-    ? 'Tu entrada'
-    : displayState.moment === 'interlude'
-      ? 'Interludio'
-      : 'Prepárate';
+    return () => window.clearTimeout(timer);
+  }, [interludeFieldMounted, isBreakScene]);
+
   const timingLabel = lyricsTimingOffsetMs === 0
     ? '0.00 s'
     : `${lyricsTimingOffsetMs > 0 ? '+' : '−'}${(Math.abs(lyricsTimingOffsetMs) / 1_000).toFixed(2)} s`;
@@ -553,7 +624,10 @@ export function KaraokeExperience({
       data-karaoke-effect={stageEffect}
       style={paletteStyle}
     >
-      <div className="karaoke-background" aria-hidden="true">
+      <div
+        className={`karaoke-background${isBreakScene ? ' is-interlude' : ''}`}
+        aria-hidden="true"
+      >
         <div className="karaoke-background-color" />
         {phase === 'ready' && mixerRef.current ? (
           <KaraokeCanvasUiStage
@@ -562,6 +636,14 @@ export function KaraokeExperience({
             mixer={mixerRef.current}
             isPlaying={isPlaying}
             targetRef={rootRef}
+          />
+        ) : null}
+        {phase === 'ready' && interludeFieldMounted && mixerRef.current ? (
+          <KaraokeInterludeField
+            mixer={mixerRef.current}
+            palette={palette}
+            isPlaying={isPlaying}
+            active={isBreakScene}
           />
         ) : null}
         <div className="karaoke-background-scrim" />
@@ -602,23 +684,12 @@ export function KaraokeExperience({
       ) : null}
 
       {phase === 'checking' || phase === 'preparing' ? (
-        <section className="karaoke-preparing" aria-live="polite">
-          <div className="karaoke-preparing-orbit">
-            <MicrophoneIcon size={28} />
-            <span />
-          </div>
-          <span className="karaoke-eyebrow">Creando versión Karaoke</span>
-          <h2>{track.title}</h2>
-          <p>{progress.detail}</p>
-          <div className="karaoke-progress-track">
-            <span style={{ transform: `scaleX(${displayedProgress})` }} />
-          </div>
-          <small>
-            {progress.stage === 'runtime'
-              ? 'La primera vez puede tardar un poco más. Después queda instalado.'
-              : 'La versión terminada quedará guardada para abrirse al instante.'}
-          </small>
-        </section>
+        <KaraokePreparingStage
+          track={track}
+          palette={palette}
+          preparation={preparation}
+          onCancel={handleExit}
+        />
       ) : null}
 
       {phase === 'error' ? (
@@ -643,27 +714,12 @@ export function KaraokeExperience({
             <p>{track.title} · {track.artist}</p>
           </header>
 
-          <main className={`karaoke-lyrics-stage moment-${displayState.moment}`}>
+          <main
+            className={`karaoke-lyrics-stage moment-${displayState.moment}`}
+            style={{ '--karaoke-entry': entryApproach.toFixed(3) } as CSSProperties}
+          >
             {lyricLines.length > 0 ? (
               <div className="karaoke-performance">
-                {isWaitingForVoice ? (
-                  <div className="karaoke-entry-cue" aria-live="polite">
-                    <span>{entryCueLabel}</span>
-                    {displayState.countdown ? (
-                      <strong key={displayState.countdown}>{displayState.countdown}</strong>
-                    ) : (
-                      <div className="karaoke-spectrum-wait" aria-hidden="true">
-                        {Array.from({ length: 9 }, (_, index) => <i key={index} />)}
-                      </div>
-                    )}
-                    <div className="karaoke-cue-dots" aria-hidden="true">
-                      {Array.from({ length: 4 }, (_, index) => (
-                        <i className={displayState.waitMs <= (4 - index) * 1_000 ? 'filled' : ''} key={index} />
-                      ))}
-                    </div>
-                  </div>
-                ) : null}
-
                 <div className="karaoke-stanza karaoke-line-stack">
                   {displayState.visibleLines.map(({ line, variant }) => (
                     <KaraokeLineView
@@ -674,6 +730,19 @@ export function KaraokeExperience({
                     />
                   ))}
                 </div>
+
+                {interludeFieldMounted && displayState.nextLine ? (
+                  <div
+                    className={`karaoke-interlude-runway${isBreakScene ? '' : ' is-leaving'}`}
+                    aria-hidden="true"
+                    style={{ '--interlude-progress': interludeProgress.toFixed(4) } as CSSProperties}
+                  >
+                    <span className="karaoke-runway-track">
+                      <i className="karaoke-runway-fill" />
+                    </span>
+                    <i className="karaoke-runway-head" />
+                  </div>
+                ) : null}
 
                 {displayState.moment === 'outro' && displayState.visibleLines.length === 0 ? (
                   <div className="karaoke-finish-state" aria-live="polite">
@@ -700,7 +769,7 @@ export function KaraokeExperience({
                 <SeekBackIcon size={23} />
               </button>
               <button className="karaoke-play" onClick={() => void handleToggle()} aria-label={isPlaying ? 'Pausar' : 'Reproducir'}>
-                {isPlaying ? <PauseIcon size={24} /> : <PlayIcon size={24} />}
+                <PlayPauseIcon playing={isPlaying} size={24} />
               </button>
               <button
                 className="karaoke-seek-button"

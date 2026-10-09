@@ -38,10 +38,15 @@ class SpectrumEngine {
   private context: AudioContext | null = null;
   private analyser: AnalyserNode | null = null;
   private frequencyData: Uint8Array<ArrayBuffer> | null = null;
+  private tauriMirror: HTMLAudioElement | null = null;
+  private tauriMirrorSource: MediaElementAudioSourceNode | null = null;
+  private tauriMirrorGain: GainNode | null = null;
+  private tauriMirrorListenersInstalled = false;
   private failed = false;
 
   private smoothed: SpectrumBands = { ...ZERO_BANDS };
   private lastSampleTime = 0;
+  private lastMirrorSync = 0;
 
   /**
    * Wires the analyser into the audio graph. Safe to call repeatedly; returns
@@ -53,7 +58,7 @@ class SpectrumEngine {
     // that suspended graph is its only output and playback becomes silent.
     // Keep Tauri on the native HTMLMediaElement output for reliable background
     // playback; the ambient canvas gracefully falls back to its idle motion.
-    if (isTauriDesktop()) return false;
+    if (isTauriDesktop()) return this.startTauriMirror();
     if (this.failed) return false;
     if (this.analyser && this.context) {
       if (this.context.state === 'suspended') void this.context.resume();
@@ -109,6 +114,7 @@ class SpectrumEngine {
     const dt = Math.min(64, now - this.lastSampleTime || 16.7) / 16.7;
     this.lastSampleTime = now;
 
+    this.syncTauriMirror();
     analyser.getByteFrequencyData(data);
 
     const nyquist = this.context.sampleRate / 2;
@@ -148,6 +154,104 @@ class SpectrumEngine {
     const rate = target > current ? 0.42 : 0.09;
     const blend = 1 - Math.pow(1 - rate, dt);
     return current + (target - current) * blend;
+  }
+
+  /**
+   * WKWebView must not capture the audible media element: its AudioContext is
+   * suspended when the Tauri window loses focus and would silence playback.
+   * Analyse a zero-gain mirror instead, leaving the primary element on its
+   * reliable native output route.
+   */
+  private startTauriMirror(): boolean {
+    if (this.failed) return false;
+    if (this.analyser && this.context && this.tauriMirror) {
+      this.syncTauriMirror();
+      if (this.context.state === 'suspended') void this.context.resume();
+      return true;
+    }
+
+    try {
+      const AudioContextCtor =
+        window.AudioContext ??
+        (window as Window & { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+      if (!AudioContextCtor) throw new Error('AudioContext unavailable');
+
+      const context = new AudioContextCtor();
+      const mirror = new Audio();
+      const source = context.createMediaElementSource(mirror);
+      const analyser = context.createAnalyser();
+      const silentGain = context.createGain();
+      analyser.fftSize = 2048;
+      analyser.smoothingTimeConstant = 0.62;
+      silentGain.gain.value = 0;
+      source.connect(analyser);
+      analyser.connect(silentGain);
+      silentGain.connect(context.destination);
+
+      this.context = context;
+      this.analyser = analyser;
+      this.frequencyData = new Uint8Array(analyser.frequencyBinCount);
+      this.tauriMirror = mirror;
+      this.tauriMirrorSource = source;
+      this.tauriMirrorGain = silentGain;
+      this.installTauriMirrorListeners();
+      this.syncTauriMirror(true);
+      if (context.state === 'suspended') void context.resume();
+      return true;
+    } catch (error) {
+      console.warn('Tauri spectrum mirror unavailable:', error);
+      this.failed = true;
+      this.context = null;
+      this.analyser = null;
+      this.tauriMirror = null;
+      return false;
+    }
+  }
+
+  private installTauriMirrorListeners(): void {
+    if (this.tauriMirrorListenersInstalled) return;
+    this.tauriMirrorListenersInstalled = true;
+    const primary = webAudioEngine.getAudioElement();
+    primary.addEventListener('loadstart', () => this.syncTauriMirror(true));
+    primary.addEventListener('play', () => this.syncTauriMirror(true));
+    primary.addEventListener('pause', () => this.tauriMirror?.pause());
+    primary.addEventListener('seeking', () => this.syncTauriMirror(true));
+    primary.addEventListener('ratechange', () => this.syncTauriMirror());
+  }
+
+  private syncTauriMirror(force = false): void {
+    const mirror = this.tauriMirror;
+    if (!mirror) return;
+    const primary = webAudioEngine.getAudioElement();
+    if (!primary.src) return;
+
+    // sample() runs once per animation frame, but keeping a second decode of
+    // the same file in step is media-pipeline work — at 60 Hz it is 60x more
+    // often than drift correction needs. Event-driven syncs (load, play, seek)
+    // still pass through immediately.
+    const now = performance.now();
+    if (!force && now - this.lastMirrorSync < 200) return;
+    this.lastMirrorSync = now;
+
+    if (mirror.src !== primary.src) {
+      mirror.src = primary.src;
+      mirror.preload = 'auto';
+      mirror.load();
+      force = true;
+    }
+    mirror.playbackRate = primary.playbackRate;
+    if (force || Math.abs(mirror.currentTime - primary.currentTime) > 0.16) {
+      try {
+        mirror.currentTime = primary.currentTime;
+      } catch {
+        // Metadata may not be ready yet; the next sample will retry.
+      }
+    }
+    if (primary.paused) {
+      if (!mirror.paused) mirror.pause();
+    } else if (mirror.paused) {
+      void mirror.play().catch(() => {});
+    }
   }
 }
 

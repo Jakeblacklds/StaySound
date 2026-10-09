@@ -1,25 +1,14 @@
 import type { TidalTrack, Track } from '@staysound/types/audio';
 import type { DownloadSearchResult } from '../downloads/downloadProvider';
+import { isTauriDesktop, searchDesktopTidalCatalog } from '../desktop/tauriMusicLibrary';
 
 const TIDAL_API_BASES = [
-  'https://hifi.geeked.wtf',
-  'https://eu-central.monochrome.tf',
-  'https://us-west.monochrome.tf',
-  'https://arran.monochrome.tf',
-  'https://api.monochrome.tf',
-  'https://monochrome-api.samidy.com',
-  'https://triton.squid.wtf',
-  'https://wolf.qqdl.site',
-  'https://maus.qqdl.site',
-  'https://vogel.qqdl.site',
-  'https://katze.qqdl.site',
-  'https://hund.qqdl.site',
-  'https://tidal.kinoplus.online',
+  'https://lol.samidy.workers.dev',
 ];
 
 const REQUEST_TIMEOUT_MS = 12000;
 
-type TidalTrackApiResponse = {
+export type TidalTrackApiResponse = {
   id?: number;
   title?: string;
   duration?: number;
@@ -67,13 +56,16 @@ export const TIDAL_DISCOVERY_MOODS: TidalDiscoveryMood[] = [
   { id: 'discover', label: 'Nuevo', query: 'new music discovery indie pop electronic', description: 'hallazgos frescos y melódicos' },
 ];
 
-function getArtworkUrl(coverUuid?: string | null): string | undefined {
+export function getTidalArtworkUrl(coverUuid?: string | null): string | undefined {
   if (!coverUuid || coverUuid === '00000000-0000-0000-0000-000000000000' || coverUuid === 'null') return undefined;
   if (coverUuid.startsWith('http')) return coverUuid;
-  return `https://resources.tidal.com/images/${coverUuid.replace(/-/g, '/')}/640x640.jpg`;
+  // TIDAL currently serves several legacy sizes inconsistently: artist image
+  // UUIDs return 403 at 640px in the desktop webview, while 750px is served
+  // for both artist portraits and album covers.
+  return `https://resources.tidal.com/images/${coverUuid.replace(/-/g, '/')}/750x750.jpg`;
 }
 
-function normalizeTidalTrack(item: TidalTrackApiResponse): TidalTrack | null {
+export function normalizeTidalTrack(item: TidalTrackApiResponse): TidalTrack | null {
   if (!item.id || !item.title) return null;
   const coverUuid = item.album?.cover ?? null;
   const quality = item.audioQuality ?? 'LOSSLESS';
@@ -89,7 +81,7 @@ function normalizeTidalTrack(item: TidalTrackApiResponse): TidalTrack | null {
     quality,
     isHiRes: tags.includes('HIRES_LOSSLESS') || quality === 'HI_RES_LOSSLESS',
     coverUuid,
-    artworkUrl: getArtworkUrl(coverUuid),
+    artworkUrl: getTidalArtworkUrl(coverUuid),
     trackNumber: item.trackNumber,
     isrc: item.isrc,
     explicit: item.explicit,
@@ -113,14 +105,42 @@ async function fetchJson<T>(url: string): Promise<T> {
   }
 }
 
-async function fetchFromTidalMirrors<T>(path: string): Promise<T> {
-  let lastError: unknown;
-  for (const base of TIDAL_API_BASES) {
-    try {
-      return await fetchJson<T>(`${base.replace(/\/+$/, '')}${path}`);
-    } catch (error) {
-      lastError = error;
+export async function fetchFromTidalMirrors<T>(path: string): Promise<T> {
+  // The public Monochrome worker is currently unavailable. Desktop sends
+  // catalog searches through Tauri so the native HTTP client can call TIDAL
+  // directly without the webview's CORS restriction.
+  if (isTauriDesktop()) {
+    const url = new URL(path, 'https://staysound.invalid');
+    const mappings = [
+      ['s', 'tracks'],
+      ['a', 'artists'],
+      ['al', 'albums'],
+      ['p', 'playlists'],
+    ] as const;
+    const match = mappings.find(([parameter]) => url.searchParams.has(parameter));
+    if (url.pathname === '/search/' && match) {
+      const [parameter, kind] = match;
+      const catalog = await searchDesktopTidalCatalog(kind, url.searchParams.get(parameter) ?? '');
+      const items = catalog.items ?? [];
+      if (kind === 'artists') return { data: { artists: { items } } } as T;
+      if (kind === 'albums') return { data: { albums: { items } } } as T;
+      if (kind === 'playlists') return { data: { playlists: { items } } } as T;
+      return { data: { items } } as T;
     }
+  }
+  let lastError: unknown;
+  // The currently maintained Monochrome worker can occasionally return a
+  // transient Cloudflare 523. Retry the catalog once before surfacing a
+  // failure or caching a partial search result.
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    for (const base of TIDAL_API_BASES) {
+      try {
+        return await fetchJson<T>(`${base.replace(/\/+$/, '')}${path}`);
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    if (attempt === 0) await new Promise(resolve => window.setTimeout(resolve, 180));
   }
   throw lastError instanceof Error ? lastError : new Error('Todos los mirrors TIDAL fallaron.');
 }

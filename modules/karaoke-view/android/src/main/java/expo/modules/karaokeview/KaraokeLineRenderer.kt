@@ -19,6 +19,10 @@ internal data class KaraokeLineRenderConfig(
     val backgroundRevealDurationMs: Float,
     val backgroundFadeOutDurationMs: Float,
     val featherPx: Float,
+    val wipeWidthEm: Float,
+    val preWipeDistanceEm: Float,
+    val foregroundLiftRatio: Float,
+    val backgroundLiftRatio: Float,
     val isLineByLine: Boolean,
     val basePaint: Paint,
     val highlightPaint: Paint,
@@ -134,9 +138,6 @@ internal interface KaraokeLineRenderCallbacks {
 }
 
 internal class KaraokeLineRenderer {
-    private val foregroundLiftRatio = 0.035f
-    private val backgroundLiftRatio = 0.025f
-
     private val lineSweepMaskPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
         xfermode = PorterDuffXfermode(PorterDuff.Mode.DST_IN)
     }
@@ -315,13 +316,7 @@ internal class KaraokeLineRenderer {
                 // smooth, complementary fade of the base (dim) text under the highlight
                 // sweep. This eliminates the "double letter" artifact without creating
                 // empty gaps between the reveal edge and the dim text (liquid sweep feel).
-                val fadeWidth = if (activeHighlightState.isContinuousRange) {
-                    val clampedProgress = activeHighlightState.progress.coerceIn(0f, 1f)
-                    val endSettleT = callbacks.smootherStep(((clampedProgress - 0.82f) / 0.18f).coerceIn(0f, 1f))
-                    config.featherPx * (4f * (1f - endSettleT * 0.88f))
-                } else {
-                    0f
-                }
+                val fadeWidth = config.highlightPaint.textSize * config.wipeWidthEm
                 callbacks.drawWordTail(
                     canvas = canvas,
                     line = line,
@@ -331,7 +326,7 @@ internal class KaraokeLineRenderer {
                     rowHeight = config.lineHeight,
                     fadeWidth = fadeWidth,
                     translateY = if (activeHighlightState.isContinuousRange) {
-                        -config.lineHeight * foregroundLiftRatio *
+                        -config.lineHeight * config.foregroundLiftRatio *
                             callbacks.smootherStep(activeHighlightState.progress.coerceIn(0f, 1f))
                     } else {
                         0f
@@ -573,7 +568,7 @@ internal class KaraokeLineRenderer {
                 callbacks.drawCompletedWordWithLift(
                     canvas = canvas, line = line, word = line.words[index],
                     paint = config.highlightPaint, rowHeight = config.lineHeight,
-                    finalLiftRatio = foregroundLiftRatio, currentTimeMs = currentTimeMs,
+                    finalLiftRatio = config.foregroundLiftRatio, currentTimeMs = currentTimeMs,
                     keepCharacterLift = keepCompletedCharacterLift,
                     visualWordDurationMs = activeHighlightState.visualWordDurationMs,
                     visualWordStartMs = activeHighlightState.visualWordStartMs,
@@ -582,13 +577,15 @@ internal class KaraokeLineRenderer {
             callbacks.drawMotionAccent(
                 canvas = canvas, line = line, words = line.words,
                 currentTimeMs = currentTimeMs, rowHeight = config.lineHeight,
-                translateY = -config.lineHeight * foregroundLiftRatio,
+                translateY = -config.lineHeight * config.foregroundLiftRatio,
             )
             drawNextWordPreHighlight(
                 canvas = canvas, line = line, words = line.words,
                 activeHighlightState = activeHighlightState, currentTimeMs = currentTimeMs,
                 marginLeft = config.marginLeft, paint = config.highlightPaint,
-                rowHeight = config.lineHeight, callbacks = callbacks,
+                rowHeight = config.lineHeight,
+                preWipeDistanceEm = config.preWipeDistanceEm,
+                callbacks = callbacks,
             )
             if (!isPast || keepCompletedCharacterLift) {
                 callbacks.drawGrowableVisualWordWipeHighlight(
@@ -597,7 +594,7 @@ internal class KaraokeLineRenderer {
                     progress = activeHighlightState.progress,
                     sweepX = activeHighlightState.sweepX,
                     paint = config.highlightPaint, rowHeight = config.lineHeight,
-                    finalLiftRatio = foregroundLiftRatio, currentTimeMs = currentTimeMs,
+                    finalLiftRatio = config.foregroundLiftRatio, currentTimeMs = currentTimeMs,
                 )
             }
             config.highlightPaint.maskFilter = null
@@ -612,7 +609,7 @@ internal class KaraokeLineRenderer {
         callbacks.drawMotionAccent(
             canvas = canvas, line = line, words = line.words,
             currentTimeMs = currentTimeMs, rowHeight = config.lineHeight,
-            translateY = -config.lineHeight * foregroundLiftRatio,
+            translateY = -config.lineHeight * config.foregroundLiftRatio,
         )
 
         if (isPast && !keepCompletedCharacterLift) {
@@ -629,7 +626,7 @@ internal class KaraokeLineRenderer {
                 rowWords = rowWords,
                 currentTimeMs = currentTimeMs,
                 marginLeft = config.marginLeft,
-                featherPx = config.featherPx,
+                featherPx = config.highlightPaint.textSize * config.preWipeDistanceEm,
                 smootherStep = callbacks::smootherStep,
             )
             callbacks.drawRowSweepHighlight(
@@ -639,7 +636,7 @@ internal class KaraokeLineRenderer {
                 sweepX = sweepX,
                 paint = config.highlightPaint,
                 rowHeight = config.lineHeight,
-                finalLiftRatio = foregroundLiftRatio,
+                finalLiftRatio = config.foregroundLiftRatio,
                 currentTimeMs = currentTimeMs,
                 isRowComplete = rowComplete || isPast,
             )
@@ -685,7 +682,7 @@ internal class KaraokeLineRenderer {
                 currentTimeMs in word.startMs..word.endMs -> {
                     val durationMs = (word.endMs - word.startMs).coerceAtLeast(1L).toFloat()
                     val rawProgress = (currentTimeMs - word.startMs).toFloat() / durationMs
-                    return wordStartX + word.width * smootherStep(rawProgress.coerceIn(0f, 1f))
+                    return wordStartX + word.width * rawProgress.coerceIn(0f, 1f)
                 }
                 // ── In the gap BEFORE this word ───────────────────────────────
                 i > 0 && currentTimeMs < word.startMs -> {
@@ -818,7 +815,7 @@ internal class KaraokeLineRenderer {
             words = line.backgroundWords,
             currentTimeMs = currentTimeMs,
             rowHeight = config.backgroundLineHeight,
-            translateY = -config.backgroundLineHeight * 0.025f,
+            translateY = -config.backgroundLineHeight * config.backgroundLiftRatio,
         )
 
         if (isGrowableActive) {
@@ -831,7 +828,7 @@ internal class KaraokeLineRenderer {
                     word = line.backgroundWords[index],
                     paint = config.backgroundHighlightPaint,
                     rowHeight = config.backgroundLineHeight,
-                    finalLiftRatio = backgroundLiftRatio,
+                    finalLiftRatio = config.backgroundLiftRatio,
                     currentTimeMs = currentTimeMs,
                     keepCharacterLift = keepCompletedCharacterLift,
                     visualWordDurationMs = resolvedActiveHighlightState.visualWordDurationMs,
@@ -848,6 +845,7 @@ internal class KaraokeLineRenderer {
                 marginLeft = config.marginLeft,
                 paint = config.backgroundHighlightPaint,
                 rowHeight = config.backgroundLineHeight,
+                preWipeDistanceEm = config.preWipeDistanceEm,
                 callbacks = callbacks,
             )
 
@@ -859,7 +857,7 @@ internal class KaraokeLineRenderer {
                 sweepX = resolvedActiveHighlightState.sweepX,
                 paint = config.backgroundHighlightPaint,
                 rowHeight = config.backgroundLineHeight,
-                finalLiftRatio = backgroundLiftRatio,
+                finalLiftRatio = config.backgroundLiftRatio,
                 currentTimeMs = currentTimeMs,
             )
         } else {
@@ -893,7 +891,7 @@ internal class KaraokeLineRenderer {
                     sweepX = sweepX,
                     paint = config.backgroundHighlightPaint,
                     rowHeight = config.backgroundLineHeight,
-                    finalLiftRatio = backgroundLiftRatio,
+                    finalLiftRatio = config.backgroundLiftRatio,
                     currentTimeMs = currentTimeMs,
                     isRowComplete = rowComplete || bgIsPast,
                 )
@@ -1028,6 +1026,7 @@ internal class KaraokeLineRenderer {
         marginLeft: Float,
         paint: Paint,
         rowHeight: Float,
+        preWipeDistanceEm: Float,
         callbacks: KaraokeLineRenderCallbacks,
     ) {
         if (activeHighlightState == null) return
@@ -1055,11 +1054,14 @@ internal class KaraokeLineRenderer {
         // Cross-word pre-highlight on the same row is essential for liquid continuity.
         if (currentWord.yOffset != nextWord.yOffset) return
 
-        val nextWordLeft = marginLeft + nextWord.xOffset
-        val leadDistancePx = (paint.textSize * 0.75f).coerceAtLeast(1f)
-        val preProgress = (
-            (activeHighlightState.sweepX - (nextWordLeft - leadDistancePx)) / leadDistancePx
-        ).coerceIn(0f, 1f)
+        val preProgress = LyricsSweepPhysics.preHighlightProgress(
+            sourceWidthPx = currentWord.width,
+            fontSizePx = paint.textSize,
+            preWipeDistanceEm = preWipeDistanceEm,
+            sourceStartMs = currentWord.startMs,
+            sourceEndMs = currentWord.endMs,
+            currentTimeMs = currentTimeMs,
+        )
         if (preProgress <= 0f) return
 
         callbacks.drawWordPreHighlight(

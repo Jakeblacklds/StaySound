@@ -1,3 +1,4 @@
+import { hasNativeTidalDetails, NativeTidalDetail } from '@/src/features/tidal/details/NativeTidalDetail';
 import { EmptyState, Skeleton, TidalTrackRow } from '@/src/components/ui';
 import {
     DetailActionBar,
@@ -14,7 +15,7 @@ import { useLibraryStore, useNotificationStore, usePlayerStore } from '@/src/sto
 import { radius, typeScale, useTheme, withAlpha } from '@/src/theme';
 import { TidalPlaylistDetail, TidalTrack, Track } from '@/src/types/audio';
 import { Image } from 'expo-image';
-import { router, Stack, useLocalSearchParams } from 'expo-router';
+import { router, Stack, useLocalSearchParams } from '@/src/navigation/navigation';
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { Alert, ScrollView, StatusBar, StyleSheet, View } from 'react-native';
 import { Button, Text } from 'react-native-paper';
@@ -33,7 +34,7 @@ async function resolveTidalQueue(tracks: TidalTrack[], batchSize = 6): Promise<T
     return out;
 }
 
-export function TidalPlaylistScreen() {
+function TidalPlaylistController() {
     const { id } = useLocalSearchParams<{ id: string }>();
     const { theme } = useTheme();
     const insets = useSafeAreaInsets();
@@ -238,6 +239,18 @@ export function TidalPlaylistScreen() {
         }
     }, [downloads, handleTidalDownload, isDownloaded, isDownloadingAll, playlistDetail?.tracks, showNotification]);
 
+    if (hasNativeTidalDetails) return <NativeTidalDetail
+        kind="playlist" id={id} loading={isLoading} error={error}
+        title={playlistDetail?.playlist.title || 'Playlist'} kicker="PLAYLIST"
+        artwork={playlistDetail?.playlist.artworkUrl} description={playlistDetail?.playlist.description}
+        meta={`${playlistDetail?.tracks.length ?? 0} canciones`}
+        tracks={playlistDetail?.tracks} downloads={downloads} isDownloaded={isDownloaded}
+        activeId={isPlayerPlaying || pendingTrackPreview ? activeTidalTrackId : null} playing={isPlayerPlaying}
+        preparing={isPreparing} downloadingAll={isDownloadingAll}
+        onPlay={handleTidalPlay} onPlayAll={handlePlayAll} onDownload={handleTidalDownload}
+        onCancelDownload={cancelDownload} onDownloadAll={handleDownloadAll}
+    />;
+
     if (isLoading) {
         return (
             <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]} edges={['left', 'right']}>
@@ -426,4 +439,8 @@ const styles = StyleSheet.create({
     },
 });
 
+export function TidalPlaylistScreen() {
+    const { id, name, source } = useLocalSearchParams<{ id: string; name?: string; source?: string }>();
+    return <TidalPlaylistController key={`${id}:${name ?? ''}:${source ?? ''}`} />;
+}
 export default TidalPlaylistScreen;

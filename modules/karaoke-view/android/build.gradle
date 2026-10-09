@@ -6,6 +6,7 @@ version = '1.0.0'
 
 android {
     namespace 'expo.modules.karaokeview'
+    testOptions { unitTests.returnDefaultValues = true }
 
     buildFeatures {
         buildConfig true
@@ -23,4 +24,5 @@ android {
 
 dependencies {
     testImplementation 'junit:junit:4.13.2'
+    testImplementation 'org.json:json:20240303'
 }

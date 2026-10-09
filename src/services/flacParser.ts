@@ -27,7 +27,6 @@ const BLOCK_TYPE_PICTURE = 6;
 
 // Picture types (we want front cover = 3)
 const PICTURE_TYPE_FRONT_COVER = 3;
-const PICTURE_TYPE_OTHER = 0;
 
 export interface FlacMetadata {
     title?: string;
