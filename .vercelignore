@@ -1,9 +1,9 @@
-# The Vercel deploy only builds the web app (`npm run web:build` → web/dist) plus the
-# serverless functions in api/. Everything the mobile and desktop targets need is dead
+# The Vercel deploy builds the landing and the web app (`npm run site:build` → web/dist)
+# plus the serverless functions in api/. Everything the mobile and desktop targets need is dead
 # weight in the upload, and the CLI does NOT fall back to .gitignore here: without this
 # file the deploy ships 41k files and fails the 15k limit outright.
 #
-# What the build actually reads: web/, src/ (aliased as @staysound), api/, package.json,
+# What the build actually reads: web/, src/ (aliased as @staysound), sites/landing/, api/, package.json,
 # package-lock.json, vercel.json, tsconfig.json.
 #
 # Every pattern is anchored with a leading slash. Unanchored, this file uses .gitignore
@@ -29,7 +29,11 @@
 
 # Build output, media renders and scratch
 /out/
-/sites/
+# The landing is part of the site (scripts/build-site.mjs); only its sources are needed.
+/sites/admin/
+/sites/landing/node_modules/
+/sites/landing/.next/
+/sites/landing/out/
 /remotion/
 /docs/
 /update/
