@@ -3,7 +3,7 @@
   "short_name": "StaySound",
   "id": "/",
   "description": "Tu música local en el navegador.",
-  "start_url": "/",
+  "start_url": "/app",
   "scope": "/",
   "display": "standalone",
   "display_override": ["window-controls-overlay", "standalone", "minimal-ui"],

@@ -42,7 +42,8 @@ export default async function HomePage() {
     size: release.macos ? formatSize(release.macos.sizeBytes) : '',
     fileName: release.macos?.fileName ?? '',
   };
-  const webAppUrl = process.env.NEXT_PUBLIC_WEB_APP_URL ?? '';
+  // The web app is served from the same site, one level down.
+  const webAppUrl = process.env.NEXT_PUBLIC_WEB_APP_URL ?? '/app';
 
   return (
     <div className="page">

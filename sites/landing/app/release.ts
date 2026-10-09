@@ -54,7 +54,6 @@ export async function fetchRelease(): Promise<Release> {
   try {
     const response = await fetch(`https://api.github.com/repos/${RELEASES_REPO}/releases/latest`, {
       headers: { Accept: 'application/vnd.github+json' },
-      next: { revalidate: 600 },
     });
     if (!response.ok) return FALLBACK;
     const payload = (await response.json()) as { tag_name?: string; published_at?: string; assets?: GitHubAsset[] };

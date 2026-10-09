@@ -15,12 +15,12 @@ npm run dev
 
 ## De dónde salen las descargas
 
-`app/release.ts` lee el último release del repo público `Jakeblacklds/staysound-releases` (el mismo que usa la página "Consigue la app" de la versión web) y lo revalida cada 10 minutos. Publicar un release nuevo ahí con un `.apk` y un `.dmg` actualiza la página sola.
+`app/release.ts` lee el último release del repo público `Jakeblacklds/staysound-releases` (el mismo que usa la página "Consigue la app" de la versión web) **al construir el sitio**. Después de publicar un release nuevo hay que volver a desplegar para que la página lo muestre.
 
 Variables opcionales:
 
 - `NEXT_PUBLIC_RELEASES_REPO`: otro repo de releases (`dueño/repo`).
-- `NEXT_PUBLIC_WEB_APP_URL`: si se define, aparece el enlace "O ábrelo en el navegador".
+- `NEXT_PUBLIC_WEB_APP_URL`: a dónde lleva "O ábrelo en el navegador". Por defecto `/app`.
 
 ## Iconos
 
@@ -32,4 +32,8 @@ node sites/landing/scripts/generate-icons.mjs
 
 ## Despliegue
 
-En Vercel, un proyecto con Root Directory `sites/landing`.
+El landing no tiene proyecto propio en Vercel. Se exporta como archivos estáticos y `scripts/build-site.mjs` (el `buildCommand` de `vercel.json`) lo coloca junto a la app web: el landing queda en `/` y la app en `/app`, las dos en `staysound.vercel.app`.
+
+```bash
+npm run site:build
+```

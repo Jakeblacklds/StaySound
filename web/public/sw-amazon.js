@@ -1,6 +1,6 @@
 importScripts('/sw-decrypter.js?v=2026-06-23-flac-hls-v8');
 
-const STAYSOUND_APP_CACHE = 'staysound-web-shell-v2';
+const STAYSOUND_APP_CACHE = 'staysound-web-shell-v3';
 const STAYSOUND_APP_ASSETS = [
   '/',
   '/manifest.webmanifest',
@@ -56,10 +56,12 @@ self.addEventListener('fetch', (event) => {
       fetch(new Request(event.request, { cache: 'reload' }))
         .then((response) => {
           const copy = response.clone();
-          caches.open(STAYSOUND_APP_CACHE).then((cache) => cache.put('/', copy));
+          // On the public site '/' is the landing and the app lives at '/app', so each
+          // page keeps its own offline copy instead of sharing the '/' slot.
+          caches.open(STAYSOUND_APP_CACHE).then((cache) => cache.put(url.pathname, copy));
           return response;
         })
-        .catch(() => caches.match('/') || Response.error())
+        .catch(() => caches.match(url.pathname).then((cached) => cached || Response.error()))
     );
     return;
   }
